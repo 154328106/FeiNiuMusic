@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../app/router/app_router.dart';
+import '../../app/state/settings_state.dart';
 import '../../components/index.dart';
+import '../../components/player/player_style_preview.dart';
 import '../player/widgets/player_background.dart';
 
 class PlayerAppearanceSettingsPage extends StatefulWidget {
@@ -18,6 +20,7 @@ class _PlayerAppearanceSettingsPageState
   void initState() {
     super.initState();
     PlayerBackgroundSettings.ensureLoaded();
+    PlayerStyleSettings.ensureLoaded();
   }
 
   String _themeLabel(ThemeMode mode) {
@@ -43,12 +46,15 @@ class _PlayerAppearanceSettingsPageState
     final borderColor = selected
         ? scheme.primary
         : (isDark ? Colors.white12 : Colors.black12);
-    final iconColor =
-        selected ? scheme.primary : (isDark ? Colors.white70 : Colors.black54);
-    final textColor =
-        selected ? scheme.primary : (isDark ? Colors.white70 : Colors.black87);
-    final background =
-        selected ? scheme.primary.withAlpha(31) : Colors.transparent;
+    final iconColor = selected
+        ? scheme.primary
+        : (isDark ? Colors.white70 : Colors.black54);
+    final textColor = selected
+        ? scheme.primary
+        : (isDark ? Colors.white70 : Colors.black87);
+    final background = selected
+        ? scheme.primary.withAlpha(31)
+        : Colors.transparent;
     return Expanded(
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
@@ -65,10 +71,7 @@ class _PlayerAppearanceSettingsPageState
             children: [
               Icon(icon, color: iconColor, size: 22),
               const SizedBox(height: 6),
-              Text(
-                label,
-                style: TextStyle(fontSize: 12, color: textColor),
-              ),
+              Text(label, style: TextStyle(fontSize: 12, color: textColor)),
             ],
           ),
         ),
@@ -113,6 +116,32 @@ class _PlayerAppearanceSettingsPageState
     );
   }
 
+  Widget _styleGrid(BuildContext context, PlayerStylePreset selected) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const spacing = 10.0;
+          final itemWidth = (constraints.maxWidth - spacing) / 2;
+          return Wrap(
+            spacing: spacing,
+            runSpacing: spacing,
+            children: PlayerStylePreset.values.map((preset) {
+              return SizedBox(
+                width: itemWidth,
+                child: _PlayerStyleCard(
+                  preset: preset,
+                  selected: preset == selected,
+                  onTap: () => PlayerStyleSettings.setStylePreset(preset),
+                ),
+              );
+            }).toList(),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bottomPadding = AppPageScaffold.scrollableBottomPadding(context);
@@ -129,6 +158,21 @@ class _PlayerAppearanceSettingsPageState
           AppSettingSection(
             title: '外观设置',
             children: [
+              ValueListenableBuilder<PlayerStylePreset>(
+                valueListenable: PlayerStyleSettings.stylePreset,
+                builder: (context, selected, _) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(16, 14, 16, 0),
+                        child: Text('播放器样式'),
+                      ),
+                      _styleGrid(context, selected),
+                    ],
+                  );
+                },
+              ),
               ValueListenableBuilder<bool>(
                 valueListenable:
                     PlayerBackgroundSettings.dynamicGradientEnabled,
@@ -162,8 +206,7 @@ class _PlayerAppearanceSettingsPageState
                 },
               ),
               ValueListenableBuilder<ThemeMode>(
-                valueListenable:
-                    PlayerBackgroundSettings.playbackThemeMode,
+                valueListenable: PlayerBackgroundSettings.playbackThemeMode,
                 builder: (context, mode, _) {
                   return _modeRow(
                     context,
@@ -175,6 +218,90 @@ class _PlayerAppearanceSettingsPageState
                 },
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PlayerStyleCard extends StatelessWidget {
+  final PlayerStylePreset preset;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _PlayerStyleCard({
+    required this.preset,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Stack(
+            children: [
+              Container(
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(
+                        alpha: selected ? 0.22 : 0.12,
+                      ),
+                      blurRadius: selected ? 16 : 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: PlayerStylePreview(preset: preset, selected: selected),
+              ),
+              if (selected)
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      color: scheme.primary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.check_rounded,
+                      size: 14,
+                      color: scheme.onPrimary,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            preset.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: selected ? scheme.primary : scheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            preset.description,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              color: scheme.onSurfaceVariant.withValues(alpha: 0.78),
+            ),
           ),
         ],
       ),

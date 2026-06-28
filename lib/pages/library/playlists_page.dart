@@ -435,6 +435,12 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
     _load();
   }
 
+  @override
+  void dispose() {
+    _removeNotifier.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     _loading.value = true;
     final all = await _service.loadAll();

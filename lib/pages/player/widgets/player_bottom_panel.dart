@@ -19,12 +19,16 @@ import 'player_background.dart';
 
 class PlayerBottomPanel extends StatelessWidget {
   final PlayerService player;
+  final PlayerStylePreset stylePreset;
   final VoidCallback onTapLyrics;
+  final bool showMiniLyrics;
 
   const PlayerBottomPanel({
     super.key,
     required this.player,
+    required this.stylePreset,
     required this.onTapLyrics,
+    this.showMiniLyrics = true,
   });
 
   @override
@@ -34,12 +38,13 @@ class PlayerBottomPanel extends StatelessWidget {
     final bottomSpacing = bottomInset > 20 ? bottomInset + 16.0 : 30.0;
     return Column(
       children: [
-        _MiniLyricsPreview(onTap: onTapLyrics),
-        _PlayerSeekBar(player: player),
+        if (showMiniLyrics)
+          _MiniLyricsPreview(onTap: onTapLyrics, stylePreset: stylePreset),
+        _PlayerSeekBar(player: player, stylePreset: stylePreset),
         const SizedBox(height: 20),
-        _PlayerControls(player: player),
+        _PlayerControls(player: player, stylePreset: stylePreset),
         const SizedBox(height: 30),
-        _BottomActions(player: player),
+        _BottomActions(player: player, stylePreset: stylePreset),
         SizedBox(height: bottomSpacing),
       ],
     );
@@ -48,8 +53,9 @@ class PlayerBottomPanel extends StatelessWidget {
 
 class _MiniLyricsPreview extends StatefulWidget {
   final VoidCallback onTap;
+  final PlayerStylePreset stylePreset;
 
-  const _MiniLyricsPreview({required this.onTap});
+  const _MiniLyricsPreview({required this.onTap, required this.stylePreset});
 
   @override
   State<_MiniLyricsPreview> createState() => _MiniLyricsPreviewState();
@@ -104,6 +110,10 @@ class _MiniLyricsPreviewState extends State<_MiniLyricsPreview>
         final model = lyrics.lyricModelSignal.value;
         final lines = model?.lines ?? const <LyricLine>[];
         final alignment = _alignment.value;
+        final previewHeight = switch (widget.stylePreset) {
+          PlayerStylePreset.poster => 118.0,
+          PlayerStylePreset.classic => 110.0,
+        };
         final textAlign = alignment == 'left'
             ? TextAlign.left
             : alignment == 'right'
@@ -123,10 +133,14 @@ class _MiniLyricsPreviewState extends State<_MiniLyricsPreview>
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 32),
                 child: SizedBox(
-                  height: 110,
+                  height: previewHeight,
                   child: Center(
                     child: () {
-                      if (snap.status == LyricsLoadStatus.loading) {
+                      // While loading a new song's lyrics, keep the area blank
+                      // (no skeleton) — show the real lines as soon as they
+                      // arrive. If lyrics are already present, keep showing them.
+                      if (snap.status == LyricsLoadStatus.loading &&
+                          lines.isEmpty) {
                         return const SizedBox.shrink();
                       }
                       if (lines.isEmpty) {
@@ -257,8 +271,9 @@ class _MiniLyricsPreviewState extends State<_MiniLyricsPreview>
 
 class _PlayerSeekBar extends StatefulWidget {
   final PlayerService player;
+  final PlayerStylePreset stylePreset;
 
-  const _PlayerSeekBar({required this.player});
+  const _PlayerSeekBar({required this.player, required this.stylePreset});
 
   @override
   State<_PlayerSeekBar> createState() => _PlayerSeekBarState();
@@ -282,6 +297,10 @@ class _PlayerSeekBarState extends State<_PlayerSeekBar> with SignalsMixin {
         final position = widget.player.positionSignal.value;
         final duration = widget.player.durationSignal.value;
         final scheme = Theme.of(context).colorScheme;
+        final trackHeight = switch (widget.stylePreset) {
+          PlayerStylePreset.poster => 4.0,
+          PlayerStylePreset.classic => 2.0,
+        };
         final totalMs = duration?.inMilliseconds ?? 0;
         final max = totalMs <= 0 ? 1.0 : totalMs.toDouble();
         final currentMs = position.inMilliseconds.clamp(0, max.toInt()).toInt();
@@ -292,7 +311,7 @@ class _PlayerSeekBarState extends State<_PlayerSeekBar> with SignalsMixin {
             children: [
               SliderTheme(
                 data: SliderTheme.of(context).copyWith(
-                  trackHeight: 2,
+                  trackHeight: trackHeight,
                   thumbShape: const RoundSliderThumbShape(
                     enabledThumbRadius: 6,
                   ),
@@ -354,14 +373,19 @@ class _PlayerSeekBarState extends State<_PlayerSeekBar> with SignalsMixin {
 
 class _PlayerControls extends StatelessWidget {
   final PlayerService player;
+  final PlayerStylePreset stylePreset;
 
-  const _PlayerControls({required this.player});
+  const _PlayerControls({required this.player, required this.stylePreset});
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final iconColor = scheme.primary.withValues(alpha: 0.86);
     final buttonBg = scheme.primaryContainer.withValues(alpha: 0.92);
+    final mainButtonSize = switch (stylePreset) {
+      PlayerStylePreset.poster => 72.0,
+      PlayerStylePreset.classic => 64.0,
+    };
     return Watch.builder(
       builder: (context) {
         final playing = player.isPlayingSignal.value;
@@ -380,7 +404,7 @@ class _PlayerControls extends StatelessWidget {
                 color: buttonBg,
               ),
               child: IconButton(
-                iconSize: 64,
+                iconSize: mainButtonSize,
                 icon: Icon(
                   playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
                   color: scheme.onPrimaryContainer,
@@ -403,8 +427,9 @@ class _PlayerControls extends StatelessWidget {
 
 class _BottomActions extends StatelessWidget {
   final PlayerService player;
+  final PlayerStylePreset stylePreset;
 
-  const _BottomActions({required this.player});
+  const _BottomActions({required this.player, required this.stylePreset});
 
   @override
   Widget build(BuildContext context) {
@@ -553,6 +578,7 @@ class _BottomActions extends StatelessWidget {
     );
   }
 }
+
 
 void showPlayerPlaylistSheet(BuildContext context, PlayerService player) {
   showModalBottomSheet(

@@ -26,24 +26,42 @@ class CoverPageTransitionsBuilder extends PageTransitionsBuilder {
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
-    final slideAnimation = CurvedAnimation(
+    // Incoming page: ease in from the right with a short fade.
+    final inCurve = CurvedAnimation(
       parent: animation,
       curve: Curves.easeOutCubic,
       reverseCurve: Curves.easeInCubic,
     );
-    final offsetTween = Tween(begin: const Offset(0.08, 0), end: Offset.zero);
-    final content = SlideTransition(
-      position: slideAnimation.drive(offsetTween),
-      child: child,
+    final slideIn = inCurve.drive(
+      Tween(begin: const Offset(0.16, 0), end: Offset.zero),
     );
+    final fadeIn = CurvedAnimation(
+      parent: animation,
+      curve: const Interval(0.0, 0.55, curve: Curves.easeOut),
+      reverseCurve: const Interval(0.45, 1.0, curve: Curves.easeIn),
+    );
+
+    Widget result = SlideTransition(
+      position: slideIn,
+      child: FadeTransition(opacity: fadeIn, child: child),
+    );
+
+    // Outgoing page (covered by a new route): subtle parallax to the left so
+    // the stack feels layered instead of a flat cross-slide.
     if (secondaryAnimation.status != AnimationStatus.dismissed) {
-      final fadeOut = CurvedAnimation(
+      final outCurve = CurvedAnimation(
         parent: secondaryAnimation,
-        curve: const Interval(0, 0.2),
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
       );
-      return FadeTransition(opacity: ReverseAnimation(fadeOut), child: content);
+      result = SlideTransition(
+        position: outCurve.drive(
+          Tween(begin: Offset.zero, end: const Offset(-0.08, 0)),
+        ),
+        child: result,
+      );
     }
-    return content;
+    return result;
   }
 }
 

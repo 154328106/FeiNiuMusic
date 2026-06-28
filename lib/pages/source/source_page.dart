@@ -351,7 +351,22 @@ class _SourcePageState extends State<SourcePage> with SignalsMixin {
           isScanning: true,
         );
       },
-    );
+    ).onError<WebDavScanException>((error, _) {
+      _scanRunning.remove(sourceItem.id);
+      _scanCancelSignals.remove(sourceItem.id);
+      if (mounted) {
+        notifier.value = _ScanProgress(
+          processed: notifier.value.processed,
+          added: notifier.value.added,
+          total: notifier.value.total,
+          isScanning: false,
+        );
+        AppToast.show(context, error.message, type: ToastType.error);
+      }
+      return const WebDavScanResult(processed: -1, added: 0);
+    });
+    // Sentinel from the error handler above: bail out without overwriting state.
+    if (result.processed == -1) return;
 
     final cancelled = _scanCancelSignals[sourceItem.id] == true;
     _scanRunning.remove(sourceItem.id);

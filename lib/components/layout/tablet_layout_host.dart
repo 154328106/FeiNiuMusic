@@ -1,7 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../app/state/settings_state.dart';
+import '../feedback/app_toast.dart';
 import 'base/app_background.dart';
 import '../player/mini_player/mini_player_bar.dart';
 import 'side_menu.dart';
@@ -70,17 +72,8 @@ class _TabletLayoutHostState extends State<TabletLayoutHost>
             ? Colors.black.withValues(alpha: 0.28 * t)
             : Colors.black.withValues(alpha: 0.08 * t);
 
-        return PopScope(
-          canPop: false,
-          onPopInvokedWithResult: (didPop, result) {
-            if (didPop) return;
-            final navigator = widget.navigatorKey.currentState;
-            if (navigator?.canPop() ?? false) {
-              navigator?.pop();
-              return;
-            }
-            SystemNavigator.pop();
-          },
+        return _RootBackHandler(
+          navigatorKey: widget.navigatorKey,
           child: AppBackground(
             child: Stack(
               children: [
@@ -160,5 +153,83 @@ class _TabletLayoutHostState extends State<TabletLayoutHost>
 
   void _handlePush(String route) {
     widget.navigatorKey.currentState?.pushNamed(route);
+  }
+}
+
+/// Routes system back gestures for the nested base [Navigator]:
+/// - while there are in-app pages to go back to, it pops the nested navigator
+///   (mirrors [NavigatorPopHandler], which keeps HarmonyOS/Android
+///   predictive-back reliable by reflecting the subtree's real pop-ability);
+/// - when already at the home page, the first back shows a hint and only the
+///   second back within 2s actually exits to the desktop.
+class _RootBackHandler extends StatefulWidget {
+  final GlobalKey<NavigatorState> navigatorKey;
+  final Widget child;
+
+  const _RootBackHandler({required this.navigatorKey, required this.child});
+
+  @override
+  State<_RootBackHandler> createState() => _RootBackHandlerState();
+}
+
+class _RootBackHandlerState extends State<_RootBackHandler> {
+  // Whether the nested navigator currently has a route to pop.
+  bool _subtreeCanPop = false;
+  // Set after the first "exit" back press so the next one really leaves.
+  bool _armedToExit = false;
+  Timer? _resetTimer;
+
+  @override
+  void dispose() {
+    _resetTimer?.cancel();
+    super.dispose();
+  }
+
+  void _armExitWindow() {
+    _resetTimer?.cancel();
+    _resetTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted) {
+        _armedToExit = false;
+        return;
+      }
+      setState(() => _armedToExit = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // canPop=false → we intercept the back; canPop=true → let the system exit.
+    final canPop = _subtreeCanPop ? false : _armedToExit;
+    return PopScope(
+      canPop: canPop,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (_subtreeCanPop) {
+          widget.navigatorKey.currentState?.maybePop();
+          return;
+        }
+        // At home, not yet armed: prompt and arm a real exit for the next back.
+        AppToast.show(context, '再次滑动返回桌面');
+        setState(() => _armedToExit = true);
+        _armExitWindow();
+      },
+      child: NotificationListener<NavigationNotification>(
+        onNotification: (notification) {
+          final next = notification.canHandlePop;
+          if (next != _subtreeCanPop) {
+            setState(() {
+              _subtreeCanPop = next;
+              // Left the home page → cancel any pending exit arming.
+              if (next) {
+                _armedToExit = false;
+                _resetTimer?.cancel();
+              }
+            });
+          }
+          return false;
+        },
+        child: widget.child,
+      ),
+    );
   }
 }

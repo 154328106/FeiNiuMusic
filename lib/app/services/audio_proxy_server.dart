@@ -41,7 +41,15 @@ class AudioProxyServer {
   AudioProxyServer._internal();
 
   HttpServer? _server;
+  Future<void>? _starting;
   final Map<String, _StreamSource> _sources = {};
+  // Cache-file paths currently being written to .tmp, so two concurrent
+  // requests for the same song never interleave writes / promote a garbage file.
+  final Set<String> _activeCacheWrites = {};
+
+  // Upper bound on retained stream tokens. Each resolve/warmup/TTL re-register
+  // creates a fresh token; without a cap the map leaks for the whole session.
+  static const int _maxSources = 64;
 
   final dio.Dio _client = dio.Dio(
     dio.BaseOptions(
@@ -57,11 +65,21 @@ class AudioProxyServer {
 
   Future<void> start() async {
     if (_server != null) return;
-    _server = await shelf_io.serve(
-      _handleRequest,
-      InternetAddress.loopbackIPv4,
-      0,
-    );
+    // Guard against concurrent callers (e.g. warming current + next track at
+    // once) each binding a separate server and leaking all but one.
+    return _starting ??= _doStart();
+  }
+
+  Future<void> _doStart() async {
+    try {
+      _server = await shelf_io.serve(
+        _handleRequest,
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+    } finally {
+      _starting = null;
+    }
   }
 
   Future<void> resetSources() async {
@@ -76,6 +94,10 @@ class AudioProxyServer {
     await start();
     // Create a unique token based on cache path and time to prevent collisions
     final token = '${cacheFile.path.hashCode}_${DateTime.now().microsecondsSinceEpoch}';
+    if (_sources.length >= _maxSources) {
+      // Map preserves insertion order; drop the oldest token.
+      _sources.remove(_sources.keys.first);
+    }
     _sources[token] = _StreamSource(uri: uri, headers: headers, cacheFile: cacheFile);
     return Uri.parse('http://127.0.0.1:${_server!.port}/stream?token=$token');
   }
@@ -162,9 +184,12 @@ class AudioProxyServer {
     final cacheFile = source.cacheFile;
     final tmpFile = File('${cacheFile.path}.tmp');
     final requestedRange = _parseRange(rangeHeader, -1);
+    // If another request is already caching this song, don't read/resume from
+    // its half-written .tmp — fetch fresh and skip caching here.
+    final cacheBusy = _activeCacheWrites.contains(cacheFile.path);
 
     int localLength = 0;
-    if (await tmpFile.exists()) {
+    if (!cacheBusy && await tmpFile.exists()) {
       try {
         localLength = await tmpFile.length();
       } catch (_) {
@@ -337,6 +362,7 @@ class AudioProxyServer {
     }
 
     IOSink? sink;
+    var ownsCacheWrite = false;
     final canCache = (requestedRange == null || requestedRange.start == 0) &&
         (remoteResponse.statusCode == HttpStatus.ok ||
             remoteResponse.statusCode == HttpStatus.partialContent);
@@ -373,16 +399,36 @@ class AudioProxyServer {
     }
 
     if (canCache && shouldComplete) {
-      await tmpFile.parent.create(recursive: true);
-      sink = tmpFile.openWrite(mode: isResuming ? FileMode.append : FileMode.write);
+      // Acquire the per-file cache-write lock; if another request holds it,
+      // stream without caching so we never interleave .tmp writes.
+      if (_activeCacheWrites.add(cacheFile.path)) {
+        ownsCacheWrite = true;
+        await tmpFile.parent.create(recursive: true);
+        sink = tmpFile.openWrite(mode: isResuming ? FileMode.append : FileMode.write);
+      }
     }
 
     if (request.method == 'HEAD') {
+      if (ownsCacheWrite) {
+        // No body will be written for HEAD; release the lock and close sink.
+        _activeCacheWrites.remove(cacheFile.path);
+        try {
+          await sink?.close();
+        } catch (_) {}
+      }
       return Response(status, headers: headers);
     }
 
     final responseStream = remoteResponse.data?.stream;
-    if (responseStream == null) return Response(HttpStatus.badGateway);
+    if (responseStream == null) {
+      if (ownsCacheWrite) {
+        _activeCacheWrites.remove(cacheFile.path);
+        try {
+          await sink?.close();
+        } catch (_) {}
+      }
+      return Response(HttpStatus.badGateway);
+    }
 
     final remoteForward = _forwardRemoteWithCache(
       responseStream,
@@ -392,6 +438,7 @@ class AudioProxyServer {
       expectedWriteBytes: expectedWriteBytes,
       tmpFile: tmpFile,
       cacheFile: cacheFile,
+      ownsCacheWrite: ownsCacheWrite,
     );
 
     // Chain local file stream + remote stream
@@ -418,18 +465,19 @@ class AudioProxyServer {
     required int? expectedWriteBytes,
     required File tmpFile,
     required File cacheFile,
+    required bool ownsCacheWrite,
   }) async* {
     Object? error;
     var written = 0;
     // Use a larger buffer size (64KB) to reduce stream events and overhead
     final buffer = BytesBuilder(copy: false);
-    const bufferSize = 64 * 1024; 
+    const bufferSize = 64 * 1024;
 
     try {
       await for (final data in remoteStream) {
         if (data.isEmpty) continue;
         buffer.add(data);
-        
+
         if (buffer.length >= bufferSize) {
           final chunk = buffer.takeBytes();
           written += chunk.length;
@@ -437,7 +485,7 @@ class AudioProxyServer {
           yield chunk;
         }
       }
-      
+
       // Yield remaining bytes
       if (buffer.isNotEmpty) {
         final chunk = buffer.takeBytes();
@@ -480,6 +528,9 @@ class AudioProxyServer {
         try {
           await File('${cacheFile.path}.complete').writeAsString('1', flush: true);
         } catch (_) {}
+      }
+      if (ownsCacheWrite) {
+        _activeCacheWrites.remove(cacheFile.path);
       }
     }
   }

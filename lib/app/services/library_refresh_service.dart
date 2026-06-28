@@ -100,22 +100,34 @@ class LibraryRefreshService {
       var added = 0;
       for (final source in sources) {
         if (source.endpoint.trim().isEmpty) continue;
-        final result = await _webDavService.scan(
-          source: source,
-          isCancelled: () => false,
-          onProgress: (_) {},
-        );
-        added += result.added;
+        try {
+          final result = await _webDavService.scan(
+            source: source,
+            isCancelled: () => false,
+            onProgress: (_) {},
+          );
+          added += result.added;
+        } catch (e) {
+          if (kDebugMode) {
+            debugPrint('Silent WebDAV refresh failed for ${source.id}: $e');
+          }
+        }
       }
       final navidromeSources = await _navidromeRepo.loadSources();
       for (final source in navidromeSources) {
         if (source.endpoint.trim().isEmpty) continue;
-        final result = await _navidromeService.scan(
-          source: source,
-          isCancelled: () => false,
-          onProgress: (_) {},
-        );
-        added += result.added;
+        try {
+          final result = await _navidromeService.scan(
+            source: source,
+            isCancelled: () => false,
+            onProgress: (_) {},
+          );
+          added += result.added;
+        } catch (e) {
+          if (kDebugMode) {
+            debugPrint('Silent Navidrome refresh failed for ${source.id}: $e');
+          }
+        }
       }
       return added;
     } catch (e) {

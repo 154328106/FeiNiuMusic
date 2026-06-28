@@ -19,6 +19,26 @@ class PlayerLyricsView extends StatefulWidget {
 }
 
 class _PlayerLyricsViewState extends State<PlayerLyricsView> with SignalsMixin {
+  // Memoized per-model scans: the lyrics Watch rebuilds on every position tick,
+  // so scanning all lines for translation/karaoke each frame is wasteful.
+  Object? _scanCacheModel;
+  bool _cachedHasTranslation = false;
+  bool _cachedHasKaraoke = false;
+
+  void _ensureScanCache(dynamic model) {
+    if (identical(model, _scanCacheModel)) return;
+    _scanCacheModel = model;
+    final lines = model?.lines;
+    if (lines == null) {
+      _cachedHasTranslation = false;
+      _cachedHasKaraoke = false;
+      return;
+    }
+    _cachedHasTranslation =
+        lines.any((l) => (l.translation ?? '').trim().isNotEmpty);
+    _cachedHasKaraoke = lines.any((l) => (l.words?.isNotEmpty ?? false));
+  }
+
   static const String _prefsFontSize = 'lyrics_view_font_size';
   static const String _prefsActiveFontSize = 'lyrics_view_active_font_size';
   static const String _prefsLineGap = 'lyrics_view_line_gap';
@@ -521,9 +541,8 @@ class _PlayerLyricsViewState extends State<PlayerLyricsView> with SignalsMixin {
             lyrics.controller.cancelOnTapLineCallback();
           }
         }
-        final hasTranslation =
-            model?.lines.any((l) => (l.translation ?? '').trim().isNotEmpty) ??
-            false;
+        _ensureScanCache(model);
+        final hasTranslation = _cachedHasTranslation;
 
         return Stack(
           children: [
@@ -564,9 +583,10 @@ class _PlayerLyricsViewState extends State<PlayerLyricsView> with SignalsMixin {
                           ),
                         );
                       }
-                      final hasKaraokeWords = model!.lines.any(
-                        (l) => (l.words?.isNotEmpty ?? false),
-                      );
+                      // Touch model! (O(1)) to keep null-promotion for the
+                      // guarded block below; the scan result itself is memoized.
+                      final hasKaraokeWords =
+                          model!.lines.isEmpty ? false : _cachedHasKaraoke;
                       final karaokeMode = forceKaraoke || hasKaraokeWords;
                       final inactiveColor = _customColorOrDefault(
                         _inactiveColorValue.value,
@@ -627,7 +647,8 @@ class _PlayerLyricsViewState extends State<PlayerLyricsView> with SignalsMixin {
                         activeAnchorPosition: 0.5,
                         selectionAlignment: MainAxisAlignment.center,
                         activeAlignment: MainAxisAlignment.center,
-                        scrollDuration: const Duration(milliseconds: 160),
+                        scrollDuration: const Duration(milliseconds: 380),
+                        scrollCurve: Curves.easeOutCubic,
                         selectedColor: activeColor,
                         selectedTranslationColor: onSurface.withValues(
                           alpha: 0.9,

@@ -20,11 +20,11 @@ class AppBackgroundSettings {
   static final ValueNotifier<double> panelOpacity = ValueNotifier(0.72);
   static final ValueNotifier<double> panelBlurStrength = ValueNotifier(18);
 
-  static bool _loaded = false;
+  static Future<void>? _loading;
 
-  static Future<void> ensureLoaded() async {
-    if (_loaded) return;
-    _loaded = true;
+  static Future<void> ensureLoaded() => _loading ??= _doLoad();
+
+  static Future<void> _doLoad() async {
     final prefs = await SharedPreferences.getInstance();
     backgroundImagePath.value = prefs.getString(_prefsBackgroundImagePath);
     backgroundMaskOpacity.value =

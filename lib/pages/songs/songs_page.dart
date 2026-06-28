@@ -147,6 +147,7 @@ class _SongsPageState extends State<SongsPage>
     PlayerService.instance.currentSong.removeListener(_handlePlayerSongChanged);
     _listController.removeListener(_handleScroll);
     _listController.dispose();
+    _removeNotifier.dispose();
     super.dispose();
   }
 

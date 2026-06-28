@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
+import '../../app/services/player_service.dart';
+import '../../app/state/settings_state.dart';
 import '../../components/index.dart';
+import '../../components/player/player_style_preview.dart';
 import '../player/widgets/player_background.dart';
 
 class GradientSettingsPage extends StatefulWidget {
@@ -61,6 +64,11 @@ class _GradientSettingsPageState extends State<GradientSettingsPage>
           body: ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
             children: [
+              ValueListenableBuilder<PlayerStylePreset>(
+                valueListenable: PlayerStyleSettings.stylePreset,
+                builder: (context, preset, _) => _GradientPreview(preset: preset),
+              ),
+              const SizedBox(height: 16),
               AppSettingSection(
                 title: '参数配置',
                 children: [
@@ -90,6 +98,94 @@ class _GradientSettingsPageState extends State<GradientSettingsPage>
           ),
         );
       },
+    );
+  }
+}
+
+/// Side-by-side fixed mock following the CURRENT player style: left = the
+/// selected style's player preview, right = the lyrics page — both rendered by
+/// the shared [PlayerStylePreview] over the REAL 流光 background, so it matches
+/// the live effect and reacts to the sliders.
+class _GradientPreview extends StatelessWidget {
+  final PlayerStylePreset preset;
+
+  const _GradientPreview({required this.preset});
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final ratio = (size.shortestSide / size.longestSide).clamp(0.42, 0.7);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: AspectRatio(
+            aspectRatio: ratio,
+            child: _PreviewScreen(
+              label: '播放器',
+              child: PlayerStylePreview(preset: preset, fill: true),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: AspectRatio(
+            aspectRatio: ratio,
+            child: _PreviewScreen(
+              label: '歌词页',
+              child: PlayerStylePreview(
+                preset: preset,
+                fill: true,
+                lyricsOnly: true,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PreviewScreen extends StatelessWidget {
+  final String label;
+  final Widget child;
+
+  const _PreviewScreen({required this.label, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(18),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // The actual live background: dominant cover color + 流光, reacting to
+          // the saturation/hue sliders just like the real player.
+          PlayerBackground(
+            songSignal: PlayerService.instance.currentSongSignal,
+          ),
+          child,
+          Positioned(
+            left: 10,
+            top: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.28),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

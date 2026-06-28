@@ -3,6 +3,7 @@ import 'dart:collection';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -235,7 +236,13 @@ class AudioCacheService {
     }
 
     final currentSize = await paths.part.length();
-    final isComplete = expectedTotal != null ? currentSize >= expectedTotal : false;
+    // With a known total, require the file to reach it. When the server sends no
+    // Content-Length/Content-Range (expectedTotal == null), a clean full GET
+    // (status 200, no resume offset) that produced bytes is treated as complete,
+    // otherwise it would re-download every play.
+    final isComplete = expectedTotal != null
+        ? currentSize >= expectedTotal
+        : (status == 200 && offset == 0 && currentSize > 0);
     if (!isComplete) return paths.part;
 
     if (await paths.complete.exists()) {
@@ -282,37 +289,46 @@ class AudioCacheService {
     }
     await paths.part.parent.create(recursive: true);
 
+    // Open ONE shared handle, pre-allocate, and keep it open for the whole
+    // segmented download. Each segment writes into its own byte range guarded by
+    // a mutex so the single file cursor (setPosition + writeFrom) stays atomic —
+    // previously every segment re-opened the file with FileMode.write, which
+    // truncates on open and corrupted concurrent segments.
     final raf = await paths.part.open(mode: FileMode.write);
+    final writeLock = _Mutex();
+    var rangeFailed = false;
     try {
       await raf.truncate(total);
+
+      final segmentCount = (total / segmentSizeBytes).ceil();
+      final limiter = _AsyncLimiter(maxConcurrentSegments);
+
+      final futures = <Future<void>>[];
+      for (var i = 0; i < segmentCount; i++) {
+        final start = i * segmentSizeBytes;
+        final end = (start + segmentSizeBytes - 1).clamp(0, total - 1);
+        futures.add(
+          limiter.run(() async {
+            if (rangeFailed) return;
+            final ok = await _downloadRangeAndWrite(
+              uri,
+              headers: headers,
+              start: start,
+              end: end,
+              raf: raf,
+              writeLock: writeLock,
+            );
+            if (!ok) rangeFailed = true;
+          }),
+        );
+      }
+
+      await Future.wait(futures);
     } finally {
-      await raf.close();
+      try {
+        await raf.close();
+      } catch (_) {}
     }
-
-    final segmentCount = (total / segmentSizeBytes).ceil();
-    final limiter = _AsyncLimiter(maxConcurrentSegments);
-    var rangeFailed = false;
-
-    final futures = <Future<void>>[];
-    for (var i = 0; i < segmentCount; i++) {
-      final start = i * segmentSizeBytes;
-      final end = (start + segmentSizeBytes - 1).clamp(0, total - 1);
-      futures.add(
-        limiter.run(() async {
-          if (rangeFailed) return;
-          final ok = await _downloadRangeAndWrite(
-            uri,
-            headers: headers,
-            start: start,
-            end: end,
-            part: paths.part,
-          );
-          if (!ok) rangeFailed = true;
-        }),
-      );
-    }
-
-    await Future.wait(futures);
 
     if (rangeFailed) {
       try {
@@ -346,7 +362,8 @@ class AudioCacheService {
     Map<String, String>? headers,
     required int start,
     required int end,
-    required File part,
+    required RandomAccessFile raf,
+    required _Mutex writeLock,
   }) async {
     final dio = Dio(
       BaseOptions(
@@ -387,19 +404,21 @@ class AudioCacheService {
       return false;
     }
 
-    final raf = await part.open(mode: FileMode.write);
+    var pos = start;
     try {
-      await raf.setPosition(start);
       await for (final chunk in body.stream) {
         if (chunk.isEmpty) continue;
-        await raf.writeFrom(chunk);
+        final writeAt = pos;
+        // Guard the (setPosition + writeFrom) pair: the shared RAF has a single
+        // cursor, so concurrent segments must not interleave these two calls.
+        await writeLock.synchronized(() async {
+          await raf.setPosition(writeAt);
+          await raf.writeFrom(chunk);
+        });
+        pos += chunk.length;
       }
     } catch (_) {
       return false;
-    } finally {
-      try {
-        await raf.close();
-      } catch (_) {}
     }
     return true;
   }
@@ -592,7 +611,12 @@ class AudioCacheService {
         items.add(_CacheEntry(file: f, size: stat.size, modified: stat.modified));
         total += stat.size;
       }
-    } catch (_) {
+    } catch (e) {
+      // Don't fail silently: if we can't enumerate the cache we also can't
+      // enforce the size limit, so surface it in debug to aid diagnosis.
+      if (kDebugMode) {
+        debugPrint('AudioCacheService: cache-limit enforcement skipped: $e');
+      }
       return;
     }
 
@@ -689,4 +713,22 @@ class _CacheEntry {
     required this.size,
     required this.modified,
   });
+}
+
+/// Minimal async mutex: serializes the critical section across awaits.
+class _Mutex {
+  Future<void> _last = Future.value();
+
+  Future<T> synchronized<T>(Future<T> Function() action) {
+    final completer = Completer<void>();
+    final previous = _last;
+    _last = completer.future;
+    return previous.then((_) async {
+      try {
+        return await action();
+      } finally {
+        completer.complete();
+      }
+    });
+  }
 }

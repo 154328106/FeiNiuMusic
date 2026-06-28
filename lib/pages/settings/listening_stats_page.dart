@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/router/app_page_route.dart';
 import '../../app/services/db/dao/song_dao.dart';
 import '../../app/services/player_service.dart';
 import '../../app/services/stats_service.dart';
@@ -9,7 +10,12 @@ import '../../components/common/setting_widgets.dart';
 import '../../components/layout/base/app_page_scaffold.dart';
 import '../../components/layout/base/app_top_bar.dart';
 import '../../components/list/media_list_tile.dart';
+import '../library/library_detail_pages.dart';
 import '../songs/song_detail_sheet.dart';
+
+enum _TrendMode { week, month }
+
+enum _LeaderTab { songs, artists, albums }
 
 class ListeningStatsPage extends StatefulWidget {
   const ListeningStatsPage({super.key});
@@ -22,11 +28,17 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
   final StatsService _statsService = StatsService.instance;
   final SongDao _songDao = SongDao();
   final PlayerService _player = PlayerService.instance;
-  DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
+
   bool _loading = true;
-  List<DayListeningStat> _monthStats = [];
+  _TrendMode _trendMode = _TrendMode.week;
+  _LeaderTab _leaderTab = _LeaderTab.songs;
+
   StatsTotals _totalStats = const StatsTotals(listenMs: 0, playCount: 0);
+  final Map<String, DayListeningStat> _dayMap = {};
+  int _activeDaysThisMonth = 0;
   List<_SongStatRow> _topSongs = [];
+  List<_AggRow> _topArtists = [];
+  List<_AggRow> _topAlbums = [];
 
   @override
   void initState() {
@@ -35,55 +47,77 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
   }
 
   Future<void> _load() async {
-    setState(() {
-      _loading = true;
-    });
-    final monthStats = await _statsService.fetchMonthStats(
-      year: _month.year,
-      month: _month.month,
+    setState(() => _loading = true);
+    final now = DateTime.now();
+    final prev = DateTime(now.year, now.month - 1);
+
+    final totals = await _statsService.fetchTotalStats();
+    final thisMonth = await _statsService.fetchMonthStats(
+      year: now.year,
+      month: now.month,
     );
-    final totalStats = await _statsService.fetchTotalStats();
-    final topStats = await _statsService.fetchTopSongs(limit: 20);
-    final songIds = topStats.map((e) => e.songId).toList();
-    final songs = await _songDao.fetchByIds(songIds);
-    final songMap = <String, SongEntity>{
-      for (final song in songs) song.id: song,
-    };
-    final topSongs = topStats
-        .map((stat) {
-          final song = songMap[stat.songId];
-          if (song == null) return null;
-          return _SongStatRow(song: song, stat: stat);
-        })
-        .whereType<_SongStatRow>()
-        .toList();
+    final lastMonth = await _statsService.fetchMonthStats(
+      year: prev.year,
+      month: prev.month,
+    );
+
+    final dayMap = <String, DayListeningStat>{};
+    for (final s in [...lastMonth, ...thisMonth]) {
+      dayMap[s.dayKey] = s;
+    }
+    final activeDays = thisMonth.where((s) => s.listenMs > 0).length;
+
+    // Pull a wider set of top songs to aggregate artists/albums from.
+    final topStats = await _statsService.fetchTopSongs(limit: 60);
+    final songs = await _songDao.fetchByIds(
+      topStats.map((e) => e.songId).toList(),
+    );
+    final songMap = {for (final s in songs) s.id: s};
+    final topSongs = <_SongStatRow>[];
+    final artistAcc = <String, _AggAccum>{};
+    final albumAcc = <String, _AggAccum>{};
+    for (final stat in topStats) {
+      final song = songMap[stat.songId];
+      if (song == null) continue;
+      topSongs.add(_SongStatRow(song: song, stat: stat));
+      final artist = song.artist.trim().isEmpty ? '未知艺术家' : song.artist.trim();
+      (artistAcc[artist] ??= _AggAccum(artist, song)).add(stat);
+      final album = (song.album ?? '').trim().isEmpty
+          ? '未知专辑'
+          : song.album!.trim();
+      (albumAcc[album] ??= _AggAccum(album, song)).add(stat);
+    }
+    List<_AggRow> rank(Map<String, _AggAccum> acc) {
+      final list = acc.values.map((e) => e.toRow()).toList()
+        ..sort((a, b) {
+          final c = b.playCount.compareTo(a.playCount);
+          return c != 0 ? c : b.listenMs.compareTo(a.listenMs);
+        });
+      return list.take(10).toList();
+    }
+
     if (!mounted) return;
     setState(() {
-      _monthStats = monthStats;
-      _totalStats = totalStats;
-      _topSongs = topSongs;
+      _totalStats = totals;
+      _dayMap
+        ..clear()
+        ..addAll(dayMap);
+      _activeDaysThisMonth = activeDays;
+      _topSongs = topSongs.take(20).toList();
+      _topArtists = rank(artistAcc);
+      _topAlbums = rank(albumAcc);
       _loading = false;
     });
   }
 
-  void _changeMonth(int delta) {
-    setState(() {
-      _month = DateTime(_month.year, _month.month + delta);
-    });
-    _load();
-  }
-
-  String _monthTitle(DateTime month) {
-    return '${month.year}年${month.month.toString().padLeft(2, '0')}月';
-  }
-
+  // ---- formatting helpers ----
   String _formatDuration(int ms) {
-    if (ms <= 0) return '0分钟';
+    if (ms <= 0) return '0 分钟';
     final totalMinutes = (ms / 60000).floor();
     final hours = totalMinutes ~/ 60;
     final minutes = totalMinutes % 60;
-    if (hours <= 0) return '$minutes分钟';
-    return '$hours小时${minutes.toString().padLeft(2, '0')}分钟';
+    if (hours <= 0) return '$minutes 分钟';
+    return '$hours 小时 $minutes 分';
   }
 
   String _formatShortDuration(int ms) {
@@ -92,10 +126,56 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
     final hours = totalSeconds ~/ 3600;
     final minutes = (totalSeconds % 3600) ~/ 60;
     final seconds = totalSeconds % 60;
-    if (hours > 0) {
-      return '$hours:${minutes.toString().padLeft(2, '0')}';
-    }
+    if (hours > 0) return '$hours:${minutes.toString().padLeft(2, '0')}';
     return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  String _durationText(int? durationMs) {
+    if (durationMs == null || durationMs <= 0) return '--:--';
+    final totalSeconds = (durationMs / 1000).floor();
+    final minutes = totalSeconds ~/ 60;
+    final seconds = totalSeconds % 60;
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  String _dayKey(DateTime t) {
+    final y = t.year.toString().padLeft(4, '0');
+    final m = t.month.toString().padLeft(2, '0');
+    final d = t.day.toString().padLeft(2, '0');
+    return '$y-$m-$d';
+  }
+
+  List<_TrendBar> _buildTrendBars() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    const weekdayLabels = ['一', '二', '三', '四', '五', '六', '日'];
+    if (_trendMode == _TrendMode.week) {
+      return List.generate(7, (i) {
+        final date = today.subtract(Duration(days: 6 - i));
+        final ms = _dayMap[_dayKey(date)]?.listenMs ?? 0;
+        return _TrendBar(
+          value: ms,
+          label: weekdayLabels[date.weekday - 1],
+          fullLabel: '${date.month}月${date.day}日 周${weekdayLabels[date.weekday - 1]}',
+          highlight: date == today,
+          showLabel: true,
+        );
+      });
+    }
+    final days = DateUtils.getDaysInMonth(now.year, now.month);
+    return List.generate(days, (i) {
+      final day = i + 1;
+      final date = DateTime(now.year, now.month, day);
+      final ms = _dayMap[_dayKey(date)]?.listenMs ?? 0;
+      final showLabel = day == 1 || day % 5 == 0 || day == today.day;
+      return _TrendBar(
+        value: ms,
+        label: showLabel ? '$day' : '',
+        fullLabel: '${now.month}月$day日',
+        highlight: date == today,
+        showLabel: showLabel,
+      );
+    });
   }
 
   @override
@@ -113,15 +193,11 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
         child: ListView(
           padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
           children: [
-            _buildMonthHeader(context),
-            const SizedBox(height: 12),
-            _buildCalendar(context),
+            _buildOverview(context),
             const SizedBox(height: 16),
-            _buildMonthSummary(context),
+            _buildTrend(context),
             const SizedBox(height: 16),
-            _buildTotalSummary(context),
-            const SizedBox(height: 16),
-            _buildTopSongs(context),
+            _buildLeaderboard(context),
             if (_loading)
               const Padding(
                 padding: EdgeInsets.only(top: 16),
@@ -133,265 +209,573 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
     );
   }
 
-  String _durationText(int? durationMs) {
-    if (durationMs == null || durationMs <= 0) return '--:--';
-    final totalSeconds = (durationMs / 1000).floor();
-    final minutes = totalSeconds ~/ 60;
-    final seconds = totalSeconds % 60;
-    return '$minutes:${seconds.toString().padLeft(2, '0')}';
-  }
-
-  Widget _buildMonthHeader(BuildContext context) {
-    return Row(
+  Widget _buildOverview(BuildContext context) {
+    return AppSettingSection(
+      title: '概览',
       children: [
-        IconButton(
-          icon: const Icon(Icons.chevron_left_rounded),
-          onPressed: () => _changeMonth(-1),
-        ),
-        Expanded(
-          child: Text(
-            _monthTitle(_month),
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 14),
+          child: Row(
+            children: [
+              _OverviewMetric(
+                icon: Icons.schedule_rounded,
+                value: _formatDuration(_totalStats.listenMs),
+                label: '累计收听',
+              ),
+              _OverviewDivider(),
+              _OverviewMetric(
+                icon: Icons.play_circle_outline_rounded,
+                value: '${_totalStats.playCount}',
+                label: '播放次数',
+              ),
+              _OverviewDivider(),
+              _OverviewMetric(
+                icon: Icons.calendar_month_rounded,
+                value: '$_activeDaysThisMonth',
+                label: '本月活跃(天)',
+              ),
+            ],
           ),
         ),
-        IconButton(
-          icon: const Icon(Icons.chevron_right_rounded),
-          onPressed: () => _changeMonth(1),
-        ),
       ],
     );
   }
 
-  Widget _buildCalendar(BuildContext context) {
-    final theme = Theme.of(context);
-    final daysInMonth = DateUtils.getDaysInMonth(_month.year, _month.month);
-    final firstDay = DateTime(_month.year, _month.month, 1);
-    final leadingEmpty = firstDay.weekday - 1;
-    final totalCells = ((leadingEmpty + daysInMonth) / 7).ceil() * 7;
-    final statsMap = {
-      for (final stat in _monthStats) stat.dayKey: stat,
-    };
-    final maxListenMs =
-        _monthStats.fold<int>(0, (max, stat) => stat.listenMs > max ? stat.listenMs : max);
-    final labels = ['一', '二', '三', '四', '五', '六', '日'];
-    return Column(
+  Widget _buildTrend(BuildContext context) {
+    final bars = _buildTrendBars();
+    return AppSettingSection(
+      title: '听歌趋势',
       children: [
-        Row(
-          children: labels
-              .map(
-                (label) => Expanded(
-                  child: Center(
-                    child: Text(
-                      label,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-              )
-              .toList(),
-        ),
-        const SizedBox(height: 8),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 7,
-            mainAxisSpacing: 6,
-            crossAxisSpacing: 6,
-            childAspectRatio: 1,
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+          child: _SegmentedToggle(
+            options: const ['最近7天', '本月'],
+            selectedIndex: _trendMode == _TrendMode.week ? 0 : 1,
+            onChanged: (i) => setState(
+              () => _trendMode = i == 0 ? _TrendMode.week : _TrendMode.month,
+            ),
           ),
-          itemCount: totalCells,
-          itemBuilder: (context, index) {
-            final dayNumber = index - leadingEmpty + 1;
-            if (dayNumber < 1 || dayNumber > daysInMonth) {
-              return const SizedBox.shrink();
-            }
-            final dayKey = _dayKey(DateTime(_month.year, _month.month, dayNumber));
-            final stat = statsMap[dayKey];
-            final ratio = maxListenMs == 0 || stat == null
-                ? 0.0
-                : (stat.listenMs / maxListenMs).clamp(0.0, 1.0);
-            final hasListen = stat != null && stat.listenMs > 0;
-            final bgColor = hasListen
-                ? theme.colorScheme.primary.withValues(alpha: 0.18 + 0.62 * ratio)
-                : Colors.transparent;
-            final textColor = hasListen && ratio > 0.45
-                ? theme.colorScheme.onPrimary
-                : theme.colorScheme.onSurface;
-            return Container(
-              decoration: BoxDecoration(
-                color: bgColor,
-                borderRadius: BorderRadius.circular(12),
-                border: hasListen
-                    ? null
-                    : Border.all(
-                        color: theme.dividerColor.withValues(alpha: 0.25),
-                      ),
-              ),
-              child: Center(
-                child: Text(
-                  '$dayNumber',
-                  style: TextStyle(
-                    color: textColor,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            );
-          },
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 14),
+          child: _TrendBarChart(
+            bars: bars,
+            tooltip: (ms) => _formatDuration(ms),
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildMonthSummary(BuildContext context) {
-    final totalListenMs =
-        _monthStats.fold<int>(0, (sum, stat) => sum + stat.listenMs);
-    final totalPlayCount =
-        _monthStats.fold<int>(0, (sum, stat) => sum + stat.playCount);
-    final daysListened =
-        _monthStats.where((stat) => stat.listenMs > 0).length;
+  Widget _buildLeaderboard(BuildContext context) {
     return AppSettingSection(
-      title: '本月概览',
+      title: '排行榜',
       children: [
-        _StatRow(label: '听歌天数', value: '$daysListened 天'),
-        _StatRow(label: '听歌时长', value: _formatDuration(totalListenMs)),
-        _StatRow(label: '播放次数', value: '$totalPlayCount 次'),
-      ],
-    );
-  }
-
-  Widget _buildTotalSummary(BuildContext context) {
-    return AppSettingSection(
-      title: '累计数据',
-      children: [
-        _StatRow(label: '听歌时长', value: _formatDuration(_totalStats.listenMs)),
-        _StatRow(label: '播放次数', value: '${_totalStats.playCount} 次'),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+          child: _SegmentedToggle(
+            options: const ['歌曲', '艺术家', '专辑'],
+            selectedIndex: _leaderTab.index,
+            onChanged: (i) =>
+                setState(() => _leaderTab = _LeaderTab.values[i]),
+          ),
+        ),
+        switch (_leaderTab) {
+          _LeaderTab.songs => _buildTopSongs(context),
+          _LeaderTab.artists => _buildAggList(context, _topArtists, isAlbum: false),
+          _LeaderTab.albums => _buildAggList(context, _topAlbums, isAlbum: true),
+        },
       ],
     );
   }
 
   Widget _buildTopSongs(BuildContext context) {
+    if (_topSongs.isEmpty) return const _EmptyHint(text: '暂无播放数据');
     final queue = _topSongs.map((e) => e.song).toList();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '高频歌曲',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        const SizedBox(height: 8),
-        Card(
-          child: _topSongs.isEmpty
-              ? const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 20),
-                  child: Center(child: Text('暂无播放数据')),
-                )
-              : ValueListenableBuilder<SongEntity?>(
-                  valueListenable: _player.currentSong,
-                  builder: (context, current, _) {
-                    return Column(
-                      children: _topSongs.asMap().entries.map((entry) {
-                        final row = entry.value;
-                        final song = row.song;
-                        final isPlaying = current?.id == song.id;
-                        return MediaListTile(
-                          leading: ArtworkWidget(
-                            song: song,
-                            size: 44,
-                            borderRadius: 8,
-                            placeholder: Container(
-                              width: 44,
-                              height: 44,
-                              decoration: BoxDecoration(
-                                color: Theme.of(context).cardColor,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              alignment: Alignment.center,
-                              child: Text(
-                                song.title.isEmpty
-                                    ? '?'
-                                    : song.title.substring(0, 1).toUpperCase(),
-                                style: TextStyle(
-                                  color: Theme.of(context).colorScheme.primary,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ),
-                          title: song.title,
-                          subtitle:
-                              '${song.artist} · ${song.album ?? '未知专辑'} · ${_durationText(song.durationMs)}',
-                          selected: false,
-                          multiSelect: false,
-                          isHighlighted: isPlaying,
-                          trailing: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text(
-                                '${row.stat.playCount} 次',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                              Text(
-                                _formatShortDuration(row.stat.listenMs),
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ],
-                          ),
-                          onTap: () {
-                            if (queue.isEmpty) return;
-                            _player.playQueue(queue, entry.key);
-                          },
-                          onLongPress: () {
-                            showModalBottomSheet<void>(
-                              context: context,
-                              backgroundColor: Colors.transparent,
-                              isScrollControlled: true,
-                              builder: (_) => SongDetailSheet(song: song),
-                            );
-                          },
-                        );
-                      }).toList(),
-                    );
-                  },
+    return ValueListenableBuilder<SongEntity?>(
+      valueListenable: _player.currentSong,
+      builder: (context, current, _) {
+        return Column(
+          children: _topSongs.asMap().entries.map((entry) {
+            final i = entry.key;
+            final row = entry.value;
+            final song = row.song;
+            return MediaListTile(
+              leading: _RankedArtwork(
+                rank: i + 1,
+                child: ArtworkWidget(
+                  song: song,
+                  size: 44,
+                  borderRadius: 8,
+                  placeholder: _SquarePlaceholder(label: song.title),
                 ),
-        ),
-      ],
+              ),
+              title: song.title,
+              subtitle:
+                  '${song.artist} · ${_durationText(song.durationMs)}',
+              selected: false,
+              multiSelect: false,
+              isHighlighted: current?.id == song.id,
+              trailing: _CountTrailing(
+                count: row.stat.playCount,
+                time: _formatShortDuration(row.stat.listenMs),
+              ),
+              onTap: () {
+                if (queue.isEmpty) return;
+                _player.playQueue(queue, i);
+              },
+              onLongPress: () {
+                showModalBottomSheet<void>(
+                  context: context,
+                  backgroundColor: Colors.transparent,
+                  isScrollControlled: true,
+                  builder: (_) => SongDetailSheet(song: song),
+                );
+              },
+            );
+          }).toList(),
+        );
+      },
     );
   }
 
-  String _dayKey(DateTime time) {
-    final y = time.year.toString().padLeft(4, '0');
-    final m = time.month.toString().padLeft(2, '0');
-    final d = time.day.toString().padLeft(2, '0');
-    return '$y-$m-$d';
+  Widget _buildAggList(
+    BuildContext context,
+    List<_AggRow> rows, {
+    required bool isAlbum,
+  }) {
+    if (rows.isEmpty) return const _EmptyHint(text: '暂无播放数据');
+    return Column(
+      children: rows.asMap().entries.map((entry) {
+        final i = entry.key;
+        final row = entry.value;
+        return MediaListTile(
+          leading: _RankedArtwork(
+            rank: i + 1,
+            child: ArtworkWidget(
+              song: row.sample,
+              size: 44,
+              borderRadius: isAlbum ? 8 : 999,
+              placeholder: _SquarePlaceholder(label: row.name),
+            ),
+          ),
+          title: row.name,
+          subtitle: '${row.playCount} 次播放',
+          selected: false,
+          multiSelect: false,
+          isHighlighted: false,
+          trailing: _CountTrailing(
+            count: row.playCount,
+            time: _formatShortDuration(row.listenMs),
+          ),
+          onTap: () {
+            Navigator.of(context).push(
+              buildAppPageRoute<void>(
+                (_) => isAlbum
+                    ? AlbumDetailPage(albumName: row.name)
+                    : ArtistDetailPage(artistName: row.name),
+              ),
+            );
+          },
+        );
+      }).toList(),
+    );
   }
 }
 
-class _StatRow extends StatelessWidget {
-  final String label;
-  final String value;
+// ---- small presentational widgets ----
 
-  const _StatRow({
-    required this.label,
+class _OverviewMetric extends StatelessWidget {
+  final IconData icon;
+  final String value;
+  final String label;
+
+  const _OverviewMetric({
+    required this.icon,
     required this.value,
+    required this.label,
   });
 
   @override
   Widget build(BuildContext context) {
-    return AppSettingTile(
-      title: label,
-      trailing: Text(
-        value,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w600,
+    final scheme = Theme.of(context).colorScheme;
+    return Expanded(
+      child: Column(
+        children: [
+          Icon(icon, color: scheme.primary, size: 22),
+          const SizedBox(height: 8),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: scheme.onSurface,
+              ),
             ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OverviewDivider extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 1,
+      height: 40,
+      color: Theme.of(context).dividerColor.withValues(alpha: 0.25),
+    );
+  }
+}
+
+class _SegmentedToggle extends StatelessWidget {
+  final List<String> options;
+  final int selectedIndex;
+  final ValueChanged<int> onChanged;
+
+  const _SegmentedToggle({
+    required this.options,
+    required this.selectedIndex,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: List.generate(options.length, (i) {
+          final selected = i == selectedIndex;
+          return Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => onChanged(i),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(vertical: 7),
+                decoration: BoxDecoration(
+                  color: selected ? scheme.primary : Colors.transparent,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Text(
+                  options[i],
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: selected
+                        ? scheme.onPrimary
+                        : scheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+}
+
+class _TrendBar {
+  final int value;
+  final String label;
+  final String fullLabel;
+  final bool highlight;
+  final bool showLabel;
+
+  const _TrendBar({
+    required this.value,
+    required this.label,
+    required this.fullLabel,
+    required this.highlight,
+    required this.showLabel,
+  });
+}
+
+class _TrendBarChart extends StatefulWidget {
+  final List<_TrendBar> bars;
+  final String Function(int ms) tooltip;
+
+  const _TrendBarChart({required this.bars, required this.tooltip});
+
+  @override
+  State<_TrendBarChart> createState() => _TrendBarChartState();
+}
+
+class _TrendBarChartState extends State<_TrendBarChart> {
+  int? _selected;
+
+  @override
+  void didUpdateWidget(_TrendBarChart old) {
+    super.didUpdateWidget(old);
+    // Reset selection when the dataset (week/month) changes length.
+    if (old.bars.length != widget.bars.length) {
+      _selected = null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final bars = widget.bars;
+    final maxVal = bars.fold<int>(0, (m, b) => b.value > m ? b.value : m);
+    final hasData = maxVal > 0;
+    const chartHeight = 120.0;
+
+    // Default focus: the selected bar, else today's bar, else none.
+    final todayIndex = bars.indexWhere((b) => b.highlight);
+    final focusIndex = _selected ?? (todayIndex >= 0 ? todayIndex : null);
+    final focus = focusIndex != null ? bars[focusIndex] : null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Header: selected day + exact duration, or a hint.
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: focus != null
+              ? Row(
+                  children: [
+                    Text(
+                      focus.fullLabel,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      widget.tooltip(focus.value),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: scheme.primary,
+                      ),
+                    ),
+                  ],
+                )
+              : Text(
+                  hasData ? '点击柱状查看当天时长' : '还没有这段时间的收听记录',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                  ),
+                ),
+        ),
+        SizedBox(
+          height: chartHeight,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: List.generate(bars.length, (i) {
+              final b = bars[i];
+              final frac = hasData ? b.value / maxVal : 0.0;
+              final barHeight = 4 + frac * (chartHeight - 8);
+              final isFocused = i == focusIndex;
+              return Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => setState(() => _selected = i),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Container(
+                          height: barHeight,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(6),
+                            border: isFocused
+                                ? Border.all(color: scheme.primary, width: 1.5)
+                                : null,
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: (b.highlight || isFocused)
+                                  ? [
+                                      scheme.primary,
+                                      scheme.primary.withValues(alpha: 0.7),
+                                    ]
+                                  : [
+                                      scheme.primary.withValues(alpha: 0.5),
+                                      scheme.primary.withValues(alpha: 0.25),
+                                    ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: bars.map((b) {
+            return Expanded(
+              child: Text(
+                b.showLabel ? b.label : '',
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.clip,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: b.highlight
+                      ? scheme.primary
+                      : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                  fontWeight: b.highlight ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+}
+
+class _RankedArtwork extends StatelessWidget {
+  final int rank;
+  final Widget child;
+
+  const _RankedArtwork({required this.rank, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final topThree = rank <= 3;
+    return SizedBox(
+      width: 44,
+      height: 44,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          child,
+          Positioned(
+            left: -6,
+            top: -6,
+            child: Container(
+              width: 18,
+              height: 18,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: topThree ? scheme.primary : scheme.surfaceContainerHighest,
+                shape: BoxShape.circle,
+                border: Border.all(color: scheme.surface, width: 1.5),
+              ),
+              child: Text(
+                '$rank',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: topThree ? scheme.onPrimary : scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CountTrailing extends StatelessWidget {
+  final int count;
+  final String time;
+
+  const _CountTrailing({required this.count, required this.time});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Text(
+          '$count 次',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: scheme.primary,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          time,
+          style: TextStyle(
+            fontSize: 11,
+            color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SquarePlaceholder extends StatelessWidget {
+  final String label;
+
+  const _SquarePlaceholder({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: 44,
+      height: 44,
+      decoration: BoxDecoration(
+        color: scheme.primary.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        label.trim().isEmpty ? '?' : label.trim().substring(0, 1).toUpperCase(),
+        style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+}
+
+class _EmptyHint extends StatelessWidget {
+  final String text;
+
+  const _EmptyHint({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 24),
+      child: Center(
+        child: Text(
+          text,
+          style: TextStyle(
+            color: Theme.of(
+              context,
+            ).colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+          ),
+        ),
       ),
     );
   }
@@ -401,8 +785,40 @@ class _SongStatRow {
   final SongEntity song;
   final SongListeningStat stat;
 
-  const _SongStatRow({
-    required this.song,
-    required this.stat,
+  const _SongStatRow({required this.song, required this.stat});
+}
+
+class _AggRow {
+  final String name;
+  final int playCount;
+  final int listenMs;
+  final SongEntity sample;
+
+  const _AggRow({
+    required this.name,
+    required this.playCount,
+    required this.listenMs,
+    required this.sample,
   });
+}
+
+class _AggAccum {
+  final String name;
+  final SongEntity sample;
+  int playCount = 0;
+  int listenMs = 0;
+
+  _AggAccum(this.name, this.sample);
+
+  void add(SongListeningStat stat) {
+    playCount += stat.playCount;
+    listenMs += stat.listenMs;
+  }
+
+  _AggRow toRow() => _AggRow(
+    name: name,
+    playCount: playCount,
+    listenMs: listenMs,
+    sample: sample,
+  );
 }

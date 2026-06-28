@@ -81,9 +81,10 @@ class _ArtworkWidgetState extends State<ArtworkWidget> with SignalsMixin {
     final cachedPath = widget.song.localCoverPath;
     final dpr = MediaQuery.of(context).devicePixelRatio;
     final cacheSize = (widget.size * dpr).round();
-    final cacheWidth = widget.preferOriginal
-        ? null
-        : (cacheSize > 0 ? cacheSize : null);
+    // Decode at the display's pixel size even for preferOriginal: a 3000px cover
+    // shown in a ~400px box otherwise decodes at full native resolution and
+    // wastes memory/decode time. size*dpr is the true full quality for the view.
+    final cacheWidth = cacheSize > 0 ? cacheSize : null;
     final cacheHeight = cacheWidth;
     final placeholder =
         widget.placeholder ??
@@ -108,6 +109,8 @@ class _ArtworkWidgetState extends State<ArtworkWidget> with SignalsMixin {
               bytes,
               width: widget.size,
               height: widget.size,
+              cacheWidth: cacheWidth,
+              cacheHeight: cacheHeight,
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) => placeholder,
             ),

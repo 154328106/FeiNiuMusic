@@ -67,8 +67,33 @@ android {
             signingConfig = if (hasReleaseSigning) {
                 signingConfigs.getByName("release")
             } else {
+                // No keystore configured: fall back to debug signing so local
+                // sideload builds still work, but make it LOUD — a debug-signed
+                // build must never be uploaded to the Play Store.
+                logger.warn(
+                    "\n**********\n" +
+                    "WARNING: release build is using the DEBUG signing key " +
+                    "(no key.properties / SIGNING_* env vars found).\n" +
+                    "This APK is fine for local install but will be REJECTED by " +
+                    "the Play Store and cannot upgrade a properly-signed install.\n" +
+                    "Configure android/key.properties to sign for distribution.\n" +
+                    "**********\n"
+                )
                 signingConfigs.getByName("debug")
             }
+            // Code shrinking (R8/minify) is intentionally OFF: this is a
+            // Flutter app whose size is dominated by native .so + assets that
+            // R8 cannot shrink (enabling it changed the APK size by <2% in
+            // testing), while the Kotlin-serialization-based lyricon provider
+            // carries reflection/serializer risk under obfuscation. The keep
+            // rules in proguard-rules.pro are kept ready: to enable shrinking,
+            // flip these to true and test the floating-lyrics + media paths.
+            isMinifyEnabled = false
+            isShrinkResources = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }

@@ -8,6 +8,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/services/app_update_service.dart';
 import '../../app/services/debug_log_service.dart';
+import '../../app/state/settings_state.dart';
+import '../../components/dialog/app_update_dialog.dart';
 import '../../components/index.dart';
 
 class VersionInfoPage extends StatefulWidget {
@@ -19,31 +21,44 @@ class VersionInfoPage extends StatefulWidget {
 
 class _VersionInfoPageState extends State<VersionInfoPage> {
   static const String _appName = 'NagoMusic';
-  static const String _version = '1.2.8+5';
   static const String _iconAsset = '开发文档/NagoAPP图标.png';
 
   final DebugLogService _debugLogs = DebugLogService.instance;
 
   bool _checking = false;
+  String _version = '...';
   AppUpdateInfo? _updateInfo;
 
   @override
   void initState() {
     super.initState();
     _debugLogs.ensureLoaded();
+    AppLaunchUpdateSettings.ensureLoaded();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    final v = await AppUpdateService.instance.currentVersion();
+    if (!mounted) return;
+    setState(() => _version = v);
   }
 
   Future<void> _checkUpdate() async {
     if (_checking) return;
     setState(() => _checking = true);
     try {
-      final info = await AppUpdateService.instance.checkLatest(_version);
+      final current = await AppUpdateService.instance.currentVersion();
+      final info = await AppUpdateService.instance.checkLatest(current);
       if (!mounted) return;
       setState(() => _updateInfo = info);
-      await _showUpdateResultDialog(info);
+      if (info.hasUpdate) {
+        await showAppUpdateDialog(context, info: info, currentVersion: current);
+      } else {
+        await showLatestVersionDialog(context, currentVersion: current);
+      }
     } catch (_) {
       if (!mounted) return;
-      await _showUpdateFailedDialog();
+      await showUpdateFailedDialog(context);
     } finally {
       if (mounted) {
         setState(() => _checking = false);
@@ -57,6 +72,17 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
     AppToast.show(context, '日志已清空');
   }
 
+  Future<void> _copyLogs() async {
+    final text = _debugLogs.exportText();
+    if (text.trim().isEmpty) {
+      AppToast.show(context, '暂无日志');
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    AppToast.show(context, '日志已复制');
+  }
+
   Future<void> _exportLogs() async {
     await _debugLogs.ensureLoaded();
     final now = DateTime.now();
@@ -67,72 +93,6 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
     await file.writeAsString(_debugLogs.exportText(), flush: true);
     if (!mounted) return;
     await _showLogExportDialog(file.path);
-  }
-
-  Future<void> _showUpdateResultDialog(AppUpdateInfo info) async {
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text(info.hasUpdate ? '发现新版本' : '当前已是最新版本'),
-          content: Text(
-            info.hasUpdate
-                ? '当前版本：$_version\n最新版本：${info.latestVersion}${info.releaseName == null ? '' : '\n版本名称：${info.releaseName}'}'
-                : '当前版本 $_version 已是最新版本。',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('关闭'),
-            ),
-            if (info.hasUpdate)
-              FilledButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  _openUrl(info.releaseUrl ?? AppUpdateService.releasePageUrl);
-                },
-                child: const Text('前往下载'),
-              ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _showUpdateFailedDialog() async {
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('检查更新失败'),
-          content: const Text('无法连接更新服务。你可以手动打开发布页面检查新版本。'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('关闭'),
-            ),
-            TextButton(
-              onPressed: () async {
-                await Clipboard.setData(
-                  const ClipboardData(text: AppUpdateService.releasePageUrl),
-                );
-                if (!context.mounted) return;
-                Navigator.pop(context);
-                AppToast.show(context, '更新地址已复制');
-              },
-              child: const Text('复制地址'),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _openUrl(AppUpdateService.releasePageUrl);
-              },
-              child: const Text('手动打开'),
-            ),
-          ],
-        );
-      },
-    );
   }
 
   Future<void> _showLogExportDialog(String path) async {
@@ -167,17 +127,6 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
         );
       },
     );
-  }
-
-  Future<void> _openUrl(String url) async {
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else if (mounted) {
-      await Clipboard.setData(ClipboardData(text: url));
-      if (!mounted) return;
-      AppToast.show(context, '无法打开浏览器，地址已复制');
-    }
   }
 
   Future<void> _openFile(String path) async {
@@ -220,10 +169,10 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
                   ),
                 ),
               ),
-              const AppSettingTile(
+              AppSettingTile(
                 title: '当前版本',
                 subtitle: _version,
-                leading: Icon(Icons.info_outline_rounded),
+                leading: const Icon(Icons.info_outline_rounded),
               ),
               AppSettingTile(
                 title: '检查更新',
@@ -237,6 +186,19 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
                       )
                     : const Icon(Icons.chevron_right_rounded),
                 onTap: _checking ? null : _checkUpdate,
+              ),
+              ValueListenableBuilder<bool>(
+                valueListenable:
+                    AppLaunchUpdateSettings.autoCheckUpdateOnLaunch,
+                builder: (context, enabled, _) {
+                  return AppSettingSwitchTile(
+                    title: '启动时自动检查更新',
+                    subtitle: '打开应用时在后台检查，有新版本会弹窗提示',
+                    value: enabled,
+                    onChanged:
+                        AppLaunchUpdateSettings.setAutoCheckUpdateOnLaunch,
+                  );
+                },
               ),
             ],
           ),
@@ -271,29 +233,88 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
             ],
           ),
           const SizedBox(height: 16),
-          ValueListenableBuilder<List<String>>(
-            valueListenable: _debugLogs.entries,
-            builder: (context, logs, _) {
-              return AppSettingSection(
-                title: '最近日志',
-                padding: const EdgeInsets.all(16),
-                children: [
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      logs.isEmpty ? '暂无日志' : logs.join('\n'),
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontFamily: 'monospace',
-                        height: 1.35,
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
+          _buildLogViewer(context),
         ],
       ),
+    );
+  }
+
+  Widget _buildLogViewer(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ValueListenableBuilder<List<String>>(
+      valueListenable: _debugLogs.entries,
+      builder: (context, logs, _) {
+        return AppSettingSection(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '最近日志 (${logs.length})',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (logs.isNotEmpty)
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.copy_rounded, size: 18),
+                    tooltip: '复制全部',
+                    onPressed: _copyLogs,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (logs.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 18),
+                child: Center(
+                  child: Text(
+                    _debugLogs.enabled.value ? '暂无日志' : '调试模式未开启',
+                    style: TextStyle(
+                      color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ),
+              )
+            else
+              Container(
+                constraints: const BoxConstraints(maxHeight: 300),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Scrollbar(
+                  child: ListView.separated(
+                    padding: const EdgeInsets.all(10),
+                    shrinkWrap: true,
+                    // Newest first.
+                    itemCount: logs.length,
+                    separatorBuilder: (_, _) => Divider(
+                      height: 10,
+                      thickness: 0.5,
+                      color: scheme.outlineVariant.withValues(alpha: 0.3),
+                    ),
+                    itemBuilder: (context, i) {
+                      final line = logs[logs.length - 1 - i];
+                      return SelectableText(
+                        line,
+                        style: TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 11.5,
+                          height: 1.4,
+                          color: scheme.onSurface.withValues(alpha: 0.88),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 
@@ -301,7 +322,7 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
     final info = _updateInfo;
     if (info == null) return '检查是否有新版本';
     if (info.hasUpdate) {
-      return '最新版本 ${info.latestVersion}${info.releaseName == null ? '' : ' · ${info.releaseName}'}';
+      return '发现新版本 ${info.latestVersion}';
     }
     return '当前已是最新版本';
   }

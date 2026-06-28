@@ -146,11 +146,16 @@ class LyricsRepository {
     }
 
     try {
-      final entries = Directory(dir)
-          .listSync()
-          .whereType<File>()
-          .where((f) => p.extension(f.path).toLowerCase() == '.lrc')
-          .toList();
+      final dirHandle = Directory(dir);
+      if (!await dirHandle.exists()) return null;
+      final entries = <File>[];
+      // Async listing so a large lyrics folder never blocks the UI isolate.
+      await for (final entry in dirHandle.list(followLinks: false)) {
+        if (entry is File &&
+            p.extension(entry.path).toLowerCase() == '.lrc') {
+          entries.add(entry);
+        }
+      }
       if (entries.isEmpty) return null;
 
       final title = song.title.trim().toLowerCase();

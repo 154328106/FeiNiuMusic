@@ -13,11 +13,11 @@ class MediaNotificationSettings {
   static final ValueNotifier<bool> lyricOnTop = ValueNotifier(false);
   static final ValueNotifier<bool> showFavoriteAction = ValueNotifier(true);
 
-  static bool _loaded = false;
+  static Future<void>? _loading;
 
-  static Future<void> ensureLoaded() async {
-    if (_loaded) return;
-    _loaded = true;
+  static Future<void> ensureLoaded() => _loading ??= _doLoad();
+
+  static Future<void> _doLoad() async {
     final prefs = await SharedPreferences.getInstance();
     showLyrics.value = prefs.getBool(_prefsShowLyrics) ?? true;
     showCloseAction.value = prefs.getBool(_prefsShowCloseAction) ?? true;

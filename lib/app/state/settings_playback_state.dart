@@ -6,11 +6,11 @@ class AppPlaybackVolumeSettings {
 
   static final ValueNotifier<double> volume = ValueNotifier(1);
 
-  static bool _loaded = false;
+  static Future<void>? _loading;
 
-  static Future<void> ensureLoaded() async {
-    if (_loaded) return;
-    _loaded = true;
+  static Future<void> ensureLoaded() => _loading ??= _doLoad();
+
+  static Future<void> _doLoad() async {
     final prefs = await SharedPreferences.getInstance();
     volume.value = (prefs.getDouble(_prefsVolume) ?? 1).clamp(0, 1);
   }
@@ -32,11 +32,11 @@ class WebDavPlaybackSettings {
   static final ValueNotifier<bool> segmentedEnabled = ValueNotifier(true);
   static final ValueNotifier<int> segmentConcurrency = ValueNotifier(4);
 
-  static bool _loaded = false;
+  static Future<void>? _loading;
 
-  static Future<void> ensureLoaded() async {
-    if (_loaded) return;
-    _loaded = true;
+  static Future<void> ensureLoaded() => _loading ??= _doLoad();
+
+  static Future<void> _doLoad() async {
     final prefs = await SharedPreferences.getInstance();
     prefetchEnabled.value = prefs.getBool(_prefsPrefetchEnabled) ?? true;
     segmentedEnabled.value = prefs.getBool(_prefsSegmentedEnabled) ?? true;
@@ -71,11 +71,11 @@ class AppLaunchPlaybackSettings {
   static final ValueNotifier<bool> autoPlayOnAppLaunch = ValueNotifier(false);
   static bool hasHandledAutoPlayThisSession = false;
 
-  static bool _loaded = false;
+  static Future<void>? _loading;
 
-  static Future<void> ensureLoaded() async {
-    if (_loaded) return;
-    _loaded = true;
+  static Future<void> ensureLoaded() => _loading ??= _doLoad();
+
+  static Future<void> _doLoad() async {
     final prefs = await SharedPreferences.getInstance();
     autoPlayOnAppLaunch.value =
         prefs.getBool(_prefsAutoPlayOnAppLaunch) ?? false;
@@ -85,6 +85,32 @@ class AppLaunchPlaybackSettings {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefsAutoPlayOnAppLaunch, enabled);
     autoPlayOnAppLaunch.value = enabled;
+  }
+}
+
+/// Whether to automatically check for app updates on launch and prompt the user.
+class AppLaunchUpdateSettings {
+  static const String _prefsAutoCheckUpdate = 'app_auto_check_update_on_launch';
+
+  static final ValueNotifier<bool> autoCheckUpdateOnLaunch = ValueNotifier(
+    false,
+  );
+  static bool hasCheckedUpdateThisSession = false;
+
+  static Future<void>? _loading;
+
+  static Future<void> ensureLoaded() => _loading ??= _doLoad();
+
+  static Future<void> _doLoad() async {
+    final prefs = await SharedPreferences.getInstance();
+    autoCheckUpdateOnLaunch.value =
+        prefs.getBool(_prefsAutoCheckUpdate) ?? false;
+  }
+
+  static Future<void> setAutoCheckUpdateOnLaunch(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsAutoCheckUpdate, enabled);
+    autoCheckUpdateOnLaunch.value = enabled;
   }
 }
 
@@ -111,11 +137,11 @@ class PlayerBottomActionSettings {
     _defaultActionOrder,
   );
 
-  static bool _loaded = false;
+  static Future<void>? _loading;
 
-  static Future<void> ensureLoaded() async {
-    if (_loaded) return;
-    _loaded = true;
+  static Future<void> ensureLoaded() => _loading ??= _doLoad();
+
+  static Future<void> _doLoad() async {
     final prefs = await SharedPreferences.getInstance();
     showPlaybackMode.value = prefs.getBool(_prefsShowPlaybackMode) ?? true;
     showSleepTimer.value = prefs.getBool(_prefsShowSleepTimer) ?? true;
@@ -180,11 +206,11 @@ class MiniPlayerInfoSettings {
 
   static final ValueNotifier<bool> showLyricsInSubtitle = ValueNotifier(false);
 
-  static bool _loaded = false;
+  static Future<void>? _loading;
 
-  static Future<void> ensureLoaded() async {
-    if (_loaded) return;
-    _loaded = true;
+  static Future<void> ensureLoaded() => _loading ??= _doLoad();
+
+  static Future<void> _doLoad() async {
     final prefs = await SharedPreferences.getInstance();
     showLyricsInSubtitle.value =
         prefs.getBool(_prefsShowLyricsInSubtitle) ?? false;

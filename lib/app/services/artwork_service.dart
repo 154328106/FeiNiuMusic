@@ -8,6 +8,8 @@ import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 import 'native_audio_thumbnail_service.dart';
+import 'http_utils.dart';
+import 'metadata/ogg_vorbis_comment.dart';
 
 class ArtworkService {
   ArtworkService._();
@@ -248,19 +250,31 @@ class ArtworkService {
           }
           if (kDebugMode && _debugArtwork) {
             debugPrint(
-              '[ArtworkService] native thumb empty uri=$uri asset=$assetId',
+              '[ArtworkService] native thumb empty uri=${HttpUtils.redactUrl(uri)} asset=$assetId',
             );
           }
         } else if (kDebugMode && _debugArtwork) {
-          debugPrint('[ArtworkService] asset missing uri=$uri asset=$assetId');
+          debugPrint(
+            '[ArtworkService] asset missing uri=${HttpUtils.redactUrl(uri)} asset=$assetId',
+          );
         }
       }
 
       final file = File(uri);
       if (!await file.exists()) return null;
       final metadata = readMetadata(file, getImage: true);
-      if (metadata.pictures.isEmpty) return null;
-      final original = metadata.pictures.first.bytes;
+      var original = metadata.pictures.isNotEmpty
+          ? metadata.pictures.first.bytes
+          : Uint8List(0);
+      // The bundled reader misses OGG/Opus covers (METADATA_BLOCK_PICTURE in a
+      // Vorbis comment) — fall back to our own extractor for those.
+      if (original.isEmpty && isOggPath(uri)) {
+        final ogg = extractOggVorbisComments(uri, includeArtwork: true);
+        final oggArt = ogg?.artwork;
+        if (oggArt != null && oggArt.isNotEmpty) {
+          original = oggArt;
+        }
+      }
       if (original.isEmpty) return null;
       if (kDebugMode && _debugArtwork) {
         debugPrint(

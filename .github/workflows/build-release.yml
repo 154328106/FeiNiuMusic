@@ -51,12 +51,7 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "TAG=$TAG" >> $GITHUB_ENV
       - run: |
-          LAST_TAG=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
-          if [ -n "$LAST_TAG" ]; then
-            git log "${LAST_TAG}..HEAD" --pretty=format:"- %s%n%b" > release_notes.txt
-          else
-            git log -5 --pretty=format:"- %s%n%b" > release_notes.txt
-          fi
+          git log -1 --pretty=format:"- %s%n%b" > release_notes.txt
           if [ ! -s release_notes.txt ]; then
             echo "- ${GITHUB_SHA}" > release_notes.txt
           fi

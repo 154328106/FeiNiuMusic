@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -22,7 +23,7 @@ class PlayerBackgroundSettings {
   static final ValueNotifier<double> saturation = ValueNotifier(1.0);
   static final ValueNotifier<double> hueShift = ValueNotifier(0.0);
 
-  static bool _loaded = false;
+  static Future<void>? _loading;
 
   static ThemeMode _modeFromString(String? raw) {
     switch (raw) {
@@ -46,9 +47,9 @@ class PlayerBackgroundSettings {
     }
   }
 
-  static Future<void> ensureLoaded() async {
-    if (_loaded) return;
-    _loaded = true;
+  static Future<void> ensureLoaded() => _loading ??= _doLoad();
+
+  static Future<void> _doLoad() async {
     final prefs = await SharedPreferences.getInstance();
     playbackThemeMode.value = _modeFromString(
       prefs.getString(_prefsPlaybackThemeMode),
@@ -292,6 +293,7 @@ class _FallbackBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -299,15 +301,10 @@ class _FallbackBackground extends StatelessWidget {
           end: Alignment.bottomRight,
           colors: [
             color,
-            Color.lerp(
-                  color,
-                  Theme.of(context).colorScheme.surfaceContainer,
-                  0.18,
-                ) ??
-                color,
-            Color.lerp(color, Theme.of(context).colorScheme.surface, 0.08) ??
-                color,
+            Color.lerp(color, scheme.surfaceContainer, 0.22) ?? color,
+            Color.lerp(color, scheme.surface, 0.12) ?? color,
           ],
+          stops: const [0.0, 0.55, 1.0],
         ),
       ),
     );
@@ -337,10 +334,11 @@ class _DynamicGradientBackgroundState extends State<_DynamicGradientBackground>
   @override
   void initState() {
     super.initState();
+    // One slow loop drives all blob drift; long period keeps it calm/premium.
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 10),
-    )..repeat(reverse: true);
+      duration: const Duration(seconds: 22),
+    )..repeat();
   }
 
   @override
@@ -349,33 +347,183 @@ class _DynamicGradientBackgroundState extends State<_DynamicGradientBackground>
     super.dispose();
   }
 
-  List<Color> _generateColors(Color base) {
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          return CustomPaint(
+            size: Size.infinite,
+            painter: _AuroraPainter(
+              t: _controller.value,
+              base: widget.baseColor,
+              saturation: widget.saturation,
+              hueShift: widget.hueShift,
+              isDark: isDark,
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Soft flowing "aurora" of drifting radial color blobs over a base gradient.
+/// Replaces the old flat sliding linear gradient.
+class _AuroraPainter extends CustomPainter {
+  final double t;
+  final Color base;
+  final double saturation;
+  final double hueShift;
+  final bool isDark;
+
+  _AuroraPainter({
+    required this.t,
+    required this.base,
+    required this.saturation,
+    required this.hueShift,
+    required this.isDark,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
     final hsl = HSLColor.fromColor(base);
-    final s = (hsl.saturation * widget.saturation).clamp(0.0, 1.0);
-    final adjustedBase = hsl.withSaturation(s);
-    final shift = widget.hueShift;
-    final c1 = adjustedBase.withHue((adjustedBase.hue + shift) % 360).toColor();
-    final c2 = adjustedBase.withHue((adjustedBase.hue - shift) % 360).toColor();
-    return [adjustedBase.toColor(), c1, c2, adjustedBase.toColor()];
+    final s = (hsl.saturation * saturation).clamp(0.18, 1.0);
+
+    // Base gradient fill.
+    final bgTop = hsl.withSaturation(s).toColor();
+    final bgBottom = hsl
+        .withSaturation((s * 0.85).clamp(0.0, 1.0))
+        .withLightness((hsl.lightness + (isDark ? -0.04 : 0.03)).clamp(0.0, 1.0))
+        .toColor();
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          rect.topCenter,
+          rect.bottomCenter,
+          [bgTop, bgBottom],
+        ),
+    );
+
+    final colors = _palette(hsl, s);
+    final blobAlpha = isDark ? 0.50 : 0.34;
+    for (var i = 0; i < colors.length; i++) {
+      final center = _blobCenter(i, size);
+      final radius =
+          size.shortestSide *
+          (0.62 + 0.10 * math.sin(2 * math.pi * t + i * 1.3));
+      final c = colors[i];
+      final paint = Paint()
+        ..shader = ui.Gradient.radial(
+          center,
+          radius,
+          [
+            c.withValues(alpha: blobAlpha),
+            c.withValues(alpha: blobAlpha * 0.45),
+            c.withValues(alpha: 0.0),
+          ],
+          const [0.0, 0.5, 1.0],
+        );
+      canvas.drawCircle(center, radius, paint);
+    }
+  }
+
+  Offset _blobCenter(int i, Size size) {
+    final phase = i * 1.7;
+    final fx = 0.55 + i * 0.13;
+    final fy = 0.70 + i * 0.11;
+    final cx = size.width * (0.5 + 0.40 * math.sin(2 * math.pi * t * fx + phase));
+    final cy =
+        size.height *
+        (0.45 + 0.38 * math.cos(2 * math.pi * t * fy + phase * 1.3));
+    return Offset(cx, cy);
+  }
+
+  List<Color> _palette(HSLColor hsl, double s) {
+    final sat = s.clamp(0.28, 1.0);
+    Color mk(double deltaHue, double deltaLight) {
+      return HSLColor.fromAHSL(
+        1.0,
+        (hsl.hue + deltaHue) % 360,
+        sat,
+        (hsl.lightness + deltaLight).clamp(isDark ? 0.18 : 0.62, 0.96),
+      ).toColor();
+    }
+
+    final shift = hueShift.clamp(0.0, 180.0);
+    return [
+      mk(0, isDark ? 0.06 : 0.0),
+      mk(shift, isDark ? 0.0 : 0.04),
+      mk(-shift, isDark ? 0.10 : -0.02),
+      mk(shift * 1.7, isDark ? 0.03 : 0.02),
+    ];
+  }
+
+  @override
+  bool shouldRepaint(_AuroraPainter old) {
+    return old.t != t ||
+        old.base != base ||
+        old.saturation != saturation ||
+        old.hueShift != hueShift ||
+        old.isDark != isDark;
+  }
+}
+
+/// Public, self-contained animated aurora view for previews (e.g. the 流光
+/// settings page). Renders the same flowing multi-blob gradient as the live
+/// player background, driven by [baseColor] / [saturation] / [hueShift].
+class AuroraGradientView extends StatefulWidget {
+  final Color baseColor;
+  final double saturation;
+  final double hueShift;
+
+  const AuroraGradientView({
+    super.key,
+    required this.baseColor,
+    required this.saturation,
+    required this.hueShift,
+  });
+
+  @override
+  State<AuroraGradientView> createState() => _AuroraGradientViewState();
+}
+
+class _AuroraGradientViewState extends State<AuroraGradientView>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 22),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final colors = _generateColors(widget.baseColor);
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        return Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: colors,
-              begin: Alignment(-1.0 + _controller.value, -1.0),
-              end: Alignment(1.0 - _controller.value, 1.0),
-              tileMode: TileMode.mirror,
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          return CustomPaint(
+            size: Size.infinite,
+            painter: _AuroraPainter(
+              t: _controller.value,
+              base: widget.baseColor,
+              saturation: widget.saturation,
+              hueShift: widget.hueShift,
+              isDark: isDark,
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 }

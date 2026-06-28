@@ -134,10 +134,21 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
     if (_downloading) return;
     setState(() => _downloading = true);
     try {
-      final result = await SongDownloadService.instance.saveToLocal(
-        widget.song,
-      );
+      var result = await SongDownloadService.instance.saveToLocal(widget.song);
       if (!mounted) return;
+      if (result.isDuplicate) {
+        final overwrite = await _confirmOverwrite();
+        if (!mounted) return;
+        if (overwrite != true) {
+          AppToast.show(context, '已取消保存');
+          return;
+        }
+        result = await SongDownloadService.instance.saveToLocal(
+          widget.song,
+          overwrite: true,
+        );
+        if (!mounted) return;
+      }
       AppToast.show(
         context,
         result.message,
@@ -148,6 +159,26 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
         setState(() => _downloading = false);
       }
     }
+  }
+
+  Future<bool?> _confirmOverwrite() {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('歌曲已保存'),
+        content: const Text('该歌曲已存在于保存目录，是否覆盖？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('覆盖'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override

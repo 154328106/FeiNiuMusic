@@ -6,11 +6,11 @@ class AppLayoutSettings {
 
   static final ValueNotifier<bool> tabletMode = ValueNotifier(false);
 
-  static bool _loaded = false;
+  static Future<void>? _loading;
 
-  static Future<void> ensureLoaded() async {
-    if (_loaded) return;
-    _loaded = true;
+  static Future<void> ensureLoaded() => _loading ??= _doLoad();
+
+  static Future<void> _doLoad() async {
     final prefs = await SharedPreferences.getInstance();
     tabletMode.value = prefs.getBool(_prefsTabletMode) ?? false;
   }

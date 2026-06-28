@@ -26,7 +26,11 @@ class NavidromeScanResult {
 
 class NavidromeMusicService {
   final Dio _dio = Dio(
-    BaseOptions(connectTimeout: const Duration(seconds: 12)),
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 12),
+      sendTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 30),
+    ),
   );
   final SongDao _songDao = SongDao();
   final NavidromeSourceRepository _repo = NavidromeSourceRepository.instance;

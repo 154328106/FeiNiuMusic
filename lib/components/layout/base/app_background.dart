@@ -16,6 +16,19 @@ class AppBackground extends StatefulWidget {
 }
 
 class _AppBackgroundState extends State<AppBackground> {
+  // Cache the existence check so we don't hit the filesystem on every rebuild
+  // (e.g. when only mask opacity or glow toggles change).
+  String? _checkedPath;
+  bool _checkedExists = false;
+
+  bool _imageExists(String? path) {
+    if (path == null || path.isEmpty) return false;
+    if (path == _checkedPath) return _checkedExists;
+    _checkedPath = path;
+    _checkedExists = File(path).existsSync();
+    return _checkedExists;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -40,9 +53,7 @@ class _AppBackgroundState extends State<AppBackground> {
         final glowEnabled = AppBackgroundSettings.pageGlowEnabled.value;
         final imagePath = path;
         final hasImage =
-            imagePath != null &&
-            imagePath.isNotEmpty &&
-            File(imagePath).existsSync();
+            imagePath != null && imagePath.isNotEmpty && _imageExists(imagePath);
         final baseColor = theme.scaffoldBackgroundColor;
         final maskColor = theme.scaffoldBackgroundColor.withValues(
           alpha: maskOpacity,
@@ -63,23 +74,23 @@ class _AppBackgroundState extends State<AppBackground> {
                         children: [
                           _glow(
                             alignment: const Alignment(0.88, -0.92),
-                            size: 320,
-                            scaleX: 1.12,
-                            scaleY: 0.94,
-                            blurSigma: 28,
+                            size: 360,
+                            scaleX: 1.15,
+                            scaleY: 0.92,
+                            blurSigma: 46,
                             colors: _glowColors(
                               colorScheme,
                               isDark: isDark,
                               primary: false,
-                              strength: 0.88,
+                              strength: 0.9,
                             ),
                           ),
                           _glow(
                             alignment: const Alignment(-0.86, 0.82),
-                            size: 290,
-                            scaleX: 0.98,
-                            scaleY: 1.08,
-                            blurSigma: 24,
+                            size: 330,
+                            scaleX: 0.96,
+                            scaleY: 1.1,
+                            blurSigma: 42,
                             colors: _glowColors(
                               colorScheme,
                               isDark: isDark,
@@ -88,16 +99,16 @@ class _AppBackgroundState extends State<AppBackground> {
                             ),
                           ),
                           _glow(
-                            alignment: const Alignment(0.12, -0.08),
-                            size: 240,
-                            scaleX: 1.22,
-                            scaleY: 0.82,
-                            blurSigma: 30,
+                            alignment: const Alignment(0.1, -0.05),
+                            size: 300,
+                            scaleX: 1.25,
+                            scaleY: 0.8,
+                            blurSigma: 50,
                             colors: _glowColors(
                               colorScheme,
                               isDark: isDark,
                               primary: true,
-                              strength: 0.42,
+                              strength: 0.4,
                             ),
                           ),
                         ],
@@ -127,21 +138,12 @@ class _AppBackgroundState extends State<AppBackground> {
     required bool primary,
     required double strength,
   }) {
-    if (isDark) {
-      final seed = primary
-          ? colorScheme.primary.withValues(alpha: 0.22 * strength)
-          : colorScheme.tertiary.withValues(alpha: 0.16 * strength);
-      return [
-        seed,
-        seed.withValues(alpha: seed.a * 0.5),
-        seed.withValues(alpha: 0.0),
-      ];
-    }
-
-    final lightPrimary = primary
-        ? const Color(0x66CBE8FF)
-        : const Color(0x66FDE2A7);
-    final seed = lightPrimary.withValues(alpha: lightPrimary.a * strength);
+    // Derive both blobs from the theme (primary / tertiary) so the page glow
+    // stays cohesive with the chosen seed color in both light and dark, and
+    // keep alpha low so it reads as a soft ambient wash rather than a stain.
+    final hue = primary ? colorScheme.primary : colorScheme.tertiary;
+    final baseAlpha = (isDark ? 0.16 : 0.11) * strength;
+    final seed = hue.withValues(alpha: baseAlpha);
     return [
       seed,
       seed.withValues(alpha: seed.a * 0.45),

@@ -8,6 +8,7 @@ import 'package:signals_flutter/signals_flutter.dart' hide computed;
 import '../../app/state/settings_state.dart';
 import '../../app/services/db/dao/song_dao.dart';
 import '../../app/router/app_page_route.dart';
+import '../../app/services/app_update_service.dart';
 import '../../app/services/library_refresh_service.dart';
 import '../../app/services/navidrome/navidrome_source_repository.dart';
 import '../../app/services/player_service.dart';
@@ -18,6 +19,7 @@ import '../../app/services/webdav/webdav_source_repository.dart';
 import '../../app/utils/cache_version_store.dart';
 import '../../app/utils/page_cache_store.dart';
 import '../../components/index.dart';
+import '../../components/dialog/app_update_dialog.dart';
 import '../library/albums_page.dart';
 import '../library/artists_page.dart';
 import '../library/library_detail_pages.dart';
@@ -104,7 +106,26 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
     super.initState();
     unawaited(_tryAutoPlayOnAppLaunch());
     unawaited(_tryRefreshLibraryOnLaunch());
+    unawaited(_tryCheckUpdateOnLaunch());
     _load();
+  }
+
+  Future<void> _tryCheckUpdateOnLaunch() async {
+    await AppLaunchUpdateSettings.ensureLoaded();
+    if (AppLaunchUpdateSettings.hasCheckedUpdateThisSession) return;
+    AppLaunchUpdateSettings.hasCheckedUpdateThisSession = true;
+    if (!AppLaunchUpdateSettings.autoCheckUpdateOnLaunch.value) return;
+    // Let the app settle before reaching out / showing a dialog.
+    await Future.delayed(const Duration(seconds: 2));
+    if (!mounted) return;
+    try {
+      final current = await AppUpdateService.instance.currentVersion();
+      final info = await AppUpdateService.instance.checkLatest(current);
+      if (!mounted || !info.hasUpdate) return;
+      await showAppUpdateDialog(context, info: info, currentVersion: current);
+    } catch (e) {
+      debugPrint('Auto check update on launch failed: $e');
+    }
   }
 
   Future<void> _tryAutoPlayOnAppLaunch() async {
@@ -438,7 +459,7 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
       key: _scaffoldKey,
       extendBodyBehindAppBar: true,
       appBar: AppTopBar(
-        title: '首页',
+        title: '音乐库',
         leading: IconButton(
           icon: const Icon(Icons.menu_rounded),
           onPressed: () => _scaffoldKey.currentState?.openDrawer(),
@@ -462,14 +483,6 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 160),
             children: [
-              Text(
-                '音乐库',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 12),
               _HomeStatsRow(
                 loading: _loading.value,
                 filterLabel: _filterTitle.value,
@@ -502,64 +515,75 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
                 ],
               ),
               const SizedBox(height: 24),
-              _HomeSectionCard(
-                title: '最近歌曲',
-                actionLabel: '查看更多',
-                onTapAction: () {
-                  _pushLibraryPage(
-                    const RecentPlaybackPage(
-                      initialTab: RecentPlaybackTab.songs,
-                    ),
-                  );
-                },
-                child: _HomeRecentSongsList(
-                  songs: _recentSongs.value,
-                  onTapSong: (song) async {
-                    final queue = _recentSongs.value;
-                    final index = queue.indexWhere((e) => e.id == song.id);
-                    if (index < 0) return;
-                    await _player.playQueue(queue, index);
-                  },
-                ),
-              ),
-              const SizedBox(height: 16),
-              _HomeSectionCard(
-                title: '最近歌单',
-                actionLabel: '查看更多',
-                onTapAction: () {
-                  _pushLibraryPage(
-                    const RecentPlaybackPage(
-                      initialTab: RecentPlaybackTab.playlists,
-                    ),
-                  );
-                },
-                child: _HomeRecentPlaylistsList(
-                  playlists: _recentPlaylists.value,
-                  onTapPlaylist: (playlist) {
+              if (_recentSongs.value.isNotEmpty) ...[
+                _HomeSectionCard(
+                  title: '最近歌曲',
+                  actionLabel: '查看更多',
+                  onTapAction: () {
                     _pushLibraryPage(
-                      PlaylistDetailPage(playlistId: playlist.id),
+                      const RecentPlaybackPage(
+                        initialTab: RecentPlaybackTab.songs,
+                      ),
                     );
                   },
+                  child: _HomeRecentSongsList(
+                    songs: _recentSongs.value,
+                    onTapSong: (song) async {
+                      final queue = _recentSongs.value;
+                      final index = queue.indexWhere((e) => e.id == song.id);
+                      if (index < 0) return;
+                      await _player.playQueue(queue, index);
+                    },
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              _HomeSectionCard(
-                title: '最近专辑',
-                actionLabel: '查看更多',
-                onTapAction: () {
-                  _pushLibraryPage(
-                    const RecentPlaybackPage(
-                      initialTab: RecentPlaybackTab.albums,
-                    ),
-                  );
-                },
-                child: _HomeRecentAlbumsList(
-                  albums: _recentAlbums.value,
-                  onTapAlbum: (album) {
-                    _pushLibraryPage(AlbumDetailPage(albumName: album.name));
+                const SizedBox(height: 16),
+              ],
+              if (_recentPlaylists.value.isNotEmpty) ...[
+                _HomeSectionCard(
+                  title: '最近歌单',
+                  actionLabel: '查看更多',
+                  onTapAction: () {
+                    _pushLibraryPage(
+                      const RecentPlaybackPage(
+                        initialTab: RecentPlaybackTab.playlists,
+                      ),
+                    );
                   },
+                  child: _HomeRecentPlaylistsList(
+                    playlists: _recentPlaylists.value,
+                    onTapPlaylist: (playlist) {
+                      _pushLibraryPage(
+                        PlaylistDetailPage(playlistId: playlist.id),
+                      );
+                    },
+                  ),
                 ),
-              ),
+                const SizedBox(height: 16),
+              ],
+              if (_recentAlbums.value.isNotEmpty) ...[
+                _HomeSectionCard(
+                  title: '最近专辑',
+                  actionLabel: '查看更多',
+                  onTapAction: () {
+                    _pushLibraryPage(
+                      const RecentPlaybackPage(
+                        initialTab: RecentPlaybackTab.albums,
+                      ),
+                    );
+                  },
+                  child: _HomeRecentAlbumsList(
+                    albums: _recentAlbums.value,
+                    onTapAlbum: (album) {
+                      _pushLibraryPage(AlbumDetailPage(albumName: album.name));
+                    },
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              if (_recentSongs.value.isEmpty &&
+                  _recentPlaylists.value.isEmpty &&
+                  _recentAlbums.value.isEmpty)
+                const _HomeEmptyState(text: '还没有最近播放记录'),
             ],
           ),
         ),
@@ -859,6 +883,82 @@ class _HomeSectionCard extends StatelessWidget {
   }
 }
 
+class _MediaCoverCard extends StatelessWidget {
+  static const double coverSize = 130;
+  static const double cardHeight = coverSize + 46;
+
+  final Widget cover;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _MediaCoverCard({
+    required this.cover,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: SizedBox(
+        width: coverSize,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.16),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: SizedBox(
+                  width: coverSize,
+                  height: coverSize,
+                  child: cover,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: scheme.onSurface,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                color: scheme.onSurfaceVariant.withValues(alpha: 0.82),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _HomeRecentSongsList extends StatelessWidget {
   final List<SongEntity> songs;
   final ValueChanged<SongEntity> onTapSong;
@@ -867,41 +967,32 @@ class _HomeRecentSongsList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (songs.isEmpty) {
-      return _HomeEmptyState(text: '还没有最近播放记录');
-    }
-    return Column(
-      children: songs.map((song) {
-        final subtitle = [
-          song.artist.trim(),
-          (song.album ?? '').trim(),
-        ].where((e) => e.isNotEmpty).join(' · ');
-        return AppListTile(
-          leading: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.1),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: ArtworkWidget(
+    return SizedBox(
+      height: _MediaCoverCard.cardHeight,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: EdgeInsets.zero,
+        physics: const BouncingScrollPhysics(),
+        itemCount: songs.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 14),
+        itemBuilder: (context, i) {
+          final song = songs[i];
+          final artist = song.artist.trim();
+          return _MediaCoverCard(
+            cover: ArtworkWidget(
               song: song,
-              size: 44,
-              borderRadius: 10,
+              size: _MediaCoverCard.coverSize,
+              borderRadius: 14,
               placeholder: _ArtworkPlaceholder(
                 label: song.title.isEmpty ? '?' : song.title.substring(0, 1),
               ),
             ),
-          ),
-          title: song.title,
-          subtitle: subtitle.isEmpty ? '未知信息' : subtitle,
-          onTap: () => onTapSong(song),
-        );
-      }).toList(),
+            title: song.title.isEmpty ? '未知歌曲' : song.title,
+            subtitle: artist.isEmpty ? '未知艺术家' : artist,
+            onTap: () => onTapSong(song),
+          );
+        },
+      ),
     );
   }
 }
@@ -917,44 +1008,48 @@ class _HomeRecentPlaylistsList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (playlists.isEmpty) {
-      return _HomeEmptyState(text: '还没有可展示的最近歌单');
-    }
-    return Column(
-      children: playlists.map((playlist) {
-        final subtitle = playlist.isFavorite
-            ? '我喜欢 · ${playlist.songIds.length} 首'
-            : '${playlist.songIds.length} 首';
-        return AppListTile(
-          leading: Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
-              color: Theme.of(
-                context,
-              ).colorScheme.primary.withValues(alpha: 0.12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.1),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2),
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox(
+      height: _MediaCoverCard.cardHeight,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: EdgeInsets.zero,
+        physics: const BouncingScrollPhysics(),
+        itemCount: playlists.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 14),
+        itemBuilder: (context, i) {
+          final playlist = playlists[i];
+          final subtitle = playlist.isFavorite
+              ? '我喜欢 · ${playlist.songIds.length} 首'
+              : '${playlist.songIds.length} 首';
+          return _MediaCoverCard(
+            cover: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    scheme.primary.withValues(alpha: 0.30),
+                    scheme.primary.withValues(alpha: 0.14),
+                  ],
                 ),
-              ],
+              ),
+              child: Center(
+                child: Icon(
+                  playlist.isFavorite
+                      ? Icons.favorite_rounded
+                      : Icons.queue_music_rounded,
+                  color: scheme.primary,
+                  size: 44,
+                ),
+              ),
             ),
-            alignment: Alignment.center,
-            child: Icon(
-              playlist.isFavorite
-                  ? Icons.favorite_rounded
-                  : Icons.queue_music_rounded,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-          ),
-          title: playlist.name,
-          subtitle: subtitle,
-          onTap: () => onTapPlaylist(playlist),
-        );
-      }).toList(),
+            title: playlist.name,
+            subtitle: subtitle,
+            onTap: () => onTapPlaylist(playlist),
+          );
+        },
+      ),
     );
   }
 }
@@ -967,38 +1062,32 @@ class _HomeRecentAlbumsList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (albums.isEmpty) {
-      return _HomeEmptyState(text: '还没有最近播放过的专辑');
-    }
-    return Column(
-      children: albums.map((album) {
-        final artist = album.representative.artist.trim();
-        return AppListTile(
-          leading: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.1),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: ArtworkWidget(
+    return SizedBox(
+      height: _MediaCoverCard.cardHeight,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: EdgeInsets.zero,
+        physics: const BouncingScrollPhysics(),
+        itemCount: albums.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 14),
+        itemBuilder: (context, i) {
+          final album = albums[i];
+          final artist = album.representative.artist.trim();
+          return _MediaCoverCard(
+            cover: ArtworkWidget(
               song: album.representative,
-              size: 44,
-              borderRadius: 10,
+              size: _MediaCoverCard.coverSize,
+              borderRadius: 14,
               placeholder: _ArtworkPlaceholder(
                 label: album.name.isEmpty ? '?' : album.name.substring(0, 1),
               ),
             ),
-          ),
-          title: album.name,
-          subtitle: artist.isEmpty ? '未知艺术家' : artist,
-          onTap: () => onTapAlbum(album),
-        );
-      }).toList(),
+            title: album.name.isEmpty ? '未知专辑' : album.name,
+            subtitle: artist.isEmpty ? '未知艺术家' : artist,
+            onTap: () => onTapAlbum(album),
+          );
+        },
+      ),
     );
   }
 }

@@ -16,10 +16,15 @@ class SongDownloadResult {
   final String message;
   final String? savedPath;
 
+  /// True when the target file already exists and the caller asked not to
+  /// overwrite — lets the UI prompt the user instead of silently duplicating.
+  final bool isDuplicate;
+
   const SongDownloadResult({
     required this.success,
     required this.message,
     this.savedPath,
+    this.isDuplicate = false,
   });
 }
 
@@ -34,36 +39,56 @@ class SongDownloadService {
 
   final AudioCacheService _audioCache = AudioCacheService.instance;
 
-  Future<SongDownloadResult> saveToLocal(SongEntity song) async {
+  Future<SongDownloadResult> saveToLocal(
+    SongEntity song, {
+    bool overwrite = false,
+  }) async {
     await SongDownloadSettings.ensureLoaded();
     final useCustom = SongDownloadSettings.useCustomDirectory.value;
     final customPath = SongDownloadSettings.customDirectoryPath.value;
     if (useCustom && customPath != null && customPath.trim().isNotEmpty) {
-      return saveToDirectory(song, customPath);
+      return saveToDirectory(song, customPath, overwrite: overwrite);
     }
-    return downloadToSystemFolder(song);
+    return downloadToSystemFolder(song, overwrite: overwrite);
   }
 
-  Future<SongDownloadResult> downloadToSystemFolder(SongEntity song) async {
+  Future<SongDownloadResult> downloadToSystemFolder(
+    SongEntity song, {
+    bool overwrite = false,
+  }) async {
     final source = await _prepareSourceFile(song);
     if (source == null) {
       return const SongDownloadResult(success: false, message: '无法获取歌曲文件');
     }
 
     final fileName = _buildFileName(song, source.path);
+
+    // Surface duplicates instead of silently writing "name (1).ext".
+    if (!overwrite) {
+      final exists = await _existsInDownloads(fileName);
+      if (exists) {
+        return const SongDownloadResult(
+          success: false,
+          message: '该歌曲已保存',
+          isDuplicate: true,
+        );
+      }
+    }
+
     try {
       final savedPath = await _channel.invokeMethod<String>('saveToDownloads', {
         'sourcePath': source.path,
         'fileName': fileName,
         'mimeType': _mimeTypeFor(fileName),
         'subdirectory': 'NagoMusic',
+        'overwrite': overwrite,
       });
       if (savedPath == null || savedPath.trim().isEmpty) {
         return const SongDownloadResult(success: false, message: '保存失败');
       }
       return SongDownloadResult(
         success: true,
-        message: '已保存到下载目录',
+        message: overwrite ? '已覆盖保存到下载目录' : '已保存到下载目录',
         savedPath: savedPath,
       );
     } on PlatformException catch (e) {
@@ -80,20 +105,34 @@ class SongDownloadService {
     }
   }
 
+  Future<bool> _existsInDownloads(String fileName) async {
+    try {
+      final exists = await _channel.invokeMethod<bool>('existsInDownloads', {
+        'fileName': fileName,
+        'subdirectory': 'NagoMusic',
+      });
+      return exists ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<SongDownloadResult> chooseAndSaveToCustomFolder(
-    SongEntity song,
-  ) async {
+    SongEntity song, {
+    bool overwrite = false,
+  }) async {
     final directoryPath = await FilePicker.platform.getDirectoryPath();
     if (directoryPath == null || directoryPath.trim().isEmpty) {
       return const SongDownloadResult(success: false, message: '已取消选择目录');
     }
-    return saveToDirectory(song, directoryPath);
+    return saveToDirectory(song, directoryPath, overwrite: overwrite);
   }
 
   Future<SongDownloadResult> saveToDirectory(
     SongEntity song,
-    String directoryPath,
-  ) async {
+    String directoryPath, {
+    bool overwrite = false,
+  }) async {
     final granted = await ensureStoragePermission();
     if (!granted) {
       return const SongDownloadResult(success: false, message: '未授予存储权限');
@@ -108,15 +147,21 @@ class SongDownloadService {
       if (!await dir.exists()) {
         await dir.create(recursive: true);
       }
-      final target = await _nextAvailableFile(
-        dir,
-        _buildFileName(song, source.path),
+      final exactTarget = File(
+        p.join(dir.path, _buildFileName(song, source.path)),
       );
-      await source.copy(target.path);
+      if (await exactTarget.exists() && !overwrite) {
+        return const SongDownloadResult(
+          success: false,
+          message: '该歌曲已保存',
+          isDuplicate: true,
+        );
+      }
+      await source.copy(exactTarget.path);
       return SongDownloadResult(
         success: true,
-        message: '已保存到自定义目录',
-        savedPath: target.path,
+        message: overwrite ? '已覆盖保存到自定义目录' : '已保存到自定义目录',
+        savedPath: exactTarget.path,
       );
     } catch (e) {
       if (kDebugMode) {
@@ -208,20 +253,6 @@ class SongDownloadService {
       '.ogg' => 'audio/ogg',
       _ => 'audio/mpeg',
     };
-  }
-
-  Future<File> _nextAvailableFile(Directory dir, String fileName) async {
-    final ext = p.extension(fileName);
-    final base = ext.isEmpty
-        ? fileName
-        : fileName.substring(0, fileName.length - ext.length);
-    var candidate = File(p.join(dir.path, fileName));
-    var index = 1;
-    while (await candidate.exists()) {
-      candidate = File(p.join(dir.path, '$base ($index)$ext'));
-      index += 1;
-    }
-    return candidate;
   }
 
   Future<bool> ensureStoragePermission() async {

@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../app/services/artwork_cache_helper.dart';
 import '../../app/services/artwork_service.dart';
+import '../../app/services/http_utils.dart';
 import '../../app/services/db/dao/song_dao.dart';
 import '../../app/state/song_state.dart';
 
@@ -261,7 +262,7 @@ class SongsArtworkCoordinator {
       return bytes;
     } catch (_) {
       if (kDebugMode && _debugArtwork) {
-        debugPrint('[SongsArtwork] load failed id=${song.id} uri=${song.uri}');
+        debugPrint('[SongsArtwork] load failed id=${song.id} uri=${HttpUtils.redactUrl(song.uri)}');
       }
       return null;
     }

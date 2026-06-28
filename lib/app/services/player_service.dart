@@ -85,6 +85,7 @@ class PlayerService with WidgetsBindingObserver {
   final Map<String, Future<Uri>> _sourceResolveInflight = {};
   bool _restoringState = false;
   bool _isSeeking = false;
+  Duration? _seekTarget;
   bool _audioInterrupted = false;
   bool _wasPlayingBeforeInterruption = false;
   int _seekSeq = 0;
@@ -182,7 +183,19 @@ class PlayerService with WidgetsBindingObserver {
     await _player.setLoopMode(LoopMode.all);
     playbackMode.value = PlaybackMode.loop;
     _positionSub = _player.positionStream.listen((value) {
-      if (_isSeeking) return;
+      if (_isSeeking) {
+        // End the seek freeze early once the player reports a position near the
+        // requested target, instead of blanking the progress bar for a fixed
+        // delay after every seek.
+        final target = _seekTarget;
+        if (target != null &&
+            (value - target).inMilliseconds.abs() <= 600) {
+          _isSeeking = false;
+          _seekTarget = null;
+        } else {
+          return;
+        }
+      }
       if (_shouldIgnoreZeroPosition(value)) {
         return;
       }
@@ -659,17 +672,24 @@ class PlayerService with WidgetsBindingObserver {
     _seekSeq++;
     final currentSeq = _seekSeq;
     _isSeeking = true;
+    _seekTarget = position;
     this.position.value = position;
     _emitSnapshot(force: true);
     try {
       await _player.seek(position);
-      // Wait a bit for the player to stabilize its position reporting
-      if (currentSeq == _seekSeq) {
-        await Future.delayed(const Duration(milliseconds: 500));
+      // Bounded settle: returns as soon as the position listener observes a
+      // near-target position (usually well under 100ms), capped at 600ms so a
+      // misbehaving backend can't freeze the bar indefinitely.
+      final start = DateTime.now();
+      while (currentSeq == _seekSeq &&
+          _isSeeking &&
+          DateTime.now().difference(start).inMilliseconds < 600) {
+        await Future.delayed(const Duration(milliseconds: 32));
       }
     } finally {
       if (currentSeq == _seekSeq) {
         _isSeeking = false;
+        _seekTarget = null;
         // Force one last update from the player to ensure sync
         _syncPositionFromPlayer();
         _emitSnapshot(force: true);
@@ -1387,10 +1407,19 @@ class PlayerService with WidgetsBindingObserver {
 
   void _applyLogicalQueue(List<SongEntity> songs, int currentQueueIndex) {
     queue.value = songs;
-    currentIndex.value = currentQueueIndex;
-    currentSong.value = songs[currentQueueIndex];
-    _maybeProbeSong(songs[currentQueueIndex]);
-    _hydrateAndSetCurrentSong(songs[currentQueueIndex]);
+    if (songs.isEmpty) {
+      currentIndex.value = -1;
+      currentSong.value = null;
+      _emitSnapshot(force: true);
+      return;
+    }
+    // Clamp defensively: callers can pass an index derived from a since-changed
+    // queue (e.g. error handling after the queue shrank), which would throw.
+    final safeIndex = currentQueueIndex.clamp(0, songs.length - 1);
+    currentIndex.value = safeIndex;
+    currentSong.value = songs[safeIndex];
+    _maybeProbeSong(songs[safeIndex]);
+    _hydrateAndSetCurrentSong(songs[safeIndex]);
     _emitSnapshot(force: true);
   }
 

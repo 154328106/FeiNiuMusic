@@ -33,6 +33,18 @@ class WebDavScanResult {
   const WebDavScanResult({required this.processed, required this.added});
 }
 
+/// Thrown when a WebDAV scan cannot reach/authenticate against the server, so
+/// callers can distinguish a genuine connection failure from an empty folder.
+class WebDavScanException implements Exception {
+  final String message;
+  final Object? cause;
+
+  const WebDavScanException(this.message, [this.cause]);
+
+  @override
+  String toString() => 'WebDavScanException: $message';
+}
+
 class WebDavDirectory {
   final String name;
   final String path;
@@ -56,18 +68,31 @@ class WebDavMusicService {
     '.opus',
   };
 
+  // Network timeouts so a dead/slow server can never hang the UI/scan forever.
+  static const int _connectTimeoutMs = 15000;
+  static const int _sendTimeoutMs = 15000;
+  static const int _receiveTimeoutMs = 30000;
+
+  webdav.Client _newClient(String endpoint, Map<String, String> headers) {
+    final client = webdav.newClient(
+      endpoint,
+      user: '',
+      password: '',
+      debug: kDebugMode,
+    );
+    client.setHeaders(headers);
+    client.setConnectTimeout(_connectTimeoutMs);
+    client.setSendTimeout(_sendTimeoutMs);
+    client.setReceiveTimeout(_receiveTimeoutMs);
+    return client;
+  }
+
   Future<bool> testConnection(WebDavSource source) async {
     final endpoint = source.endpoint.trim();
     if (endpoint.isEmpty) return false;
     final headers = _repo.buildHeaders(source);
     try {
-      final client = webdav.newClient(
-        endpoint,
-        user: '',
-        password: '',
-        debug: kDebugMode,
-      );
-      client.setHeaders(headers);
+      final client = _newClient(endpoint, headers);
       final searchPath = _normalizeWebDavPath(
         source.path.trim().isEmpty ? '/' : source.path,
       );
@@ -129,6 +154,19 @@ class WebDavMusicService {
     final visited = <String>{};
     final headers = _repo.buildHeaders(source);
     final seenFiles = <String>{};
+
+    // Probe the first target path strictly so connection/auth/timeout failures
+    // surface as an exception instead of being silently swallowed by the
+    // lenient per-directory listing (which would report "added 0" as success).
+    try {
+      await _listEntriesStrict(
+        endpoint: endpoint,
+        path: _normalizeWebDavPath(pathsToScan.first),
+        headers: headers,
+      );
+    } catch (e) {
+      throw WebDavScanException('无法连接到 WebDAV 服务器，请检查地址、账号或网络', e);
+    }
 
     var discovered = 0;
     onProgress(const WebDavScanProgress(processed: 0, added: 0, total: 0));
@@ -306,13 +344,7 @@ class WebDavMusicService {
     required String path,
     required Map<String, String> headers,
   }) async {
-    final client = webdav.newClient(
-      endpoint,
-      user: '',
-      password: '',
-      debug: kDebugMode,
-    );
-    client.setHeaders(headers);
+    final client = _newClient(endpoint, headers);
 
     var searchPath = path.trim().isEmpty ? '/' : path.trim();
     if (!searchPath.startsWith('/')) {

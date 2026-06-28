@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:audio_metadata_reader/audio_metadata_reader.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -11,6 +11,7 @@ import '../cache/audio_cache_service.dart';
 
 import '../http_utils.dart';
 import 'tag_probe_result.dart';
+import 'ogg_vorbis_comment.dart';
 import 'probe_handlers.dart';
 
 class TagProbeService {
@@ -445,43 +446,27 @@ class TagProbeService {
     required bool includeArtwork,
     bool includeLyrics = true,
   }) async {
-    try {
-      final stat = await file.stat();
-      final meta = readMetadata(file, getImage: includeArtwork);
+    // Tag parsing reads + decodes the file synchronously; run it on a background
+    // isolate so library scans and song changes never jank the UI thread.
+    final raw = await compute(
+      _readMetadataIsolate,
+      _IsolateProbeInput(path: file.path, includeArtwork: includeArtwork),
+    );
+    if (raw == null) return null;
 
-      Uint8List? artwork;
-      if (includeArtwork && meta.pictures.isNotEmpty) {
-        final bytes = meta.pictures.first.bytes;
-        if (bytes.isNotEmpty) artwork = bytes;
-      }
-
-      final lyrics = includeLyrics ? _normalizeLyrics(meta.lyrics) : null;
-      var ext = p.extension(file.path).replaceAll('.', '').toUpperCase();
-      // Handle .0gg typo or variation as OGG
-      if (ext == '0GG') ext = 'OGG';
-
-      final format = ext.isNotEmpty ? ext : null;
-
-      return TagProbeResult(
-        title: _nonEmpty(meta.title),
-        artist: _nonEmpty(meta.artist),
-        album: _nonEmpty(meta.album),
-        durationMs: meta.duration?.inMilliseconds,
-        bitrate: meta.bitrate,
-        sampleRate: meta.sampleRate,
-        fileSize: stat.size,
-        format: format,
-        artwork: artwork,
-        lyrics: lyrics,
-      );
-    } catch (_) {
-      return null;
-    }
-  }
-
-  String? _nonEmpty(String? v) {
-    final t = (v ?? '').trim();
-    return t.isEmpty ? null : t;
+    final lyrics = includeLyrics ? _normalizeLyrics(raw.lyrics) : null;
+    return TagProbeResult(
+      title: raw.title,
+      artist: raw.artist,
+      album: raw.album,
+      durationMs: raw.durationMs,
+      bitrate: raw.bitrate,
+      sampleRate: raw.sampleRate,
+      fileSize: raw.fileSize,
+      format: raw.format,
+      artwork: raw.artwork,
+      lyrics: lyrics,
+    );
   }
 
   String? _normalizeLyrics(String? raw) {
@@ -625,7 +610,6 @@ class TagProbeService {
     }
     return hash.toRadixString(16);
   }
-
   Future<File?> _existingRemoteCacheFile(
     Uri uri, {
     Map<String, String>? headers,
@@ -992,4 +976,108 @@ class TagProbeService {
       return null;
     }
   }
+}
+
+class _IsolateProbeInput {
+  final String path;
+  final bool includeArtwork;
+
+  const _IsolateProbeInput({required this.path, required this.includeArtwork});
+}
+
+String? _nonEmptyTop(String? v) {
+  final t = (v ?? '').trim();
+  return t.isEmpty ? null : t;
+}
+
+/// Runs on a background isolate via [compute]. Returns un-normalized lyrics;
+/// the caller normalizes them on the main isolate (cheap string work).
+TagProbeResult? _readMetadataIsolate(_IsolateProbeInput input) {
+  final path = input.path;
+  var ext = p.extension(path).replaceAll('.', '').toLowerCase();
+  if (ext == '0gg') ext = 'ogg';
+  final isOgg = ext == 'ogg' || ext == 'oga' || ext == 'opus';
+
+  int fileSize = 0;
+  try {
+    fileSize = File(path).statSync().size;
+  } catch (_) {}
+
+  // The bundled reader's OGG support is fragile (cover/lyrics in
+  // METADATA_BLOCK_PICTURE/LYRICS Vorbis comments that span pages), so it may
+  // throw or come back without artwork/lyrics. Treat its failure as non-fatal
+  // for OGG and supplement with our own Vorbis-comment extractor below.
+  AudioMetadata? meta;
+  try {
+    meta = readMetadata(File(path), getImage: input.includeArtwork);
+  } catch (_) {
+    meta = null;
+  }
+
+  String? title = _nonEmptyTop(meta?.title);
+  String? artist = _nonEmptyTop(meta?.artist);
+  String? album = _nonEmptyTop(meta?.album);
+  int? durationMs = meta?.duration?.inMilliseconds;
+  final bitrate = meta?.bitrate;
+  final sampleRate = meta?.sampleRate;
+  String? lyrics = meta?.lyrics;
+  Uint8List? artwork;
+  if (input.includeArtwork &&
+      meta != null &&
+      meta.pictures.isNotEmpty &&
+      meta.pictures.first.bytes.isNotEmpty) {
+    artwork = meta.pictures.first.bytes;
+  }
+
+  if (isOgg) {
+    final needsArtwork = input.includeArtwork && artwork == null;
+    final needsLyrics = (lyrics == null || lyrics.trim().isEmpty);
+    final needsTags = title == null || artist == null || album == null;
+    if (needsArtwork || needsLyrics || needsTags) {
+      final extra = extractOggVorbisComments(
+        path,
+        includeArtwork: input.includeArtwork,
+      );
+      if (extra != null) {
+        title ??= _nonEmptyTop(extra.title);
+        artist ??= _nonEmptyTop(extra.artist);
+        album ??= _nonEmptyTop(extra.album);
+        if (input.includeArtwork &&
+            artwork == null &&
+            extra.artwork != null &&
+            extra.artwork!.isNotEmpty) {
+          artwork = extra.artwork;
+        }
+        if ((lyrics == null || lyrics.trim().isEmpty) &&
+            extra.lyrics != null &&
+            extra.lyrics!.trim().isNotEmpty) {
+          lyrics = extra.lyrics;
+        }
+      }
+    }
+  }
+
+  // Nothing parseable at all → behave like the old null result.
+  if (meta == null &&
+      title == null &&
+      artist == null &&
+      album == null &&
+      artwork == null &&
+      (lyrics == null || lyrics.trim().isEmpty)) {
+    return null;
+  }
+
+  final format = ext.isNotEmpty ? ext.toUpperCase() : null;
+  return TagProbeResult(
+    title: title,
+    artist: artist,
+    album: album,
+    durationMs: durationMs,
+    bitrate: bitrate,
+    sampleRate: sampleRate,
+    fileSize: fileSize > 0 ? fileSize : null,
+    format: format,
+    artwork: artwork,
+    lyrics: lyrics,
+  );
 }

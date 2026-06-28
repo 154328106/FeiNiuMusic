@@ -102,6 +102,7 @@ class MainActivity : AudioServiceActivity() {
                     val fileName = call.argument<String>("fileName")
                     val mimeType = call.argument<String>("mimeType") ?: "audio/mpeg"
                     val subdirectory = call.argument<String>("subdirectory") ?: "NagoMusic"
+                    val overwrite = call.argument<Boolean>("overwrite") ?: false
                     if (sourcePath.isNullOrBlank() || fileName.isNullOrBlank()) {
                         result.error("invalid_args", "缺少文件信息", null)
                     } else {
@@ -110,11 +111,25 @@ class MainActivity : AudioServiceActivity() {
                                 sourcePath = sourcePath,
                                 fileName = fileName,
                                 mimeType = mimeType,
-                                subdirectory = subdirectory
+                                subdirectory = subdirectory,
+                                overwrite = overwrite
                             )
                             result.success(savedPath)
                         } catch (t: Throwable) {
                             result.error("save_failed", t.message ?: "保存失败", null)
+                        }
+                    }
+                }
+                "existsInDownloads" -> {
+                    val fileName = call.argument<String>("fileName")
+                    val subdirectory = call.argument<String>("subdirectory") ?: "NagoMusic"
+                    if (fileName.isNullOrBlank()) {
+                        result.success(false)
+                    } else {
+                        try {
+                            result.success(downloadFileExists(fileName, subdirectory))
+                        } catch (t: Throwable) {
+                            result.success(false)
                         }
                     }
                 }
@@ -192,15 +207,46 @@ class MainActivity : AudioServiceActivity() {
         sourcePath: String,
         fileName: String,
         mimeType: String,
-        subdirectory: String
+        subdirectory: String,
+        overwrite: Boolean
     ): String {
         val sourceFile = java.io.File(sourcePath)
         require(sourceFile.exists()) { "源文件不存在" }
 
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            saveToDownloadsWithMediaStore(sourceFile, fileName, mimeType, subdirectory)
+            saveToDownloadsWithMediaStore(sourceFile, fileName, mimeType, subdirectory, overwrite)
         } else {
-            saveToDownloadsLegacy(sourceFile, fileName, subdirectory)
+            saveToDownloadsLegacy(sourceFile, fileName, subdirectory, overwrite)
+        }
+    }
+
+    private fun downloadFileExists(fileName: String, subdirectory: String): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val resolver = applicationContext.contentResolver
+            val relativePath = Environment.DIRECTORY_DOWNLOADS + "/" + subdirectory
+            resolver.query(
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                arrayOf(MediaStore.Downloads._ID),
+                "${MediaStore.Downloads.RELATIVE_PATH}=? AND ${MediaStore.Downloads.DISPLAY_NAME}=?",
+                arrayOf("$relativePath/", fileName),
+                null
+            )?.use { it.moveToFirst() } == true
+        } else {
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOWNLOADS
+            )
+            java.io.File(java.io.File(downloadsDir, subdirectory), fileName).exists()
+        }
+    }
+
+    private fun deleteExistingDownload(fileName: String, relativePath: String) {
+        try {
+            applicationContext.contentResolver.delete(
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                "${MediaStore.Downloads.RELATIVE_PATH}=? AND ${MediaStore.Downloads.DISPLAY_NAME}=?",
+                arrayOf("$relativePath/", fileName)
+            )
+        } catch (_: Throwable) {
         }
     }
 
@@ -208,11 +254,18 @@ class MainActivity : AudioServiceActivity() {
         sourceFile: java.io.File,
         fileName: String,
         mimeType: String,
-        subdirectory: String
+        subdirectory: String,
+        overwrite: Boolean
     ): String {
         val resolver = applicationContext.contentResolver
         val relativePath = Environment.DIRECTORY_DOWNLOADS + "/" + subdirectory
-        val actualName = nextAvailableDisplayName(fileName, relativePath)
+        val actualName: String
+        if (overwrite) {
+            deleteExistingDownload(fileName, relativePath)
+            actualName = fileName
+        } else {
+            actualName = nextAvailableDisplayName(fileName, relativePath)
+        }
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, actualName)
             put(MediaStore.Downloads.MIME_TYPE, mimeType)
@@ -237,7 +290,8 @@ class MainActivity : AudioServiceActivity() {
     private fun saveToDownloadsLegacy(
         sourceFile: java.io.File,
         fileName: String,
-        subdirectory: String
+        subdirectory: String,
+        overwrite: Boolean
     ): String {
         val downloadsDir = Environment.getExternalStoragePublicDirectory(
             Environment.DIRECTORY_DOWNLOADS
@@ -246,8 +300,12 @@ class MainActivity : AudioServiceActivity() {
         if (!targetDir.exists()) {
             targetDir.mkdirs()
         }
-        val targetFile = nextAvailableFile(targetDir, fileName)
-        sourceFile.copyTo(targetFile, overwrite = false)
+        val targetFile = if (overwrite) {
+            java.io.File(targetDir, fileName)
+        } else {
+            nextAvailableFile(targetDir, fileName)
+        }
+        sourceFile.copyTo(targetFile, overwrite = overwrite)
         return targetFile.absolutePath
     }
 

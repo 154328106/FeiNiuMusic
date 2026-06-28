@@ -14,13 +14,13 @@ class DebugLogService {
   final ValueNotifier<List<String>> entries = ValueNotifier(<String>[]);
 
   DebugPrintCallback? _originalDebugPrint;
-  bool _loaded = false;
+  Future<void>? _loading;
   bool _installed = false;
   bool _persistScheduled = false;
 
-  Future<void> ensureLoaded() async {
-    if (_loaded) return;
-    _loaded = true;
+  Future<void> ensureLoaded() => _loading ??= _doLoad();
+
+  Future<void> _doLoad() async {
     final prefs = await SharedPreferences.getInstance();
     enabled.value = prefs.getBool(_prefsEnabled) ?? false;
     entries.value = prefs.getStringList(_prefsLogs) ?? <String>[];

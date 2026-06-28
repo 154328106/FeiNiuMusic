@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../app/router/app_router.dart';
-import '../../app/theme/app_styles.dart';
 import 'base/app_page_scaffold.dart';
 
 class SideMenu extends StatelessWidget {
@@ -14,125 +13,87 @@ class SideMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final baseColor = colorScheme.surface;
-    final overlayColor = theme.brightness == Brightness.dark
-        ? Colors.black.withValues(alpha: 0.06)
-        : Colors.white.withValues(alpha: 0.04);
-    final borderColor = colorScheme.outlineVariant.withValues(alpha: 0.22);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
+    // Theme-tinted gradient instead of flat white, so the drawer reads as part
+    // of the app's color scheme.
+    final topColor = Color.alphaBlend(
+      scheme.primary.withValues(alpha: isDark ? 0.18 : 0.14),
+      scheme.surfaceContainerHigh,
+    );
+    final bottomColor = Color.alphaBlend(
+      scheme.primary.withValues(alpha: isDark ? 0.08 : 0.05),
+      scheme.surface,
+    );
+    final borderColor = scheme.outlineVariant.withValues(alpha: 0.25);
 
     return Material(
       color: Colors.transparent,
-      child: SafeArea(
-        child: Container(
-          decoration: BoxDecoration(
-            color: Color.alphaBlend(
-              overlayColor,
-              baseColor.withValues(
-                alpha: theme.hasAmbientBackground ? 0.14 : 0.92,
-              ),
-            ),
-            border: Border(right: BorderSide(color: borderColor)),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [topColor, bottomColor],
           ),
+          border: Border(right: BorderSide(color: borderColor)),
+        ),
+        child: SafeArea(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 36, 24, 16),
-                child: Row(
+              _buildHeader(context),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
                   children: [
-                    Container(
-                      width: 50,
-                      height: 50,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.12),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: Image.asset(
-                        '开发文档/NagoAPP图标.png',
-                        fit: BoxFit.cover,
-                      ),
+                    _sectionLabel(context, '资源库'),
+                    _MenuItem(
+                      icon: Icons.music_note_rounded,
+                      label: '歌曲',
+                      onTap: () => _navigateAndClose(context, AppRoutes.songs),
                     ),
-                    const SizedBox(width: 16),
-                    Text(
-                      'NagoMusic',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                    _MenuItem(
+                      icon: Icons.album_rounded,
+                      label: '专辑',
+                      onTap: () => _navigateAndClose(context, AppRoutes.albums),
+                    ),
+                    _MenuItem(
+                      icon: Icons.people_rounded,
+                      label: '艺术家',
+                      onTap: () => _navigateAndClose(context, AppRoutes.artists),
+                    ),
+                    _MenuItem(
+                      icon: Icons.queue_music_rounded,
+                      label: '歌单',
+                      onTap: () =>
+                          _navigateAndClose(context, AppRoutes.playlists),
+                    ),
+                    _MenuItem(
+                      icon: Icons.library_music_rounded,
+                      label: '音乐库',
+                      onTap: () => _navigateAndClose(context, AppRoutes.home),
+                    ),
+                    const SizedBox(height: 8),
+                    _sectionLabel(context, '更多'),
+                    _MenuItem(
+                      icon: Icons.radar_rounded,
+                      label: '音源',
+                      onTap: () => _navigateAndClose(context, AppRoutes.source),
+                    ),
+                    _MenuItem(
+                      icon: Icons.bar_chart_rounded,
+                      label: '统计',
+                      onTap: () =>
+                          _pushAndClose(context, AppRoutes.listeningStats),
+                    ),
+                    _MenuItem(
+                      icon: Icons.settings_rounded,
+                      label: '设置',
+                      onTap: () => _pushAndClose(context, AppRoutes.settings),
                     ),
                   ],
-                ),
-              ),
-              const SizedBox(height: 10),
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 100),
-                  child: Column(
-                    children: [
-                      _buildMenuItem(
-                        context,
-                        Icons.music_note_rounded,
-                        '歌曲',
-                        () => _navigateAndClose(context, AppRoutes.songs),
-                      ),
-                      _buildMenuItem(
-                        context,
-                        Icons.album_rounded,
-                        '专辑',
-                        () => _navigateAndClose(context, AppRoutes.albums),
-                      ),
-                      _buildMenuItem(
-                        context,
-                        Icons.people_rounded,
-                        '艺术家',
-                        () => _navigateAndClose(context, AppRoutes.artists),
-                      ),
-                      _buildMenuItem(
-                        context,
-                        Icons.queue_music_rounded,
-                        '歌单',
-                        () => _navigateAndClose(context, AppRoutes.playlists),
-                      ),
-                      _buildMenuItem(
-                        context,
-                        Icons.library_music_rounded,
-                        '音乐库',
-                        () => _navigateAndClose(context, AppRoutes.home),
-                      ),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(
-                          vertical: 8,
-                          horizontal: 12,
-                        ),
-                        child: Divider(height: 1),
-                      ),
-                      _buildMenuItem(
-                        context,
-                        Icons.radar_rounded,
-                        '音源',
-                        () => _navigateAndClose(context, AppRoutes.source),
-                      ),
-                      _buildMenuItem(
-                        context,
-                        Icons.bar_chart_rounded,
-                        '统计',
-                        () => _pushAndClose(context, AppRoutes.listeningStats),
-                      ),
-                      _buildMenuItem(
-                        context,
-                        Icons.settings_rounded,
-                        '设置',
-                        () => _pushAndClose(context, AppRoutes.settings),
-                      ),
-                    ],
-                  ),
                 ),
               ),
             ],
@@ -142,24 +103,77 @@ class SideMenu extends StatelessWidget {
     );
   }
 
-  Widget _buildMenuItem(
-    BuildContext context,
-    IconData icon,
-    String title,
-    VoidCallback onTap,
-  ) {
-    return ListTile(
-      leading: Icon(icon, size: 24),
-      title: Text(
-        title,
-        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+  Widget _buildHeader(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+      child: Row(
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: scheme.primary.withValues(alpha: 0.25),
+                  blurRadius: 14,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Image.asset(
+              '开发文档/NagoAPP图标.png',
+              fit: BoxFit.cover,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'NagoMusic',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '本地与云端音乐',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
-      tileColor: Colors.transparent,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      onTap: onTap,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-      dense: true,
-      visualDensity: const VisualDensity(horizontal: 0, vertical: -1),
+    );
+  }
+
+  Widget _sectionLabel(BuildContext context, String text) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 10, 12, 6),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.5,
+          color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+        ),
+      ),
     );
   }
 
@@ -191,5 +205,67 @@ class SideMenu extends StatelessWidget {
     if (!context.mounted) return;
     final state = context.findAncestorStateOfType<AppPageScaffoldState>();
     state?.closeDrawer();
+  }
+}
+
+class _MenuItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _MenuItem({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+            child: Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: Icon(icon, size: 20, color: scheme.primary),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: scheme.onSurfaceVariant.withValues(alpha: 0.4),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

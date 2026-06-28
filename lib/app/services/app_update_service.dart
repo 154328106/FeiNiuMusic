@@ -1,9 +1,11 @@
 import 'package:dio/dio.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 class AppUpdateInfo {
   final String latestVersion;
   final String? releaseName;
   final String? releaseUrl;
+  final String? releaseNotes;
   final bool hasUpdate;
 
   const AppUpdateInfo({
@@ -11,6 +13,7 @@ class AppUpdateInfo {
     required this.hasUpdate,
     this.releaseName,
     this.releaseUrl,
+    this.releaseNotes,
   });
 }
 
@@ -31,17 +34,36 @@ class AppUpdateService {
     ),
   );
 
+  String? _cachedVersion;
+
+  /// The running app's version (e.g. "1.3.0-beta+1"), read from the platform.
+  Future<String> currentVersion() async {
+    final cached = _cachedVersion;
+    if (cached != null) return cached;
+    try {
+      final info = await PackageInfo.fromPlatform();
+      final build = info.buildNumber.trim();
+      final v = build.isEmpty ? info.version : '${info.version}+$build';
+      _cachedVersion = v;
+      return v;
+    } catch (_) {
+      return _cachedVersion ?? '0.0.0';
+    }
+  }
+
   Future<AppUpdateInfo> checkLatest(String currentVersion) async {
     final response = await _dio.get<Map<String, dynamic>>(latestReleaseApiUrl);
     final data = response.data ?? <String, dynamic>{};
     final tag = (data['tag_name'] as String? ?? '').trim();
     final name = (data['name'] as String?)?.trim();
     final url = (data['html_url'] as String?)?.trim();
+    final body = (data['body'] as String?)?.trim();
     final latest = tag.isEmpty ? currentVersion : _normalizeVersion(tag);
     return AppUpdateInfo(
       latestVersion: latest,
       releaseName: name == null || name.isEmpty ? null : name,
       releaseUrl: url == null || url.isEmpty ? releasePageUrl : url,
+      releaseNotes: body == null || body.isEmpty ? null : body,
       hasUpdate: _compareVersions(latest, currentVersion) > 0,
     );
   }

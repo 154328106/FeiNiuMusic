@@ -12,7 +12,7 @@ class AppThemeSettings {
   static final ValueNotifier<bool> dynamicColorEnabled = ValueNotifier(false);
   static final ValueNotifier<Color?> themeSeedColor = ValueNotifier(null);
 
-  static bool _loaded = false;
+  static Future<void>? _loading;
 
   static ThemeMode _modeFromString(String? raw) {
     switch (raw) {
@@ -36,9 +36,9 @@ class AppThemeSettings {
     }
   }
 
-  static Future<void> ensureLoaded() async {
-    if (_loaded) return;
-    _loaded = true;
+  static Future<void> ensureLoaded() => _loading ??= _doLoad();
+
+  static Future<void> _doLoad() async {
     final prefs = await SharedPreferences.getInstance();
     themeMode.value = _modeFromString(prefs.getString(_prefsThemeMode));
     dynamicColorEnabled.value = prefs.getBool(_prefsDynamicColor) ?? false;

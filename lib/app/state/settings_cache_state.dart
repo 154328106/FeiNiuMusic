@@ -7,11 +7,11 @@ class AppCacheSettings {
   static const String _prefsAudioCacheLimitGb = 'audio_cache_limit_gb';
 
   static final ValueNotifier<int> audioCacheLimitGb = ValueNotifier(0);
-  static bool _loaded = false;
+  static Future<void>? _loading;
 
-  static Future<void> ensureLoaded() async {
-    if (_loaded) return;
-    _loaded = true;
+  static Future<void> ensureLoaded() => _loading ??= _doLoad();
+
+  static Future<void> _doLoad() async {
     final prefs = await SharedPreferences.getInstance();
     audioCacheLimitGb.value = (prefs.getInt(_prefsAudioCacheLimitGb) ?? 0)
         .clamp(0, 5);
@@ -41,11 +41,11 @@ class SongDownloadSettings {
   static final ValueNotifier<String?> customDirectoryPath = ValueNotifier(null);
   static final ValueNotifier<bool> useCustomDirectory = ValueNotifier(false);
 
-  static bool _loaded = false;
+  static Future<void>? _loading;
 
-  static Future<void> ensureLoaded() async {
-    if (_loaded) return;
-    _loaded = true;
+  static Future<void> ensureLoaded() => _loading ??= _doLoad();
+
+  static Future<void> _doLoad() async {
     final prefs = await SharedPreferences.getInstance();
     customDirectoryPath.value = prefs.getString(_prefsCustomDirectory);
     useCustomDirectory.value = prefs.getBool(_prefsUseCustomDirectory) ?? false;

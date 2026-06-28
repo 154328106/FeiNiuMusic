@@ -40,10 +40,12 @@ class MiniPlayerBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<PlaybackSnapshot>(
-      valueListenable: player.snapshot,
-      builder: (context, snapshot, child) {
-        final song = snapshot.song;
+    // Only rebuild the bar chrome when the SONG changes — not on every position
+    // tick. Position/playing are consumed by the leaf play-button & subtitle
+    // widgets, which have their own snapshot listeners.
+    return ValueListenableBuilder<SongEntity?>(
+      valueListenable: player.currentSong,
+      builder: (context, song, child) {
         final hasSong = song != null;
         final theme = Theme.of(context);
         final scheme = theme.colorScheme;
@@ -196,19 +198,36 @@ class MiniPlayerBar extends StatelessWidget {
       barrierColor: Colors.transparent,
       pageBuilder: (context, animation, secondaryAnimation) =>
           const PlayerPage(),
-      transitionDuration: const Duration(milliseconds: 280),
-      reverseTransitionDuration: const Duration(milliseconds: 220),
+      transitionDuration: const Duration(milliseconds: 320),
+      reverseTransitionDuration: const Duration(milliseconds: 260),
       transitionsBuilder: (context, animation, secondaryAnimation, child) {
         final curved = CurvedAnimation(
           parent: animation,
           curve: Curves.easeOutCubic,
-          reverseCurve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
         );
         final offset = Tween<Offset>(
           begin: const Offset(0, 1),
           end: Offset.zero,
         ).animate(curved);
-        return SlideTransition(position: offset, child: child);
+        // Slight scale + fade so the player "lifts" into place rather than just
+        // sliding up flatly.
+        final scale = Tween<double>(begin: 0.97, end: 1.0).animate(curved);
+        final fade = CurvedAnimation(
+          parent: animation,
+          curve: const Interval(0.0, 0.5, curve: Curves.easeOut),
+        );
+        return SlideTransition(
+          position: offset,
+          child: FadeTransition(
+            opacity: fade,
+            child: ScaleTransition(
+              scale: scale,
+              alignment: Alignment.bottomCenter,
+              child: child,
+            ),
+          ),
+        );
       },
     );
   }

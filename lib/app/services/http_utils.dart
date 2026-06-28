@@ -3,6 +3,33 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 class HttpUtils {
+  /// Removes credential-bearing parts (query string, userinfo) from a URI so
+  /// it can be safely logged. Navidrome auth tokens (`t=`, `s=`, `u=`) ride in
+  /// the query string, and some endpoints embed userinfo, so neither must reach
+  /// the (persisted) debug log.
+  static String redactUri(Uri uri) {
+    final buffer = StringBuffer()
+      ..write(uri.scheme.isEmpty ? '' : '${uri.scheme}://')
+      ..write(uri.host);
+    if (uri.hasPort) {
+      buffer.write(':${uri.port}');
+    }
+    buffer.write(uri.path);
+    if (uri.hasQuery) {
+      buffer.write('?<redacted>');
+    }
+    return buffer.toString();
+  }
+
+  /// String overload of [redactUri]; returns the input unchanged if it cannot
+  /// be parsed as a URI.
+  static String redactUrl(String? url) {
+    if (url == null || url.isEmpty) return '';
+    final uri = Uri.tryParse(url);
+    if (uri == null) return '<unparsable-uri>';
+    return redactUri(uri);
+  }
+
   /// Fetches a resource with manual redirect handling.
   /// 
   /// This method manually follows 3xx redirects (up to [maxRedirects]).
@@ -33,7 +60,7 @@ class HttpUtils {
 
     for (var i = 0; i < maxRedirects; i++) {
       if (kDebugMode) {
-        debugPrint('HttpUtils: Fetching $currentUri (Attempt ${i + 1})');
+        debugPrint('HttpUtils: Fetching ${redactUri(currentUri)} (Attempt ${i + 1})');
       }
 
       try {
