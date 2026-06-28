@@ -22,6 +22,7 @@ import '../../components/index.dart';
 import '../../components/dialog/app_update_dialog.dart';
 import '../library/albums_page.dart';
 import '../library/artists_page.dart';
+import '../library/folders_page.dart';
 import '../library/library_detail_pages.dart';
 import '../library/playlists_page.dart';
 import 'recent_playback_page.dart';
@@ -453,6 +454,16 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
     await Navigator.of(context).push(buildAppPageRoute<void>((_) => page));
   }
 
+  // Top-level destinations (歌曲/专辑/艺术家/歌单) are peers of the home page:
+  // replace the stack so back from them triggers the double-press-to-exit flow
+  // instead of returning here.
+  Future<void> _openTopLevel(Widget page) async {
+    await Navigator.of(context).pushAndRemoveUntil(
+      buildAppPageRoute<void>((_) => page),
+      (route) => false,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AppPageScaffold(
@@ -495,22 +506,27 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
                   _HomeEntryData(
                     icon: Icons.music_note_rounded,
                     label: '歌曲',
-                    onTap: () => _pushLibraryPage(const SongsPage()),
+                    onTap: () => _openTopLevel(const SongsPage()),
                   ),
                   _HomeEntryData(
                     icon: Icons.people_rounded,
                     label: '艺术家',
-                    onTap: () => _pushLibraryPage(const ArtistsPage()),
+                    onTap: () => _openTopLevel(const ArtistsPage()),
                   ),
                   _HomeEntryData(
                     icon: Icons.album_rounded,
                     label: '专辑',
-                    onTap: () => _pushLibraryPage(const AlbumsPage()),
+                    onTap: () => _openTopLevel(const AlbumsPage()),
                   ),
                   _HomeEntryData(
                     icon: Icons.queue_music_rounded,
                     label: '歌单',
-                    onTap: () => _pushLibraryPage(const PlaylistsPage()),
+                    onTap: () => _openTopLevel(const PlaylistsPage()),
+                  ),
+                  _HomeEntryData(
+                    icon: Icons.folder_rounded,
+                    label: '文件夹',
+                    onTap: () => _openTopLevel(const FoldersPage()),
                   ),
                 ],
               ),

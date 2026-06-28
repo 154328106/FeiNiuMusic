@@ -119,7 +119,8 @@ class SongsArtworkCoordinator {
     for (var i = safeEnd; i >= safeStart; i--) {
       final song = songs[i];
       final hasLocalCover = (song.localCoverPath ?? '').trim().isNotEmpty;
-      if (hasLocalCover || !song.isLocal) continue;
+      // Prefetch both local and remote covers; skip only those already cached.
+      if (hasLocalCover) continue;
       unawaited(
         loadArtwork(
           song,
@@ -196,7 +197,9 @@ class SongsArtworkCoordinator {
         }
       }
     }
-    if (!song.isLocal) return null;
+    // Remote songs also resolve their cover here (e.g. embedded art fetched by
+    // ArtworkService), matching the player/mini-player. The result is cached and
+    // its path persisted, so it's a one-time fetch per song.
     try {
       final resolvedAssetId = (song.localAssetId ?? '').trim();
       if (kDebugMode && _debugArtwork) {

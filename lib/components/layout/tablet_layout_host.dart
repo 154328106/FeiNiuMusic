@@ -209,7 +209,7 @@ class _RootBackHandlerState extends State<_RootBackHandler> {
           return;
         }
         // At home, not yet armed: prompt and arm a real exit for the next back.
-        AppToast.show(context, '再次滑动返回桌面');
+        AppToast.show(context, '再返回一次退回桌面');
         setState(() => _armedToExit = true);
         _armExitWindow();
       },

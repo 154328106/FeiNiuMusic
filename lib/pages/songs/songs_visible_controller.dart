@@ -45,16 +45,19 @@ class SongsVisibleController {
     required String sortKey,
     required bool ascending,
     required int currentMaxCount,
+    Map<String, int> playCounts = const {},
   }) async {
+    // Play-count order depends on live stats, not the song-library version, so
+    // bypass the cache for it to always reflect the latest counts.
+    final useCache = sortKey != 'playCount';
     final cacheKey = _cacheKey(
       sourceFilter: sourceFilter,
       sortKey: sortKey,
       ascending: ascending,
     );
-    final cached = _cacheStore.get<List<SongEntity>>(
-      cacheScopeVisible,
-      cacheKey,
-    );
+    final cached = useCache
+        ? _cacheStore.get<List<SongEntity>>(cacheScopeVisible, cacheKey)
+        : null;
     final visible =
         cached ??
         await _buildVisibleSongsAsync(
@@ -62,8 +65,9 @@ class SongsVisibleController {
           sourceFilter: sourceFilter,
           sortKey: sortKey,
           ascending: ascending,
+          playCounts: playCounts,
         );
-    if (cached == null) {
+    if (useCache && cached == null) {
       _cacheStore.set(cacheScopeVisible, cacheKey, visible);
     }
     final maxCount = currentMaxCount > visible.length
@@ -109,12 +113,14 @@ Future<List<SongEntity>> _buildVisibleSongsAsync({
   required String sourceFilter,
   required String sortKey,
   required bool ascending,
+  Map<String, int> playCounts = const {},
 }) async {
   final payload = <String, dynamic>{
     'songs': songs.map((e) => e.toMap()).toList(),
     'sourceFilter': sourceFilter,
     'sortKey': sortKey,
     'ascending': ascending,
+    'playCounts': playCounts,
   };
   final result = await compute(_buildVisibleSongsIsolate, payload);
   return result
@@ -128,6 +134,8 @@ List<Map<String, dynamic>> _buildVisibleSongsIsolate(
   final sourceFilter = (args['sourceFilter'] as String?) ?? 'all';
   final sortKey = (args['sortKey'] as String?) ?? 'title';
   final ascending = (args['ascending'] as bool?) ?? true;
+  final playCounts = ((args['playCounts'] as Map?) ?? const {})
+      .map((key, value) => MapEntry(key.toString(), (value as num).toInt()));
   final rawSongs = (args['songs'] as List).cast<Map>();
   final songs = rawSongs
       .map((e) => SongEntity.fromMap(e.cast<String, dynamic>()))
@@ -185,6 +193,9 @@ List<Map<String, dynamic>> _buildVisibleSongsIsolate(
         break;
       case 'duration':
         result = (a.durationMs ?? 0).compareTo(b.durationMs ?? 0);
+        break;
+      case 'playCount':
+        result = (playCounts[a.id] ?? 0).compareTo(playCounts[b.id] ?? 0);
         break;
       case 'title':
       default:

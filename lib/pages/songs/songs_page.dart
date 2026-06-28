@@ -10,6 +10,7 @@ import '../../app/router/app_router.dart';
 import '../../app/services/artwork_service.dart';
 import '../../app/services/db/dao/song_dao.dart';
 import '../../app/services/local_music_service.dart';
+import '../../app/services/stats_service.dart';
 import '../../app/services/navidrome/navidrome_source_repository.dart';
 import '../../app/services/player_service.dart';
 import '../../app/services/webdav/webdav_source_repository.dart';
@@ -255,6 +256,10 @@ class _SongsPageState extends State<SongsPage>
     final sortKey = _sortKey.value;
     final ascending = _ascending.value;
     final token = ++_visibleBuildToken;
+    final playCounts = sortKey == 'playCount'
+        ? await StatsService.instance.fetchPlayCounts()
+        : const <String, int>{};
+    if (!mounted || token != _visibleBuildToken) return;
     final result = await _visibleController.buildVisibleSongs(
       songs: songs,
       sourceFilter: sourceFilter,
@@ -263,6 +268,7 @@ class _SongsPageState extends State<SongsPage>
       currentMaxCount: _currentMaxCount < _pageSize
           ? _pageSize
           : _currentMaxCount,
+      playCounts: playCounts,
     );
     if (!mounted || token != _visibleBuildToken) return;
     _visibleSongsAll.value = result.allVisible;
@@ -872,6 +878,11 @@ class _SongsPageState extends State<SongsPage>
                 icon: Icons.album_outlined,
               ),
               SortOption(key: 'duration', label: '歌曲时长', icon: Icons.schedule),
+              SortOption(
+                key: 'playCount',
+                label: '播放次数',
+                icon: Icons.local_fire_department_outlined,
+              ),
             ],
             currentKey: _sortKey.value,
             ascending: _ascending.value,

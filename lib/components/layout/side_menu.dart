@@ -71,6 +71,11 @@ class SideMenu extends StatelessWidget {
                           _navigateAndClose(context, AppRoutes.playlists),
                     ),
                     _MenuItem(
+                      icon: Icons.folder_rounded,
+                      label: '文件夹',
+                      onTap: () => _navigateAndClose(context, AppRoutes.folders),
+                    ),
+                    _MenuItem(
                       icon: Icons.library_music_rounded,
                       label: '音乐库',
                       onTap: () => _navigateAndClose(context, AppRoutes.home),

@@ -452,7 +452,7 @@ class _PosterPlayerLayout extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(height: 18),
-                          _PosterLyricsPreview(song: song),
+                          _PosterLyricsPreview(),
                         ],
                       ),
                     ),
@@ -559,9 +559,7 @@ class _PosterArtwork extends StatelessWidget {
 }
 
 class _PosterLyricsPreview extends StatelessWidget {
-  final SongEntity? song;
-
-  const _PosterLyricsPreview({required this.song});
+  const _PosterLyricsPreview();
 
   @override
   Widget build(BuildContext context) {
@@ -578,20 +576,16 @@ class _PosterLyricsPreview extends StatelessWidget {
           return const SizedBox.shrink();
         }
         if (lines.isEmpty) {
-          final title = song?.title.trim().isNotEmpty == true
-              ? song!.title.trim()
-              : '暂无歌词';
-          final artist = song?.artist.trim().isNotEmpty == true
-              ? song!.artist.trim()
-              : '纯音乐或未匹配到歌词';
-          return Column(
+          // Don't echo the song title/artist here — they already show in the
+          // header above; use neutral placeholders to avoid duplication.
+          return const Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _PosterLyricLine(text: title, active: true),
-              const SizedBox(height: 8),
-              _PosterLyricLine(text: artist, active: false),
-              const SizedBox(height: 8),
-              const _PosterLyricLine(text: ' ', active: false),
+              _PosterLyricLine(text: '暂无歌词', active: true),
+              SizedBox(height: 8),
+              _PosterLyricLine(text: '纯音乐或未匹配到歌词', active: false),
+              SizedBox(height: 8),
+              _PosterLyricLine(text: ' ', active: false),
             ],
           );
         }

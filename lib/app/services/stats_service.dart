@@ -139,8 +139,22 @@ class StatsService {
         .toList();
   }
 
-  Future<List<SongListeningStat>> fetchTopSongs({int limit = 20}) async {
+  /// Map of songId -> playCount for every song that has playback stats.
+  /// Used to sort the songs list by play count.
+  Future<Map<String, int>> fetchPlayCounts() async {
     final db = await DbHelper.instance.database;
+    final rows = await db.query(
+      DbConstants.tableSongStats,
+      columns: ['songId', 'playCount'],
+    );
+    final map = <String, int>{};
+    for (final row in rows) {
+      map[row['songId'].toString()] = _parseInt(row['playCount']);
+    }
+    return map;
+  }
+
+  Future<List<SongListeningStat>> fetchTopSongs({int limit = 20}) async {    final db = await DbHelper.instance.database;
     final rows = await db.query(
       DbConstants.tableSongStats,
       orderBy: 'playCount DESC, listenMs DESC',
