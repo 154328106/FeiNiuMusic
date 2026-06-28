@@ -30,8 +30,19 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 27
         targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // Derive a monotonic versionCode from the semantic version so the
+        // version string stays clean (e.g. "1.3.1", no "+N"). The optional
+        // pubspec build number (flutter.versionCode, default 1) is the
+        // maintenance counter. Example: 1.3.1 -> 1030101, 1.3.1+2 -> 1030102.
+        run {
+            val parts = (flutter.versionName).split(".")
+            val major = parts.getOrNull(0)?.toIntOrNull() ?: 0
+            val minor = parts.getOrNull(1)?.toIntOrNull() ?: 0
+            val patch = parts.getOrNull(2)?.toIntOrNull() ?: 0
+            versionCode = (major * 10000 + minor * 100 + patch) * 100 +
+                flutter.versionCode
+        }
     }
 
     val keystoreProperties = Properties()

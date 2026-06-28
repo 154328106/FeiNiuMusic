@@ -406,4 +406,99 @@ class StatsService {
       );
     });
   }
+
+  // ---- Backup / restore ----
+
+  /// Dumps all four stats tables as plain row maps for backup.
+  Future<Map<String, List<Map<String, dynamic>>>> exportAll() async {
+    final db = await DbHelper.instance.database;
+    Future<List<Map<String, dynamic>>> dump(String table) async {
+      final rows = await db.query(table);
+      return rows.map((r) => Map<String, dynamic>.from(r)).toList();
+    }
+
+    return {
+      'songStats': await dump(DbConstants.tableSongStats),
+      'dayStats': await dump(DbConstants.tableListeningDays),
+      'albumStats': await dump(DbConstants.tableAlbumStats),
+      'playlistStats': await dump(DbConstants.tablePlaylistStats),
+    };
+  }
+
+  /// Merge-import stats: cumulative counters are ADDED to existing values,
+  /// timestamps take the later value.
+  Future<void> importMerge(Map<String, dynamic> data) async {
+    final db = await DbHelper.instance.database;
+    await db.transaction((txn) async {
+      Future<void> mergeCounter(
+        String table,
+        String idCol,
+        List rows,
+        List<String> sumCols,
+        List<String> maxCols,
+      ) async {
+        for (final raw in rows) {
+          if (raw is! Map) continue;
+          final row = raw.cast<String, dynamic>();
+          final id = row[idCol]?.toString();
+          if (id == null || id.isEmpty) continue;
+          final existing = await txn.query(
+            table,
+            where: '$idCol = ?',
+            whereArgs: [id],
+            limit: 1,
+          );
+          if (existing.isEmpty) {
+            await txn.insert(table, row);
+          } else {
+            final cur = existing.first;
+            final update = <String, dynamic>{};
+            for (final c in sumCols) {
+              update[c] = _parseInt(cur[c]) + _parseInt(row[c]);
+            }
+            for (final c in maxCols) {
+              final a = _parseInt(cur[c]);
+              final b = _parseInt(row[c]);
+              update[c] = a > b ? a : b;
+            }
+            await txn.update(
+              table,
+              update,
+              where: '$idCol = ?',
+              whereArgs: [id],
+            );
+          }
+        }
+      }
+
+      await mergeCounter(
+        DbConstants.tableSongStats,
+        'songId',
+        (data['songStats'] as List?) ?? const [],
+        ['listenMs', 'playCount'],
+        ['lastPlayedMs'],
+      );
+      await mergeCounter(
+        DbConstants.tableListeningDays,
+        'dayKey',
+        (data['dayStats'] as List?) ?? const [],
+        ['listenMs', 'playCount'],
+        const [],
+      );
+      await mergeCounter(
+        DbConstants.tableAlbumStats,
+        'albumName',
+        (data['albumStats'] as List?) ?? const [],
+        ['playCount'],
+        ['lastPlayedMs'],
+      );
+      await mergeCounter(
+        DbConstants.tablePlaylistStats,
+        'playlistId',
+        (data['playlistStats'] as List?) ?? const [],
+        ['playCount'],
+        ['lastPlayedMs'],
+      );
+    });
+  }
 }

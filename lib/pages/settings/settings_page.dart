@@ -181,6 +181,13 @@ class _SettingsPageState extends State<SettingsPage> {
             title: '应用',
             children: [
               AppSettingTile(
+                title: '数据备份',
+                subtitle: '歌单、听歌统计等导出到本地或 WebDAV',
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () =>
+                    Navigator.pushNamed(context, AppRoutes.dataBackup),
+              ),
+              AppSettingTile(
                 title: '版本信息',
                 subtitle: '版本号、检查更新与调试日志',
                 trailing: const Icon(Icons.chevron_right_rounded),

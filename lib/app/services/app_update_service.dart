@@ -36,16 +36,18 @@ class AppUpdateService {
 
   String? _cachedVersion;
 
-  /// The running app's version (e.g. "1.3.0-beta+1"), read from the platform.
+  /// The running app's clean release version (e.g. "1.3.1"), read from the
+  /// platform. The build number is intentionally omitted — it's only a
+  /// maintenance counter and shouldn't appear in the displayed version or
+  /// affect update comparison.
   Future<String> currentVersion() async {
     final cached = _cachedVersion;
     if (cached != null) return cached;
     try {
       final info = await PackageInfo.fromPlatform();
-      final build = info.buildNumber.trim();
-      final v = build.isEmpty ? info.version : '${info.version}+$build';
-      _cachedVersion = v;
-      return v;
+      final v = info.version.trim();
+      _cachedVersion = v.isEmpty ? '0.0.0' : v;
+      return _cachedVersion!;
     } catch (_) {
       return _cachedVersion ?? '0.0.0';
     }
@@ -77,12 +79,22 @@ class AppUpdateService {
   }
 
   int _compareVersions(String a, String b) {
-    final left = _normalizeVersion(a).split(RegExp(r'[.+-]'));
-    final right = _normalizeVersion(b).split(RegExp(r'[.+-]'));
+    // Compare only the release part (major.minor.patch); ignore any build or
+    // prerelease suffix so maintenance builds (e.g. 1.3.1-2 vs 1.3.1) don't
+    // register as a new version.
+    List<int> release(String v) {
+      var s = _normalizeVersion(v);
+      final cut = s.indexOf(RegExp(r'[+\-]'));
+      if (cut >= 0) s = s.substring(0, cut);
+      return s.split('.').map((e) => int.tryParse(e.trim()) ?? 0).toList();
+    }
+
+    final left = release(a);
+    final right = release(b);
     final length = left.length > right.length ? left.length : right.length;
     for (var i = 0; i < length; i++) {
-      final l = i < left.length ? int.tryParse(left[i]) ?? 0 : 0;
-      final r = i < right.length ? int.tryParse(right[i]) ?? 0 : 0;
+      final l = i < left.length ? left[i] : 0;
+      final r = i < right.length ? right[i] : 0;
       if (l != r) return l.compareTo(r);
     }
     return 0;

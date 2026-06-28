@@ -9,6 +9,7 @@ import '../../app/state/settings_state.dart';
 import '../../app/services/db/dao/song_dao.dart';
 import '../../app/router/app_page_route.dart';
 import '../../app/services/app_update_service.dart';
+import '../../app/services/backup/backup_service.dart';
 import '../../app/services/library_refresh_service.dart';
 import '../../app/services/navidrome/navidrome_source_repository.dart';
 import '../../app/services/player_service.dart';
@@ -108,6 +109,7 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
     unawaited(_tryAutoPlayOnAppLaunch());
     unawaited(_tryRefreshLibraryOnLaunch());
     unawaited(_tryCheckUpdateOnLaunch());
+    unawaited(BackupService.instance.maybeAutoBackupOnLaunch());
     _load();
   }
 
