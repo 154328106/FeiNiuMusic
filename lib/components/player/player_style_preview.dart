@@ -16,7 +16,9 @@ class PlayerStylePreview extends StatelessWidget {
 
   static const String _sampleTitle = '逆光';
   static const String _sampleArtist = '孙燕姿';
-  static const String _coverAsset = 'assets/preview/style_preview_cover.jpg';
+  static const String sampleCoverAsset =
+      'assets/preview/style_preview_cover.jpg';
+  static const String _coverAsset = sampleCoverAsset;
 
   const PlayerStylePreview({
     super.key,
@@ -342,10 +344,7 @@ class PlayerStylePreview extends StatelessWidget {
         const SizedBox(height: 4),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            _timeText(context, '1:28'),
-            _timeText(context, '4:29'),
-          ],
+          children: [_timeText(context, '1:28'), _timeText(context, '4:29')],
         ),
       ],
     );
@@ -407,7 +406,11 @@ class PlayerStylePreview extends StatelessWidget {
             shape: BoxShape.circle,
             color: scheme.onSurface,
           ),
-          child: Icon(Icons.play_arrow_rounded, size: 15, color: scheme.surface),
+          child: Icon(
+            Icons.play_arrow_rounded,
+            size: 15,
+            color: scheme.surface,
+          ),
         ),
         Icon(Icons.skip_next_rounded, size: 16, color: color),
         Icon(Icons.more_vert_rounded, size: 12, color: color),

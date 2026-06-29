@@ -19,6 +19,7 @@ class _GradientSettingsPageState extends State<GradientSettingsPage>
   late final _saturation = createSignal(1.0);
   late final _hueShift = createSignal(0.0);
   late final _loading = createSignal(true);
+  late final _coverColor = createSignal<Color?>(null);
 
   @override
   void initState() {
@@ -28,9 +29,13 @@ class _GradientSettingsPageState extends State<GradientSettingsPage>
 
   Future<void> _load() async {
     await PlayerBackgroundSettings.ensureLoaded();
+    final coverColor = await dominantColorFromAsset(
+      PlayerStylePreview.sampleCoverAsset,
+    );
     if (!mounted) return;
     _saturation.value = PlayerBackgroundSettings.saturation.value;
     _hueShift.value = PlayerBackgroundSettings.hueShift.value;
+    _coverColor.value = coverColor;
     _loading.value = false;
   }
 
@@ -54,6 +59,7 @@ class _GradientSettingsPageState extends State<GradientSettingsPage>
           );
         }
 
+        final coverColor = _coverColor.value;
         return AppPageScaffold(
           extendBodyBehindAppBar: true,
           appBar: const AppTopBar(
@@ -66,7 +72,8 @@ class _GradientSettingsPageState extends State<GradientSettingsPage>
             children: [
               ValueListenableBuilder<PlayerStylePreset>(
                 valueListenable: PlayerStyleSettings.stylePreset,
-                builder: (context, preset, _) => _GradientPreview(preset: preset),
+                builder: (context, preset, _) =>
+                    _GradientPreview(preset: preset, coverColor: coverColor),
               ),
               const SizedBox(height: 16),
               AppSettingSection(
@@ -108,8 +115,9 @@ class _GradientSettingsPageState extends State<GradientSettingsPage>
 /// the live effect and reacts to the sliders.
 class _GradientPreview extends StatelessWidget {
   final PlayerStylePreset preset;
+  final Color? coverColor;
 
-  const _GradientPreview({required this.preset});
+  const _GradientPreview({required this.preset, this.coverColor});
 
   @override
   Widget build(BuildContext context) {
@@ -123,6 +131,7 @@ class _GradientPreview extends StatelessWidget {
             aspectRatio: ratio,
             child: _PreviewScreen(
               label: '播放器',
+              coverColor: coverColor,
               child: PlayerStylePreview(preset: preset, fill: true),
             ),
           ),
@@ -133,6 +142,7 @@ class _GradientPreview extends StatelessWidget {
             aspectRatio: ratio,
             child: _PreviewScreen(
               label: '歌词页',
+              coverColor: coverColor,
               child: PlayerStylePreview(
                 preset: preset,
                 fill: true,
@@ -149,8 +159,13 @@ class _GradientPreview extends StatelessWidget {
 class _PreviewScreen extends StatelessWidget {
   final String label;
   final Widget child;
+  final Color? coverColor;
 
-  const _PreviewScreen({required this.label, required this.child});
+  const _PreviewScreen({
+    required this.label,
+    required this.child,
+    this.coverColor,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -159,10 +174,12 @@ class _PreviewScreen extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // The actual live background: dominant cover color + 流光, reacting to
-          // the saturation/hue sliders just like the real player.
+          // The actual live background, but locked to the preview's sample cover
+          // color (not the currently playing song) so it reacts to the sliders
+          // and matches the cover shown above.
           PlayerBackground(
             songSignal: PlayerService.instance.currentSongSignal,
+            dominantColor: coverColor,
           ),
           child,
           Positioned(

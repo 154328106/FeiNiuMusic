@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
@@ -88,7 +89,16 @@ class PlayerBackgroundSettings {
 class PlayerBackground extends StatefulWidget {
   final Signal<SongEntity?> songSignal;
 
-  const PlayerBackground({super.key, required this.songSignal});
+  /// When set, the aurora/fallback base color is derived from this color instead
+  /// of the current song's cover. Used by the 流光 settings preview so it follows
+  /// the sample cover shown there rather than whatever song is playing.
+  final Color? dominantColor;
+
+  const PlayerBackground({
+    super.key,
+    required this.songSignal,
+    this.dominantColor,
+  });
 
   @override
   State<PlayerBackground> createState() => _PlayerBackgroundState();
@@ -132,6 +142,7 @@ class PlayerTheme extends StatelessWidget {
 }
 
 class _PlayerBackgroundState extends State<PlayerBackground> {
+  static const int _dominantCacheLimit = 128;
   static final Map<String, Color> _dominantCache = {};
   static final Map<String, Future<Color?>> _dominantInflight = {};
 
@@ -168,7 +179,8 @@ class _PlayerBackgroundState extends State<PlayerBackground> {
             final hueShift = PlayerBackgroundSettings.hueShift.value;
             final preferLight = _preferLightBackground(context, playbackMode);
             final surface = _tintSurface(scheme.surface, preferLight);
-            final dominant = _dominantColor ?? scheme.primary;
+            final dominant =
+                widget.dominantColor ?? _dominantColor ?? scheme.primary;
             final baseColor = _adjustBackground(dominant, preferLight);
             if (dynamicEnabled) {
               return _DynamicGradientBackground(
@@ -187,6 +199,9 @@ class _PlayerBackgroundState extends State<PlayerBackground> {
   }
 
   void _handleCoverChange(String? coverPath) {
+    // When a fixed dominant color is supplied (e.g. the 流光 preview), the song
+    // cover never drives the background, so skip the file probe entirely.
+    if (widget.dominantColor != null) return;
     if (_lastCoverPath == coverPath) return;
     _lastCoverPath = coverPath;
     _dominantColor = null;
@@ -211,6 +226,10 @@ class _PlayerBackgroundState extends State<PlayerBackground> {
     if (!mounted) return;
     if (_lastCoverPath != coverPath) return;
     if (color != null) {
+      if (_dominantCache.length >= _dominantCacheLimit) {
+        // Insertion-ordered map: evict the oldest entry to bound memory.
+        _dominantCache.remove(_dominantCache.keys.first);
+      }
       _dominantCache[coverPath] = color;
     }
     setState(() => _dominantColor = color);
@@ -219,34 +238,51 @@ class _PlayerBackgroundState extends State<PlayerBackground> {
   Future<Color?> _computeDominantColor(String coverPath) async {
     try {
       final bytes = await File(coverPath).readAsBytes();
-      if (bytes.isEmpty) return null;
-      final codec = await ui.instantiateImageCodec(
-        bytes,
-        targetWidth: 40,
-        targetHeight: 40,
-      );
-      final frame = await codec.getNextFrame();
-      final image = frame.image;
-      final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
-      if (data == null) return null;
-      final list = data.buffer.asUint8List();
-      int r = 0;
-      int g = 0;
-      int b = 0;
-      int count = 0;
-      for (var i = 0; i + 3 < list.length; i += 4) {
-        final a = list[i + 3];
-        if (a < 10) continue;
-        r += list[i];
-        g += list[i + 1];
-        b += list[i + 2];
-        count += 1;
-      }
-      if (count == 0) return null;
-      return Color.fromARGB(255, r ~/ count, g ~/ count, b ~/ count);
+      return averageImageColor(bytes);
     } catch (_) {
       return null;
     }
+  }
+}
+
+/// Average (dominant) color of decoded image [bytes], downscaled for speed.
+/// Shared by the live cover probe and the asset-based preview probe.
+Future<Color?> averageImageColor(Uint8List bytes) async {
+  if (bytes.isEmpty) return null;
+  final codec = await ui.instantiateImageCodec(
+    bytes,
+    targetWidth: 40,
+    targetHeight: 40,
+  );
+  final frame = await codec.getNextFrame();
+  final image = frame.image;
+  final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+  if (data == null) return null;
+  final list = data.buffer.asUint8List();
+  int r = 0;
+  int g = 0;
+  int b = 0;
+  int count = 0;
+  for (var i = 0; i + 3 < list.length; i += 4) {
+    final a = list[i + 3];
+    if (a < 10) continue;
+    r += list[i];
+    g += list[i + 1];
+    b += list[i + 2];
+    count += 1;
+  }
+  if (count == 0) return null;
+  return Color.fromARGB(255, r ~/ count, g ~/ count, b ~/ count);
+}
+
+/// Dominant color of a bundled asset image, for previews that want the aurora to
+/// follow a sample cover instead of the currently playing song.
+Future<Color?> dominantColorFromAsset(String assetPath) async {
+  try {
+    final data = await rootBundle.load(assetPath);
+    return averageImageColor(data.buffer.asUint8List());
+  } catch (_) {
+    return null;
   }
 }
 
@@ -329,6 +365,11 @@ class _DynamicGradientBackground extends StatefulWidget {
 
 class _DynamicGradientBackgroundState extends State<_DynamicGradientBackground>
     with SingleTickerProviderStateMixin {
+  // ~30fps over the 22s loop. Quantizing the animation phase lets the painter's
+  // shouldRepaint skip the full-screen multi-shader repaint between steps, while
+  // the very slow drift stays visually smooth.
+  static const int _phaseSteps = 22 * 30;
+
   late AnimationController _controller;
 
   @override
@@ -354,10 +395,12 @@ class _DynamicGradientBackgroundState extends State<_DynamicGradientBackground>
       child: AnimatedBuilder(
         animation: _controller,
         builder: (context, _) {
+          final t =
+              (_controller.value * _phaseSteps).floorToDouble() / _phaseSteps;
           return CustomPaint(
             size: Size.infinite,
             painter: _AuroraPainter(
-              t: _controller.value,
+              t: t,
               base: widget.baseColor,
               saturation: widget.saturation,
               hueShift: widget.hueShift,
@@ -391,18 +434,11 @@ class _AuroraPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
     final hsl = HSLColor.fromColor(base);
-    final s = (hsl.saturation * saturation).clamp(0.12, 1.0);
-
-    // 色彩变幻度 (hueShift) spreads the gradient's hue from top to bottom, so the
-    // whole field — not just the faint drifting blobs — visibly reacts to it.
-    // At hueShift 0 the field stays uniform, preserving the default look.
-    final spread = hueShift.clamp(0.0, 180.0) * 0.5;
-    double hueAt(double delta) => (hsl.hue + delta) % 360.0;
+    final s = (hsl.saturation * saturation).clamp(0.18, 1.0);
 
     // Base gradient fill.
-    final bgTop = hsl.withHue(hueAt(-spread)).withSaturation(s).toColor();
+    final bgTop = hsl.withSaturation(s).toColor();
     final bgBottom = hsl
-        .withHue(hueAt(spread))
         .withSaturation((s * 0.85).clamp(0.0, 1.0))
         .withLightness(
           (hsl.lightness + (isDark ? -0.04 : 0.03)).clamp(0.0, 1.0),
@@ -418,11 +454,7 @@ class _AuroraPainter extends CustomPainter {
     );
 
     final colors = _palette(hsl, s);
-    // Higher 饱和度 also lets the blobs pop a little more, so the slider reads
-    // clearly even over a light, lightness-clamped base.
-    final baseAlpha = isDark ? 0.50 : 0.34;
-    final blobAlpha = (baseAlpha * (0.7 + 0.3 * saturation.clamp(0.0, 2.0)))
-        .clamp(0.0, 0.85);
+    final blobAlpha = isDark ? 0.50 : 0.34;
     for (var i = 0; i < colors.length; i++) {
       final center = _blobCenter(i, size);
       final radius =
@@ -483,60 +515,5 @@ class _AuroraPainter extends CustomPainter {
         old.saturation != saturation ||
         old.hueShift != hueShift ||
         old.isDark != isDark;
-  }
-}
-
-/// Public, self-contained animated aurora view for previews (e.g. the 流光
-/// settings page). Renders the same flowing multi-blob gradient as the live
-/// player background, driven by [baseColor] / [saturation] / [hueShift].
-class AuroraGradientView extends StatefulWidget {
-  final Color baseColor;
-  final double saturation;
-  final double hueShift;
-
-  const AuroraGradientView({
-    super.key,
-    required this.baseColor,
-    required this.saturation,
-    required this.hueShift,
-  });
-
-  @override
-  State<AuroraGradientView> createState() => _AuroraGradientViewState();
-}
-
-class _AuroraGradientViewState extends State<AuroraGradientView>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(seconds: 22),
-  )..repeat();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return RepaintBoundary(
-      child: AnimatedBuilder(
-        animation: _controller,
-        builder: (context, _) {
-          return CustomPaint(
-            size: Size.infinite,
-            painter: _AuroraPainter(
-              t: _controller.value,
-              base: widget.baseColor,
-              saturation: widget.saturation,
-              hueShift: widget.hueShift,
-              isDark: isDark,
-            ),
-          );
-        },
-      ),
-    );
   }
 }
