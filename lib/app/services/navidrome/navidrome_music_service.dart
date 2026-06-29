@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../state/song_state.dart';
+import '../artwork_cache_helper.dart';
 import '../db/dao/song_dao.dart';
 import 'navidrome_source_repository.dart';
 
@@ -89,9 +90,28 @@ class NavidromeMusicService {
         );
         final albumInfo = _asMap(albumData['album']);
         final albumSongs = _readList(albumInfo, 'song');
+
+        // Cache the album cover once via Subsonic getCoverArt and share it with
+        // every track in the album, so the song list shows covers without having
+        // to play each track. Album-level keeps it to one fetch per album.
+        final coverArtId = _firstNonEmpty([
+          _readString(albumInfo, 'coverArt'),
+          _readString(album, 'coverArt'),
+          albumId,
+        ]);
+        String? coverPath;
+        if (!isCancelled() && coverArtId.isNotEmpty) {
+          coverPath = await _fetchAndCacheCover(source, coverArtId);
+        }
+
         for (final rawSong in albumSongs) {
           final song = _songFromJson(source, albumInfo, rawSong);
-          if (song != null) songs.add(song);
+          if (song == null) continue;
+          songs.add(
+            (coverPath != null && coverPath.isNotEmpty)
+                ? song.copyWith(localCoverPath: coverPath)
+                : song,
+          );
         }
         processedAlbums += 1;
         onProgress(
@@ -142,6 +162,37 @@ class NavidromeMusicService {
       throw StateError(message.isEmpty ? 'Subsonic request failed' : message);
     }
     return data;
+  }
+
+  /// Downloads an album cover via Subsonic `getCoverArt` and caches it locally,
+  /// returning the cached file path (or null on failure). Skips the download
+  /// when the same cover is already cached (e.g. on re-scan).
+  Future<String?> _fetchAndCacheCover(
+    NavidromeSource source,
+    String coverArtId,
+  ) async {
+    final key = '${source.id}:cover:$coverArtId';
+    try {
+      final existing = await ArtworkCacheHelper.cachedPathIfExists(key: key);
+      if (existing != null) return existing;
+      final uri = _repo.apiUri(
+        source,
+        'getCoverArt',
+        query: {'id': coverArtId, 'size': '600'},
+      );
+      final response = await _dio.getUri<List<int>>(
+        uri,
+        options: Options(responseType: ResponseType.bytes),
+      );
+      final data = response.data;
+      if (data == null || data.isEmpty) return null;
+      return await ArtworkCacheHelper.cacheCompressedArtwork(
+        bytes: Uint8List.fromList(data),
+        key: key,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   SongEntity? _songFromJson(

@@ -10,11 +10,16 @@ class WebDavFolderPickerPage extends StatefulWidget {
   final String initialPath;
   final List<String> initialSelected;
 
+  /// When true the picker selects a single folder: tap rows to navigate, then
+  /// confirm the current location. Returns a one-element list with that path.
+  final bool singleSelect;
+
   const WebDavFolderPickerPage({
     super.key,
     required this.source,
     required this.initialPath,
     this.initialSelected = const [],
+    this.singleSelect = false,
   });
 
   @override
@@ -53,7 +58,10 @@ class _WebDavFolderPickerPageState extends State<WebDavFolderPickerPage> {
       _error = null;
     });
     try {
-      final dirs = await _service.listDirectories(source: widget.source, path: _path);
+      final dirs = await _service.listDirectories(
+        source: widget.source,
+        path: _path,
+      );
       if (!mounted) return;
       setState(() {
         _dirs = dirs;
@@ -90,6 +98,7 @@ class _WebDavFolderPickerPageState extends State<WebDavFolderPickerPage> {
     final canGoUp = _path != '/';
     final selectedCount = _selected.length;
     final currentSelected = _selected.contains(_path);
+    final single = widget.singleSelect;
     final bottomPadding = AppPageScaffold.scrollableBottomPadding(context);
 
     return AppPageScaffold(
@@ -103,10 +112,10 @@ class _WebDavFolderPickerPageState extends State<WebDavFolderPickerPage> {
             onPressed: _loading
                 ? null
                 : () => Navigator.pop(
-                      context,
-                      _selected.toList()..sort(),
-                    ),
-            child: Text('完成($selectedCount)'),
+                    context,
+                    single ? [_path] : (_selected.toList()..sort()),
+                  ),
+            child: Text(single ? '选择此处' : '完成($selectedCount)'),
           ),
         ],
       ),
@@ -119,29 +128,33 @@ class _WebDavFolderPickerPageState extends State<WebDavFolderPickerPage> {
               AppSettingTile(
                 title: _path,
                 leading: const Icon(Icons.location_on_outlined),
-                trailing: Checkbox(
-                  value: currentSelected,
-                  onChanged: (v) {
-                    setState(() {
-                      if (v == true) {
-                        _selected.add(_path);
-                      } else {
-                        _selected.remove(_path);
-                      }
-                    });
-                  },
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  visualDensity: VisualDensity.compact,
-                ),
-                onTap: () {
-                  setState(() {
-                    if (currentSelected) {
-                      _selected.remove(_path);
-                    } else {
-                      _selected.add(_path);
-                    }
-                  });
-                },
+                trailing: single
+                    ? null
+                    : Checkbox(
+                        value: currentSelected,
+                        onChanged: (v) {
+                          setState(() {
+                            if (v == true) {
+                              _selected.add(_path);
+                            } else {
+                              _selected.remove(_path);
+                            }
+                          });
+                        },
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                onTap: single
+                    ? null
+                    : () {
+                        setState(() {
+                          if (currentSelected) {
+                            _selected.remove(_path);
+                          } else {
+                            _selected.add(_path);
+                          }
+                        });
+                      },
               ),
             ],
           ),
@@ -185,27 +198,30 @@ class _WebDavFolderPickerPageState extends State<WebDavFolderPickerPage> {
                       title: d.name,
                       subtitle: d.path,
                       leading: const Icon(Icons.folder_outlined),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Checkbox(
-                            value: _selected.contains(_normalize(d.path)),
-                            onChanged: (v) {
-                              final normalized = _normalize(d.path);
-                              setState(() {
-                                if (v == true) {
-                                  _selected.add(normalized);
-                                } else {
-                                  _selected.remove(normalized);
-                                }
-                              });
-                            },
-                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            visualDensity: VisualDensity.compact,
-                          ),
-                          const Icon(Icons.chevron_right),
-                        ],
-                      ),
+                      trailing: single
+                          ? const Icon(Icons.chevron_right)
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Checkbox(
+                                  value: _selected.contains(_normalize(d.path)),
+                                  onChanged: (v) {
+                                    final normalized = _normalize(d.path);
+                                    setState(() {
+                                      if (v == true) {
+                                        _selected.add(normalized);
+                                      } else {
+                                        _selected.remove(normalized);
+                                      }
+                                    });
+                                  },
+                                  materialTapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                const Icon(Icons.chevron_right),
+                              ],
+                            ),
                       onTap: () => _enter(d),
                     ),
                   ),

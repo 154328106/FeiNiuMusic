@@ -37,9 +37,20 @@ class ArtworkCacheHelper {
     }
   }
 
-  static Future<void> removeCachedArtwork({
-    required String key,
-  }) async {
+  /// Returns the cached artwork path for [key] if it already exists on disk,
+  /// without fetching or recompressing. Lets callers skip redundant downloads.
+  static Future<String?> cachedPathIfExists({required String key}) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final cacheDir = Directory(p.join(dir.path, 'artwork_cache'));
+      final name = _hashKey(key);
+      final target = File(p.join(cacheDir.path, '$name.jpg'));
+      if (await target.exists()) return target.path;
+    } catch (_) {}
+    return null;
+  }
+
+  static Future<void> removeCachedArtwork({required String key}) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
       final cacheDir = Directory(p.join(dir.path, 'artwork_cache'));

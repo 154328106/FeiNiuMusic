@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../app/router/app_page_route.dart';
 import '../../app/services/backup/backup_service.dart';
 import '../../app/services/webdav/webdav_source_repository.dart';
 import '../../components/index.dart';
+import '../source/webdav/webdav_folder_picker_page.dart';
 
 class BackupRestorePage extends StatefulWidget {
   const BackupRestorePage({super.key});
@@ -169,11 +171,7 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   Future<void> _addTarget() async {
     final source = await _pickWebDavSource();
     if (source == null) return;
-    final path = await _promptText(
-      title: '备份路径',
-      hint: '例如 /NagoMusicBackup',
-      initial: BackupService.defaultBackupPath,
-    );
+    final path = await _pickFolderForSource(source, '/');
     if (path == null) return;
     final next = await _backup.addTarget(
       BackupTarget(sourceId: source.id, path: path),
@@ -185,11 +183,16 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
 
   Future<void> _editTargetPath(int index) async {
     final target = _targets[index];
-    final path = await _promptText(
-      title: '修改备份路径',
-      hint: '例如 /NagoMusicBackup',
-      initial: target.path,
-    );
+    final source = _sourceById(target.sourceId);
+    // Browse the server when the source still exists; otherwise fall back to
+    // manual entry (can't list directories without credentials).
+    final path = source != null
+        ? await _pickFolderForSource(source, target.path)
+        : await _promptText(
+            title: '修改备份路径',
+            hint: '例如 /NagoMusicBackup',
+            initial: target.path,
+          );
     if (path == null) return;
     final next = await _backup.updateTargetAt(
       index,
@@ -197,6 +200,34 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
     );
     if (!mounted) return;
     setState(() => _targets = next);
+  }
+
+  /// Opens the WebDAV folder browser for [source] and returns the chosen path.
+  /// The source's stored credentials are reused — no re-entry needed.
+  Future<String?> _pickFolderForSource(
+    WebDavSource source,
+    String initialPath,
+  ) async {
+    final result = await Navigator.push<List<String>>(
+      context,
+      buildAppPageRoute(
+        (_) => WebDavFolderPickerPage(
+          source: source,
+          initialPath: initialPath,
+          singleSelect: true,
+        ),
+      ),
+    );
+    if (result == null || result.isEmpty) return null;
+    final picked = result.first.trim();
+    return picked.isEmpty ? null : picked;
+  }
+
+  WebDavSource? _sourceById(String sourceId) {
+    for (final s in _sources) {
+      if (s.id == sourceId) return s;
+    }
+    return null;
   }
 
   Future<void> _removeTarget(int index) async {
@@ -650,7 +681,7 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
           ),
         AppSettingTile(
           title: '添加备份目标',
-          subtitle: '选择一个 WebDAV 源并指定保存路径',
+          subtitle: '选择 WebDAV 源后浏览并选取服务器上的文件夹',
           leading: const Icon(Icons.add_circle_outline),
           trailing: const Icon(Icons.chevron_right_rounded),
           onTap: _busy ? null : _addTarget,
