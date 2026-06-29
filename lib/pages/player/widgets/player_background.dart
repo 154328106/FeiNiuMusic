@@ -391,26 +391,38 @@ class _AuroraPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
     final hsl = HSLColor.fromColor(base);
-    final s = (hsl.saturation * saturation).clamp(0.18, 1.0);
+    final s = (hsl.saturation * saturation).clamp(0.12, 1.0);
+
+    // 色彩变幻度 (hueShift) spreads the gradient's hue from top to bottom, so the
+    // whole field — not just the faint drifting blobs — visibly reacts to it.
+    // At hueShift 0 the field stays uniform, preserving the default look.
+    final spread = hueShift.clamp(0.0, 180.0) * 0.5;
+    double hueAt(double delta) => (hsl.hue + delta) % 360.0;
 
     // Base gradient fill.
-    final bgTop = hsl.withSaturation(s).toColor();
+    final bgTop = hsl.withHue(hueAt(-spread)).withSaturation(s).toColor();
     final bgBottom = hsl
+        .withHue(hueAt(spread))
         .withSaturation((s * 0.85).clamp(0.0, 1.0))
-        .withLightness((hsl.lightness + (isDark ? -0.04 : 0.03)).clamp(0.0, 1.0))
+        .withLightness(
+          (hsl.lightness + (isDark ? -0.04 : 0.03)).clamp(0.0, 1.0),
+        )
         .toColor();
     canvas.drawRect(
       rect,
       Paint()
-        ..shader = ui.Gradient.linear(
-          rect.topCenter,
-          rect.bottomCenter,
-          [bgTop, bgBottom],
-        ),
+        ..shader = ui.Gradient.linear(rect.topCenter, rect.bottomCenter, [
+          bgTop,
+          bgBottom,
+        ]),
     );
 
     final colors = _palette(hsl, s);
-    final blobAlpha = isDark ? 0.50 : 0.34;
+    // Higher 饱和度 also lets the blobs pop a little more, so the slider reads
+    // clearly even over a light, lightness-clamped base.
+    final baseAlpha = isDark ? 0.50 : 0.34;
+    final blobAlpha = (baseAlpha * (0.7 + 0.3 * saturation.clamp(0.0, 2.0)))
+        .clamp(0.0, 0.85);
     for (var i = 0; i < colors.length; i++) {
       final center = _blobCenter(i, size);
       final radius =
@@ -436,7 +448,8 @@ class _AuroraPainter extends CustomPainter {
     final phase = i * 1.7;
     final fx = 0.55 + i * 0.13;
     final fy = 0.70 + i * 0.11;
-    final cx = size.width * (0.5 + 0.40 * math.sin(2 * math.pi * t * fx + phase));
+    final cx =
+        size.width * (0.5 + 0.40 * math.sin(2 * math.pi * t * fx + phase));
     final cy =
         size.height *
         (0.45 + 0.38 * math.cos(2 * math.pi * t * fy + phase * 1.3));
