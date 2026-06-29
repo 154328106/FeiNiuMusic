@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:dio/dio.dart' as dio;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -52,6 +53,7 @@ class BackupService {
 
   static const int formatVersion = 1;
   static const String webDavFolder = 'NagoMusicBackup';
+  static const String defaultBackupPath = '/$webDavFolder';
   static const int maxBackupsPerDevice = 10;
 
   static const String _prefsSectionsKey = 'backup_sections_v1';
@@ -60,6 +62,7 @@ class BackupService {
   static const String _prefsAutoSourceId = 'backup_auto_source_id';
   static const String _prefsAutoIntervalH = 'backup_auto_interval_h';
   static const String _prefsAutoLastMs = 'backup_auto_last_ms';
+  static const String _prefsTargetsKey = 'backup_targets_v1';
   // Pref keys that must NOT be exported as generic "app settings".
   static const Set<String> _settingsDenyList = {
     'webdav_sources_v1',
@@ -72,6 +75,7 @@ class BackupService {
     _prefsAutoSourceId,
     _prefsAutoIntervalH,
     _prefsAutoLastMs,
+    _prefsTargetsKey,
   };
 
   final PlaylistsService _playlists = PlaylistsService.instance;
@@ -172,8 +176,7 @@ class BackupService {
 
     final applied = <String>[];
 
-    if (data['playlists'] is List &&
-        (restrict?.playlists ?? true)) {
+    if (data['playlists'] is List && (restrict?.playlists ?? true)) {
       final n = await _importPlaylists((data['playlists'] as List));
       applied.add('歌单 $n 个');
     }
@@ -353,15 +356,15 @@ class BackupService {
     return client;
   }
 
-  String _backupDir(WebDavSource source) {
-    var base = source.path.trim();
-    if (base.isEmpty) base = '/';
-    if (!base.startsWith('/')) base = '/$base';
+  String _normalizeDir(String path) {
+    var base = path.trim();
+    if (base.isEmpty) return defaultBackupPath;
     base = base.replaceAll('\\', '/');
+    if (!base.startsWith('/')) base = '/$base';
     if (base.length > 1 && base.endsWith('/')) {
       base = base.substring(0, base.length - 1);
     }
-    return base == '/' ? '/$webDavFolder' : '$base/$webDavFolder';
+    return base.isEmpty ? defaultBackupPath : base;
   }
 
   /// Stable per-install id so backups from different devices are distinguishable.
@@ -402,28 +405,87 @@ class BackupService {
     }
   }
 
-  /// Uploads a timestamped, per-device backup and prunes old ones for this
-  /// device. Returns the remote path written.
-  Future<String> uploadToWebDav(
-    WebDavSource source,
+  /// Resolves the WebDAV source a target points at, or throws if it was removed.
+  Future<WebDavSource> _sourceForTarget(BackupTarget target) async {
+    final sources = await _webdavRepo.loadSources();
+    for (final s in sources) {
+      if (s.id == target.sourceId) return s;
+    }
+    throw const BackupException('音源已删除，请重新选择备份目标');
+  }
+
+  /// Uploads a timestamped, per-device backup to a single target and prunes old
+  /// ones for this device. Returns the remote path written. Throws
+  /// [BackupException] with the real HTTP status + path on failure.
+  Future<String> uploadToTarget(
+    BackupTarget target,
     BackupSections sections,
   ) async {
+    final source = await _sourceForTarget(target);
     final jsonStr = await buildBackupJson(sections);
     final client = _client(source);
-    final dir = _backupDir(source);
+    final dir = _normalizeDir(target.path);
     try {
       await client.mkdirAll(dir);
-    } catch (_) {}
+    } catch (e) {
+      if (kDebugMode) debugPrint('BackupService mkdirAll($dir) failed: $e');
+    }
     final dev = await deviceId();
     final path = '$dir/nagomusic_backup__${dev}__${_tsNow()}.json';
-    await client.write(path, Uint8List.fromList(utf8.encode(jsonStr)));
+    try {
+      await client.write(path, Uint8List.fromList(utf8.encode(jsonStr)));
+    } on dio.DioException catch (e) {
+      final code = e.response?.statusCode;
+      throw BackupException(
+        code != null ? '上传失败：HTTP $code $dir' : '上传失败：$dir 不可写或无法连接',
+      );
+    } catch (e) {
+      throw BackupException('上传失败：$e');
+    }
     await _pruneWebDav(client, dir, dev, keep: maxBackupsPerDevice);
     return path;
   }
 
-  Future<List<WebDavBackupEntry>> listWebDavBackups(WebDavSource source) async {
+  /// One-click upload to every configured target. Never throws; collects a
+  /// per-target success/failure result for the caller to summarize.
+  Future<List<BackupUploadResult>> uploadToAllTargets(
+    List<BackupTarget> targets,
+    BackupSections sections,
+  ) async {
+    final sources = await _webdavRepo.loadSources();
+    String nameFor(BackupTarget t) {
+      for (final s in sources) {
+        if (s.id == t.sourceId) return s.name;
+      }
+      return t.sourceId;
+    }
+
+    final results = <BackupUploadResult>[];
+    for (final t in targets) {
+      try {
+        await uploadToTarget(t, sections);
+        results.add(
+          BackupUploadResult(target: t, sourceName: nameFor(t), ok: true),
+        );
+      } catch (e) {
+        final msg = e is BackupException ? e.message : e.toString();
+        results.add(
+          BackupUploadResult(
+            target: t,
+            sourceName: nameFor(t),
+            ok: false,
+            message: msg,
+          ),
+        );
+      }
+    }
+    return results;
+  }
+
+  Future<List<WebDavBackupEntry>> listWebDavBackups(BackupTarget target) async {
+    final source = await _sourceForTarget(target);
     final client = _client(source);
-    final dir = _backupDir(source);
+    final dir = _normalizeDir(target.path);
     List<webdav.File> files;
     try {
       files = await client.readDir(dir);
@@ -466,9 +528,10 @@ class BackupService {
   }
 
   Future<String> downloadFromWebDavPath(
-    WebDavSource source,
+    BackupTarget target,
     String path,
   ) async {
+    final source = await _sourceForTarget(target);
     final client = _client(source);
     final bytes = await client.read(path);
     return utf8.decode(bytes);
@@ -506,12 +569,82 @@ class BackupService {
 
   Future<List<WebDavSource>> webDavSources() => _webdavRepo.loadSources();
 
+  // ---- backup targets (shared by manual + auto) ----
+  Future<List<BackupTarget>> loadTargets() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_prefsTargetsKey);
+    if (raw != null && raw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) {
+          return decoded
+              .whereType<Map>()
+              .map((e) => BackupTarget.fromJson(e.cast<String, dynamic>()))
+              .where((t) => t.sourceId.trim().isNotEmpty)
+              .toList();
+        }
+      } catch (_) {}
+      return const [];
+    }
+    // One-time migration from the legacy single auto-backup source id.
+    final legacy = (prefs.getString(_prefsAutoSourceId) ?? '').trim();
+    if (legacy.isNotEmpty) {
+      final migrated = [
+        BackupTarget(sourceId: legacy, path: defaultBackupPath),
+      ];
+      await saveTargets(migrated);
+      return migrated;
+    }
+    return const [];
+  }
+
+  Future<void> saveTargets(List<BackupTarget> targets) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _prefsTargetsKey,
+      jsonEncode(targets.map((e) => e.toJson()).toList()),
+    );
+  }
+
+  Future<List<BackupTarget>> addTarget(BackupTarget target) async {
+    final list = await loadTargets();
+    final next = [
+      ...list.where(
+        (t) =>
+            !(t.sourceId == target.sourceId &&
+                _normalizeDir(t.path) == _normalizeDir(target.path)),
+      ),
+      target.copyWith(path: _normalizeDir(target.path)),
+    ];
+    await saveTargets(next);
+    return next;
+  }
+
+  Future<List<BackupTarget>> updateTargetAt(
+    int index,
+    BackupTarget target,
+  ) async {
+    final list = await loadTargets();
+    if (index < 0 || index >= list.length) return list;
+    final next = [...list];
+    next[index] = target.copyWith(path: _normalizeDir(target.path));
+    await saveTargets(next);
+    return next;
+  }
+
+  Future<List<BackupTarget>> removeTargetAt(int index) async {
+    final list = await loadTargets();
+    if (index < 0 || index >= list.length) return list;
+    final next = [...list]..removeAt(index);
+    await saveTargets(next);
+    return next;
+  }
+
   // ---- auto backup config ----
   Future<AutoBackupConfig> loadAutoConfig() async {
     final prefs = await SharedPreferences.getInstance();
     return AutoBackupConfig(
       enabled: prefs.getBool(_prefsAutoEnabled) ?? false,
-      sourceId: prefs.getString(_prefsAutoSourceId) ?? '',
       intervalHours: prefs.getInt(_prefsAutoIntervalH) ?? 24,
     );
   }
@@ -521,11 +654,6 @@ class BackupService {
     await prefs.setBool(_prefsAutoEnabled, v);
   }
 
-  Future<void> setAutoSourceId(String id) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_prefsAutoSourceId, id);
-  }
-
   Future<void> setAutoIntervalHours(int h) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_prefsAutoIntervalH, h);
@@ -533,8 +661,9 @@ class BackupService {
 
   static bool hasRunAutoBackupThisSession = false;
 
-  /// Called on app launch. Uploads to WebDAV if auto-backup is enabled and the
-  /// minimum interval has elapsed. Silent on failure.
+  /// Called on app launch. Uploads to every configured target if auto-backup is
+  /// enabled and the minimum interval has elapsed. Silent on failure, but only
+  /// records the run time if at least one target succeeded.
   Future<void> maybeAutoBackupOnLaunch() async {
     if (hasRunAutoBackupThisSession) return;
     hasRunAutoBackupThisSession = true;
@@ -546,17 +675,55 @@ class BackupService {
     final now = DateTime.now().millisecondsSinceEpoch;
     final last = prefs.getInt(_prefsAutoLastMs) ?? 0;
     if (now - last < cfg.intervalHours * 3600 * 1000) return;
-    final sources = await webDavSources();
-    if (sources.isEmpty) return;
-    WebDavSource target = sources.firstWhere(
-      (s) => s.id == cfg.sourceId,
-      orElse: () => sources.first,
-    );
-    try {
-      await uploadToWebDav(target, sections);
+    final targets = await loadTargets();
+    if (targets.isEmpty) return;
+    final results = await uploadToAllTargets(targets, sections);
+    if (results.any((r) => r.ok)) {
       await prefs.setInt(_prefsAutoLastMs, now);
-    } catch (_) {}
+    }
   }
+}
+
+class BackupTarget {
+  final String sourceId;
+  final String path;
+
+  const BackupTarget({required this.sourceId, required this.path});
+
+  BackupTarget copyWith({String? sourceId, String? path}) => BackupTarget(
+    sourceId: sourceId ?? this.sourceId,
+    path: path ?? this.path,
+  );
+
+  Map<String, dynamic> toJson() => {'sourceId': sourceId, 'path': path};
+
+  factory BackupTarget.fromJson(Map<String, dynamic> json) => BackupTarget(
+    sourceId: (json['sourceId'] ?? '').toString(),
+    path: (json['path'] ?? BackupService.defaultBackupPath).toString(),
+  );
+}
+
+class BackupUploadResult {
+  final BackupTarget target;
+  final String sourceName;
+  final bool ok;
+  final String? message;
+
+  const BackupUploadResult({
+    required this.target,
+    required this.sourceName,
+    required this.ok,
+    this.message,
+  });
+}
+
+/// Carries a user-facing message (incl. real HTTP status) for backup failures.
+class BackupException implements Exception {
+  final String message;
+  const BackupException(this.message);
+
+  @override
+  String toString() => message;
 }
 
 class WebDavBackupEntry {
@@ -579,12 +746,7 @@ class WebDavBackupEntry {
 
 class AutoBackupConfig {
   final bool enabled;
-  final String sourceId;
   final int intervalHours;
 
-  const AutoBackupConfig({
-    required this.enabled,
-    required this.sourceId,
-    required this.intervalHours,
-  });
+  const AutoBackupConfig({required this.enabled, required this.intervalHours});
 }

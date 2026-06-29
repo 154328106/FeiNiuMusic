@@ -18,9 +18,10 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   BackupSections _sections = const BackupSections();
   AutoBackupConfig _auto = const AutoBackupConfig(
     enabled: false,
-    sourceId: '',
     intervalHours: 24,
   );
+  List<BackupTarget> _targets = const [];
+  List<WebDavSource> _sources = const [];
   bool _loading = true;
   bool _busy = false;
 
@@ -33,13 +34,26 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   Future<void> _load() async {
     final s = await _backup.loadSections();
     final a = await _backup.loadAutoConfig();
+    final t = await _backup.loadTargets();
+    final src = await _backup.webDavSources();
     if (!mounted) return;
     setState(() {
       _sections = s;
       _auto = a;
+      _targets = t;
+      _sources = src;
       _loading = false;
     });
   }
+
+  String _sourceName(String sourceId) {
+    for (final s in _sources) {
+      if (s.id == sourceId) return s.name;
+    }
+    return '源已失效';
+  }
+
+  bool _sourceExists(String sourceId) => _sources.any((s) => s.id == sourceId);
 
   Future<void> _update(BackupSections s) async {
     setState(() => _sections = s);
@@ -90,28 +104,34 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
       AppToast.show(context, '请至少选择一项备份内容');
       return;
     }
-    final source = await _pickWebDavSource();
-    if (source == null) return;
-    try {
-      await _backup.uploadToWebDav(source, _sections);
-      if (!mounted) return;
+    if (_targets.isEmpty) {
+      AppToast.show(context, '请先在下方添加备份目标');
+      return;
+    }
+    final results = await _backup.uploadToAllTargets(_targets, _sections);
+    if (!mounted) return;
+    final okCount = results.where((r) => r.ok).length;
+    final failed = results.where((r) => !r.ok).toList();
+    if (failed.isEmpty) {
+      AppToast.show(context, '已备份到 $okCount 个目标', type: ToastType.success);
+    } else {
+      final detail = failed
+          .map((r) => '${r.sourceName}：${r.message ?? '失败'}')
+          .join('；');
       AppToast.show(
         context,
-        '已上传到 ${source.name}/${BackupService.webDavFolder}',
-        type: ToastType.success,
+        '成功 $okCount/${results.length}，失败：$detail',
+        type: ToastType.error,
       );
-    } catch (e) {
-      if (!mounted) return;
-      AppToast.show(context, '上传失败：$e', type: ToastType.error);
     }
   });
 
   Future<void> _importWebDav() => _run(() async {
-    final source = await _pickWebDavSource();
-    if (source == null) return;
+    final target = await _pickTarget('选择要恢复的来源');
+    if (target == null) return;
     List<WebDavBackupEntry> entries;
     try {
-      entries = await _backup.listWebDavBackups(source);
+      entries = await _backup.listWebDavBackups(target);
     } catch (e) {
       if (!mounted) return;
       AppToast.show(context, '读取备份列表失败：$e', type: ToastType.error);
@@ -119,14 +139,14 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
     }
     if (!mounted) return;
     if (entries.isEmpty) {
-      AppToast.show(context, '该 WebDAV 源没有找到备份');
+      AppToast.show(context, '该目标没有找到备份');
       return;
     }
     final chosen = await _pickBackupEntry(entries);
     if (chosen == null) return;
     String jsonStr;
     try {
-      jsonStr = await _backup.downloadFromWebDavPath(source, chosen.path);
+      jsonStr = await _backup.downloadFromWebDavPath(target, chosen.path);
     } catch (e) {
       if (!mounted) return;
       AppToast.show(context, '下载失败：$e', type: ToastType.error);
@@ -145,28 +165,98 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
     }
   });
 
-  Future<void> _toggleAuto(bool v) async {
-    if (v) {
-      final source = await _pickWebDavSource();
-      if (source == null) return;
-      await _backup.setAutoSourceId(source.id);
-      await _backup.setAutoEnabled(true);
-    } else {
-      await _backup.setAutoEnabled(false);
-    }
-    final a = await _backup.loadAutoConfig();
-    if (!mounted) return;
-    setState(() => _auto = a);
-  }
-
-  Future<void> _changeAutoSource() async {
+  // ---- backup targets ----
+  Future<void> _addTarget() async {
     final source = await _pickWebDavSource();
     if (source == null) return;
-    await _backup.setAutoSourceId(source.id);
+    final path = await _promptText(
+      title: '备份路径',
+      hint: '例如 /NagoMusicBackup',
+      initial: BackupService.defaultBackupPath,
+    );
+    if (path == null) return;
+    final next = await _backup.addTarget(
+      BackupTarget(sourceId: source.id, path: path),
+    );
+    if (!mounted) return;
+    setState(() => _targets = next);
+    AppToast.show(context, '已添加备份目标');
+  }
+
+  Future<void> _editTargetPath(int index) async {
+    final target = _targets[index];
+    final path = await _promptText(
+      title: '修改备份路径',
+      hint: '例如 /NagoMusicBackup',
+      initial: target.path,
+    );
+    if (path == null) return;
+    final next = await _backup.updateTargetAt(
+      index,
+      target.copyWith(path: path),
+    );
+    if (!mounted) return;
+    setState(() => _targets = next);
+  }
+
+  Future<void> _removeTarget(int index) async {
+    final next = await _backup.removeTargetAt(index);
+    if (!mounted) return;
+    setState(() => _targets = next);
+  }
+
+  Future<BackupTarget?> _pickTarget(String title) async {
+    if (_targets.isEmpty) {
+      AppToast.show(context, '请先添加备份目标');
+      return null;
+    }
+    if (_targets.length == 1) return _targets.first;
+    return showModalBottomSheet<BackupTarget>(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+              for (final t in _targets)
+                ListTile(
+                  leading: const Icon(Icons.cloud_outlined),
+                  title: Text(_sourceName(t.sourceId)),
+                  subtitle: Text(
+                    t.path,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () => Navigator.pop(context, t),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _toggleAuto(bool v) async {
+    if (v && _targets.isEmpty) {
+      AppToast.show(context, '请先在下方添加备份目标');
+      return;
+    }
+    await _backup.setAutoEnabled(v);
     final a = await _backup.loadAutoConfig();
     if (!mounted) return;
     setState(() => _auto = a);
-    AppToast.show(context, '自动备份目标已设为 ${source.name}');
   }
 
   Future<void> _changeAutoInterval() async {
@@ -210,9 +300,7 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
     return '每 $h 小时';
   }
 
-  Future<WebDavBackupEntry?> _pickBackupEntry(
-    List<WebDavBackupEntry> entries,
-  ) {
+  Future<WebDavBackupEntry?> _pickBackupEntry(List<WebDavBackupEntry> entries) {
     String fmtTime(DateTime? t) {
       if (t == null) return '未知时间';
       String two(int v) => v.toString().padLeft(2, '0');
@@ -327,14 +415,46 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
     );
   }
 
+  Future<String?> _promptText({
+    required String title,
+    required String hint,
+    required String initial,
+  }) {
+    final controller = TextEditingController(text: initial);
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: InputDecoration(hintText: hint),
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final v = controller.text.trim();
+              if (v.isEmpty) return;
+              Navigator.pop(ctx, v);
+            },
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<bool?> _confirmImport() {
     return showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('导入备份'),
-        content: const Text(
-          '将以「智能合并」方式导入：歌单按名称合并、听歌统计累加、音源/设置按需覆盖。是否继续？',
-        ),
+        content: const Text('将以「智能合并」方式导入：歌单按名称合并、听歌统计累加、音源/设置按需覆盖。是否继续？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -447,12 +567,16 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
                   ],
                 ),
                 const SizedBox(height: 16),
+                _buildTargetsSection(),
+                const SizedBox(height: 16),
                 AppSettingSection(
                   title: 'WebDAV 云端',
                   children: [
                     AppSettingTile(
                       title: '上传到 WebDAV',
-                      subtitle: '保存到 WebDAV 的 ${BackupService.webDavFolder} 目录',
+                      subtitle: _targets.isEmpty
+                          ? '请先在上方添加备份目标'
+                          : '一键备份到 ${_targets.length} 个目标',
                       leading: const Icon(Icons.cloud_upload_rounded),
                       trailing: _busy
                           ? _spinner()
@@ -461,7 +585,7 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
                     ),
                     AppSettingTile(
                       title: '从 WebDAV 导入',
-                      subtitle: '从云端备份历史中选择一个恢复',
+                      subtitle: '从某个目标的备份历史中选择一个恢复',
                       leading: const Icon(Icons.cloud_download_rounded),
                       trailing: const Icon(Icons.chevron_right_rounded),
                       onTap: _busy ? null : _importWebDav,
@@ -474,30 +598,64 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
                   children: [
                     AppSettingSwitchTile(
                       title: '启动时自动备份到 WebDAV',
-                      subtitle: '打开应用时按下面的间隔自动上传一份备份',
+                      subtitle: '打开应用时按下面的间隔自动上传到所有备份目标',
                       value: _auto.enabled,
                       onChanged: _toggleAuto,
                     ),
-                    if (_auto.enabled) ...[
+                    if (_auto.enabled)
                       AppSettingTile(
                         title: '备份间隔',
-                        subtitle: '最短 ${_intervalLabel(_auto.intervalHours)} 自动备份一次',
+                        subtitle:
+                            '最短 ${_intervalLabel(_auto.intervalHours)} 自动备份一次',
                         leading: const Icon(Icons.timer_outlined),
                         trailing: const Icon(Icons.chevron_right_rounded),
                         onTap: _busy ? null : _changeAutoInterval,
                       ),
-                      AppSettingTile(
-                        title: '更换目标源',
-                        subtitle: '选择用于自动备份的 WebDAV 源',
-                        leading: const Icon(Icons.cloud_outlined),
-                        trailing: const Icon(Icons.chevron_right_rounded),
-                        onTap: _busy ? null : _changeAutoSource,
-                      ),
-                    ],
                   ],
                 ),
               ],
             ),
+    );
+  }
+
+  Widget _buildTargetsSection() {
+    return AppSettingSection(
+      title: '备份目标',
+      children: [
+        for (var i = 0; i < _targets.length; i++)
+          AppSettingTile(
+            title: _sourceName(_targets[i].sourceId),
+            subtitle: _targets[i].path,
+            leading: Icon(
+              _sourceExists(_targets[i].sourceId)
+                  ? Icons.cloud_done_outlined
+                  : Icons.cloud_off_outlined,
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.edit_outlined),
+                  tooltip: '修改路径',
+                  onPressed: _busy ? null : () => _editTargetPath(i),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  tooltip: '移除',
+                  onPressed: _busy ? null : () => _removeTarget(i),
+                ),
+              ],
+            ),
+            onTap: _busy ? null : () => _editTargetPath(i),
+          ),
+        AppSettingTile(
+          title: '添加备份目标',
+          subtitle: '选择一个 WebDAV 源并指定保存路径',
+          leading: const Icon(Icons.add_circle_outline),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: _busy ? null : _addTarget,
+        ),
+      ],
     );
   }
 
