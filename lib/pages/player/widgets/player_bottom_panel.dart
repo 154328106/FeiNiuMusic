@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -10,7 +11,8 @@ import '../../../app/router/app_router.dart';
 import '../../../app/services/lyrics/lyrics_service.dart';
 import '../../../app/services/player_service.dart';
 import '../../../app/state/settings_state.dart';
-import '../../../components/common/app_list_tile.dart';
+import '../../../app/state/song_state.dart';
+import '../../../components/common/artwork_widget.dart';
 import '../../../components/common/labeled_slider.dart';
 import '../../../components/feedback/app_toast.dart';
 import '../../library/library_detail_pages.dart';
@@ -859,7 +861,7 @@ class _PlaylistSheet extends StatefulWidget {
 }
 
 class _PlaylistSheetState extends State<_PlaylistSheet> {
-  static const double _itemExtent = 60;
+  static const double _itemExtent = 64;
   late final ScrollController _controller;
   int _lastIndex = -1;
 
@@ -901,6 +903,8 @@ class _PlaylistSheetState extends State<_PlaylistSheet> {
       builder: (context) {
         final queue = widget.player.queueSignal.value;
         final currentIndex = widget.player.currentIndexSignal.value;
+        final mode = widget.player.playbackModeSignal.value;
+        final playing = widget.player.isPlayingSignal.value;
         final total = queue.length;
         final current = currentIndex >= 0 ? currentIndex + 1 : 0;
         if (currentIndex != _lastIndex && currentIndex >= 0) {
@@ -927,9 +931,12 @@ class _PlaylistSheetState extends State<_PlaylistSheet> {
             header: _PlaylistHeader(
               total: total,
               current: current,
+              mode: mode,
+              accent: scheme.primary,
               textColor: textColor,
               secondaryTextColor: secondaryTextColor,
               onClear: widget.player.clearQueue,
+              onCycleMode: widget.player.cyclePlaybackMode,
             ),
             body: Expanded(
               child: total == 0
@@ -971,51 +978,19 @@ class _PlaylistSheetState extends State<_PlaylistSheet> {
                         itemBuilder: (context, index) {
                           final song = queue[index];
                           final isCurrent = index == currentIndex;
-                          final titleColor = isCurrent
-                              ? scheme.primary
-                              : textColor;
-                          final artistColor = secondaryTextColor.withValues(
-                            alpha: 0.85,
-                          );
                           return RepaintBoundary(
                             key: ValueKey(song.id),
-                            child: AppListTile(
-                              title: song.title,
-                              subtitle: song.artist,
-                              titleColor: titleColor,
-                              subtitleColor: artistColor,
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    icon: Icon(
-                                      Icons.close_rounded,
-                                      color: secondaryTextColor,
-                                      size: 20,
-                                    ),
-                                    onPressed: () {
-                                      widget.player.removeFromQueue(index);
-                                    },
-                                  ),
-                                  ReorderableDelayedDragStartListener(
-                                    index: index,
-                                    child: Padding(
-                                      padding: const EdgeInsets.only(
-                                        left: 8,
-                                        right: 8,
-                                      ),
-                                      child: Icon(
-                                        Icons.menu,
-                                        color: secondaryTextColor,
-                                        size: 20,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              onTap: () {
-                                widget.player.skipToIndex(index);
-                              },
+                            child: _QueueItem(
+                              song: song,
+                              index: index,
+                              isCurrent: isCurrent,
+                              playing: playing,
+                              accent: scheme.primary,
+                              textColor: textColor,
+                              secondaryTextColor: secondaryTextColor,
+                              onTap: () => widget.player.skipToIndex(index),
+                              onRemove: () =>
+                                  widget.player.removeFromQueue(index),
                             ),
                           );
                         },
@@ -1032,66 +1007,99 @@ class _PlaylistSheetState extends State<_PlaylistSheet> {
 class _PlaylistHeader extends StatelessWidget {
   final int total;
   final int current;
+  final PlaybackMode mode;
   final Color textColor;
   final Color secondaryTextColor;
+  final Color accent;
   final VoidCallback onClear;
+  final VoidCallback onCycleMode;
 
   const _PlaylistHeader({
     required this.total,
     required this.current,
+    required this.mode,
     required this.textColor,
     required this.secondaryTextColor,
+    required this.accent,
     required this.onClear,
+    required this.onCycleMode,
   });
 
   @override
   Widget build(BuildContext context) {
+    final (IconData modeIcon, String modeLabel) = switch (mode) {
+      PlaybackMode.shuffle => (Icons.shuffle_rounded, '随机播放'),
+      PlaybackMode.single => (Icons.repeat_one_rounded, '单曲循环'),
+      PlaybackMode.loop => (Icons.repeat_rounded, '列表循环'),
+    };
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-          child: SizedBox(
-            height: 34,
-            child: Stack(
-              children: [
-                Positioned(
-                  left: 0,
-                  bottom: 2,
-                  child: Text(
-                    '$current/$total',
-                    style: TextStyle(fontSize: 13, color: secondaryTextColor),
-                  ),
-                ),
-                Align(
-                  alignment: Alignment.center,
-                  child: Text(
-                    '播放队列',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      color: textColor,
+          padding: const EdgeInsets.fromLTRB(16, 4, 8, 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '播放队列',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 17,
+                        color: textColor,
+                      ),
                     ),
-                  ),
-                ),
-                Positioned(
-                  right: 0,
-                  bottom: 2,
-                  child: TextButton(
-                    style: TextButton.styleFrom(
-                      padding: EdgeInsets.zero,
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      alignment: Alignment.centerRight,
+                    const SizedBox(height: 3),
+                    InkWell(
+                      onTap: onCycleMode,
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.only(
+                          top: 2,
+                          bottom: 2,
+                          right: 6,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(modeIcon, size: 16, color: secondaryTextColor),
+                            const SizedBox(width: 5),
+                            Text(
+                              '$modeLabel · $current/$total',
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                color: secondaryTextColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                    onPressed: onClear,
-                    child: Text(
-                      '清空',
-                      style: TextStyle(fontSize: 13, color: secondaryTextColor),
-                    ),
-                  ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+              TextButton.icon(
+                onPressed: onClear,
+                style: TextButton.styleFrom(
+                  foregroundColor: secondaryTextColor,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                icon: Icon(
+                  Icons.delete_sweep_rounded,
+                  size: 19,
+                  color: secondaryTextColor,
+                ),
+                label: Text(
+                  '清空',
+                  style: TextStyle(fontSize: 13, color: secondaryTextColor),
+                ),
+              ),
+            ],
           ),
         ),
         Container(
@@ -1100,6 +1108,215 @@ class _PlaylistHeader extends StatelessWidget {
           color: secondaryTextColor.withValues(alpha: 0.18),
         ),
       ],
+    );
+  }
+}
+
+/// A single row in the play-queue sheet: cover thumbnail + title/artist, with a
+/// highlighted background and animated equalizer bars for the current song.
+class _QueueItem extends StatelessWidget {
+  final SongEntity song;
+  final int index;
+  final bool isCurrent;
+  final bool playing;
+  final Color accent;
+  final Color textColor;
+  final Color secondaryTextColor;
+  final VoidCallback onTap;
+  final VoidCallback onRemove;
+
+  const _QueueItem({
+    required this.song,
+    required this.index,
+    required this.isCurrent,
+    required this.playing,
+    required this.accent,
+    required this.textColor,
+    required this.secondaryTextColor,
+    required this.onTap,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final titleColor = isCurrent ? accent : textColor;
+    final artistColor = isCurrent
+        ? accent.withValues(alpha: 0.78)
+        : secondaryTextColor.withValues(alpha: 0.82);
+    final artist = song.artist.trim().isEmpty ? '未知艺术家' : song.artist.trim();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      child: Material(
+        color: isCurrent
+            ? accent.withValues(alpha: 0.13)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 5, 4, 5),
+            child: Row(
+              children: [
+                _buildCover(),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        song.title.trim().isEmpty ? '未知歌曲' : song.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: titleColor,
+                          fontSize: 15,
+                          fontWeight: isCurrent
+                              ? FontWeight.w700
+                              : FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        artist,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: artistColor, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  icon: Icon(
+                    Icons.close_rounded,
+                    color: secondaryTextColor.withValues(alpha: 0.8),
+                    size: 20,
+                  ),
+                  onPressed: onRemove,
+                ),
+                ReorderableDelayedDragStartListener(
+                  index: index,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Icon(
+                      Icons.drag_handle_rounded,
+                      color: secondaryTextColor.withValues(alpha: 0.55),
+                      size: 20,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCover() {
+    const size = 44.0;
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ArtworkWidget(song: song, size: size, borderRadius: 8),
+          if (isCurrent)
+            DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                color: Colors.black.withValues(alpha: 0.38),
+              ),
+              child: Center(
+                child: _PlayingBars(color: Colors.white, animating: playing),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Three little bars that rise and fall to signal the currently-playing song.
+/// Falls back to a static shape when playback is paused.
+class _PlayingBars extends StatefulWidget {
+  final Color color;
+  final bool animating;
+
+  const _PlayingBars({required this.color, required this.animating});
+
+  @override
+  State<_PlayingBars> createState() => _PlayingBarsState();
+}
+
+class _PlayingBarsState extends State<_PlayingBars>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 820),
+    );
+    if (widget.animating) _controller.repeat();
+  }
+
+  @override
+  void didUpdateWidget(covariant _PlayingBars oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.animating && !_controller.isAnimating) {
+      _controller.repeat();
+    } else if (!widget.animating && _controller.isAnimating) {
+      _controller.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 16,
+      height: 16,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          final v = _controller.value;
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: List.generate(3, (i) {
+              final double height;
+              if (widget.animating) {
+                final t = (v + i / 3) % 1.0;
+                final scale = 0.5 - 0.5 * math.cos(2 * math.pi * t);
+                height = 4 + 10 * scale;
+              } else {
+                height = 8;
+              }
+              return Container(
+                width: 3,
+                height: height,
+                margin: const EdgeInsets.symmetric(horizontal: 1),
+                decoration: BoxDecoration(
+                  color: widget.color,
+                  borderRadius: BorderRadius.circular(1.5),
+                ),
+              );
+            }),
+          );
+        },
+      ),
     );
   }
 }
