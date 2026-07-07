@@ -5,11 +5,6 @@ on:
     branches:
       - main
       - master
-    paths:
-      - pubspec.yaml
-      - pubspec.lock
-      - android/**
-      - .github/workflows/build-release.yml
   workflow_dispatch:
 
 permissions:
@@ -47,7 +42,9 @@ jobs:
           SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       - run: |
           VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
-          TAG=${VERSION/+/-}
+          VERSION_TAG=${VERSION/+/-}
+          SHORT_SHA=${GITHUB_SHA::7}
+          TAG=${VERSION_TAG}-${GITHUB_RUN_NUMBER}-${SHORT_SHA}
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "TAG=$TAG" >> $GITHUB_ENV
       - run: |
