@@ -130,6 +130,11 @@ class LyricsParser {
         final all = multiSpaceReg.allMatches(fullText).toList();
         if (all.isNotEmpty) {
           splitIdx = all.last.start;
+        } else {
+          // Inline bilingual line separated by a SINGLE space, e.g.
+          // "\u6ef2\u3093\u3067\u3044\u308b\u308f \u6726\u80e7\u4f9d\u65e7" or "\u6d99\u304c tok tok tok \u6cea\u6c34\u6ee1\u895f" \u2014 the
+          // trailing pure-Chinese run is the translation of a foreign original.
+          splitIdx = _inlineChineseSplitIndex(fullText);
         }
       }
       if (splitIdx >= 0) {
@@ -154,6 +159,40 @@ class LyricsParser {
       }
     }
     return MapEntry(mainText, transText);
+  }
+
+  // For an inline bilingual line separated by a single ASCII space, return the
+  // index of the separator space where everything after it is a pure-Chinese
+  // translation and everything before it is a foreign-language original.
+  // Returns -1 when the line is not a foreign+Chinese pair (so pure-English,
+  // pure-Japanese, or pure-Chinese lines are left untouched).
+  static final RegExp _han = RegExp(r'[一-鿿㐀-䶿]');
+  static final RegExp _kana = RegExp(r'[぀-ヿ]');
+  static final RegExp _latinLetter = RegExp(r'[A-Za-z]');
+  static final RegExp _hangul = RegExp(r'[가-힯]');
+
+  static bool _isChineseOnly(String s) =>
+      _han.hasMatch(s) &&
+      !_kana.hasMatch(s) &&
+      !_latinLetter.hasMatch(s) &&
+      !_hangul.hasMatch(s);
+
+  static bool _isForeign(String s) =>
+      _kana.hasMatch(s) || _latinLetter.hasMatch(s) || _hangul.hasMatch(s);
+
+  static int _inlineChineseSplitIndex(String text) {
+    for (int i = 0; i < text.length; i++) {
+      if (text.codeUnitAt(i) != 0x20) continue;
+      final left = text.substring(0, i).trim();
+      final right = text.substring(i + 1).trim();
+      if (left.isEmpty || right.isEmpty) continue;
+      // Earliest space whose remainder is entirely Chinese gives the longest
+      // (complete) trailing translation.
+      if (_isChineseOnly(right) && _isForeign(left)) {
+        return i;
+      }
+    }
+    return -1;
   }
 
   static Duration _parseTimeMatch(RegExpMatch m) {
