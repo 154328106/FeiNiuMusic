@@ -29,17 +29,43 @@ class LyricsParser {
 
   static bool _hasText(String? text) => (text ?? '').trim().isNotEmpty;
 
+  // Two separately-timed lyric lines are effectively never closer than this in
+  // real music, so a small tolerance safely pairs an original line with a
+  // translation line whose timestamp was rounded slightly differently.
+  static const int _mergeToleranceMs = 30;
+
+  static int _findMergeTargetIndex(
+    List<fl.LyricLine> modelLines,
+    Duration start,
+  ) {
+    final ms = start.inMilliseconds;
+    final exact = modelLines.lastIndexWhere(
+      (l) => l.start.inMilliseconds == ms,
+    );
+    if (exact != -1) return exact;
+    return modelLines.lastIndexWhere(
+      (l) => (l.start.inMilliseconds - ms).abs() <= _mergeToleranceMs,
+    );
+  }
+
+  /// Merge a second line that shares (or nearly shares) the timestamp of an
+  /// existing line. By universal LRC convention the first line at a timestamp
+  /// is the original and any following line at the same timestamp is its
+  /// translation — regardless of language. We therefore do NOT gate this on a
+  /// script heuristic (which broke Chinese-original songs, same-script
+  /// translations, and translations containing latin characters) and we never
+  /// silently drop the incoming text.
   static void _mergeDuplicateLine(
     List<fl.LyricLine> modelLines,
     int existingIndex,
     fl.LyricLine incoming,
   ) {
     final existing = modelLines[existingIndex];
-    if (_hasText(existing.translation)) return;
 
-    if (_hasText(incoming.translation) &&
-        (existing.text.trim() == incoming.text.trim() ||
-            _isTranslationCandidate(existing.text, incoming.translation!))) {
+    // The incoming line carries its own inline translation (e.g. "text / 译").
+    // Prefer it only when the existing line has none yet.
+    if (_hasText(incoming.translation)) {
+      if (_hasText(existing.translation)) return;
       modelLines[existingIndex] = fl.LyricLine(
         start: existing.start,
         end: existing.end ?? incoming.end,
@@ -50,28 +76,30 @@ class LyricsParser {
       return;
     }
 
-    if (!_hasText(incoming.translation) &&
-        _isTranslationCandidate(existing.text, incoming.text)) {
-      modelLines[existingIndex] = fl.LyricLine(
-        start: existing.start,
-        end: existing.end ?? incoming.end,
-        text: existing.text,
-        translation: incoming.text,
-        words: existing.words,
-      );
+    // Exact-duplicate line (same text, same time): keep the first, drop the
+    // duplicate rather than turning identical text into a "translation".
+    if (existing.text.trim() == incoming.text.trim()) return;
+
+    // The existing line already has a translation: this is a third same-time
+    // line. Keep it as its own line so nothing is lost.
+    if (_hasText(existing.translation)) {
+      if (!modelLines.any(
+        (l) => l.start == incoming.start && l.text == incoming.text,
+      )) {
+        modelLines.add(incoming);
+      }
       return;
     }
 
-    if (!_hasText(incoming.translation) &&
-        _isTranslationCandidate(incoming.text, existing.text)) {
-      modelLines[existingIndex] = fl.LyricLine(
-        start: existing.start,
-        end: incoming.end ?? existing.end,
-        text: incoming.text,
-        translation: existing.text,
-        words: incoming.words ?? existing.words,
-      );
-    }
+    // Standard case: incoming.text is the translation of the existing line.
+    // Preserve the existing line's karaoke words.
+    modelLines[existingIndex] = fl.LyricLine(
+      start: existing.start,
+      end: existing.end ?? incoming.end,
+      text: existing.text,
+      translation: incoming.text,
+      words: existing.words,
+    );
   }
 
   static MapEntry<String, String?> _splitTranslation(
@@ -604,9 +632,7 @@ class LyricsParser {
           translation: transText,
           words: words.isNotEmpty ? words : null,
         );
-        final existingIndex = modelLines.lastIndexWhere(
-          (l) => l.start == lineStart,
-        );
+        final existingIndex = _findMergeTargetIndex(modelLines, lineStart);
         if (existingIndex != -1) {
           _mergeDuplicateLine(modelLines, existingIndex, incoming);
           continue;
@@ -622,7 +648,7 @@ class LyricsParser {
             text: mainText,
             translation: transText,
           );
-          final existingIndex = modelLines.lastIndexWhere((l) => l.start == d);
+          final existingIndex = _findMergeTargetIndex(modelLines, d);
           if (existingIndex != -1) {
             _mergeDuplicateLine(modelLines, existingIndex, incoming);
             continue;

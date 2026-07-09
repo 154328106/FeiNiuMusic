@@ -1,3 +1,4 @@
+import 'package:flutter_lyric/core/lyric_model.dart' as fl;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nagomusic/app/services/lyrics/lyrics_parser.dart';
 
@@ -37,5 +38,78 @@ void main() {
     expect(line.text, 'Hello world');
     expect(line.translation, '\u4f60\u597d\u4e16\u754c');
     expect(line.words?.map((w) => w.text).join(), 'Hello world');
+  });
+
+  fl.LyricLine lineAt(String lrc, Duration t) {
+    final model = LyricsParser.buildModelFromRaw(
+      lrc,
+      predictDuration: false,
+      forceKaraoke: false,
+    );
+    return model.lines.firstWhere((l) => l.start == t);
+  }
+
+  test('chinese-original song keeps original as main, foreign as translation',
+      () {
+    // Same timestamp; original is Han-only, translation is latin. Must NOT swap.
+    const lrc = '''
+[00:10.00]\u6211\u4eec\u4e0d\u518d\u8054\u7cfb
+[00:10.00]We are no longer in touch
+''';
+    final line = lineAt(lrc, const Duration(seconds: 10));
+    expect(line.text, '\u6211\u4eec\u4e0d\u518d\u8054\u7cfb');
+    expect(line.translation, 'We are no longer in touch');
+  });
+
+  test('translation containing latin characters is still detected', () {
+    const lrc = '''
+[00:12.00]I love you
+[00:12.00]\u6211\u7231\u4f60 baby
+''';
+    final line = lineAt(lrc, const Duration(seconds: 12));
+    expect(line.text, 'I love you');
+    expect(line.translation, '\u6211\u7231\u4f60 baby');
+  });
+
+  test('same-script (zh/zh) translation is detected', () {
+    const lrc = '''
+[00:05.00]\u5173\u5173\u96ce\u9e20
+[00:05.00]\u96ce\u9e20\u9e1f\u5173\u5173\u548c\u5531
+''';
+    final line = lineAt(lrc, const Duration(seconds: 5));
+    expect(line.text, '\u5173\u5173\u96ce\u9e20');
+    expect(line.translation, '\u96ce\u9e20\u9e1f\u5173\u5173\u548c\u5531');
+  });
+
+  test('near-timestamp translation (rounding) is merged', () {
+    const lrc = '''
+[00:10.00]I love you
+[00:10.01]\u6211\u7231\u4f60
+''';
+    final model = LyricsParser.buildModelFromRaw(
+      lrc,
+      predictDuration: false,
+      forceKaraoke: false,
+    );
+    expect(model.lines.length, 1);
+    expect(model.lines.first.text, 'I love you');
+    expect(model.lines.first.translation, '\u6211\u7231\u4f60');
+  });
+
+  test('exact-duplicate line is not turned into a translation', () {
+    const lrc = '''
+[00:03.00]la la la
+[00:03.00]la la la
+''';
+    final model = LyricsParser.buildModelFromRaw(
+      lrc,
+      predictDuration: false,
+      forceKaraoke: false,
+    );
+    final line = model.lines.firstWhere(
+      (l) => l.start == const Duration(seconds: 3),
+    );
+    expect(line.text, 'la la la');
+    expect(line.translation, isNull);
   });
 }
