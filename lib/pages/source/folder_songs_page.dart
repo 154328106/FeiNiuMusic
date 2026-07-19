@@ -287,144 +287,150 @@ class _FolderSongsPageState extends State<FolderSongsPage> with SignalsMixin {
 
   @override
   Widget build(BuildContext context) {
-    return AppPageScaffold(
-      extendBodyBehindAppBar: true,
-      showMiniPlayer: !_multiSelect.value,
-      appBar: AppTopBar(
-        title: widget.title,
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-      ),
-      body: Watch.builder(
-        builder: (context) {
-          if (_isLoading.value) {
-            return const Center(child: CircularProgressIndicator());
-          }
+    return AppNavigationModeBuilder(
+      builder: (context, useBottomNavigation) => AppPageScaffold(
+        extendBodyBehindAppBar: true,
+        showMiniPlayer: !_multiSelect.value,
+        appBar: AppTopBar(
+          title: widget.title,
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+        ),
+        body: Watch.builder(
+          builder: (context) {
+            if (_isLoading.value) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-          final songs = _sortedSongs(_songs.value);
-          final currentId = _currentSongId.value;
-          final selected = _selectedIds.value;
-          final selectedCount = selected.length;
-          final isAllSelected =
-              songs.isNotEmpty && selectedCount == songs.length;
+            final songs = _sortedSongs(_songs.value);
+            final currentId = _currentSongId.value;
+            final selected = _selectedIds.value;
+            final selectedCount = selected.length;
+            final isAllSelected =
+                songs.isNotEmpty && selectedCount == songs.length;
 
-          if (songs.isEmpty) {
-            return const Center(child: Text('此文件夹没有歌曲'));
-          }
+            if (songs.isEmpty) {
+              return const Center(child: Text('此文件夹没有歌曲'));
+            }
 
-          return Column(
-            children: [
-              MediaListHeader(
-                multiSelect: _multiSelect.value,
-                isAllSelected: isAllSelected,
-                selectedCount: selectedCount,
-                totalCount: songs.length,
-                playbackCount: songs.length,
-                isSequentialPlay: _isSequentialPlay.value,
-                onToggleSelectAll: () => _toggleSelectAll(songs),
-                onPlay: () {
-                  if (songs.isEmpty) return;
-                  final queue = List<SongEntity>.from(songs);
-                  if (!_isSequentialPlay.value) {
-                    queue.shuffle();
-                  }
-                  PlayerService.instance.playQueue(queue, 0);
-                },
-                onConfigurePlay: () {},
-                onTogglePlayMode: _togglePlayMode,
-                onSort: _showSortSheet,
-                onToggleMultiSelect: _toggleMultiSelect,
-              ),
-              Expanded(
-                child: MediaListView(
-                  controller: _scrollController,
-                  itemCount: songs.length,
-                  itemExtent: _itemExtent,
-                  bottomInset:
-                      MediaQuery.of(context).padding.bottom +
-                      (_multiSelect.value ? 160 : 80),
-                  itemBuilder: (context, index) {
-                    final song = songs[index];
-                    final isPlaying = song.id == currentId;
-                    final isSelected = selected.contains(song.id);
-                    return MediaListTile(
-                      title: song.title,
-                      subtitle: song.artist,
-                      leading: ArtworkWidget(
-                        song: song,
-                        size: 48,
-                        borderRadius: 8,
-                      ),
-                      isHighlighted: isPlaying,
-                      selected: isSelected,
-                      multiSelect: _multiSelect.value,
-                      onTap: () {
-                        if (_multiSelect.value) {
-                          final next = Set<String>.from(selected);
-                          if (next.contains(song.id)) {
-                            next.remove(song.id);
-                          } else {
-                            next.add(song.id);
-                          }
-                          _selectedIds.value = next;
-                          return;
-                        }
-                        _playQueue(songs, song);
-                      },
-                      onLongPress: () {
-                        if (_multiSelect.value) return;
-                        showModalBottomSheet<void>(
-                          context: context,
-                          backgroundColor: Colors.transparent,
-                          isScrollControlled: true,
-                          builder: (_) => SongDetailSheet(song: song),
-                        );
-                      },
-                    );
+            return Column(
+              children: [
+                MediaListHeader(
+                  multiSelect: _multiSelect.value,
+                  isAllSelected: isAllSelected,
+                  selectedCount: selectedCount,
+                  totalCount: songs.length,
+                  playbackCount: songs.length,
+                  isSequentialPlay: _isSequentialPlay.value,
+                  onToggleSelectAll: () => _toggleSelectAll(songs),
+                  onPlay: () {
+                    if (songs.isEmpty) return;
+                    final queue = List<SongEntity>.from(songs);
+                    if (!_isSequentialPlay.value) {
+                      queue.shuffle();
+                    }
+                    PlayerService.instance.playQueue(queue, 0);
                   },
+                  onConfigurePlay: () {},
+                  onTogglePlayMode: _togglePlayMode,
+                  onSort: _showSortSheet,
+                  onToggleMultiSelect: _toggleMultiSelect,
                 ),
-              ),
-              if (_multiSelect.value)
-                MultiSelectBottomBar(
-                  actions: [
-                    MultiSelectAction(
-                      icon: Icons.queue_play_next,
-                      label: '下一首播放',
-                      onTap: selectedCount == 0
-                          ? null
-                          : () async {
-                              final selectedSongs = songs
-                                  .where((s) => selected.contains(s.id))
-                                  .toList(growable: false);
-                              await PlayerService.instance.insertNext(
-                                selectedSongs,
-                              );
-                              if (!context.mounted) return;
-                              AppToast.show(
-                                context,
-                                '已将 $selectedCount 首歌曲加入下一首播放',
-                              );
-                              _toggleMultiSelect();
-                            },
-                    ),
-                    MultiSelectAction(
-                      icon: Icons.playlist_add,
-                      label: '收藏到歌单',
-                      onTap: selectedCount == 0
-                          ? null
-                          : _openAddToPlaylistSheet,
-                    ),
-                    MultiSelectAction(
-                      icon: Icons.delete_outline,
-                      label: '移除',
-                      isDestructive: true,
-                      onTap: selectedCount == 0 ? null : _removeSelectedSongs,
-                    ),
-                  ],
+                Expanded(
+                  child: MediaListView(
+                    controller: _scrollController,
+                    itemCount: songs.length,
+                    itemExtent: _itemExtent,
+                    bottomInset:
+                        MediaQuery.of(context).padding.bottom +
+                        (_multiSelect.value ? 160 : 80),
+                    itemBuilder: (context, index) {
+                      final song = songs[index];
+                      final isPlaying = song.id == currentId;
+                      final isSelected = selected.contains(song.id);
+                      return MediaListTile(
+                        title: song.title,
+                        subtitle: song.artist,
+                        leading: ArtworkWidget(
+                          song: song,
+                          size: 48,
+                          borderRadius: 8,
+                        ),
+                        isHighlighted: isPlaying,
+                        selected: isSelected,
+                        multiSelect: _multiSelect.value,
+                        onTap: () {
+                          if (_multiSelect.value) {
+                            final next = Set<String>.from(selected);
+                            if (next.contains(song.id)) {
+                              next.remove(song.id);
+                            } else {
+                              next.add(song.id);
+                            }
+                            _selectedIds.value = next;
+                            return;
+                          }
+                          _playQueue(songs, song);
+                        },
+                        onLongPress: () {
+                          if (_multiSelect.value) return;
+                          showModalBottomSheet<void>(
+                            context: context,
+                            backgroundColor: Colors.transparent,
+                            isScrollControlled: true,
+                            builder: (_) => SongDetailSheet(song: song),
+                          );
+                        },
+                      );
+                    },
+                  ),
                 ),
-            ],
-          );
-        },
+                if (_multiSelect.value)
+                  MultiSelectBottomBar(
+                    actions: [
+                      MultiSelectAction(
+                        icon: Icons.queue_play_next,
+                        label: '下一首播放',
+                        onTap: selectedCount == 0
+                            ? null
+                            : () async {
+                                final selectedSongs = songs
+                                    .where((s) => selected.contains(s.id))
+                                    .toList(growable: false);
+                                await PlayerService.instance.insertNext(
+                                  selectedSongs,
+                                );
+                                if (!context.mounted) return;
+                                AppToast.show(
+                                  context,
+                                  '已将 $selectedCount 首歌曲加入下一首播放',
+                                );
+                                _toggleMultiSelect();
+                              },
+                      ),
+                      MultiSelectAction(
+                        icon: Icons.playlist_add,
+                        label: '收藏到歌单',
+                        onTap: selectedCount == 0
+                            ? null
+                            : _openAddToPlaylistSheet,
+                      ),
+                      MultiSelectAction(
+                        icon: Icons.delete_outline,
+                        label: '移除',
+                        isDestructive: true,
+                        onTap: selectedCount == 0 ? null : _removeSelectedSongs,
+                      ),
+                    ],
+                  ),
+              ],
+            );
+          },
+        ),
+        bottomNavIndex: useBottomNavigation ? 0 : null,
+        onBottomNavTap: useBottomNavigation
+            ? (index) => navigateToPrimaryDestination(context, index)
+            : null,
       ),
     );
   }

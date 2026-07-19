@@ -62,7 +62,8 @@ class SideMenu extends StatelessWidget {
                     _MenuItem(
                       icon: Icons.people_rounded,
                       label: '艺术家',
-                      onTap: () => _navigateAndClose(context, AppRoutes.artists),
+                      onTap: () =>
+                          _navigateAndClose(context, AppRoutes.artists),
                     ),
                     _MenuItem(
                       icon: Icons.queue_music_rounded,
@@ -73,7 +74,8 @@ class SideMenu extends StatelessWidget {
                     _MenuItem(
                       icon: Icons.folder_rounded,
                       label: '文件夹',
-                      onTap: () => _navigateAndClose(context, AppRoutes.folders),
+                      onTap: () =>
+                          _navigateAndClose(context, AppRoutes.folders),
                     ),
                     _MenuItem(
                       icon: Icons.library_music_rounded,
@@ -111,57 +113,62 @@ class SideMenu extends StatelessWidget {
   Widget _buildHeader(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
-      child: Row(
-        children: [
-          Container(
-            width: 52,
-            height: 52,
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: scheme.primary.withValues(alpha: 0.25),
-                  blurRadius: 14,
-                  offset: const Offset(0, 5),
+    return Semantics(
+      button: true,
+      label: '返回音乐库',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: () => _navigateAndClose(context, AppRoutes.home),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+          child: Row(
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: scheme.primary.withValues(alpha: 0.25),
+                      blurRadius: 14,
+                      offset: const Offset(0, 5),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            child: Image.asset(
-              '开发文档/NagoAPP图标.png',
-              fit: BoxFit.cover,
-            ),
+                child: Image.asset('开发文档/NagoAPP图标.png', fit: BoxFit.cover),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'NagoMusic',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '本地与云端音乐',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'NagoMusic',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: scheme.onSurface,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '本地与云端音乐',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

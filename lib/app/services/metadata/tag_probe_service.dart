@@ -10,9 +10,10 @@ import 'package:path_provider/path_provider.dart';
 import '../cache/audio_cache_service.dart';
 
 import '../http_utils.dart';
-import 'tag_probe_result.dart';
 import 'ogg_vorbis_comment.dart';
 import 'probe_handlers.dart';
+import 'tag_probe_result.dart';
+import 'wav_id3_metadata.dart';
 
 class TagProbeService {
   static final TagProbeService instance = TagProbeService._internal();
@@ -26,12 +27,17 @@ class TagProbeService {
 
   final AudioCacheService _audioCache = AudioCacheService.instance;
   final List<ProbeHandler> _probeHandlers = [ProgressiveHeadHandler()];
+  Future<Directory>? _supportDirectoryFuture;
 
   static final Map<String, Future<TagProbeResult?>> _inflight = {};
   static final Map<String, Future<File?>> _remoteFileInflight = {};
   static final Map<String, Future<File?>> _remoteTailInflight = {};
   static final Map<String, Future<int?>> _remoteTotalInflight = {};
   static final Map<String, int?> _remoteTotalCache = {};
+
+  Future<Directory> _supportDirectory() {
+    return _supportDirectoryFuture ??= getApplicationSupportDirectory();
+  }
 
   Map<String, String>? _effectiveHeaders(Map<String, String>? headers) {
     if (headers == null || headers.isEmpty) {
@@ -90,7 +96,7 @@ class TagProbeService {
     if (parsed == null) return;
     if (!(parsed.isScheme('http') || parsed.isScheme('https'))) return;
     try {
-      final support = await getApplicationSupportDirectory();
+      final support = await _supportDirectory();
       final cacheDir = Directory(p.join(support.path, 'tag_probe_cache'));
       final ext = p.extension(parsed.path).isNotEmpty
           ? p.extension(parsed.path)
@@ -174,7 +180,9 @@ class TagProbeService {
           includeArtwork: includeArtwork,
         );
         if (parsedTmp != null) {
-          if (!includeArtwork) return parsedTmp;
+          if (!includeArtwork && _hasDescriptiveTags(parsedTmp)) {
+            return parsedTmp;
+          }
           if ((parsedTmp.artwork?.isNotEmpty ?? false)) return parsedTmp;
         }
       }
@@ -205,6 +213,14 @@ class TagProbeService {
     const steps = <int>[2 * 1024 * 1024, 4 * 1024 * 1024, 8 * 1024 * 1024];
 
     final totalBytes = await _remoteTotalBytes(uri, headers: headers);
+    if (p.extension(uri.path).toLowerCase() == '.wav') {
+      return _probeRemoteWav(
+        uri,
+        headers: headers,
+        includeArtwork: includeArtwork,
+        totalBytes: totalBytes,
+      );
+    }
     TagProbeResult? best;
 
     final cached = await _existingRemoteCacheFile(uri, headers: headers);
@@ -290,6 +306,68 @@ class TagProbeService {
     }
 
     return best;
+  }
+
+  Future<TagProbeResult?> _probeRemoteWav(
+    Uri uri, {
+    Map<String, String>? headers,
+    required bool includeArtwork,
+    required int? totalBytes,
+  }) async {
+    final head = await _downloadPartialCached(
+      uri,
+      headers: headers,
+      maxBytes: 64 * 1024,
+    );
+    final headResult = head == null
+        ? null
+        : await _probeFromFile(head, includeArtwork: false);
+
+    final tail = await _downloadTailCached(
+      uri,
+      headers: headers,
+      maxBytes: 2 * 1024 * 1024,
+    );
+    final tailResult = tail == null
+        ? null
+        : await _probeFromFile(tail, includeArtwork: includeArtwork);
+
+    final merged = _mergeProbeResults(tailResult, headResult);
+    if (merged == null) return null;
+    return _normalizeRemoteResult(
+      uri: uri,
+      file: tail ?? head!,
+      totalBytes: totalBytes,
+      parsed: merged,
+    );
+  }
+
+  bool _hasDescriptiveTags(TagProbeResult result) {
+    return (result.title?.trim().isNotEmpty ?? false) ||
+        (result.artist?.trim().isNotEmpty ?? false) ||
+        (result.album?.trim().isNotEmpty ?? false);
+  }
+
+  TagProbeResult? _mergeProbeResults(
+    TagProbeResult? primary,
+    TagProbeResult? fallback,
+  ) {
+    if (primary == null) return fallback;
+    if (fallback == null) return primary;
+    return TagProbeResult(
+      title: primary.title ?? fallback.title,
+      artist: primary.artist ?? fallback.artist,
+      album: primary.album ?? fallback.album,
+      durationMs: primary.durationMs ?? fallback.durationMs,
+      bitrate: primary.bitrate ?? fallback.bitrate,
+      sampleRate: primary.sampleRate ?? fallback.sampleRate,
+      fileSize: primary.fileSize ?? fallback.fileSize,
+      format: primary.format ?? fallback.format,
+      artwork: primary.artwork ?? fallback.artwork,
+      lyrics: primary.lyrics ?? fallback.lyrics,
+      trackNumber: primary.trackNumber ?? fallback.trackNumber,
+      discNumber: primary.discNumber ?? fallback.discNumber,
+    );
   }
 
   Future<int?> _remoteTotalBytes(Uri uri, {Map<String, String>? headers}) {
@@ -405,6 +483,10 @@ class TagProbeService {
 
     final keepDurationEvenIfPartial = format == 'FLAC' || format == 'WAV';
     int? durationMs = parsed.durationMs;
+    var fileSize = parsed.fileSize;
+    if (isProbablyPartial) {
+      fileSize = totalBytes;
+    }
 
     if (isProbablyPartial && !keepDurationEvenIfPartial) {
       final total = totalBytes;
@@ -425,7 +507,9 @@ class TagProbeService {
       }
     }
 
-    if (durationMs == parsed.durationMs) return parsed;
+    if (durationMs == parsed.durationMs && fileSize == parsed.fileSize) {
+      return parsed;
+    }
 
     return TagProbeResult(
       title: parsed.title,
@@ -434,10 +518,12 @@ class TagProbeService {
       durationMs: durationMs,
       bitrate: parsed.bitrate,
       sampleRate: parsed.sampleRate,
-      fileSize: parsed.fileSize,
+      fileSize: fileSize,
       format: parsed.format,
       artwork: parsed.artwork,
       lyrics: parsed.lyrics,
+      trackNumber: parsed.trackNumber,
+      discNumber: parsed.discNumber,
     );
   }
 
@@ -466,6 +552,8 @@ class TagProbeService {
       format: raw.format,
       artwork: raw.artwork,
       lyrics: lyrics,
+      trackNumber: raw.trackNumber,
+      discNumber: raw.discNumber,
     );
   }
 
@@ -610,13 +698,14 @@ class TagProbeService {
     }
     return hash.toRadixString(16);
   }
+
   Future<File?> _existingRemoteCacheFile(
     Uri uri, {
     Map<String, String>? headers,
     bool tail = false,
   }) async {
     try {
-      final support = await getApplicationSupportDirectory();
+      final support = await _supportDirectory();
       final cacheDir = Directory(p.join(support.path, 'tag_probe_cache'));
       final ext = p.extension(uri.path).isNotEmpty
           ? p.extension(uri.path)
@@ -641,7 +730,7 @@ class TagProbeService {
     Map<String, String>? headers,
   }) async {
     try {
-      final support = await getApplicationSupportDirectory();
+      final support = await _supportDirectory();
       final cacheDir = Directory(p.join(support.path, 'audio_cache'));
       final ext = p.extension(uri.path).isNotEmpty
           ? p.extension(uri.path)
@@ -693,7 +782,7 @@ class TagProbeService {
     required int maxBytes,
   }) async {
     try {
-      final support = await getApplicationSupportDirectory();
+      final support = await _supportDirectory();
       final cacheDir = Directory(p.join(support.path, 'tag_probe_cache'));
       if (!await cacheDir.exists()) {
         await cacheDir.create(recursive: true);
@@ -867,7 +956,7 @@ class TagProbeService {
       );
       if (existing != null) return existing;
 
-      final support = await getApplicationSupportDirectory();
+      final support = await _supportDirectory();
       final cacheDir = Directory(p.join(support.path, 'tag_probe_cache'));
       if (!await cacheDir.exists()) {
         await cacheDir.create(recursive: true);
@@ -997,6 +1086,7 @@ TagProbeResult? _readMetadataIsolate(_IsolateProbeInput input) {
   var ext = p.extension(path).replaceAll('.', '').toLowerCase();
   if (ext == '0gg') ext = 'ogg';
   final isOgg = ext == 'ogg' || ext == 'oga' || ext == 'opus';
+  final isWav = ext == 'wav';
 
   int fileSize = 0;
   try {
@@ -1018,9 +1108,11 @@ TagProbeResult? _readMetadataIsolate(_IsolateProbeInput input) {
   String? artist = _nonEmptyTop(meta?.artist);
   String? album = _nonEmptyTop(meta?.album);
   int? durationMs = meta?.duration?.inMilliseconds;
-  final bitrate = meta?.bitrate;
-  final sampleRate = meta?.sampleRate;
+  var bitrate = meta?.bitrate;
+  var sampleRate = meta?.sampleRate;
   String? lyrics = meta?.lyrics;
+  int? trackNumber = meta?.trackNumber;
+  int? discNumber = meta?.discNumber;
   Uint8List? artwork;
   if (input.includeArtwork &&
       meta != null &&
@@ -1057,13 +1149,51 @@ TagProbeResult? _readMetadataIsolate(_IsolateProbeInput input) {
     }
   }
 
+  if (isWav) {
+    final technical = extractWavTechnicalMetadata(path);
+    durationMs = technical?.durationMs ?? durationMs;
+    sampleRate = technical?.sampleRate ?? sampleRate;
+    // audio_metadata_reader exposes the WAV fmt byte rate as `bitrate`.
+    // TagProbeResult and the UI use bits per second for every other format.
+    bitrate =
+        technical?.bitrate ??
+        (bitrate != null && bitrate > 0 ? bitrate * 8 : null);
+
+    final extra =
+        extractWavId3Metadata(path, includeArtwork: input.includeArtwork) ??
+        extractWavId3MetadataFromTail(
+          path,
+          includeArtwork: input.includeArtwork,
+        );
+    if (extra != null) {
+      // Prefer ID3 because LIST/INFO is often limited to a system code page and
+      // can contain a lossy duplicate of the Unicode ID3 title.
+      title = _nonEmptyTop(extra.title) ?? title;
+      artist = _nonEmptyTop(extra.artist) ?? artist;
+      album = _nonEmptyTop(extra.album) ?? album;
+      trackNumber = extra.trackNumber ?? trackNumber;
+      discNumber = extra.discNumber ?? discNumber;
+      if (input.includeArtwork &&
+          extra.artwork != null &&
+          extra.artwork!.isNotEmpty) {
+        artwork = extra.artwork;
+      }
+      if (extra.lyrics != null && extra.lyrics!.trim().isNotEmpty) {
+        lyrics = extra.lyrics;
+      }
+    }
+  }
+
   // Nothing parseable at all → behave like the old null result.
   if (meta == null &&
       title == null &&
       artist == null &&
       album == null &&
       artwork == null &&
-      (lyrics == null || lyrics.trim().isEmpty)) {
+      (lyrics == null || lyrics.trim().isEmpty) &&
+      durationMs == null &&
+      bitrate == null &&
+      sampleRate == null) {
     return null;
   }
 
@@ -1079,5 +1209,7 @@ TagProbeResult? _readMetadataIsolate(_IsolateProbeInput input) {
     format: format,
     artwork: artwork,
     lyrics: lyrics,
+    trackNumber: trackNumber,
+    discNumber: discNumber,
   );
 }

@@ -102,6 +102,43 @@ class LyricsParser {
     );
   }
 
+  /// Whole-line translation lines are usually emitted at the SAME timestamp as
+  /// their original and get merged during parsing. Some lyric sources instead
+  /// stamp the translation a fraction of a second after the original (beyond
+  /// the tight same-time tolerance), so it survives as its own line: the 译
+  /// toggle never appears and the translation shows permanently. This pass
+  /// folds such a follower back into its original when it is confidently a
+  /// translation — a pure-Chinese line closely following a non-pure-Chinese
+  /// original, with no karaoke words and a small time gap.
+  static const int _offsetTranslationMaxGapMs = 1500;
+
+  static void _mergeOffsetTranslationLines(List<fl.LyricLine> lines) {
+    for (int i = lines.length - 1; i >= 1; i--) {
+      final follower = lines[i];
+      final original = lines[i - 1];
+      if (_hasText(original.translation)) continue;
+      if (_hasText(follower.translation)) continue;
+      if (follower.words != null && follower.words!.isNotEmpty) continue;
+      final followerText = follower.text.trim();
+      final originalText = original.text.trim();
+      if (followerText.isEmpty || originalText.isEmpty) continue;
+      // Only treat a pure-Chinese follower of a non-pure-Chinese original as a
+      // translation. This avoids collapsing two ordinary consecutive lyric
+      // lines (same language) into a fake original/translation pair.
+      if (!_isHanOnly(followerText) || _isHanOnly(originalText)) continue;
+      final gap = follower.start.inMilliseconds - original.start.inMilliseconds;
+      if (gap < 0 || gap > _offsetTranslationMaxGapMs) continue;
+      lines[i - 1] = fl.LyricLine(
+        start: original.start,
+        end: original.end ?? follower.end,
+        text: original.text,
+        translation: follower.text,
+        words: original.words,
+      );
+      lines.removeAt(i);
+    }
+  }
+
   static MapEntry<String, String?> _splitTranslation(
     String fullText, {
     bool allowLooseSplit = true,
@@ -118,13 +155,16 @@ class LyricsParser {
       if (!allowLooseSplit) {
         return MapEntry(mainText, transText);
       }
-      final thinIdx = fullText.lastIndexOf('\u2009');
-      final fullIdx = fullText.lastIndexOf('\u3000');
+      // Lyrics copied from web pages commonly use typographic spaces as the
+      // inline original/translation separator. Several of them are visually
+      // indistinguishable from U+2009, so accepting only one code point makes
+      // the translation silently become part of the main lyric text.
+      final typographicSpaces = RegExp(
+        r'[\u00A0\u1680\u2000-\u200B\u202F\u205F\u2060\u3000]',
+      ).allMatches(fullText).toList();
       int splitIdx = -1;
-      if (thinIdx >= 0) {
-        splitIdx = thinIdx;
-      } else if (fullIdx >= 0) {
-        splitIdx = fullIdx;
+      if (typographicSpaces.isNotEmpty) {
+        splitIdx = typographicSpaces.last.start;
       } else {
         final multiSpaceReg = RegExp(r'\s{2,}');
         final all = multiSpaceReg.allMatches(fullText).toList();
@@ -699,6 +739,8 @@ class LyricsParser {
     }
 
     modelLines.sort((a, b) => a.start.compareTo(b.start));
+
+    _mergeOffsetTranslationLines(modelLines);
 
     if (modelLines.isEmpty) {
       final parsed = parseLrc(lrc);

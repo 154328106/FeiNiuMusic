@@ -17,7 +17,10 @@ class ArtworkService {
   static final ArtworkService instance = ArtworkService._();
 
   static const bool _debugArtwork = false;
-  static const int _maxCache = 100;
+  // Compressed bytes cache — a typical 320px JPEG thumb is ~15–30 KB, so 400
+  // entries sits around ~10 MB. Well below the decoded ImageCache budget and
+  // large enough that scroll-back through a full album grid doesn't churn.
+  static const int _maxCache = 400;
   static const int _maxConcurrent = 6;
 
   final LinkedHashMap<String, Uint8List?> _bytesCache =

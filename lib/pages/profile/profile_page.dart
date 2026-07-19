@@ -1,0 +1,146 @@
+import 'package:flutter/material.dart';
+
+import '../../app/router/app_router.dart';
+import '../../components/index.dart';
+
+/// 底部导航第 4 项「我的」入口页。
+///
+/// 侧栏模式下这些入口本来放在抽屉里；切到底部导航之后，为了不让「设置」独占底
+/// 栏，把资源库 / 更多这些常用入口集中到这里，设置只作为其中一项。
+class ProfilePage extends StatelessWidget {
+  const ProfilePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return AppNavigationModeBuilder(
+      builder: (context, useBottomNavigation) {
+        final bottomPadding = AppPageScaffold.scrollableBottomPadding(
+          context,
+          hasBottomNav: useBottomNavigation,
+        );
+        return AppPageScaffold(
+          extendBodyBehindAppBar: true,
+          appBar: AppTopBar(
+            title: '我的',
+            showBackButton: !useBottomNavigation,
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            actions: [
+              IconButton(
+                tooltip: '设置',
+                icon: const Icon(Icons.settings_rounded),
+                onPressed: () =>
+                    Navigator.pushNamed(context, AppRoutes.settings),
+              ),
+            ],
+          ),
+          body: ListView(
+            padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
+            children: [
+              AppSettingSection(
+                title: '资源库',
+                children: [
+                  _navTile(
+                    context,
+                    icon: Icons.album_rounded,
+                    title: '专辑',
+                    route: AppRoutes.albums,
+                  ),
+                  _navTile(
+                    context,
+                    icon: Icons.people_rounded,
+                    title: '艺术家',
+                    route: AppRoutes.artists,
+                  ),
+                  _navTile(
+                    context,
+                    icon: Icons.folder_rounded,
+                    title: '文件夹',
+                    route: AppRoutes.folders,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              AppSettingSection(
+                title: '更多',
+                children: [
+                  _navTile(
+                    context,
+                    icon: Icons.radar_rounded,
+                    title: '音源管理',
+                    subtitle: '本地与云端音乐来源',
+                    route: AppRoutes.source,
+                  ),
+                  _navTile(
+                    context,
+                    icon: Icons.bar_chart_rounded,
+                    title: '听歌统计',
+                    subtitle: '日历与播放数据概览',
+                    route: AppRoutes.listeningStats,
+                  ),
+                  _navTile(
+                    context,
+                    icon: Icons.backup_rounded,
+                    title: '数据备份',
+                    subtitle: '歌单、听歌统计导出到本地或 WebDAV',
+                    route: AppRoutes.dataBackup,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              AppSettingSection(
+                title: '应用',
+                children: [
+                  _navTile(
+                    context,
+                    icon: Icons.settings_rounded,
+                    title: '设置',
+                    subtitle: '外观、播放器、通知等',
+                    route: AppRoutes.settings,
+                  ),
+                  _navTile(
+                    context,
+                    icon: Icons.info_outline_rounded,
+                    title: '版本信息',
+                    subtitle: '版本号、检查更新与调试日志',
+                    route: AppRoutes.versionInfo,
+                  ),
+                ],
+              ),
+            ],
+          ),
+          bottomNavIndex: useBottomNavigation ? 3 : null,
+          onBottomNavTap: useBottomNavigation
+              ? (index) => navigateToPrimaryDestination(context, index)
+              : null,
+        );
+      },
+    );
+  }
+
+  Widget _navTile(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    String? subtitle,
+    required String route,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return AppSettingTile(
+      title: title,
+      subtitle: subtitle,
+      leading: Container(
+        width: 38,
+        height: 38,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: scheme.primary.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(11),
+        ),
+        child: Icon(icon, size: 20, color: scheme.primary),
+      ),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: () => Navigator.pushNamed(context, route),
+    );
+  }
+}

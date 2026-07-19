@@ -1,6 +1,10 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:image_cropper/image_cropper.dart';
 import 'package:path/path.dart' as path;
+import 'package:path_provider/path_provider.dart';
 
 import '../../app/state/settings_state.dart';
 import '../../components/index.dart';
@@ -160,7 +164,7 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
   Future<void> _showBackgroundImageSheet(BuildContext context) async {
     await showModalBottomSheet(
       context: context,
-      builder: (context) {
+      builder: (sheetContext) {
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -169,23 +173,15 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                 leading: const Icon(Icons.image_outlined),
                 title: const Text('选择图片'),
                 onTap: () async {
-                  Navigator.pop(context);
-                  final result = await FilePicker.platform.pickFiles(
-                    type: FileType.image,
-                    allowMultiple: false,
-                  );
-                  final file = result?.files.first;
-                  if (file?.path == null) return;
-                  await AppBackgroundSettings.setBackgroundImagePath(
-                    file!.path!,
-                  );
+                  Navigator.pop(sheetContext);
+                  await _pickAndCropBackground(context);
                 },
               ),
               ListTile(
                 leading: const Icon(Icons.delete_outline_rounded),
                 title: const Text('清除背景'),
                 onTap: () async {
-                  Navigator.pop(context);
+                  Navigator.pop(sheetContext);
                   await AppBackgroundSettings.setBackgroundImagePath(null);
                 },
               ),
@@ -194,6 +190,65 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
         );
       },
     );
+  }
+
+  /// Pick a source image, launch the uCrop editor with the aspect ratio of the
+  /// current device screen, and save the cropped output as the new background.
+  Future<void> _pickAndCropBackground(BuildContext context) async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: false,
+    );
+    final file = result?.files.first;
+    if (file?.path == null) return;
+
+    // Use the device's short/long dimensions so the crop frame matches what
+    // the wallpaper will actually be painted into. Reading it once here is
+    // fine — no need to react to rotation while the cropper UI is on screen.
+    if (!context.mounted) return;
+    final size = MediaQuery.of(context).size;
+    final ratio = CropAspectRatio(
+      ratioX: size.width,
+      ratioY: size.height,
+    );
+
+    final cropped = await ImageCropper().cropImage(
+      sourcePath: file!.path!,
+      compressFormat: ImageCompressFormat.png,
+      compressQuality: 95,
+      aspectRatio: ratio,
+      uiSettings: [
+        AndroidUiSettings(
+          toolbarTitle: '裁剪背景',
+          hideBottomControls: true,
+          lockAspectRatio: true,
+          // Explicit toolbar / status bar tint so the confirm/cancel icons
+          // never blend into the phone's system bar (which was the "点几下才
+          // 点得到" bug on notched screens).
+          toolbarColor: const Color(0xFF212121),
+          statusBarLight: false,
+          toolbarWidgetColor: Colors.white,
+          activeControlsWidgetColor: Colors.white,
+          backgroundColor: Colors.black,
+        ),
+        IOSUiSettings(
+          title: '裁剪背景',
+          aspectRatioLockEnabled: true,
+          resetAspectRatioEnabled: false,
+        ),
+      ],
+    );
+    if (cropped == null) return;
+
+    // uCrop writes to a cache directory that OS may sweep; copy the output
+    // into our app documents dir so the background survives across launches.
+    final docs = await getApplicationDocumentsDirectory();
+    final targetPath = path.join(
+      docs.path,
+      'background_${DateTime.now().millisecondsSinceEpoch}.png',
+    );
+    await File(cropped.path).copy(targetPath);
+    await AppBackgroundSettings.setBackgroundImagePath(targetPath);
   }
 
   @override
@@ -209,6 +264,66 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
       body: ListView(
         padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
         children: [
+          AppSettingSection(
+            title: '导航布局',
+            children: [
+              ValueListenableBuilder<AppNavigationStyle>(
+                valueListenable: AppLayoutSettings.navigationStyle,
+                builder: (context, style, _) {
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 14, 12, 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '导航方式',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: SegmentedButton<AppNavigationStyle>(
+                            segments: const [
+                              ButtonSegment(
+                                value: AppNavigationStyle.drawer,
+                                icon: Icon(Icons.menu_open_rounded),
+                                label: Text('侧边栏'),
+                              ),
+                              ButtonSegment(
+                                value: AppNavigationStyle.bottomBar,
+                                icon: Icon(Icons.space_dashboard_outlined),
+                                label: Text('底部导航'),
+                              ),
+                            ],
+                            selected: {style},
+                            showSelectedIcon: false,
+                            onSelectionChanged: (selection) {
+                              AppLayoutSettings.setNavigationStyle(
+                                selection.first,
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          style == AppNavigationStyle.bottomBar
+                              ? '四个常用入口固定在底部，专辑、艺术家与文件夹仍从音乐库进入'
+                              : '保留当前从左侧菜单访问各页面的方式',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
           AppSettingSection(
             title: '外观设置',
             children: [
@@ -408,66 +523,22 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                             );
                           },
                         ),
-                    ],
-                  );
-                },
-              ),
-              ValueListenableBuilder<bool>(
-                valueListenable: AppBackgroundSettings.glassEffectEnabled,
-                builder: (context, glassEnabled, _) {
-                  return Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      AppSettingSwitchTile(
-                        title: '毛玻璃质感',
-                        subtitle: glassEnabled
-                            ? '面板和播放器控件启用背景模糊'
-                            : '关闭后使用普通实体面板',
-                        value: glassEnabled,
-                        onChanged: (value) {
-                          AppBackgroundSettings.setGlassEffectEnabled(value);
-                        },
-                      ),
-                      if (glassEnabled)
+                      if (hasImage)
                         ValueListenableBuilder<double>(
-                          valueListenable: AppBackgroundSettings.panelOpacity,
-                          builder: (context, value, _) {
-                            return ValueListenableBuilder<double>(
-                              valueListenable:
-                                  AppBackgroundSettings.panelBlurStrength,
-                              builder: (context, blurValue, _) {
-                                return Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    AppSettingSlider(
-                                      title: '面板透明度',
-                                      description: '调节卡片、列表面板等半透明程度',
-                                      value: (value * 100).clamp(0, 100),
-                                      min: 0,
-                                      max: 100,
-                                      divisions: 100,
-                                      valueText: '${(value * 100).round()}%',
-                                      onChanged: (next) {
-                                        AppBackgroundSettings.setPanelOpacity(
-                                          next / 100,
-                                        );
-                                      },
-                                    ),
-                                    AppSettingSlider(
-                                      title: '面板模糊强度',
-                                      description: '调节玻璃面板的背景模糊程度',
-                                      value: blurValue,
-                                      min: 0,
-                                      max: 30,
-                                      divisions: 30,
-                                      valueText: blurValue.toStringAsFixed(0),
-                                      onChanged: (next) {
-                                        AppBackgroundSettings.setPanelBlurStrength(
-                                          next,
-                                        );
-                                      },
-                                    ),
-                                  ],
+                          valueListenable:
+                              AppBackgroundSettings.backgroundBlurSigma,
+                          builder: (context, sigma, _) {
+                            return AppSettingSlider(
+                              title: '图片模糊',
+                              description: '0 = 保持原图清晰',
+                              value: sigma.clamp(0, 32),
+                              min: 0,
+                              max: 32,
+                              divisions: 32,
+                              valueText: sigma.toStringAsFixed(0),
+                              onChanged: (next) {
+                                AppBackgroundSettings.setBackgroundBlurSigma(
+                                  next,
                                 );
                               },
                             );
@@ -477,12 +548,35 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                   );
                 },
               ),
+              ValueListenableBuilder<double>(
+                valueListenable: AppBackgroundSettings.panelOpacity,
+                builder: (context, value, _) {
+                  // Slider shows *transparency* (what the label says), while
+                  // storage keeps *opacity*. Invert on the way in/out so the
+                  // user's mental model matches: 100% = fully see-through,
+                  // 0% = solid panel.
+                  final transparencyPercent = ((1 - value) * 100).clamp(0, 100);
+                  return AppSettingSlider(
+                    title: '面板透明度',
+                    description: '调节卡片、列表面板等半透明程度（100% = 完全透明）',
+                    value: transparencyPercent.toDouble(),
+                    min: 0,
+                    max: 100,
+                    divisions: 100,
+                    valueText: '${transparencyPercent.round()}%',
+                    onChanged: (next) {
+                      final opacity = (1 - next / 100).clamp(0.0, 1.0);
+                      AppBackgroundSettings.setPanelOpacity(opacity);
+                    },
+                  );
+                },
+              ),
               ValueListenableBuilder<bool>(
                 valueListenable: AppBackgroundSettings.pageGlowEnabled,
                 builder: (context, enabled, _) {
                   return AppSettingSwitchTile(
                     title: '页面流光',
-                    subtitle: enabled ? '已为页面添加柔和流光效果' : '关闭后页面仅使用主题背景',
+                    subtitle: enabled ? '页面顶部叠加主题色柔和渐变' : '关闭后页面仅使用主题背景',
                     value: enabled,
                     onChanged: (value) {
                       AppBackgroundSettings.setPageGlowEnabled(value);

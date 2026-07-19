@@ -13,13 +13,7 @@ import 'lyrics_repository.dart';
 import 'lyricon_service.dart';
 import 'meizu_lyrics_service.dart';
 
-enum LyricsLoadStatus {
-  idle,
-  loading,
-  loaded,
-  empty,
-  failed,
-}
+enum LyricsLoadStatus { idle, loading, loaded, empty, failed }
 
 class LyricsSnapshot {
   final LyricsLoadStatus status;
@@ -62,7 +56,8 @@ class LyricsService {
   static final LyricsService instance = LyricsService._internal();
 
   static const String _prefsLyriconEnabled = 'lyrics_lyricon_enabled';
-  static const String _prefsLyriconForceKaraoke = 'lyrics_lyricon_force_karaoke';
+  static const String _prefsLyriconForceKaraoke =
+      'lyrics_lyricon_force_karaoke';
   static const String _prefsLyriconHideTranslation =
       'lyrics_lyricon_hide_translation';
   static const String _prefsMeizuLyrics = 'lyrics_meizu_enabled';
@@ -71,17 +66,19 @@ class LyricsService {
   final LyricsRepository _repo = LyricsRepository();
   final PlayerService _player = PlayerService.instance;
   final LyricController controller = LyricController();
-  final ValueNotifier<LyricsSnapshot> snapshot =
-      ValueNotifier(LyricsSnapshot.idle());
+  final ValueNotifier<LyricsSnapshot> snapshot = ValueNotifier(
+    LyricsSnapshot.idle(),
+  );
   final ValueNotifier<String?> currentLineText = ValueNotifier(null);
   final ValueNotifier<int> viewSettingsTick = ValueNotifier(0);
   late final snapshotSignal = signal(LyricsSnapshot.idle());
   late final viewSettingsTickSignal = signal(0);
-  late final activeIndexSignal =
-      signal(controller.activeIndexNotifiter.value);
+  late final activeIndexSignal = signal(controller.activeIndexNotifiter.value);
   late final lyricModelSignal = signal(controller.lyricNotifier.value);
   late final isSelectingSignal = signal(controller.isSelectingNotifier.value);
-  late final selectedIndexSignal = signal(controller.selectedIndexNotifier.value);
+  late final selectedIndexSignal = signal(
+    controller.selectedIndexNotifier.value,
+  );
 
   int _loadSeq = 0;
   Timer? _lyriconPosTimer;
@@ -228,6 +225,15 @@ class LyricsService {
         predictDuration: false,
         forceKaraoke: _viewForceKaraoke || _lyriconForceKaraoke,
       );
+      if (kDebugMode) {
+        final translationCount = model.lines
+            .where((line) => (line.translation ?? '').trim().isNotEmpty)
+            .length;
+        debugPrint(
+          '[Lyrics] parsed ${model.lines.length} lines, '
+          '$translationCount translations for ${song.title}',
+        );
+      }
       controller.loadLyricModel(model);
       _updateCurrentLineText(controller.activeIndexNotifiter.value);
       snapshot.value = snapshot.value.copyWith(
@@ -275,8 +281,9 @@ class LyricsService {
 
   void _scheduleLyriconPosition(Duration position) {
     if (!_lyriconEnabled) return;
-    _lyriconPosTimer ??=
-        Timer.periodic(const Duration(milliseconds: 250), (_) async {
+    _lyriconPosTimer ??= Timer.periodic(const Duration(milliseconds: 250), (
+      _,
+    ) async {
       await _flushLyriconPosition();
     });
   }

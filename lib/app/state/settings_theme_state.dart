@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+enum AppVisualStyle { miuix }
+
 class AppThemeSettings {
   static const String _prefsThemeMode = 'setting_theme_mode';
   static const String _prefsDynamicColor = 'setting_dynamic_color_enabled';
@@ -11,6 +13,9 @@ class AppThemeSettings {
   );
   static final ValueNotifier<bool> dynamicColorEnabled = ValueNotifier(false);
   static final ValueNotifier<Color?> themeSeedColor = ValueNotifier(null);
+  static final ValueNotifier<AppVisualStyle> visualStyle = ValueNotifier(
+    AppVisualStyle.miuix,
+  );
 
   static Future<void>? _loading;
 
@@ -44,6 +49,7 @@ class AppThemeSettings {
     dynamicColorEnabled.value = prefs.getBool(_prefsDynamicColor) ?? false;
     final seed = prefs.getInt(_prefsThemeSeedColor);
     themeSeedColor.value = seed == null ? null : Color(seed);
+    visualStyle.value = AppVisualStyle.miuix;
   }
 
   static Future<void> setThemeMode(ThemeMode mode) async {

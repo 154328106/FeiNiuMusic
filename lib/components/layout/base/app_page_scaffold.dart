@@ -6,7 +6,7 @@ import '../../player/mini_player/mini_player_bar.dart';
 import '../modern_navigation_bar.dart';
 
 class AppPageScaffold extends StatefulWidget {
-  static const double modernNavHeight = 60.0;
+  static const double modernNavHeight = 52.0;
 
   static double scrollableBottomPadding(
     BuildContext context, {
@@ -190,7 +190,9 @@ class AppPageScaffoldState extends State<AppPageScaffold>
                 },
                 child: Align(
                   alignment: Alignment.centerLeft,
-                  child: SizedBox(width: drawerWidth, child: widget.drawer),
+                  child: RepaintBoundary(
+                    child: SizedBox(width: drawerWidth, child: widget.drawer),
+                  ),
                 ),
               ),
               AnimatedBuilder(
@@ -230,7 +232,7 @@ class AppPageScaffoldState extends State<AppPageScaffold>
                     ),
                   );
                 },
-                child: page,
+                child: RepaintBoundary(child: page),
               ),
               if (miniPlayer != null)
                 Positioned(

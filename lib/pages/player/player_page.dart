@@ -996,14 +996,11 @@ class _PlayerArtwork extends StatelessWidget {
                       child: SizedBox(
                         width: boxSize,
                         height: boxSize,
-                        child: Skeletonizer(
-                          enabled: true,
-                          child: _ArtworkShadowContainer(
+                        child: _ArtworkShadowContainer(
+                          border: border,
+                          child: _ArtworkPlaceholder(
                             border: border,
-                            child: _ArtworkPlaceholder(
-                              border: border,
-                              label: '',
-                            ),
+                            label: '',
                           ),
                         ),
                       ),
@@ -1030,12 +1027,9 @@ class _PlayerArtwork extends StatelessWidget {
                           borderRadius: 12,
                           preferOriginal: true,
                           keepPreviousUntilLoaded: true,
-                          placeholder: Skeletonizer(
-                            enabled: true,
-                            child: _ArtworkPlaceholder(
-                              border: border,
-                              label: song.title,
-                            ),
+                          placeholder: _ArtworkPlaceholder(
+                            border: border,
+                            label: song.title,
                           ),
                         ),
                       ),

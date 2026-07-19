@@ -23,13 +23,33 @@ class ArtistsPage extends StatefulWidget {
   State<ArtistsPage> createState() => _ArtistsPageState();
 }
 
-class _ArtistGroup {
+// Exposed for the app-wide warm-up path. Keep in sync with _ArtistsPageState.
+const String artistsCacheScope = 'artists_groups';
+const String artistsPrefsSortKey = 'artists_sort_key_v1';
+const String artistsPrefsSortAscending = 'artists_sort_ascending_v1';
+const String artistsPrefsFilterUnknown = 'artists_filter_unknown_v1';
+const String artistsPrefsBlockedArtists = 'blocked_artists_v1';
+const String artistsDefaultSortKey = 'name';
+const bool artistsDefaultAscending = true;
+const bool artistsDefaultFilterUnknown = false;
+
+String artistsCacheKeyForVersion({
+  required int songVersion,
+  required String sortKey,
+  required bool ascending,
+  required bool filterUnknown,
+  required List<String> blockedSorted,
+}) {
+  return 'songv:$songVersion|$sortKey|${ascending ? 1 : 0}|${filterUnknown ? 1 : 0}|${blockedSorted.join(',')}';
+}
+
+class ArtistGroup {
   final String name;
   final int songCount;
   final int albumCount;
   final SongEntity representative;
 
-  const _ArtistGroup({
+  const ArtistGroup({
     required this.name,
     required this.songCount,
     required this.albumCount,
@@ -40,12 +60,12 @@ class _ArtistGroup {
 class _ArtistsPageState extends State<ArtistsPage>
     with SignalsMixin, DeferredPageInitMixin {
   static const double _itemExtent = 64;
-  static const String _prefsSortKey = 'artists_sort_key_v1';
-  static const String _prefsSortAscending = 'artists_sort_ascending_v1';
-  static const String _prefsFilterUnknown = 'artists_filter_unknown_v1';
+  static const String _prefsSortKey = artistsPrefsSortKey;
+  static const String _prefsSortAscending = artistsPrefsSortAscending;
+  static const String _prefsFilterUnknown = artistsPrefsFilterUnknown;
   static const String _prefsShowBlockedEntry = 'artists_show_blocked_entry_v1';
-  static const String _prefsBlockedArtists = 'blocked_artists_v1';
-  static const String _cacheScope = 'artists_groups';
+  static const String _prefsBlockedArtists = artistsPrefsBlockedArtists;
+  static const String _cacheScope = artistsCacheScope;
 
   final SongDao _songDao = SongDao();
   final ScrollController _controller = ScrollController();
@@ -54,7 +74,7 @@ class _ArtistsPageState extends State<ArtistsPage>
   final PageCacheStore _cacheStore = PageCacheStore.instance;
 
   late final _loading = createSignal(true);
-  late final _groups = createSignal<List<_ArtistGroup>>([]);
+  late final _groups = createSignal<List<ArtistGroup>>([]);
   late final _sortKey = createSignal('name');
   late final _ascending = createSignal(true);
   late final _filterUnknown = createSignal(false);
@@ -111,14 +131,19 @@ class _ArtistsPageState extends State<ArtistsPage>
     final songVersion = CacheVersionStore.instance.getVersion(
       SongDao.cacheVersionScope,
     );
-    final cacheKey =
-        'songv:$songVersion|${_sortKey.value}|${_ascending.value ? 1 : 0}|${_filterUnknown.value ? 1 : 0}|${blockedSorted.join(',')}';
-    final cached = _cacheStore.get<List<_ArtistGroup>>(_cacheScope, cacheKey);
+    final cacheKey = artistsCacheKeyForVersion(
+      songVersion: songVersion,
+      sortKey: _sortKey.value,
+      ascending: _ascending.value,
+      filterUnknown: _filterUnknown.value,
+      blockedSorted: blockedSorted,
+    );
+    final cached = _cacheStore.get<List<ArtistGroup>>(_cacheScope, cacheKey);
 
     if (cached != null) {
       _groups.value = cached
           .map(
-            (g) => _ArtistGroup(
+            (g) => ArtistGroup(
               name: g.name,
               songCount: g.songCount,
               albumCount: g.albumCount,
@@ -130,7 +155,7 @@ class _ArtistsPageState extends State<ArtistsPage>
       return;
     }
 
-    final groups = await compute(_buildArtistGroups, {
+    final groups = await compute(buildArtistGroups, {
       'songs': songs.map((e) => e.toMap()).toList(),
       'blocked': blockedSorted,
       'sortKey': _sortKey.value,
@@ -141,7 +166,7 @@ class _ArtistsPageState extends State<ArtistsPage>
     if (!mounted) return;
     final mapped = groups
         .map(
-          (e) => _ArtistGroup(
+          (e) => ArtistGroup(
             name: e['name'] as String,
             songCount: e['songCount'] as int,
             albumCount: e['albumCount'] as int,
@@ -156,12 +181,12 @@ class _ArtistsPageState extends State<ArtistsPage>
     _loading.value = false;
   }
 
-  void _sortGroups(List<_ArtistGroup> groups) {
+  void _sortGroups(List<ArtistGroup> groups) {
     if (_filterUnknown.value) {
       groups.removeWhere((g) => g.name == '未知艺术家');
     }
 
-    int compare(_ArtistGroup a, _ArtistGroup b) {
+    int compare(ArtistGroup a, ArtistGroup b) {
       if (_sortKey.value == 'songCount') {
         return a.songCount.compareTo(b.songCount);
       }
@@ -292,143 +317,158 @@ class _ArtistsPageState extends State<ArtistsPage>
 
   @override
   Widget build(BuildContext context) {
-    return AppPageScaffold(
-      key: _scaffoldKey,
-      extendBodyBehindAppBar: true,
-      appBar: AppTopBar(
-        title: '艺术家',
-        leading: IconButton(
-          icon: const Icon(Icons.menu_rounded),
-          onPressed: _openDrawer,
+    return AppNavigationModeBuilder(
+      builder: (context, useBottomNavigation) => AppPageScaffold(
+        key: _scaffoldKey,
+        extendBodyBehindAppBar: true,
+        appBar: AppTopBar(
+          title: '艺术家',
+          leading: IconButton(
+            icon: Icon(
+              useBottomNavigation
+                  ? Icons.arrow_back_rounded
+                  : Icons.menu_rounded,
+            ),
+            onPressed: useBottomNavigation
+                ? () => Navigator.of(context).maybePop()
+                : _openDrawer,
+          ),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          actions: [SortActionButton(onTap: _showSortSheet)],
         ),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        actions: [SortActionButton(onTap: _showSortSheet)],
-      ),
-      drawer: SideMenu(
-        onCloseDrawer: () => _scaffoldKey.currentState?.closeDrawer(),
-      ),
-      body: Watch.builder(
-        builder: (context) {
-          final headerCount =
-              (_showBlockedEntry.value && _blockedArtists.value.isNotEmpty)
-              ? 1
-              : 0;
-          final itemCount = _groups.value.length + headerCount;
-          return RefreshIndicator(
-            onRefresh: _load,
-            child: MediaListView(
-              controller: _controller,
-              itemCount: itemCount,
-              itemExtent: _itemExtent,
-              isLoading: false,
-              emptyText: '暂无艺术家',
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 160),
-              indexLabelBuilder: (index) {
-                if (index < headerCount) return '';
-                final name = _groups.value[index - headerCount].name;
-                if (name == '未知艺术家') return '↑';
-                return IndexUtils.leadingLetter(name);
-              },
-              itemBuilder: (context, index) {
-                if (headerCount == 1 && index == 0) {
-                  final theme = Theme.of(context);
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: SizedBox(
-                      height: 64,
-                      child: Material(
-                        color: theme.cardColor,
-                        borderRadius: BorderRadius.circular(16),
-                        child: InkWell(
+        drawer: useBottomNavigation
+            ? null
+            : SideMenu(
+                onCloseDrawer: () => _scaffoldKey.currentState?.closeDrawer(),
+              ),
+        body: Watch.builder(
+          builder: (context) {
+            final headerCount =
+                (_showBlockedEntry.value && _blockedArtists.value.isNotEmpty)
+                ? 1
+                : 0;
+            final itemCount = _groups.value.length + headerCount;
+            return RefreshIndicator(
+              onRefresh: _load,
+              child: MediaListView(
+                controller: _controller,
+                itemCount: itemCount,
+                itemExtent: _itemExtent,
+                isLoading: false,
+                emptyText: '暂无艺术家',
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 160),
+                indexLabelBuilder: (index) {
+                  if (index < headerCount) return '';
+                  final name = _groups.value[index - headerCount].name;
+                  if (name == '未知艺术家') return '↑';
+                  return IndexUtils.leadingLetter(name);
+                },
+                itemBuilder: (context, index) {
+                  if (headerCount == 1 && index == 0) {
+                    final theme = Theme.of(context);
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: SizedBox(
+                        height: 64,
+                        child: Material(
+                          color: theme.cardColor,
                           borderRadius: BorderRadius.circular(16),
-                          onTap: _showBlockedArtists,
-                          child: Row(
-                            children: [
-                              const SizedBox(width: 16),
-                              Icon(
-                                Icons.person_off_outlined,
-                                color: theme.colorScheme.error,
-                              ),
-                              const SizedBox(width: 12),
-                              const Expanded(child: Text('已屏蔽的艺术家')),
-                              Text('${_blockedArtists.value.length} 个'),
-                              const SizedBox(width: 8),
-                              const Icon(Icons.chevron_right_rounded),
-                              const SizedBox(width: 12),
-                            ],
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: _showBlockedArtists,
+                            child: Row(
+                              children: [
+                                const SizedBox(width: 16),
+                                Icon(
+                                  Icons.person_off_outlined,
+                                  color: theme.colorScheme.error,
+                                ),
+                                const SizedBox(width: 12),
+                                const Expanded(child: Text('已屏蔽的艺术家')),
+                                Text('${_blockedArtists.value.length} 个'),
+                                const SizedBox(width: 8),
+                                const Icon(Icons.chevron_right_rounded),
+                                const SizedBox(width: 12),
+                              ],
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  );
-                }
-                final g = _groups.value[index - headerCount];
-                final initial = g.name.isNotEmpty
-                    ? g.name.characters.first
-                    : '?';
-                return MediaListTile(
-                  leading: ArtworkWidget(
-                    song: g.representative,
-                    size: 44,
-                    borderRadius: 22,
-                    placeholder: CircleAvatar(radius: 22, child: Text(initial)),
-                  ),
-                  title: g.name,
-                  subtitle: '专辑：${g.albumCount}  歌曲：${g.songCount}',
-                  selected: false,
-                  multiSelect: false,
-                  isHighlighted: false,
-                  onTap: () {
-                    Navigator.of(context).push(
-                      buildAppPageRoute(
-                        (_) => ArtistDetailPage(artistName: g.name),
+                    );
+                  }
+                  final g = _groups.value[index - headerCount];
+                  final initial = g.name.isNotEmpty
+                      ? g.name.characters.first
+                      : '?';
+                  return MediaListTile(
+                    leading: ArtworkWidget(
+                      song: g.representative,
+                      size: 44,
+                      borderRadius: 22,
+                      placeholder: CircleAvatar(
+                        radius: 22,
+                        child: Text(initial),
                       ),
-                    );
-                  },
-                  onLongPress: () {
-                    showModalBottomSheet(
-                      context: context,
-                      backgroundColor: Colors.transparent,
-                      builder: (context) {
-                        return AppSheetPanel(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              ListTile(
-                                leading: const Icon(
-                                  Icons.person_off_outlined,
-                                  color: Colors.red,
+                    ),
+                    title: g.name,
+                    subtitle: '专辑：${g.albumCount}  歌曲：${g.songCount}',
+                    selected: false,
+                    multiSelect: false,
+                    isHighlighted: false,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        buildAppPageRoute(
+                          (_) => ArtistDetailPage(artistName: g.name),
+                        ),
+                      );
+                    },
+                    onLongPress: () {
+                      showModalBottomSheet(
+                        context: context,
+                        backgroundColor: Colors.transparent,
+                        builder: (context) {
+                          return AppSheetPanel(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                ListTile(
+                                  leading: const Icon(
+                                    Icons.person_off_outlined,
+                                    color: Colors.red,
+                                  ),
+                                  title: const Text('屏蔽艺术家'),
+                                  titleTextStyle: TextStyle(
+                                    color: Theme.of(context).colorScheme.error,
+                                  ),
+                                  onTap: () async {
+                                    Navigator.pop(context);
+                                    await _blockArtist(g.name);
+                                  },
                                 ),
-                                title: const Text('屏蔽艺术家'),
-                                titleTextStyle: TextStyle(
-                                  color: Theme.of(context).colorScheme.error,
-                                ),
-                                onTap: () async {
-                                  Navigator.pop(context);
-                                  await _blockArtist(g.name);
-                                },
-                              ),
-                              const SizedBox(height: 8),
-                            ],
-                          ),
-                        );
-                      },
-                    );
-                  },
-                );
-              },
-            ),
-          );
-        },
+                                const SizedBox(height: 8),
+                              ],
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  );
+                },
+              ),
+            );
+          },
+        ),
+        bottomNavIndex: useBottomNavigation ? 0 : null,
+        onBottomNavTap: useBottomNavigation
+            ? (index) => navigateToPrimaryDestination(context, index)
+            : null,
       ),
-      bottomNavIndex: null,
-      onBottomNavTap: null,
     );
   }
 }
 
-List<Map<String, dynamic>> _buildArtistGroups(Map<String, dynamic> payload) {
+List<Map<String, dynamic>> buildArtistGroups(Map<String, dynamic> payload) {
   final rawSongs = (payload['songs'] as List).cast<Map>();
   final blocked = (payload['blocked'] as List).cast<String>().toSet();
   final sortKey = (payload['sortKey'] as String?) ?? 'name';

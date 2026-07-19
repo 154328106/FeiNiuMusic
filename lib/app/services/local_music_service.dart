@@ -255,9 +255,9 @@ class LocalMusicService {
     var processed = 0;
     var added = 0;
     final scannedSongs = <SongEntity>[];
-    final existingIds = await _songDao.fetchIdsBySource('local');
     final existingSongs = await _songDao.fetchAll(sourceId: 'local');
     final existingById = {for (final song in existingSongs) song.id: song};
+    final existingIds = existingById.keys.toSet();
     final seenPaths = <String>{};
     final candidates = <_LocalScanCandidate>[];
     final customFiles = await _collectCustomFiles(
@@ -265,6 +265,22 @@ class LocalMusicService {
       isCancelled,
     );
     var total = 0;
+    final progressClock = Stopwatch()..start();
+    var lastProgressAtMs = -1000;
+    var lastProgressProcessed = -1;
+
+    void reportProgress({bool force = false}) {
+      if (!force && processed == lastProgressProcessed) return;
+      final elapsedMs = progressClock.elapsedMilliseconds;
+      final enoughTime = elapsedMs - lastProgressAtMs >= 200;
+      final enoughSongs = processed - lastProgressProcessed >= 20;
+      if (!force && !enoughTime && !enoughSongs) return;
+      lastProgressAtMs = elapsedMs;
+      lastProgressProcessed = processed;
+      onProgress(
+        LocalScanProgress(processed: processed, added: added, total: total),
+      );
+    }
 
     List<AssetPathEntity> selectedAlbums = [];
     final includeSet = settings.includeAlbumIds.toSet();
@@ -344,9 +360,7 @@ class LocalMusicService {
     }
 
     total = candidates.length;
-    onProgress(
-      LocalScanProgress(processed: processed, added: added, total: total),
-    );
+    reportProgress(force: true);
 
     final int concurrency = settings.localMetadataConcurrency.clamp(1, 12);
     var nextIndex = 0;
@@ -361,15 +375,7 @@ class LocalMusicService {
         final file = File(candidate.path);
         if (!await file.exists()) {
           processed += 1;
-          if (processed % 20 == 0) {
-            onProgress(
-              LocalScanProgress(
-                processed: processed,
-                added: added,
-                total: total,
-              ),
-            );
-          }
+          reportProgress();
           continue;
         }
         final stat = await file.stat();
@@ -383,15 +389,7 @@ class LocalMusicService {
               existing.durationMs != null &&
               existing.durationMs! < settings.minDurationMs) {
             processed += 1;
-            if (processed % 10 == 0) {
-              onProgress(
-                LocalScanProgress(
-                  processed: processed,
-                  added: added,
-                  total: total,
-                ),
-              );
-            }
+            reportProgress();
             continue;
           }
           final trimmedAssetId = (candidate.assetId ?? '').trim();
@@ -419,15 +417,7 @@ class LocalMusicService {
               : existing;
           scannedSongs.add(nextSong);
           processed += 1;
-          if (processed % 10 == 0) {
-            onProgress(
-              LocalScanProgress(
-                processed: processed,
-                added: added,
-                total: total,
-              ),
-            );
-          }
+          reportProgress();
           continue;
         }
 
@@ -454,15 +444,7 @@ class LocalMusicService {
             durationMs != null &&
             durationMs < settings.minDurationMs) {
           processed += 1;
-          if (processed % 10 == 0) {
-            onProgress(
-              LocalScanProgress(
-                processed: processed,
-                added: added,
-                total: total,
-              ),
-            );
-          }
+          reportProgress();
           continue;
         }
         final coverPath = await _resolveCoverPath(
@@ -507,26 +489,26 @@ class LocalMusicService {
             localCoverPath: coverPath,
             localAssetId: candidate.assetId,
             tagsParsed: tagInfo != null,
+            trackNumber: settings.readFullTagsOnScan
+                ? tagInfo?.trackNumber
+                : existing?.trackNumber,
+            discNumber: settings.readFullTagsOnScan
+                ? tagInfo?.discNumber
+                : existing?.discNumber,
           ),
         );
         processed += 1;
         if (!existingIds.contains(candidate.path)) {
           added += 1;
         }
-        if (processed % 10 == 0) {
-          onProgress(
-            LocalScanProgress(processed: processed, added: added, total: total),
-          );
-        }
+        reportProgress();
       }
     }
 
     final workers = List.generate(concurrency, (_) => worker());
     await Future.wait(workers);
 
-    onProgress(
-      LocalScanProgress(processed: processed, added: added, total: total),
-    );
+    reportProgress(force: true);
     final inserted = await _songDao.upsertSongs(scannedSongs);
     if (kDebugMode) {
       debugPrint('Local scan finished: $processed processed, $inserted added.');

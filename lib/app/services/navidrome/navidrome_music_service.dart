@@ -237,6 +237,11 @@ class NavidromeMusicService {
           : _readString(raw, 'contentType'),
       sourceId: source.id,
       tagsParsed: true,
+      // Subsonic API surfaces both — Navidrome uses `track` (int) and
+      // `discNumber` (int) on the child element. When absent the fallback
+      // sort key still works, so no coalescing needed here.
+      trackNumber: _readInt(raw, 'track'),
+      discNumber: _readInt(raw, 'discNumber'),
     );
   }
 

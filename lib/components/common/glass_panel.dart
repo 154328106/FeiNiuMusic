@@ -1,10 +1,15 @@
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
 
 import '../../app/state/settings_state.dart';
 import '../../app/theme/app_styles.dart';
 
+/// Solid-but-optionally-transparent panel container.
+///
+/// Previously this used `BackdropFilter` to blur whatever was underneath, but
+/// the blur was expensive, its "on/off" switch made the transparency slider
+/// look broken, and users just wanted a panel whose opacity they could tune.
+/// The widget name is kept for backwards compatibility with all the call
+/// sites — think of it now as "the app's standard panel", not a blur.
 class GlassPanel extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry? padding;
@@ -13,7 +18,11 @@ class GlassPanel extends StatelessWidget {
   final Color? borderColor;
   final Color? shadowColor;
   final List<BoxShadow>? boxShadow;
-  final double blurSigma;
+  // Kept for source compatibility — no longer honoured. Left as `double?` so
+  // callers can keep passing their old `blurSigma:` args without a compile
+  // error, and so a future replacement (e.g. a subtle inner highlight tied to
+  // this value) could reuse the parameter.
+  final double? blurSigma;
   final VoidCallback? onTap;
   final double? height;
 
@@ -26,7 +35,7 @@ class GlassPanel extends StatelessWidget {
     this.borderColor,
     this.shadowColor,
     this.boxShadow,
-    this.blurSigma = 1,
+    this.blurSigma,
     this.onTap,
     this.height,
   });
@@ -39,66 +48,59 @@ class GlassPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Listen to panelOpacity so dragging the "面板透明度" slider updates
+    // every panel instantly, without needing to leave and re-enter the page.
+    return ValueListenableBuilder<double>(
+      valueListenable: AppBackgroundSettings.panelOpacity,
+      builder: (context, _, _) => _buildPanel(context),
+    );
+  }
+
+  Widget _buildPanel(BuildContext context) {
     final theme = Theme.of(context);
     final resolvedColor = color ?? theme.appPanelColor;
     final resolvedBorderColor = borderColor ?? theme.appPanelBorderColor;
     final resolvedShadowColor = shadowColor ?? theme.appPanelShadowColor;
+    final isInvisible = resolvedColor.a <= 0;
     final resolvedShadow =
         boxShadow ??
-        [
-          BoxShadow(
-            color: resolvedShadowColor,
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ];
+        (isInvisible
+            ? const <BoxShadow>[]
+            : [
+                BoxShadow(
+                  color: resolvedShadowColor,
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
+                ),
+              ]);
 
-    return ValueListenableBuilder<bool>(
-      valueListenable: AppBackgroundSettings.glassEffectEnabled,
-      builder: (context, glassEnabled, _) {
-        return ValueListenableBuilder<double>(
-          valueListenable: AppBackgroundSettings.panelBlurStrength,
-          builder: (context, panelBlurStrength, _) {
-            final sigma = glassEnabled ? panelBlurStrength * blurSigma : 0.0;
-            final isInvisible = resolvedColor.a <= 0 && sigma <= 0;
-            final panel = Container(
-              height: height,
-              decoration: BoxDecoration(
-                color: resolvedColor,
-                borderRadius: _resolvedBorderRadius,
-                border: isInvisible
-                    ? null
-                    : Border.all(color: resolvedBorderColor),
-                boxShadow: isInvisible ? null : resolvedShadow,
-              ),
-              child: padding == null
-                  ? child
-                  : Padding(padding: padding!, child: child),
-            );
+    final panel = Container(
+      height: height,
+      decoration: BoxDecoration(
+        color: resolvedColor,
+        borderRadius: _resolvedBorderRadius,
+        border: isInvisible ? null : Border.all(color: resolvedBorderColor),
+        boxShadow: resolvedShadow,
+      ),
+      child: padding == null
+          ? child
+          : Padding(padding: padding!, child: child),
+    );
 
-            final material = Material(
-              color: Colors.transparent,
-              child: onTap == null
-                  ? panel
-                  : InkWell(
-                      borderRadius: _resolvedBorderRadius,
-                      onTap: onTap,
-                      child: panel,
-                    ),
-            );
-
-            return ClipRRect(
+    final material = Material(
+      color: Colors.transparent,
+      child: onTap == null
+          ? panel
+          : InkWell(
               borderRadius: _resolvedBorderRadius,
-              child: glassEnabled && sigma > 0
-                  ? BackdropFilter(
-                      filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-                      child: material,
-                    )
-                  : material,
-            );
-          },
-        );
-      },
+              onTap: onTap,
+              child: panel,
+            ),
+    );
+
+    return ClipRRect(
+      borderRadius: _resolvedBorderRadius,
+      child: material,
     );
   }
 }

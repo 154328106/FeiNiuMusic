@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../state/settings_background_state.dart';
+import '../state/settings_theme_state.dart';
 
 class AppScrollBehavior extends MaterialScrollBehavior {
   const AppScrollBehavior();
@@ -73,12 +74,18 @@ extension AppThemeSurfaceX on ThemeData {
   }
 
   Color get appPanelColor {
-    final isDark = brightness == Brightness.dark;
-    final glassEnabled = AppBackgroundSettings.glassEffectEnabled.value;
-    final panelOpacity = glassEnabled
-        ? AppBackgroundSettings.panelOpacity.value
-        : 1.0;
+    final panelOpacity = AppBackgroundSettings.panelOpacity.value;
     if (panelOpacity <= 0) return Colors.transparent;
+
+    if (AppThemeSettings.visualStyle.value == AppVisualStyle.miuix) {
+      // miuix panels used to be forced fully opaque; honour the transparency
+      // slider here too so users get a single unified control.
+      return colorScheme.surface.withValues(alpha: panelOpacity);
+    }
+    final isDark = brightness == Brightness.dark;
+    // Panel opacity is now an unconditional control — no more gating on a
+    // separate "glass effect" toggle. 1.0 = fully solid panel, 0.0 = fully
+    // transparent (the background/glow shows through).
     final base = isDark
         ? Color.alphaBlend(
             colorScheme.primary.withValues(alpha: 0.08),
@@ -88,21 +95,13 @@ extension AppThemeSurfaceX on ThemeData {
             colorScheme.primary.withValues(alpha: 0.12),
             Colors.white,
           );
-    if (!glassEnabled || !hasAmbientBackground) {
-      return base.withValues(alpha: panelOpacity);
-    }
-
-    final overlayColor = isDark
-        ? colorScheme.surfaceContainerHighest.withValues(alpha: panelOpacity)
-        : Colors.white.withValues(alpha: panelOpacity);
-
-    return Color.alphaBlend(
-      colorScheme.primary.withValues(alpha: 0.06),
-      overlayColor,
-    );
+    return base.withValues(alpha: panelOpacity);
   }
 
   Color get appPanelShadowColor {
+    if (AppThemeSettings.visualStyle.value == AppVisualStyle.miuix) {
+      return Colors.transparent;
+    }
     final isDark = brightness == Brightness.dark;
     return isDark
         ? Colors.black.withValues(alpha: 0.35)
@@ -110,6 +109,9 @@ extension AppThemeSurfaceX on ThemeData {
   }
 
   Color get appPanelBorderColor {
+    if (AppThemeSettings.visualStyle.value == AppVisualStyle.miuix) {
+      return Colors.transparent;
+    }
     final isDark = brightness == Brightness.dark;
     return isDark
         ? colorScheme.outline.withValues(alpha: 0.36)
@@ -117,6 +119,9 @@ extension AppThemeSurfaceX on ThemeData {
   }
 
   Color get appPanelElevatedColor {
+    if (AppThemeSettings.visualStyle.value == AppVisualStyle.miuix) {
+      return colorScheme.surfaceContainerHigh;
+    }
     final base = appPanelColor;
     if (base.a <= 0) return Colors.transparent;
     final overlay = brightness == Brightness.dark

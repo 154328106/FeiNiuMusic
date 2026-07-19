@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6,6 +7,7 @@ import 'package:signals/signals.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
 import '../../app/state/settings_state.dart';
+import '../../app/theme/app_visual_theme.dart';
 import '../../app/services/db/dao/song_dao.dart';
 import '../../app/router/app_page_route.dart';
 import '../../app/services/app_update_service.dart';
@@ -27,6 +29,7 @@ import '../library/folders_page.dart';
 import '../library/library_detail_pages.dart';
 import '../library/playlists_page.dart';
 import 'recent_playback_page.dart';
+import 'home_recommender.dart';
 import '../songs/songs_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -66,6 +69,12 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
   late final _recentSongs = createSignal<List<SongEntity>>([]);
   late final _recentAlbums = createSignal<List<_RecentAlbumItem>>([]);
   late final _recentPlaylists = createSignal<List<PlaylistEntity>>([]);
+  late final _librarySongs = createSignal<List<SongEntity>>([]);
+  late final _favoriteSongIds = createSignal<Set<String>>({});
+  // Behaviour data driving the home recommender. Refreshed alongside the
+  // library counts in _load.
+  late final _playCounts = createSignal<Map<String, int>>({});
+  late final _lastPlayedMs = createSignal<Map<String, int>>({});
 
   late final _webDavNameMap = computed<Map<String, String>>(() {
     final map = <String, String>{};
@@ -227,13 +236,26 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
     final sourcesFuture = _webDavRepo.loadSources();
     final navidromeSourcesFuture = _navidromeRepo.loadSources();
     final recentSongsFuture = _loadRecentSongs();
-    final recentPlaylistsFuture = _loadRecentPlaylists();
+    final playlistsFuture = _playlistsService.loadAll();
+    final librarySongsFuture = _songDao.fetchAllCached();
+    // Parallel with the DB fetches — recommender inputs.
+    final playCountsFuture = _statsService.fetchPlayCounts();
+    final lastPlayedFuture = _statsService.fetchLastPlayedTimestamps();
 
     final counts = await countsFuture;
     final sources = await sourcesFuture;
     final navidromeSources = await navidromeSourcesFuture;
     final recentSongs = await recentSongsFuture;
-    final recentPlaylists = await recentPlaylistsFuture;
+    final playlists = await playlistsFuture;
+    final librarySongs = await librarySongsFuture;
+    final playCounts = await playCountsFuture;
+    final lastPlayed = await lastPlayedFuture;
+    final recentPlaylists = playlists.toList()
+      ..sort((a, b) => b.createdAtMs.compareTo(a.createdAtMs));
+    final favorite = playlists.where((playlist) => playlist.isFavorite);
+    final favoriteSongIds = favorite.isEmpty
+        ? const <String>{}
+        : favorite.first.songIds.toSet();
     final recentAlbums = _buildRecentAlbums(recentSongs);
 
     Map<String, int> webdavCounts;
@@ -303,8 +325,12 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
     _navidromeSources.value = navidromeSources;
     _navidromeCounts.value = navidromeCounts;
     _recentSongs.value = recentSongs;
-    _recentPlaylists.value = recentPlaylists;
+    _recentPlaylists.value = recentPlaylists.take(6).toList();
     _recentAlbums.value = recentAlbums;
+    _librarySongs.value = librarySongs;
+    _favoriteSongIds.value = favoriteSongIds;
+    _playCounts.value = playCounts;
+    _lastPlayedMs.value = lastPlayed;
     _loading.value = false;
   }
 
@@ -319,11 +345,52 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
     return songs.take(6).toList();
   }
 
-  Future<List<PlaylistEntity>> _loadRecentPlaylists() async {
-    final playlists = await _playlistsService.loadAll();
-    final sorted = playlists.toList()
-      ..sort((a, b) => b.createdAtMs.compareTo(a.createdAtMs));
-    return sorted.take(6).toList();
+  bool _matchesCurrentSource(SongEntity song) {
+    final filter = _filter.value;
+    if (filter == 'all') return true;
+    if (filter == 'local') return song.isLocal;
+    if (filter == 'webdav') return !song.isLocal;
+    if (filter.startsWith('webdav:')) {
+      return song.sourceId == filter.substring('webdav:'.length);
+    }
+    return true;
+  }
+
+  HomeRecommender _recommender() {
+    return HomeRecommender(
+      now: DateTime.now(),
+      playCounts: _playCounts.value,
+      lastPlayedMs: _lastPlayedMs.value,
+      favoriteIds: _favoriteSongIds.value,
+    );
+  }
+
+  List<SongEntity> _dailySongs() {
+    final pool = _librarySongs.value.where(_matchesCurrentSource).toList();
+    return _recommender().daily(pool);
+  }
+
+  List<SongEntity> _heartModeSongs() {
+    final pool = _librarySongs.value.where(_matchesCurrentSource).toList();
+    return _recommender().heart(pool);
+  }
+
+  List<SongEntity> _recommendedSongs() {
+    final pool = _librarySongs.value.where(_matchesCurrentSource).toList();
+    final picks = _recommender().recommended(pool, limit: 6);
+    if (picks.isNotEmpty) return picks;
+    // Ultimate fallback: recently listened, then daily.
+    final recent = _recentSongs.value.where(_matchesCurrentSource).toList();
+    if (recent.isNotEmpty) return recent.take(6).toList();
+    return _dailySongs().take(6).toList();
+  }
+
+  Future<void> _playDiscoveryQueue(List<SongEntity> songs) async {
+    if (songs.isEmpty) {
+      AppToast.show(context, '当前音源还没有可播放的歌曲');
+      return;
+    }
+    await _player.playQueue(songs, 0);
   }
 
   List<_RecentAlbumItem> _buildRecentAlbums(List<SongEntity> songs) {
@@ -460,153 +527,850 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
   // replace the stack so back from them triggers the double-press-to-exit flow
   // instead of returning here.
   Future<void> _openTopLevel(Widget page) async {
+    if (AppLayoutSettings.navigationStyle.value ==
+        AppNavigationStyle.bottomBar) {
+      await Navigator.of(context).push(buildAppPageRoute<void>((_) => page));
+      return;
+    }
     await Navigator.of(context).pushAndRemoveUntil(
       buildAppPageRoute<void>((_) => page),
       (route) => false,
     );
   }
 
+  Widget _buildClassicHome() {
+    return Watch.builder(
+      builder: (context) => RefreshIndicator(
+        onRefresh: () => _load(includeWebDavCounts: true),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 160),
+          children: [
+            _HomeStatsRow(
+              loading: _loading.value,
+              filterLabel: _filterTitle.value,
+              songCount: _filterCount.value,
+              onTap: _showSourceSheet,
+            ),
+            const SizedBox(height: 14),
+            _HomeEntryRow(
+              entries: [
+                _HomeEntryData(
+                  icon: Icons.music_note_rounded,
+                  label: '歌曲',
+                  onTap: () => _openTopLevel(const SongsPage()),
+                ),
+                _HomeEntryData(
+                  icon: Icons.people_rounded,
+                  label: '艺术家',
+                  onTap: () => _openTopLevel(const ArtistsPage()),
+                ),
+                _HomeEntryData(
+                  icon: Icons.album_rounded,
+                  label: '专辑',
+                  onTap: () => _openTopLevel(const AlbumsPage()),
+                ),
+                _HomeEntryData(
+                  icon: Icons.queue_music_rounded,
+                  label: '歌单',
+                  onTap: () => _openTopLevel(const PlaylistsPage()),
+                ),
+                _HomeEntryData(
+                  icon: Icons.folder_rounded,
+                  label: '文件夹',
+                  onTap: () => _openTopLevel(const FoldersPage()),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            if (_recentSongs.value.isNotEmpty) ...[
+              _HomeSectionCard(
+                title: '最近歌曲',
+                actionLabel: '查看更多',
+                onTapAction: () => _pushLibraryPage(
+                  const RecentPlaybackPage(initialTab: RecentPlaybackTab.songs),
+                ),
+                child: _HomeRecentSongsList(
+                  songs: _recentSongs.value,
+                  onTapSong: (song) async {
+                    final queue = _recentSongs.value;
+                    final index = queue.indexWhere(
+                      (item) => item.id == song.id,
+                    );
+                    if (index >= 0) await _player.playQueue(queue, index);
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            if (_recentPlaylists.value.isNotEmpty) ...[
+              _HomeSectionCard(
+                title: '最近歌单',
+                actionLabel: '查看更多',
+                onTapAction: () => _pushLibraryPage(
+                  const RecentPlaybackPage(
+                    initialTab: RecentPlaybackTab.playlists,
+                  ),
+                ),
+                child: _HomeRecentPlaylistsList(
+                  playlists: _recentPlaylists.value,
+                  onTapPlaylist: (playlist) => _pushLibraryPage(
+                    PlaylistDetailPage(playlistId: playlist.id),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            if (_recentAlbums.value.isNotEmpty) ...[
+              _HomeSectionCard(
+                title: '最近专辑',
+                actionLabel: '查看更多',
+                onTapAction: () => _pushLibraryPage(
+                  const RecentPlaybackPage(
+                    initialTab: RecentPlaybackTab.albums,
+                  ),
+                ),
+                child: _HomeRecentAlbumsList(
+                  albums: _recentAlbums.value,
+                  onTapAlbum: (album) =>
+                      _pushLibraryPage(AlbumDetailPage(albumName: album.name)),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            if (_recentSongs.value.isEmpty &&
+                _recentPlaylists.value.isEmpty &&
+                _recentAlbums.value.isEmpty)
+              const _HomeEmptyState(text: '还没有最近播放记录'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<_HomeSourceItem> _topSourceItems() {
+    final items = <_HomeSourceItem>[
+      const _HomeSourceItem(label: '综合', value: 'all'),
+      const _HomeSourceItem(label: '本地', value: 'local'),
+    ];
+    for (final source in _webDavSources.value) {
+      items.add(
+        _HomeSourceItem(
+          label: source.name.trim().isEmpty ? 'WebDAV' : source.name.trim(),
+          value: 'webdav:${source.id}',
+        ),
+      );
+    }
+    for (final source in _navidromeSources.value) {
+      items.add(
+        _HomeSourceItem(
+          label: source.name.trim().isEmpty ? 'Navidrome' : source.name.trim(),
+          value: 'webdav:${source.id}',
+        ),
+      );
+    }
+    return items;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return AppPageScaffold(
-      key: _scaffoldKey,
-      extendBodyBehindAppBar: true,
-      appBar: AppTopBar(
-        title: '音乐库',
-        leading: IconButton(
-          icon: const Icon(Icons.menu_rounded),
-          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.swap_horiz_rounded),
-            onPressed: _showSourceSheet,
+    return AppNavigationModeBuilder(
+      builder: (context, useBottomNavigation) => AppPageScaffold(
+        key: _scaffoldKey,
+        extendBodyBehindAppBar: true,
+        appBar: AppTopBar(
+          titleWidget: Watch.builder(
+            builder: (context) => _HomeSourceTabs(
+              items: _topSourceItems(),
+              selectedValue: _filter.value,
+              onSelected: _setFilter,
+            ),
           ),
-          const SizedBox(width: 8),
-        ],
-        backgroundColor: Colors.transparent,
-        elevation: 0,
+          showBackButton: false,
+          centerTitle: false,
+          leading: useBottomNavigation
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.menu_rounded),
+                  onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                ),
+          actions: [
+            IconButton(
+              tooltip: '管理音源',
+              icon: const Icon(Icons.tune_rounded),
+              onPressed: _showSourceSheet,
+            ),
+            const SizedBox(width: 4),
+          ],
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+        ),
+        drawer: useBottomNavigation
+            ? null
+            : SideMenu(
+                onCloseDrawer: () => _scaffoldKey.currentState?.closeDrawer(),
+              ),
+        bottomNavIndex: useBottomNavigation ? 0 : null,
+        onBottomNavTap: useBottomNavigation
+            ? (index) => navigateToPrimaryDestination(context, index)
+            : null,
+        body: context.usesMiuix
+            ? Watch.builder(
+                builder: (context) {
+                  final dailySongs = _dailySongs();
+                  final heartSongs = _heartModeSongs();
+                  final recommendedSongs = _recommendedSongs();
+                  final featuredPlaylists = _recentPlaylists.value
+                      .where((playlist) => !playlist.isFavorite)
+                      .toList();
+                  return RefreshIndicator(
+                    onRefresh: () => _load(includeWebDavCounts: true),
+                    child: ListView(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 160),
+                      children: [
+                        _HomeSourceSummary(
+                          title: _filterTitle.value,
+                          count: _filterCount.value,
+                          loading: _loading.value,
+                        ),
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          height: 210,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            physics: const BouncingScrollPhysics(),
+                            itemCount: 3,
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(width: 14),
+                            itemBuilder: (context, index) {
+                              if (index == 0) {
+                                return _DiscoveryCard(
+                                  eyebrow: '每日推荐',
+                                  title: '今日限定好歌推荐',
+                                  icon: Icons.calendar_month_rounded,
+                                  song: dailySongs.firstOrNull,
+                                  accent: const Color(0xFFEF4444),
+                                  onTap: () => _playDiscoveryQueue(dailySongs),
+                                );
+                              }
+                              if (index == 1) {
+                                return _DiscoveryCard(
+                                  eyebrow: '心动模式',
+                                  title: '红心歌曲和相似推荐',
+                                  icon: Icons.favorite_rounded,
+                                  song: heartSongs.firstOrNull,
+                                  accent: const Color(0xFF8B7CF6),
+                                  onTap: () => _playDiscoveryQueue(heartSongs),
+                                );
+                              }
+                              return _DiscoveryCard(
+                                eyebrow: '歌单推荐',
+                                title: featuredPlaylists.isEmpty
+                                    ? '创建你的第一张歌单'
+                                    : featuredPlaylists.first.name,
+                                icon: Icons.queue_music_rounded,
+                                song: recommendedSongs.firstOrNull,
+                                accent: const Color(0xFF38A3A5),
+                                onTap: () {
+                                  if (featuredPlaylists.isEmpty) {
+                                    _openTopLevel(const PlaylistsPage());
+                                    return;
+                                  }
+                                  _pushLibraryPage(
+                                    PlaylistDetailPage(
+                                      playlistId: featuredPlaylists.first.id,
+                                    ),
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 28),
+                        _HomeRecommendationSection(
+                          songs: recommendedSongs,
+                          onPlayAll: () =>
+                              _playDiscoveryQueue(recommendedSongs),
+                          onTapSong: (song) async {
+                            final index = recommendedSongs.indexWhere(
+                              (item) => item.id == song.id,
+                            );
+                            await _player.playQueue(
+                              recommendedSongs,
+                              index < 0 ? 0 : index,
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 28),
+                        _HomeQuickLibrary(
+                          onArtists: () => _openTopLevel(const ArtistsPage()),
+                          onAlbums: () => _openTopLevel(const AlbumsPage()),
+                          onFolders: () => _openTopLevel(const FoldersPage()),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              )
+            : _buildClassicHome(),
       ),
-      drawer: SideMenu(
-        onCloseDrawer: () => _scaffoldKey.currentState?.closeDrawer(),
+    );
+  }
+}
+
+class _HomeSourceTabs extends StatelessWidget {
+  final List<_HomeSourceItem> items;
+  final String selectedValue;
+  final ValueChanged<String> onSelected;
+
+  const _HomeSourceTabs({
+    required this.items,
+    required this.selectedValue,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox(
+      height: 48,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        itemCount: items.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 22),
+        itemBuilder: (context, index) {
+          final item = items[index];
+          final selected = selectedValue == item.value;
+          return InkWell(
+            onTap: () => onSelected(item.value),
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.only(top: 3, bottom: 5),
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(
+                      color: selected ? scheme.primary : Colors.transparent,
+                      width: 2.5,
+                    ),
+                  ),
+                ),
+                child: Text(
+                  item.label,
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: selected
+                        ? scheme.onSurface
+                        : scheme.onSurfaceVariant,
+                    fontSize: selected ? 18 : 16,
+                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
       ),
-      body: Watch.builder(
-        builder: (context) => RefreshIndicator(
-          onRefresh: () => _load(includeWebDavCounts: true),
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 160),
+    );
+  }
+}
+
+class _HomeSourceSummary extends StatelessWidget {
+  final String title;
+  final int count;
+  final bool loading;
+
+  const _HomeSourceSummary({
+    required this.title,
+    required this.count,
+    required this.loading,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
+        ),
+        Text(
+          loading ? '正在更新' : '$count 首歌曲',
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+        ),
+      ],
+    );
+  }
+}
+
+class _DiscoveryCard extends StatelessWidget {
+  static const double width = 168;
+  static const double _coverSize = 168;
+
+  final String eyebrow;
+  final String title;
+  final IconData icon;
+  final SongEntity? song;
+  final Color accent;
+  final VoidCallback onTap;
+
+  const _DiscoveryCard({
+    required this.eyebrow,
+    required this.title,
+    required this.icon,
+    required this.song,
+    required this.accent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final currentSong = song;
+    // NetEase-style: big square artwork on top, small chip label + play button
+    // overlaid, and a single subtitle line underneath (outside the artwork,
+    // in normal panel-text color) — not a dark gradient buried under everything.
+    return SizedBox(
+      width: width,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _HomeStatsRow(
-                loading: _loading.value,
-                filterLabel: _filterTitle.value,
-                songCount: _filterCount.value,
-                onTap: _showSourceSheet,
+              ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: SizedBox(
+                  width: _coverSize,
+                  height: _coverSize,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      if (currentSong != null)
+                        ArtworkWidget(
+                          song: currentSong,
+                          size: _coverSize,
+                          borderRadius: 0,
+                          preferOriginal: true,
+                        )
+                      else
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                accent.withValues(alpha: 0.95),
+                                accent.withValues(alpha: 0.55),
+                              ],
+                            ),
+                          ),
+                        ),
+                      // Thin translucent chip at top-left, no full-cover gradient.
+                      Positioned(
+                        left: 10,
+                        top: 10,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.36),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(icon, color: Colors.white, size: 12),
+                              const SizedBox(width: 4),
+                              Text(
+                                eyebrow,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      // Play button, bottom-right — the NetEase-style circular
+                      // affordance sitting on top of the artwork.
+                      Positioned(
+                        right: 8,
+                        bottom: 8,
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.92),
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.18),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Icon(
+                            Icons.play_arrow_rounded,
+                            color: Colors.black.withValues(alpha: 0.85),
+                            size: 22,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              const SizedBox(height: 14),
-              _HomeEntryRow(
-                entries: [
-                  _HomeEntryData(
-                    icon: Icons.music_note_rounded,
-                    label: '歌曲',
-                    onTap: () => _openTopLevel(const SongsPage()),
-                  ),
-                  _HomeEntryData(
-                    icon: Icons.people_rounded,
-                    label: '艺术家',
-                    onTap: () => _openTopLevel(const ArtistsPage()),
-                  ),
-                  _HomeEntryData(
-                    icon: Icons.album_rounded,
-                    label: '专辑',
-                    onTap: () => _openTopLevel(const AlbumsPage()),
-                  ),
-                  _HomeEntryData(
-                    icon: Icons.queue_music_rounded,
-                    label: '歌单',
-                    onTap: () => _openTopLevel(const PlaylistsPage()),
-                  ),
-                  _HomeEntryData(
-                    icon: Icons.folder_rounded,
-                    label: '文件夹',
-                    onTap: () => _openTopLevel(const FoldersPage()),
-                  ),
-                ],
+              const SizedBox(height: 10),
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                  letterSpacing: 0.1,
+                ),
               ),
-              const SizedBox(height: 24),
-              if (_recentSongs.value.isNotEmpty) ...[
-                _HomeSectionCard(
-                  title: '最近歌曲',
-                  actionLabel: '查看更多',
-                  onTapAction: () {
-                    _pushLibraryPage(
-                      const RecentPlaybackPage(
-                        initialTab: RecentPlaybackTab.songs,
-                      ),
-                    );
-                  },
-                  child: _HomeRecentSongsList(
-                    songs: _recentSongs.value,
-                    onTapSong: (song) async {
-                      final queue = _recentSongs.value;
-                      final index = queue.indexWhere((e) => e.id == song.id);
-                      if (index < 0) return;
-                      await _player.playQueue(queue, index);
-                    },
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-              if (_recentPlaylists.value.isNotEmpty) ...[
-                _HomeSectionCard(
-                  title: '最近歌单',
-                  actionLabel: '查看更多',
-                  onTapAction: () {
-                    _pushLibraryPage(
-                      const RecentPlaybackPage(
-                        initialTab: RecentPlaybackTab.playlists,
-                      ),
-                    );
-                  },
-                  child: _HomeRecentPlaylistsList(
-                    playlists: _recentPlaylists.value,
-                    onTapPlaylist: (playlist) {
-                      _pushLibraryPage(
-                        PlaylistDetailPage(playlistId: playlist.id),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-              if (_recentAlbums.value.isNotEmpty) ...[
-                _HomeSectionCard(
-                  title: '最近专辑',
-                  actionLabel: '查看更多',
-                  onTapAction: () {
-                    _pushLibraryPage(
-                      const RecentPlaybackPage(
-                        initialTab: RecentPlaybackTab.albums,
-                      ),
-                    );
-                  },
-                  child: _HomeRecentAlbumsList(
-                    albums: _recentAlbums.value,
-                    onTapAlbum: (album) {
-                      _pushLibraryPage(AlbumDetailPage(albumName: album.name));
-                    },
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-              if (_recentSongs.value.isEmpty &&
-                  _recentPlaylists.value.isEmpty &&
-                  _recentAlbums.value.isEmpty)
-                const _HomeEmptyState(text: '还没有最近播放记录'),
             ],
           ),
         ),
       ),
     );
+  }
+}
+
+class _HomeRecommendationSection extends StatefulWidget {
+  final List<SongEntity> songs;
+  final VoidCallback onPlayAll;
+  final ValueChanged<SongEntity> onTapSong;
+
+  const _HomeRecommendationSection({
+    required this.songs,
+    required this.onPlayAll,
+    required this.onTapSong,
+  });
+
+  @override
+  State<_HomeRecommendationSection> createState() =>
+      _HomeRecommendationSectionState();
+}
+
+class _HomeRecommendationSectionState
+    extends State<_HomeRecommendationSection> {
+  final PageController _pageController = PageController();
+
+  @override
+  void didUpdateWidget(covariant _HomeRecommendationSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldIds = oldWidget.songs.map((song) => song.id).join('|');
+    final newIds = widget.songs.map((song) => song.id).join('|');
+    if (oldIds != newIds && _pageController.hasClients) {
+      _pageController.jumpToPage(0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                '根据你喜欢的歌曲推荐',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.4,
+                ),
+              ),
+            ),
+            IconButton.filledTonal(
+              tooltip: '播放全部',
+              onPressed: widget.onPlayAll,
+              icon: const Icon(Icons.play_arrow_rounded),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (widget.songs.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Text(
+              '收藏几首喜欢的歌后，这里会出现更贴合你的推荐',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: scheme.onSurfaceVariant),
+            ),
+          )
+        else
+          SizedBox(
+            height: 198,
+            child: PageView.builder(
+              controller: _pageController,
+              itemCount: (widget.songs.length + 2) ~/ 3,
+              itemBuilder: (context, pageIndex) {
+                final start = pageIndex * 3;
+                final end = min(start + 3, widget.songs.length);
+                return Column(
+                  children: widget.songs
+                      .sublist(start, end)
+                      .map(
+                        (song) => _RecommendationSongTile(
+                          song: song,
+                          onTap: () => widget.onTapSong(song),
+                        ),
+                      )
+                      .toList(),
+                );
+              },
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _RecommendationSongTile extends StatelessWidget {
+  final SongEntity song;
+  final VoidCallback onTap;
+
+  const _RecommendationSongTile({required this.song, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox(
+      height: 66,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Row(
+          children: [
+            ArtworkWidget(song: song, size: 52, borderRadius: 9),
+            const SizedBox(width: 11),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    song.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    song.artist,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.play_arrow_rounded,
+              size: 22,
+              color: scheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 4),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeQuickLibrary extends StatelessWidget {
+  final VoidCallback onArtists;
+  final VoidCallback onAlbums;
+  final VoidCallback onFolders;
+
+  const _HomeQuickLibrary({
+    required this.onArtists,
+    required this.onAlbums,
+    required this.onFolders,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    // Three-tone tinted tiles keyed off the current theme's primary/tertiary
+    // colors, so the row picks up whatever accent the user chose in 应用外观.
+    final buttons = <_QuickLibraryData>[
+      _QuickLibraryData(
+        label: '艺术家',
+        icon: Icons.person_rounded,
+        accent: scheme.primary,
+        onTap: onArtists,
+      ),
+      _QuickLibraryData(
+        label: '专辑',
+        icon: Icons.album_rounded,
+        accent: scheme.tertiary,
+        onTap: onAlbums,
+      ),
+      _QuickLibraryData(
+        label: '文件夹',
+        icon: Icons.folder_rounded,
+        accent: scheme.secondary,
+        onTap: onFolders,
+      ),
+    ];
+    return Row(
+      children: [
+        for (var i = 0; i < buttons.length; i++) ...[
+          if (i > 0) const SizedBox(width: 12),
+          Expanded(
+            child: _QuickLibraryButton(data: buttons[i], isDark: isDark),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _QuickLibraryData {
+  final String label;
+  final IconData icon;
+  final Color accent;
+  final VoidCallback onTap;
+
+  const _QuickLibraryData({
+    required this.label,
+    required this.icon,
+    required this.accent,
+    required this.onTap,
+  });
+}
+
+class _QuickLibraryButton extends StatelessWidget {
+  final _QuickLibraryData data;
+  final bool isDark;
+
+  const _QuickLibraryButton({required this.data, required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    // Blend the accent onto an opaque surface — the resulting color is fully
+    // solid, so text sitting on it never has to fight the background image
+    // for contrast. Then pick foreground colors against *this* blended
+    // color, not against the page.
+    final scaffold = Theme.of(context).scaffoldBackgroundColor;
+    final tileTop = Color.alphaBlend(
+      data.accent.withValues(alpha: isDark ? 0.55 : 0.28),
+      scaffold,
+    );
+    final tileBottom = Color.alphaBlend(
+      data.accent.withValues(alpha: isDark ? 0.32 : 0.16),
+      scaffold,
+    );
+    // Same blended-surface trick for the icon chip.
+    final iconChipBg = Color.alphaBlend(
+      data.accent.withValues(alpha: isDark ? 0.72 : 0.42),
+      scaffold,
+    );
+    final iconChipFg = _readableOn(iconChipBg);
+    final textColor = _readableOn(tileTop);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: data.onTap,
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [tileTop, tileBottom],
+            ),
+            border: Border.all(
+              color: data.accent.withValues(alpha: isDark ? 0.45 : 0.30),
+              width: 0.8,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: iconChipBg,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(data.icon, size: 18, color: iconChipFg),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  data.label,
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Return black or white — whichever has higher perceived contrast against
+  /// [background]. Uses ITU-R BT.601 luminance so it works on any tint.
+  static Color _readableOn(Color background) {
+    final luminance =
+        0.299 * background.r + 0.587 * background.g + 0.114 * background.b;
+    return luminance > 0.6 ? Colors.black : Colors.white;
   }
 }
 
@@ -673,6 +1437,58 @@ class _HomeStatsRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final miuix = context.usesMiuix;
+
+    if (miuix) {
+      return GlassPanel(
+        borderRadius: BorderRadius.circular(28),
+        padding: const EdgeInsets.fromLTRB(20, 18, 18, 18),
+        onTap: onTap,
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    filterLabel,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    loading ? '--' : '$songCount 首歌曲',
+                    style: theme.textTheme.headlineMedium?.copyWith(
+                      color: theme.colorScheme.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Icon(
+                Icons.library_music_rounded,
+                color: theme.colorScheme.primary,
+                size: 25,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ],
+        ),
+      );
+    }
 
     return GlassPanel(
       borderRadius: BorderRadius.circular(20),
@@ -755,9 +1571,13 @@ class _HomeEntryRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final miuix = context.usesMiuix;
     return GlassPanel(
-      borderRadius: BorderRadius.circular(20),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      borderRadius: BorderRadius.circular(miuix ? 28 : 20),
+      padding: EdgeInsets.symmetric(
+        horizontal: miuix ? 10 : 8,
+        vertical: miuix ? 14 : 10,
+      ),
       child: Row(
         children: entries
             .map(
@@ -789,6 +1609,7 @@ class _HomeEntryButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final miuix = context.usesMiuix;
     final isDark = theme.brightness == Brightness.dark;
     final iconColor = isDark
         ? theme.colorScheme.primary.withValues(alpha: 0.9)
@@ -798,29 +1619,33 @@ class _HomeEntryButton extends StatelessWidget {
         : const Color.fromARGB(255, 45, 45, 45);
 
     return InkWell(
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(miuix ? 20 : 16),
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+        padding: EdgeInsets.symmetric(horizontal: 3, vertical: miuix ? 7 : 6),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              padding: const EdgeInsets.all(7),
+              width: miuix ? 46 : null,
+              height: miuix ? 46 : null,
+              padding: EdgeInsets.all(miuix ? 0 : 7),
+              alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: iconColor.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
+                color: iconColor.withValues(alpha: miuix ? 0.13 : 0.1),
+                shape: miuix ? BoxShape.rectangle : BoxShape.circle,
+                borderRadius: miuix ? BorderRadius.circular(16) : null,
               ),
-              child: Icon(icon, size: 20, color: iconColor),
+              child: Icon(icon, size: miuix ? 23 : 20, color: iconColor),
             ),
-            const SizedBox(height: 6),
+            SizedBox(height: miuix ? 8 : 6),
             Text(
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 13,
+                fontSize: miuix ? 12 : 13,
                 fontWeight: FontWeight.w600,
                 color: textColor,
               ),
@@ -847,6 +1672,43 @@ class _HomeSectionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final miuix = context.usesMiuix;
+    if (miuix) {
+      final theme = Theme.of(context);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 6, right: 2, bottom: 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: theme.textTheme.titleLarge?.copyWith(fontSize: 18),
+                  ),
+                ),
+                TextButton(
+                  onPressed: onTapAction,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(actionLabel),
+                      const Icon(Icons.chevron_right_rounded, size: 18),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          GlassPanel(
+            borderRadius: BorderRadius.circular(28),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+            child: child,
+          ),
+        ],
+      );
+    }
     return GlassPanel(
       borderRadius: BorderRadius.circular(20),
       padding: const EdgeInsets.fromLTRB(16, 18, 16, 12),
@@ -903,7 +1765,9 @@ class _HomeSectionCard extends StatelessWidget {
 
 class _MediaCoverCard extends StatelessWidget {
   static const double coverSize = 130;
-  static const double cardHeight = coverSize + 46;
+
+  static double heightFor(BuildContext context) =>
+      coverSize + (context.usesMiuix ? 60 : 46);
 
   final Widget cover;
   final String title;
@@ -920,6 +1784,8 @@ class _MediaCoverCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final miuix = context.usesMiuix;
+    final coverRadius = miuix ? 20.0 : 14.0;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
@@ -931,17 +1797,17 @@ class _MediaCoverCard extends StatelessWidget {
           children: [
             Container(
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(coverRadius),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.16),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
+                    color: Colors.black.withValues(alpha: miuix ? 0.10 : 0.16),
+                    blurRadius: miuix ? 8 : 10,
+                    offset: Offset(0, miuix ? 3 : 4),
                   ),
                 ],
               ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(coverRadius),
                 child: SizedBox(
                   width: coverSize,
                   height: coverSize,
@@ -949,13 +1815,13 @@ class _MediaCoverCard extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: miuix ? 10 : 8),
             Text(
               title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 13,
+                fontSize: miuix ? 14 : 13,
                 fontWeight: FontWeight.w600,
                 color: scheme.onSurface,
               ),
@@ -986,7 +1852,7 @@ class _HomeRecentSongsList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: _MediaCoverCard.cardHeight,
+      height: _MediaCoverCard.heightFor(context),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: EdgeInsets.zero,
@@ -1028,7 +1894,7 @@ class _HomeRecentPlaylistsList extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return SizedBox(
-      height: _MediaCoverCard.cardHeight,
+      height: _MediaCoverCard.heightFor(context),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: EdgeInsets.zero,
@@ -1081,7 +1947,7 @@ class _HomeRecentAlbumsList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: _MediaCoverCard.cardHeight,
+      height: _MediaCoverCard.heightFor(context),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: EdgeInsets.zero,
@@ -1117,16 +1983,30 @@ class _HomeEmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final miuix = context.usesMiuix;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(0, 4, 0, 12),
-      child: Text(
-        text,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-          color: Theme.of(
-            context,
-          ).colorScheme.onSurface.withValues(alpha: 0.62),
-        ),
-      ),
+      padding: EdgeInsets.fromLTRB(0, miuix ? 8 : 4, 0, 12),
+      child: miuix
+          ? GlassPanel(
+              borderRadius: BorderRadius.circular(24),
+              padding: const EdgeInsets.symmetric(vertical: 28),
+              child: Center(
+                child: Text(
+                  text,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            )
+          : Text(
+              text,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurface.withValues(alpha: 0.62),
+              ),
+            ),
     );
   }
 }

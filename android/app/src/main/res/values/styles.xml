@@ -15,4 +15,16 @@
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">?android:colorBackground</item>
     </style>
+    <!-- uCrop screen. Without an explicit non-fullscreen theme, the toolbar
+         sits under the status bar / camera cutout on modern phones so the
+         confirm / cancel icons become nearly untappable. -->
+    <style name="AppTheme.UCrop" parent="Theme.AppCompat.Light.DarkActionBar">
+        <item name="android:windowFullscreen">false</item>
+        <item name="android:fitsSystemWindows">true</item>
+        <item name="android:statusBarColor">#212121</item>
+        <item name="android:navigationBarColor">#212121</item>
+        <item name="colorPrimary">#212121</item>
+        <item name="colorPrimaryDark">#212121</item>
+        <item name="colorAccent">#FFFFFF</item>
+    </style>
 </resources>

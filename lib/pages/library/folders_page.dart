@@ -104,42 +104,58 @@ class _FoldersPageState extends State<FoldersPage> with SignalsMixin {
 
   @override
   Widget build(BuildContext context) {
-    return AppPageScaffold(
-      key: _scaffoldKey,
-      extendBodyBehindAppBar: true,
-      appBar: AppTopBar(
-        title: '文件夹',
-        leading: IconButton(
-          icon: const Icon(Icons.menu_rounded),
-          onPressed: _openDrawer,
+    return AppNavigationModeBuilder(
+      builder: (context, useBottomNavigation) => AppPageScaffold(
+        key: _scaffoldKey,
+        extendBodyBehindAppBar: true,
+        appBar: AppTopBar(
+          title: '文件夹',
+          leading: IconButton(
+            icon: Icon(
+              useBottomNavigation
+                  ? Icons.arrow_back_rounded
+                  : Icons.menu_rounded,
+            ),
+            onPressed: useBottomNavigation
+                ? () => Navigator.of(context).maybePop()
+                : _openDrawer,
+          ),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
         ),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-      ),
-      drawer: SideMenu(
-        onCloseDrawer: () => _scaffoldKey.currentState?.closeDrawer(),
-      ),
-      body: Watch.builder(
-        builder: (context) {
-          if (_loading.value) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final folders = _folders.value;
-          if (folders.isEmpty) {
-            return const Center(child: Text('还没有可显示的文件夹'));
-          }
-          final bottomPadding = AppPageScaffold.scrollableBottomPadding(context);
-          return ListView.builder(
-            padding: EdgeInsets.fromLTRB(12, 8, 12, bottomPadding),
-            itemCount: folders.length,
-            itemBuilder: (context, index) {
-              return _FolderTile(
-                folder: folders[index],
-                onTap: () => _openFolder(folders[index]),
-              );
-            },
-          );
-        },
+        drawer: useBottomNavigation
+            ? null
+            : SideMenu(
+                onCloseDrawer: () => _scaffoldKey.currentState?.closeDrawer(),
+              ),
+        bottomNavIndex: useBottomNavigation ? 0 : null,
+        onBottomNavTap: useBottomNavigation
+            ? (index) => navigateToPrimaryDestination(context, index)
+            : null,
+        body: Watch.builder(
+          builder: (context) {
+            if (_loading.value) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final folders = _folders.value;
+            if (folders.isEmpty) {
+              return const Center(child: Text('还没有可显示的文件夹'));
+            }
+            final bottomPadding = AppPageScaffold.scrollableBottomPadding(
+              context,
+            );
+            return ListView.builder(
+              padding: EdgeInsets.fromLTRB(12, 8, 12, bottomPadding),
+              itemCount: folders.length,
+              itemBuilder: (context, index) {
+                return _FolderTile(
+                  folder: folders[index],
+                  onTap: () => _openFolder(folders[index]),
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }

@@ -43,7 +43,9 @@ CREATE TABLE ${DbConstants.tableSongs} (
   fileModifiedMs INTEGER,
   localCoverPath TEXT,
   localAssetId TEXT,
-  tagsParsed INTEGER
+  tagsParsed INTEGER,
+  trackNumber INTEGER,
+  discNumber INTEGER
 )
 ''');
         await db.execute(
@@ -238,6 +240,18 @@ CREATE TABLE IF NOT EXISTS ${DbConstants.tablePlaylistStats} (
 ''');
           await db.execute(
             'CREATE INDEX IF NOT EXISTS idx_playlist_stats_playcount ON ${DbConstants.tablePlaylistStats}(playCount)',
+          );
+        }
+        if (oldVersion < 10) {
+          // Track/disc numbers so we can offer a proper "album order" sort.
+          // Existing rows get NULL — a rescan is needed to populate them from
+          // the tag reader. Sort falls back to song title for those in the
+          // meantime.
+          await db.execute(
+            'ALTER TABLE ${DbConstants.tableSongs} ADD COLUMN trackNumber INTEGER',
+          );
+          await db.execute(
+            'ALTER TABLE ${DbConstants.tableSongs} ADD COLUMN discNumber INTEGER',
           );
         }
       },

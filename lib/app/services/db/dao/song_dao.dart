@@ -7,39 +7,43 @@ import '../../../utils/cache_version_store.dart';
 
 class SongDao {
   static const String cacheVersionScope = 'song_library';
+  static const int _maxIdsPerQuery = 500;
   static List<SongEntity>? _cachedAll;
   static Future<List<SongEntity>>? _cachedAllFuture;
 
   Future<int> upsertSongs(List<SongEntity> songs) async {
     if (songs.isEmpty) return 0;
     final db = await DbHelper.instance.database;
+    final uniqueIds = songs.map((song) => song.id).toSet().toList();
     final added = await db.transaction<int>((txn) async {
-      var added = 0;
-      final insertBatch = txn.batch();
-      for (final song in songs) {
-        insertBatch.insert(
+      final existingIds = <String>{};
+      for (
+        var offset = 0;
+        offset < uniqueIds.length;
+        offset += _maxIdsPerQuery
+      ) {
+        final end = (offset + _maxIdsPerQuery).clamp(0, uniqueIds.length);
+        final ids = uniqueIds.sublist(offset, end);
+        final placeholders = List.filled(ids.length, '?').join(',');
+        final rows = await txn.query(
           DbConstants.tableSongs,
-          song.toMap(),
-          conflictAlgorithm: ConflictAlgorithm.ignore,
+          columns: ['id'],
+          where: 'id IN ($placeholders)',
+          whereArgs: ids,
         );
-      }
-      final insertResults = await insertBatch.commit();
-      for (final result in insertResults) {
-        if (result is int && result > 0) {
-          added += 1;
-        }
+        existingIds.addAll(rows.map((row) => row['id']).whereType<String>());
       }
 
-      final updateBatch = txn.batch();
+      final batch = txn.batch();
       for (final song in songs) {
-        updateBatch.insert(
+        batch.insert(
           DbConstants.tableSongs,
           song.toMap(),
           conflictAlgorithm: ConflictAlgorithm.replace,
         );
       }
-      await updateBatch.commit(noResult: true);
-      return added;
+      await batch.commit(noResult: true);
+      return uniqueIds.length - existingIds.length;
     });
     _cachedAll = null;
     CacheVersionStore.instance.bump(cacheVersionScope);

@@ -11,6 +11,8 @@ class TagProbeResult {
   final String? format;
   final Uint8List? artwork;
   final String? lyrics;
+  final int? trackNumber;
+  final int? discNumber;
 
   const TagProbeResult({
     this.title,
@@ -23,5 +25,7 @@ class TagProbeResult {
     this.format,
     this.artwork,
     this.lyrics,
+    this.trackNumber,
+    this.discNumber,
   });
 }

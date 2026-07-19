@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/theme/app_visual_theme.dart';
 import 'glass_panel.dart';
 import 'labeled_slider.dart';
 
@@ -21,6 +22,7 @@ class AppSettingSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final miuix = context.usesMiuix;
     final content = <Widget>[];
     for (var i = 0; i < children.length; i++) {
       if (i > 0 && showDividers) {
@@ -34,12 +36,22 @@ class AppSettingSection extends StatelessWidget {
       children: [
         if (title != null)
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(title!, style: Theme.of(context).textTheme.titleMedium),
+            padding: EdgeInsets.fromLTRB(miuix ? 6 : 0, 0, 0, 8),
+            child: Text(
+              title!,
+              style: miuix
+                  ? Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    )
+                  : Theme.of(context).textTheme.titleMedium,
+            ),
           ),
         GlassPanel(
-          borderRadius: BorderRadius.circular(16),
-          blurSigma: 0.8,
+          borderRadius: BorderRadius.circular(miuix ? 24 : 16),
+          blurSigma: miuix ? 0.2 : 0.8,
+          boxShadow: miuix ? const [] : null,
+          borderColor: miuix ? Colors.transparent : null,
           child: Padding(
             padding: margin ?? EdgeInsets.zero,
             child: Padding(
@@ -71,9 +83,10 @@ class AppSettingTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final miuix = context.usesMiuix;
     return ListTile(
-      dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+      dense: !miuix,
+      contentPadding: EdgeInsets.symmetric(horizontal: miuix ? 20 : 16),
       leading: leading,
       title: Text(title),
       subtitle: subtitle == null ? null : Text(subtitle!),

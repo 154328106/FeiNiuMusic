@@ -5,6 +5,7 @@ import '../../pages/source/source_page.dart';
 import '../../pages/songs/songs_page.dart';
 import '../../pages/player/player_page.dart';
 import '../../pages/player/lyrics/lyric_page.dart';
+import '../../pages/profile/profile_page.dart';
 import '../../pages/settings/gradient_settings_page.dart';
 import '../../pages/settings/lyrics_settings_page.dart';
 import '../../pages/settings/notification_settings_page.dart';
@@ -22,6 +23,9 @@ import '../../pages/library/artists_page.dart';
 import '../../pages/library/folders_page.dart';
 import '../../pages/library/playlists_page.dart';
 import '../../pages/search/search_page.dart';
+import '../../app/state/settings_state.dart';
+import '../../app/utils/primary_shell_scope.dart';
+import '../../components/layout/modern_navigation_bar.dart';
 
 class AppRoutes {
   static const home = '/home';
@@ -46,13 +50,14 @@ class AppRoutes {
   static const playlists = '/playlists';
   static const folders = '/folders';
   static const search = '/search';
+  static const profile = '/profile';
 }
 
 class AppRouter {
   static String get initialRoute => AppRoutes.home;
 
   static Map<String, WidgetBuilder> get routes => {
-    AppRoutes.home: (_) => const HomePage(),
+    AppRoutes.home: (_) => const _PrimaryNavigationShell(),
     AppRoutes.source: (_) => const SourcePage(),
     AppRoutes.songs: (_) => const SongsPage(),
     AppRoutes.player: (_) => const PlayerPage(),
@@ -75,5 +80,126 @@ class AppRouter {
     AppRoutes.playlists: (_) => const PlaylistsPage(),
     AppRoutes.folders: (_) => const FoldersPage(),
     AppRoutes.search: (_) => const SearchPage(),
+    AppRoutes.profile: (_) => const ProfilePage(),
   };
+}
+
+class _PrimaryNavigationShell extends StatefulWidget {
+  const _PrimaryNavigationShell();
+
+  @override
+  State<_PrimaryNavigationShell> createState() =>
+      _PrimaryNavigationShellState();
+}
+
+class _PrimaryNavigationShellState extends State<_PrimaryNavigationShell> {
+  int _currentIndex = 0;
+  final List<Widget?> _pages = <Widget?>[const HomePage(), null, null, null];
+  bool _warmupScheduled = false;
+
+  Widget _buildPage(int index) {
+    return switch (index) {
+      0 => const HomePage(),
+      1 => const SongsPage(),
+      2 => const PlaylistsPage(),
+      3 => const ProfilePage(),
+      _ => const SizedBox.shrink(),
+    };
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    primaryNavigationShellActive = true;
+    primaryNavigationIndex.value = _currentIndex;
+    primaryNavigationIndex.addListener(_handleExternalSelection);
+  }
+
+  @override
+  void dispose() {
+    primaryNavigationIndex.removeListener(_handleExternalSelection);
+    primaryNavigationShellActive = false;
+    super.dispose();
+  }
+
+  void _handleExternalSelection() {
+    _select(primaryNavigationIndex.value);
+  }
+
+  void _select(int index) {
+    if (_currentIndex == index || index < 0 || index > 3) return;
+    setState(() {
+      _pages[index] ??= _buildPage(index);
+      _currentIndex = index;
+    });
+    if (primaryNavigationIndex.value != index) {
+      primaryNavigationIndex.value = index;
+    }
+  }
+
+  /// Build the remaining tabs during idle time so their DB reads and first
+  /// frame happen while the user is still looking at Home. Subsequent taps on
+  /// the bottom bar just flip IndexedStack.index — no cold start.
+  void _scheduleWarmup() {
+    if (_warmupScheduled) return;
+    _warmupScheduled = true;
+    // Give Home one full frame to settle first.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // Then spread the remaining pages across idle slots so we don't stall
+      // the very next frame with three heavy initState() runs at once.
+      _warmOne(1, delay: const Duration(milliseconds: 250));
+      _warmOne(2, delay: const Duration(milliseconds: 700));
+      _warmOne(3, delay: const Duration(milliseconds: 1100));
+    });
+  }
+
+  void _warmOne(int index, {required Duration delay}) {
+    Future<void>.delayed(delay, () {
+      if (!mounted) return;
+      if (_pages[index] != null) return;
+      setState(() {
+        _pages[index] = _buildPage(index);
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<AppNavigationStyle>(
+      valueListenable: AppLayoutSettings.navigationStyle,
+      builder: (context, navigationStyle, _) {
+        return ValueListenableBuilder<bool>(
+          valueListenable: AppLayoutSettings.tabletMode,
+          builder: (context, tabletMode, _) {
+            final useBottomNavigation =
+                navigationStyle == AppNavigationStyle.bottomBar && !tabletMode;
+            if (!useBottomNavigation) return const HomePage();
+
+            _scheduleWarmup();
+
+            return PopScope(
+              canPop: _currentIndex == 0,
+              onPopInvokedWithResult: (didPop, result) {
+                if (!didPop && _currentIndex != 0) _select(0);
+              },
+              child: PrimaryShellMarker(
+                child: PrimaryNavigationScope(
+                  currentIndex: _currentIndex,
+                  onSelected: _select,
+                  child: IndexedStack(
+                    index: _currentIndex,
+                    children: List.generate(
+                      _pages.length,
+                      (index) => _pages[index] ?? const SizedBox.shrink(),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 }

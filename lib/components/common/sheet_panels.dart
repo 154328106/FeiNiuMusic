@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../app/theme/app_visual_theme.dart';
+
 class AppSheetPanel extends StatelessWidget {
   final String? title;
   final Widget child;
@@ -17,15 +19,19 @@ class AppSheetPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final miuix = context.usesMiuix;
     final isDark = theme.brightness == Brightness.dark;
     final cardColor = theme.cardTheme.color ?? theme.cardColor;
-    final secondaryTextColor =
-        isDark ? Colors.white70 : const Color.fromARGB(255, 100, 100, 100);
+    final secondaryTextColor = isDark
+        ? Colors.white70
+        : const Color.fromARGB(255, 100, 100, 100);
 
     return Container(
       decoration: BoxDecoration(
         color: cardColor,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(miuix ? 30 : 22),
+        ),
       ),
       child: SafeArea(
         top: false,
@@ -43,14 +49,16 @@ class AppSheetPanel extends StatelessWidget {
             ),
             if (title != null)
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                padding: EdgeInsets.fromLTRB(20, miuix ? 18 : 16, 20, 10),
                 child: Text(
                   title!,
-                  style: TextStyle(
-                    color: secondaryTextColor,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: miuix
+                      ? theme.textTheme.titleLarge?.copyWith(fontSize: 20)
+                      : TextStyle(
+                          color: secondaryTextColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
                 ),
               ),
             if (expand)
@@ -61,10 +69,7 @@ class AppSheetPanel extends StatelessWidget {
                 ),
               )
             else
-              Padding(
-                padding: padding ?? EdgeInsets.zero,
-                child: child,
-              ),
+              Padding(padding: padding ?? EdgeInsets.zero, child: child),
           ],
         ),
       ),

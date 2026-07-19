@@ -191,6 +191,31 @@ List<Map<String, dynamic>> _buildVisibleSongsIsolate(
           isUnknownAlbum(a) ? '' : (a.album ?? ''),
         ).compareTo(sortKeyStr(isUnknownAlbum(b) ? '' : (b.album ?? '')));
         break;
+      case 'albumTrack':
+        // Album-then-disc-then-track ordering so a full album plays in the
+        // sequence the artist laid out. Songs missing a track/disc number
+        // (older library rows before v10, or singles) sink to the bottom of
+        // their album by title so the overall list still degrades gracefully.
+        final albumA = sortKeyStr(isUnknownAlbum(a) ? '' : (a.album ?? ''));
+        final albumB = sortKeyStr(isUnknownAlbum(b) ? '' : (b.album ?? ''));
+        result = albumA.compareTo(albumB);
+        if (result == 0) {
+          // Missing disc / track sort AFTER numbered ones inside the album.
+          final discA = a.discNumber ?? 1 << 30;
+          final discB = b.discNumber ?? 1 << 30;
+          result = discA.compareTo(discB);
+        }
+        if (result == 0) {
+          final trackA = a.trackNumber ?? 1 << 30;
+          final trackB = b.trackNumber ?? 1 << 30;
+          result = trackA.compareTo(trackB);
+        }
+        if (result == 0) {
+          result = sortKeyStr(
+            isUnknownTitle(a) ? '' : a.title,
+          ).compareTo(sortKeyStr(isUnknownTitle(b) ? '' : b.title));
+        }
+        break;
       case 'duration':
         result = (a.durationMs ?? 0).compareTo(b.durationMs ?? 0);
         break;
@@ -214,7 +239,7 @@ List<Map<String, dynamic>> _buildVisibleSongsIsolate(
       list.removeWhere(isUnknownArtist);
       list.insertAll(0, unknown);
     }
-  } else if (sortKey == 'album') {
+  } else if (sortKey == 'album' || sortKey == 'albumTrack') {
     final unknown = list.where(isUnknownAlbum).toList();
     if (unknown.isNotEmpty) {
       list.removeWhere(isUnknownAlbum);

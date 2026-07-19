@@ -16,6 +16,10 @@ class SongEntity {
   final String? localCoverPath;
   final String? localAssetId;
   final bool tagsParsed;
+  // Track/disc numbers pulled from ID3/Vorbis/M4A tags at scan time. Optional
+  // because plenty of loose singles / re-encodes carry no track metadata.
+  final int? trackNumber;
+  final int? discNumber;
 
   const SongEntity({
     required this.id,
@@ -35,6 +39,8 @@ class SongEntity {
     this.localCoverPath,
     this.localAssetId,
     this.tagsParsed = false,
+    this.trackNumber,
+    this.discNumber,
   });
 
   Map<String, dynamic> toMap() {
@@ -56,6 +62,8 @@ class SongEntity {
       'localCoverPath': localCoverPath,
       'localAssetId': localAssetId,
       'tagsParsed': tagsParsed ? 1 : 0,
+      'trackNumber': trackNumber,
+      'discNumber': discNumber,
     };
   }
 
@@ -83,6 +91,8 @@ class SongEntity {
       localCoverPath: map['localCoverPath']?.toString(),
       localAssetId: map['localAssetId']?.toString(),
       tagsParsed: map['tagsParsed'] == true || map['tagsParsed'] == 1,
+      trackNumber: parseInt(map['trackNumber']),
+      discNumber: parseInt(map['discNumber']),
     );
   }
 
@@ -104,6 +114,8 @@ class SongEntity {
     String? localCoverPath,
     String? localAssetId,
     bool? tagsParsed,
+    int? trackNumber,
+    int? discNumber,
   }) {
     return SongEntity(
       id: id ?? this.id,
@@ -123,6 +135,8 @@ class SongEntity {
       localCoverPath: localCoverPath ?? this.localCoverPath,
       localAssetId: localAssetId ?? this.localAssetId,
       tagsParsed: tagsParsed ?? this.tagsParsed,
+      trackNumber: trackNumber ?? this.trackNumber,
+      discNumber: discNumber ?? this.discNumber,
     );
   }
 }

@@ -154,6 +154,21 @@ class StatsService {
     return map;
   }
 
+  /// Map of songId -> lastPlayedMs. Powers the home recommender's recency /
+  /// time-of-day signals.
+  Future<Map<String, int>> fetchLastPlayedTimestamps() async {
+    final db = await DbHelper.instance.database;
+    final rows = await db.query(
+      DbConstants.tableSongStats,
+      columns: ['songId', 'lastPlayedMs'],
+    );
+    final map = <String, int>{};
+    for (final row in rows) {
+      map[row['songId'].toString()] = _parseInt(row['lastPlayedMs']);
+    }
+    return map;
+  }
+
   Future<List<SongListeningStat>> fetchTopSongs({int limit = 20}) async {    final db = await DbHelper.instance.database;
     final rows = await db.query(
       DbConstants.tableSongStats,
