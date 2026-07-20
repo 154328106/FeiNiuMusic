@@ -7,13 +7,12 @@ import '../../../app/services/player_service.dart';
 import '../../../app/router/app_router.dart';
 import '../../../app/state/settings_state.dart';
 import '../../../app/state/song_state.dart';
-import '../../../app/theme/app_styles.dart';
 import '../../common/artwork_widget.dart';
 import '../../../pages/player/player_page.dart';
 import '../../../pages/player/widgets/player_bottom_panel.dart';
 
 class MiniPlayerBar extends StatelessWidget {
-  static const double estimatedHeight = 76.0;
+  static const double estimatedHeight = 70.0;
 
   final PlayerService player;
   final VoidCallback? onOpenPlayer;
@@ -32,7 +31,7 @@ class MiniPlayerBar extends StatelessWidget {
     this.onOpenQueue,
     this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
     this.artworkSize = 48,
-    this.borderRadius = 24,
+    this.borderRadius = 20,
     this.boxShadow,
     this.enableSwipe = true,
     this.trailing,
@@ -64,24 +63,24 @@ class MiniPlayerBar extends StatelessWidget {
 
         final isDark = theme.brightness == Brightness.dark;
         final bgColor = isDark
-            ? scheme.surfaceContainerHigh.withValues(alpha: 0.75)
+            ? scheme.surfaceContainerHigh.withValues(alpha: 0.86)
             : Color.alphaBlend(
-                scheme.primary.withValues(alpha: 0.04),
-                Colors.white.withValues(alpha: 0.85),
+                scheme.primary.withValues(alpha: 0.025),
+                Colors.white.withValues(alpha: 0.90),
               );
 
         final border = Border.all(
           color: isDark
               ? Colors.white.withValues(alpha: 0.08)
-              : scheme.primary.withValues(alpha: 0.1),
-          width: 1,
+              : scheme.outlineVariant.withValues(alpha: 0.42),
+          width: 0.8,
         );
 
         final defaultShadow = [
           BoxShadow(
-            color: theme.appPanelShadowColor,
-            blurRadius: 20,
-            offset: const Offset(0, 8),
+            color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.10),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
           ),
         ];
 
@@ -98,8 +97,8 @@ class MiniPlayerBar extends StatelessWidget {
               onTap: openPlayer,
               child: Padding(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
+                  horizontal: 10,
+                  vertical: 7,
                 ),
                 child: Row(
                   children: [
@@ -108,9 +107,9 @@ class MiniPlayerBar extends StatelessWidget {
                         borderRadius: BorderRadius.circular(10),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.15),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
+                            color: Colors.black.withValues(alpha: 0.12),
+                            blurRadius: 6,
+                            offset: const Offset(0, 1),
                           ),
                         ],
                       ),
@@ -120,7 +119,7 @@ class MiniPlayerBar extends StatelessWidget {
                         borderRadius: 10,
                       ),
                     ),
-                    const SizedBox(width: 14),
+                    const SizedBox(width: 11),
                     Expanded(
                       child: MiniPlayerInfo(
                         song: song,
@@ -129,27 +128,19 @@ class MiniPlayerBar extends StatelessWidget {
                         onOpenPlayer: openPlayer,
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: scheme.primary.withValues(alpha: 0.1),
-                        shape: BoxShape.circle,
-                      ),
-                      child: MiniPlayerPlayButton(
-                        player: player,
-                        size: 32,
-                        enabled: hasSong,
-                      ),
+                    const SizedBox(width: 6),
+                    MiniPlayerPlayButton(
+                      player: player,
+                      size: 38,
+                      enabled: hasSong,
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 4),
                     trailing ??
                         MiniPlayerQueueButton(
                           onPressed: hasSong ? openQueue : null,
                           color: scheme.onSurface,
                         ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 2),
                   ],
                 ),
               ),
@@ -361,7 +352,7 @@ class _InfoContent extends StatelessWidget {
           song!.title,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontWeight: FontWeight.w600),
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 2),
         ValueListenableBuilder<bool>(
@@ -380,7 +371,7 @@ class _InfoContent extends StatelessWidget {
                   player: player,
                   style: TextStyle(
                     color: scheme.onSurfaceVariant,
-                    fontSize: 12,
+                    fontSize: 11.5,
                   ),
                 );
               },
@@ -653,30 +644,37 @@ class MiniPlayerPlayButton extends StatelessWidget {
         return SizedBox(
           width: size,
           height: size,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              SizedBox(
-                width: size,
-                height: size,
-                child: CircularProgressIndicator(
-                  value: enabled ? progress.clamp(0.0, 1.0) : 0.0,
-                  strokeWidth: 2,
-                  backgroundColor: scheme.outline.withAlpha(38),
-                  color: scheme.primary,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: scheme.primary.withValues(alpha: 0.08),
+              shape: BoxShape.circle,
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  width: size,
+                  height: size,
+                  child: CircularProgressIndicator(
+                    value: enabled ? progress.clamp(0.0, 1.0) : 0.0,
+                    strokeWidth: 1.8,
+                    backgroundColor: scheme.outline.withValues(alpha: 0.12),
+                    color: scheme.primary,
+                    strokeCap: StrokeCap.round,
+                  ),
                 ),
-              ),
-              IconButton(
-                icon: Icon(
-                  playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                  color: scheme.onSurface,
-                  size: 20,
+                IconButton(
+                  icon: Icon(
+                    playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                    color: scheme.onSurface,
+                    size: 20,
+                  ),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  onPressed: enabled ? player.togglePlayPause : null,
                 ),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-                onPressed: enabled ? player.togglePlayPause : null,
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -697,10 +695,10 @@ class MiniPlayerQueueButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 40,
-      height: 40,
+      width: 36,
+      height: 36,
       child: IconButton(
-        icon: Icon(Icons.format_list_bulleted, color: color, size: 30),
+        icon: Icon(Icons.queue_music_rounded, color: color, size: 24),
         padding: EdgeInsets.zero,
         constraints: const BoxConstraints(),
         onPressed: onPressed,

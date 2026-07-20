@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -14,6 +13,7 @@ import '../../../app/state/settings_state.dart';
 import '../../../app/state/song_state.dart';
 import '../../../components/common/artwork_widget.dart';
 import '../../../components/common/labeled_slider.dart';
+import '../../../components/common/playing_bars.dart';
 import '../../../components/feedback/app_toast.dart';
 import '../../library/library_detail_pages.dart';
 import '../../songs/song_detail_sheet.dart';
@@ -581,7 +581,6 @@ class _BottomActions extends StatelessWidget {
   }
 }
 
-
 void showPlayerPlaylistSheet(BuildContext context, PlayerService player) {
   showModalBottomSheet(
     context: context,
@@ -1148,9 +1147,7 @@ class _QueueItem extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       child: Material(
-        color: isCurrent
-            ? accent.withValues(alpha: 0.13)
-            : Colors.transparent,
+        color: isCurrent ? accent.withValues(alpha: 0.13) : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
@@ -1232,90 +1229,10 @@ class _QueueItem extends StatelessWidget {
                 color: Colors.black.withValues(alpha: 0.38),
               ),
               child: Center(
-                child: _PlayingBars(color: Colors.white, animating: playing),
+                child: PlayingBars(color: Colors.white, animating: playing),
               ),
             ),
         ],
-      ),
-    );
-  }
-}
-
-/// Three little bars that rise and fall to signal the currently-playing song.
-/// Falls back to a static shape when playback is paused.
-class _PlayingBars extends StatefulWidget {
-  final Color color;
-  final bool animating;
-
-  const _PlayingBars({required this.color, required this.animating});
-
-  @override
-  State<_PlayingBars> createState() => _PlayingBarsState();
-}
-
-class _PlayingBarsState extends State<_PlayingBars>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 820),
-    );
-    if (widget.animating) _controller.repeat();
-  }
-
-  @override
-  void didUpdateWidget(covariant _PlayingBars oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.animating && !_controller.isAnimating) {
-      _controller.repeat();
-    } else if (!widget.animating && _controller.isAnimating) {
-      _controller.stop();
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 16,
-      height: 16,
-      child: AnimatedBuilder(
-        animation: _controller,
-        builder: (context, _) {
-          final v = _controller.value;
-          return Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: List.generate(3, (i) {
-              final double height;
-              if (widget.animating) {
-                final t = (v + i / 3) % 1.0;
-                final scale = 0.5 - 0.5 * math.cos(2 * math.pi * t);
-                height = 4 + 10 * scale;
-              } else {
-                height = 8;
-              }
-              return Container(
-                width: 3,
-                height: height,
-                margin: const EdgeInsets.symmetric(horizontal: 1),
-                decoration: BoxDecoration(
-                  color: widget.color,
-                  borderRadius: BorderRadius.circular(1.5),
-                ),
-              );
-            }),
-          );
-        },
       ),
     );
   }

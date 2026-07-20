@@ -31,15 +31,15 @@ import '../../app/state/song_state.dart';
 class HomeRecommender {
   static const int _artistQuota = 2;
   static const int _albumQuota = 3;
+  static const int _heartFallbackSalt = 0x48454152;
+  static const int _recommendedFallbackSalt = 0x5245434F;
 
   final DateTime now;
   final Map<String, int> playCounts;
   final Map<String, int> lastPlayedMs;
   final Set<String> favoriteIds;
 
-  late final _random = Random(
-    now.year * 10000 + now.month * 100 + now.day,
-  );
+  late final _random = Random(now.year * 10000 + now.month * 100 + now.day);
 
   HomeRecommender({
     required this.now,
@@ -70,9 +70,13 @@ class HomeRecommender {
   /// scored so heavy-listen favorites float above one-time hearts and unheard
   /// same-artist tracks earn a real boost.
   List<SongEntity> heart(List<SongEntity> pool, {int limit = 40}) {
-    if (favoriteIds.isEmpty) return daily(pool, limit: limit);
+    if (favoriteIds.isEmpty) {
+      return _stableFallback(pool, limit: limit, salt: _heartFallbackSalt);
+    }
     final favorites = pool.where((s) => favoriteIds.contains(s.id)).toList();
-    if (favorites.isEmpty) return daily(pool, limit: limit);
+    if (favorites.isEmpty) {
+      return _stableFallback(pool, limit: limit, salt: _heartFallbackSalt);
+    }
 
     // Anchor sets so we know which artists / albums the user is attached to,
     // and how strongly (a favorited artist counted three times matters more
@@ -90,11 +94,12 @@ class HomeRecommender {
       }
     }
 
-    final scored = pool
-        .map((s) => _scoreForHeart(s, artistAffinity, albumAffinity))
-        .where((entry) => entry.score > 0)
-        .toList()
-      ..sort((a, b) => b.score.compareTo(a.score));
+    final scored =
+        pool
+            .map((s) => _scoreForHeart(s, artistAffinity, albumAffinity))
+            .where((entry) => entry.score > 0)
+            .toList()
+          ..sort((a, b) => b.score.compareTo(a.score));
     return _diversify(scored, limit: limit);
   }
 
@@ -102,16 +107,36 @@ class HomeRecommender {
   /// existing favorites so users see fresh candidates they haven't hearted
   /// yet. Falls back cleanly when there's nothing similar to lean on.
   List<SongEntity> recommended(List<SongEntity> pool, {int limit = 6}) {
-    final list = heart(pool, limit: limit * 4)
-        .where((s) => !favoriteIds.contains(s.id))
-        .toList();
+    final hasFavoriteInPool = pool.any((s) => favoriteIds.contains(s.id));
+    if (!hasFavoriteInPool) {
+      return _stableFallback(
+        pool,
+        limit: limit,
+        salt: _recommendedFallbackSalt,
+      );
+    }
+    final list = heart(
+      pool,
+      limit: limit * 4,
+    ).where((s) => !favoriteIds.contains(s.id)).toList();
     if (list.length >= limit) return list.take(limit).toList();
     // Backfill with daily so the row is never empty.
     final seen = list.map((s) => s.id).toSet();
-    final backfill = daily(pool, limit: limit * 2)
-        .where((s) => !seen.contains(s.id))
-        .toList();
+    final backfill = daily(
+      pool,
+      limit: limit * 2,
+    ).where((s) => !seen.contains(s.id)).toList();
     return [...list, ...backfill].take(limit).toList();
+  }
+
+  List<SongEntity> _stableFallback(
+    List<SongEntity> pool, {
+    required int limit,
+    required int salt,
+  }) {
+    final daySeed = now.year * 10000 + now.month * 100 + now.day;
+    final copy = List<SongEntity>.of(pool)..shuffle(Random(daySeed ^ salt));
+    return copy.take(limit).toList();
   }
 
   // ---------------------------------------------------------------------------

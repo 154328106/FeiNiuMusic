@@ -59,6 +59,7 @@ class _SongsPageState extends State<SongsPage>
   static const String _prefsSourceFilter = 'songs_source_filter';
   static const String _prefsSortKey = 'songs_sort_key';
   static const String _prefsSortAsc = 'songs_sort_asc';
+  static const String _prefsSequentialPlay = 'songs_sequential_play';
   static const String _prefsRandomPlayCount = 'songs_random_play_count';
   static const String _prefsSequentialPlayCount = 'songs_sequential_play_count';
   static const String _cacheScopeSongs = 'songs_all';
@@ -201,6 +202,8 @@ class _SongsPageState extends State<SongsPage>
     if (sortAsc != null) {
       _ascending.value = sortAsc;
     }
+    _isSequentialPlay.value =
+        prefs.getBool(_prefsSequentialPlay) ?? _isSequentialPlay.value;
     final randomCount = prefs.getInt(_prefsRandomPlayCount);
     if (randomCount != null && randomCount > 0) {
       _randomPlayCount.value = randomCount;
@@ -434,8 +437,15 @@ class _SongsPageState extends State<SongsPage>
 
   void _togglePlayMode() {
     HapticFeedback.mediumImpact();
-    _isSequentialPlay.value = !_isSequentialPlay.value;
-    AppToast.show(context, _isSequentialPlay.value ? '已切换为顺序播放' : '已切换为随机播放');
+    final isSequential = !_isSequentialPlay.value;
+    _isSequentialPlay.value = isSequential;
+    unawaited(_savePlayMode(isSequential));
+    AppToast.show(context, isSequential ? '已切换为顺序播放' : '已切换为随机播放');
+  }
+
+  Future<void> _savePlayMode(bool isSequential) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsSequentialPlay, isSequential);
   }
 
   int _playCountForMode(int totalCount) {
@@ -988,7 +998,12 @@ class _SongsPageState extends State<SongsPage>
     int startIndex,
   ) async {
     if (queue.isEmpty) return;
-    await PlayerService.instance.playQueue(queue, startIndex);
+    final player = PlayerService.instance;
+    final mode = _isSequentialPlay.value
+        ? PlaybackMode.loop
+        : PlaybackMode.shuffle;
+    await player.setPlaybackMode(mode);
+    await player.playQueue(queue, startIndex);
   }
 
   Future<void> _removeSelectedSongs() async {

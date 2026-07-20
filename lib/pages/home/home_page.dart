@@ -39,6 +39,8 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
+enum _DiscoveryKind { daily, recommended, heart }
+
 class _HomePageState extends State<HomePage> with SignalsMixin {
   static const String _prefsHomeFilter = 'home_filter';
   static const String _cacheScope = 'home_counts';
@@ -71,6 +73,7 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
   late final _recentPlaylists = createSignal<List<PlaylistEntity>>([]);
   late final _librarySongs = createSignal<List<SongEntity>>([]);
   late final _favoriteSongIds = createSignal<Set<String>>({});
+  late final _activeDiscovery = createSignal<_DiscoveryKind?>(null);
   // Behaviour data driving the home recommender. Refreshed alongside the
   // library counts in _load.
   late final _playCounts = createSignal<Map<String, int>>({});
@@ -385,12 +388,53 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
     return _dailySongs().take(6).toList();
   }
 
-  Future<void> _playDiscoveryQueue(List<SongEntity> songs) async {
+  List<SongEntity?> _distinctDiscoveryCovers(List<List<SongEntity>> groups) {
+    final usedIds = <String>{};
+    return groups
+        .map((songs) {
+          SongEntity? selected;
+          for (final song in songs) {
+            if (!usedIds.contains(song.id)) {
+              selected = song;
+              break;
+            }
+          }
+          selected ??= songs.firstOrNull;
+          if (selected != null) usedIds.add(selected.id);
+          return selected;
+        })
+        .toList(growable: false);
+  }
+
+  Future<void> _playDiscoveryQueue(
+    List<SongEntity> songs,
+    _DiscoveryKind kind,
+  ) async {
     if (songs.isEmpty) {
       AppToast.show(context, '当前音源还没有可播放的歌曲');
       return;
     }
+    _activeDiscovery.value = kind;
     await _player.playQueue(songs, 0);
+  }
+
+  bool _isDiscoveryQueueActive(
+    _DiscoveryKind kind,
+    List<SongEntity> songs,
+    List<SongEntity> playerQueue,
+  ) {
+    if (_activeDiscovery.value != kind) return false;
+    final playableIds = songs
+        .where((song) => (song.uri ?? '').trim().isNotEmpty)
+        .map((song) => song.id)
+        .toList(growable: false);
+    if (playableIds.length != playerQueue.length || playableIds.isEmpty) {
+      return false;
+    }
+    for (var index = 0; index < playableIds.length; index++) {
+      if (playableIds[index] != playerQueue[index].id) return false;
+    }
+    return true;
   }
 
   List<_RecentAlbumItem> _buildRecentAlbums(List<SongEntity> songs) {
@@ -719,9 +763,13 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
                   final dailySongs = _dailySongs();
                   final heartSongs = _heartModeSongs();
                   final recommendedSongs = _recommendedSongs();
-                  final featuredPlaylists = _recentPlaylists.value
-                      .where((playlist) => !playlist.isFavorite)
-                      .toList();
+                  final discoveryCovers = _distinctDiscoveryCovers([
+                    dailySongs,
+                    recommendedSongs,
+                    heartSongs,
+                  ]);
+                  final playerQueue = _player.queueSignal.value;
+                  final isPlaying = _player.isPlayingSignal.value;
                   return RefreshIndicator(
                     onRefresh: () => _load(includeWebDavCounts: true),
                     child: ListView(
@@ -734,53 +782,68 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
                         ),
                         const SizedBox(height: 16),
                         SizedBox(
-                          height: 210,
+                          height: _DiscoveryCard.height,
                           child: ListView.separated(
                             scrollDirection: Axis.horizontal,
                             physics: const BouncingScrollPhysics(),
                             itemCount: 3,
                             separatorBuilder: (_, _) =>
-                                const SizedBox(width: 14),
+                                const SizedBox(width: 10),
                             itemBuilder: (context, index) {
                               if (index == 0) {
                                 return _DiscoveryCard(
                                   eyebrow: '每日推荐',
                                   title: '今日限定好歌推荐',
                                   icon: Icons.calendar_month_rounded,
-                                  song: dailySongs.firstOrNull,
+                                  song: discoveryCovers[0],
                                   accent: const Color(0xFFEF4444),
-                                  onTap: () => _playDiscoveryQueue(dailySongs),
+                                  active: _isDiscoveryQueueActive(
+                                    _DiscoveryKind.daily,
+                                    dailySongs,
+                                    playerQueue,
+                                  ),
+                                  playing: isPlaying,
+                                  onTap: () => _playDiscoveryQueue(
+                                    dailySongs,
+                                    _DiscoveryKind.daily,
+                                  ),
                                 );
                               }
                               if (index == 1) {
                                 return _DiscoveryCard(
-                                  eyebrow: '心动模式',
-                                  title: '红心歌曲和相似推荐',
-                                  icon: Icons.favorite_rounded,
-                                  song: heartSongs.firstOrNull,
-                                  accent: const Color(0xFF8B7CF6),
-                                  onTap: () => _playDiscoveryQueue(heartSongs),
+                                  eyebrow: '雷达歌单',
+                                  title: '反复聆听你爱的歌',
+                                  icon: null,
+                                  song: discoveryCovers[1],
+                                  accent: const Color(0xFF38A3A5),
+                                  active: _isDiscoveryQueueActive(
+                                    _DiscoveryKind.recommended,
+                                    recommendedSongs,
+                                    playerQueue,
+                                  ),
+                                  playing: isPlaying,
+                                  onTap: () => _playDiscoveryQueue(
+                                    recommendedSongs,
+                                    _DiscoveryKind.recommended,
+                                  ),
                                 );
                               }
                               return _DiscoveryCard(
-                                eyebrow: '歌单推荐',
-                                title: featuredPlaylists.isEmpty
-                                    ? '创建你的第一张歌单'
-                                    : featuredPlaylists.first.name,
-                                icon: Icons.queue_music_rounded,
-                                song: recommendedSongs.firstOrNull,
-                                accent: const Color(0xFF38A3A5),
-                                onTap: () {
-                                  if (featuredPlaylists.isEmpty) {
-                                    _openTopLevel(const PlaylistsPage());
-                                    return;
-                                  }
-                                  _pushLibraryPage(
-                                    PlaylistDetailPage(
-                                      playlistId: featuredPlaylists.first.id,
-                                    ),
-                                  );
-                                },
+                                eyebrow: '心动模式',
+                                title: '红心歌曲和相似推荐',
+                                icon: Icons.favorite_rounded,
+                                song: discoveryCovers[2],
+                                accent: const Color(0xFF8B7CF6),
+                                active: _isDiscoveryQueueActive(
+                                  _DiscoveryKind.heart,
+                                  heartSongs,
+                                  playerQueue,
+                                ),
+                                playing: isPlaying,
+                                onTap: () => _playDiscoveryQueue(
+                                  heartSongs,
+                                  _DiscoveryKind.heart,
+                                ),
                               );
                             },
                           ),
@@ -788,8 +851,10 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
                         const SizedBox(height: 28),
                         _HomeRecommendationSection(
                           songs: recommendedSongs,
-                          onPlayAll: () =>
-                              _playDiscoveryQueue(recommendedSongs),
+                          onPlayAll: () => _playDiscoveryQueue(
+                            recommendedSongs,
+                            _DiscoveryKind.recommended,
+                          ),
                           onTapSong: (song) async {
                             final index = recommendedSongs.indexWhere(
                               (item) => item.id == song.id,
@@ -912,14 +977,18 @@ class _HomeSourceSummary extends StatelessWidget {
 }
 
 class _DiscoveryCard extends StatelessWidget {
-  static const double width = 168;
-  static const double _coverSize = 168;
+  static const double width = 120;
+  static const double _coverSize = 120;
+  static const double _footerHeight = 38;
+  static const double height = _coverSize + _footerHeight;
 
   final String eyebrow;
   final String title;
-  final IconData icon;
+  final IconData? icon;
   final SongEntity? song;
   final Color accent;
+  final bool active;
+  final bool playing;
   final VoidCallback onTap;
 
   const _DiscoveryCard({
@@ -928,30 +997,30 @@ class _DiscoveryCard extends StatelessWidget {
     required this.icon,
     required this.song,
     required this.accent,
+    required this.active,
+    required this.playing,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     final currentSong = song;
-    // NetEase-style: big square artwork on top, small chip label + play button
-    // overlaid, and a single subtitle line underneath (outside the artwork,
-    // in normal panel-text color) — not a dark gradient buried under everything.
+    final footerColor = Color.alphaBlend(
+      accent.withValues(alpha: 0.18),
+      const Color(0xFF211B1B),
+    );
     return SizedBox(
       width: width,
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: SizedBox(
+          borderRadius: BorderRadius.circular(5),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(5),
+            child: Column(
+              children: [
+                SizedBox(
                   width: _coverSize,
                   height: _coverSize,
                   child: Stack(
@@ -977,83 +1046,159 @@ class _DiscoveryCard extends StatelessWidget {
                             ),
                           ),
                         ),
-                      // Thin translucent chip at top-left, no full-cover gradient.
-                      Positioned(
-                        left: 10,
-                        top: 10,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.36),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(icon, color: Colors.white, size: 12),
-                              const SizedBox(width: 4),
-                              Text(
-                                eyebrow,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.2,
-                                ),
-                              ),
+                      const DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Color(0x59000000),
+                              Color(0x00000000),
+                              Color(0x26000000),
                             ],
+                            stops: [0, 0.48, 1],
                           ),
                         ),
                       ),
-                      // Play button, bottom-right — the NetEase-style circular
-                      // affordance sitting on top of the artwork.
                       Positioned(
-                        right: 8,
-                        bottom: 8,
-                        child: Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.92),
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.18),
-                                blurRadius: 6,
-                                offset: const Offset(0, 2),
+                        left: 8,
+                        top: 8,
+                        right: 7,
+                        child: Row(
+                          children: [
+                            if (icon == Icons.calendar_month_rounded)
+                              const _DiscoveryCalendarBadge()
+                            else if (icon != null)
+                              Icon(icon, color: Colors.white, size: 17),
+                            if (icon != null) const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                eyebrow,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  height: 1.1,
+                                  fontWeight: FontWeight.w800,
+                                  shadows: [
+                                    Shadow(
+                                      color: Color(0x8A000000),
+                                      blurRadius: 4,
+                                      offset: Offset(0, 1),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ],
-                          ),
-                          child: Icon(
-                            Icons.play_arrow_rounded,
-                            color: Colors.black.withValues(alpha: 0.85),
-                            size: 22,
-                          ),
+                            ),
+                          ],
                         ),
+                      ),
+                      Positioned(
+                        right: 7,
+                        bottom: 6,
+                        child: active
+                            ? PlayingBars(
+                                color: Colors.white,
+                                animating: playing,
+                              )
+                            : const Icon(
+                                Icons.play_arrow_rounded,
+                                color: Colors.white,
+                                size: 24,
+                                shadows: [
+                                  Shadow(
+                                    color: Color(0x8F000000),
+                                    blurRadius: 5,
+                                    offset: Offset(0, 2),
+                                  ),
+                                ],
+                              ),
                       ),
                     ],
                   ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: scheme.onSurface,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                  letterSpacing: 0.1,
+                Container(
+                  width: width,
+                  height: _footerHeight,
+                  padding: const EdgeInsets.symmetric(horizontal: 7),
+                  color: footerColor,
+                  alignment: Alignment.center,
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      height: 1.1,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _DiscoveryCalendarBadge extends StatelessWidget {
+  const _DiscoveryCalendarBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 18,
+      height: 18,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned.fill(
+            top: 1.5,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white, width: 1.5),
+                borderRadius: BorderRadius.circular(3),
+              ),
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 1.5),
+                  child: Text(
+                    '${DateTime.now().day}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 7,
+                      height: 1,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const Positioned(left: 4, top: 0, child: _CalendarBinding()),
+          const Positioned(right: 4, top: 0, child: _CalendarBinding()),
+        ],
+      ),
+    );
+  }
+}
+
+class _CalendarBinding extends StatelessWidget {
+  const _CalendarBinding();
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(1),
+      ),
+      child: const SizedBox(width: 1.5, height: 4),
     );
   }
 }
@@ -1333,7 +1478,7 @@ class _QuickLibraryButton extends StatelessWidget {
             ),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -1347,14 +1492,18 @@ class _QuickLibraryButton extends StatelessWidget {
                   ),
                   child: Icon(data.icon, size: 18, color: iconChipFg),
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  data.label,
-                  style: TextStyle(
-                    color: textColor,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.2,
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    data.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: textColor,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.1,
+                    ),
                   ),
                 ),
               ],

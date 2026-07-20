@@ -188,8 +188,7 @@ class PlayerService with WidgetsBindingObserver {
         // requested target, instead of blanking the progress bar for a fixed
         // delay after every seek.
         final target = _seekTarget;
-        if (target != null &&
-            (value - target).inMilliseconds.abs() <= 600) {
+        if (target != null && (value - target).inMilliseconds.abs() <= 600) {
           _isSeeking = false;
           _seekTarget = null;
         } else {
@@ -763,18 +762,12 @@ class PlayerService with WidgetsBindingObserver {
       PlaybackMode.single => PlaybackMode.shuffle,
     };
 
-    playbackMode.value = next;
-    if (next == PlaybackMode.shuffle) {
-      await _player.setLoopMode(LoopMode.all);
-      await _player.setShuffleModeEnabled(true);
-      await _player.shuffle();
-      _schedulePersistPlaybackState();
-      return;
-    }
-    await _player.setShuffleModeEnabled(false);
-    await _player.setLoopMode(
-      next == PlaybackMode.single ? LoopMode.one : LoopMode.all,
-    );
+    await setPlaybackMode(next);
+  }
+
+  Future<void> setPlaybackMode(PlaybackMode mode) async {
+    playbackMode.value = mode;
+    await _applyPlaybackMode(mode);
     _schedulePersistPlaybackState();
   }
 
