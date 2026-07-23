@@ -220,6 +220,7 @@ class NavidromeMusicService {
             _readString(albumInfo, 'title'),
           ]);
     final durationSeconds = _readInt(raw, 'duration');
+    final bitrateKbps = _readInt(raw, 'bitRate');
     final uri = _repo.apiUri(source, 'stream', query: {'id': songId});
 
     return SongEntity(
@@ -230,7 +231,9 @@ class NavidromeMusicService {
       uri: uri.toString(),
       isLocal: false,
       durationMs: durationSeconds == null ? null : durationSeconds * 1000,
-      bitrate: _readInt(raw, 'bitRate'),
+      // Subsonic reports bitRate in kbps; SongEntity stores bits per second.
+      bitrate: bitrateKbps == null ? null : bitrateKbps * 1000,
+      sampleRate: _readInt(raw, 'samplingRate') ?? _readInt(raw, 'sampleRate'),
       fileSize: _readInt(raw, 'size'),
       format: _readString(raw, 'suffix').isNotEmpty
           ? _readString(raw, 'suffix')

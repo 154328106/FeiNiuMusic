@@ -476,12 +476,8 @@ class LocalMusicService {
             durationMs: durationMs != null && durationMs > 0
                 ? durationMs
                 : null,
-            bitrate: settings.readFullTagsOnScan
-                ? tagInfo?.bitrate
-                : existing?.bitrate,
-            sampleRate: settings.readFullTagsOnScan
-                ? tagInfo?.sampleRate
-                : existing?.sampleRate,
+            bitrate: tagInfo?.bitrate ?? existing?.bitrate,
+            sampleRate: tagInfo?.sampleRate ?? existing?.sampleRate,
             fileSize: tagInfo?.fileSize ?? stat.size,
             format: tagInfo?.format,
             sourceId: 'local',
@@ -489,12 +485,8 @@ class LocalMusicService {
             localCoverPath: coverPath,
             localAssetId: candidate.assetId,
             tagsParsed: tagInfo != null,
-            trackNumber: settings.readFullTagsOnScan
-                ? tagInfo?.trackNumber
-                : existing?.trackNumber,
-            discNumber: settings.readFullTagsOnScan
-                ? tagInfo?.discNumber
-                : existing?.discNumber,
+            trackNumber: tagInfo?.trackNumber ?? existing?.trackNumber,
+            discNumber: tagInfo?.discNumber ?? existing?.discNumber,
           ),
         );
         processed += 1;

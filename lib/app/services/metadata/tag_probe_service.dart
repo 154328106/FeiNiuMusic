@@ -15,6 +15,13 @@ import 'probe_handlers.dart';
 import 'tag_probe_result.dart';
 import 'wav_id3_metadata.dart';
 
+int? estimateAudioBitrate({required int? fileSize, required int? durationMs}) {
+  final bytes = fileSize ?? 0;
+  final milliseconds = durationMs ?? 0;
+  if (bytes <= 0 || milliseconds <= 0) return null;
+  return (bytes * 8 * 1000 / milliseconds).round();
+}
+
 class TagProbeService {
   static final TagProbeService instance = TagProbeService._internal();
   TagProbeService._internal();
@@ -154,7 +161,8 @@ class TagProbeService {
     if (isLocal) {
       final file = File(u);
       if (!await file.exists()) return null;
-      return _probeFromFile(file, includeArtwork: includeArtwork);
+      final result = await _probeFromFile(file, includeArtwork: includeArtwork);
+      return _withEstimatedBitrate(result, fileSize: await file.length());
     }
 
     final parsed = _parseSafeUri(u);
@@ -162,7 +170,8 @@ class TagProbeService {
     if (parsed.isScheme('file')) {
       final file = File(parsed.toFilePath());
       if (!await file.exists()) return null;
-      return _probeFromFile(file, includeArtwork: includeArtwork);
+      final result = await _probeFromFile(file, includeArtwork: includeArtwork);
+      return _withEstimatedBitrate(result, fileSize: await file.length());
     }
 
     if (parsed.isScheme('http') || parsed.isScheme('https')) {
@@ -171,7 +180,11 @@ class TagProbeService {
         headers: headers,
       );
       if (complete != null) {
-        return _probeFromFile(complete, includeArtwork: includeArtwork);
+        final result = await _probeFromFile(
+          complete,
+          includeArtwork: includeArtwork,
+        );
+        return _withEstimatedBitrate(result, fileSize: await complete.length());
       }
       final tmp = await _existingAudioCacheTempFile(parsed, headers: headers);
       if (tmp != null) {
@@ -202,7 +215,38 @@ class TagProbeService {
     if (u.isEmpty) return null;
     final file = File(u);
     if (!await file.exists()) return null;
-    return _probeFromFile(file, includeArtwork: false, includeLyrics: false);
+    final result = await _probeFromFile(
+      file,
+      includeArtwork: false,
+      includeLyrics: false,
+    );
+    return _withEstimatedBitrate(result, fileSize: await file.length());
+  }
+
+  TagProbeResult? _withEstimatedBitrate(
+    TagProbeResult? result, {
+    required int? fileSize,
+  }) {
+    if (result == null || (result.bitrate ?? 0) > 0) return result;
+    final bitrate = estimateAudioBitrate(
+      fileSize: fileSize ?? result.fileSize,
+      durationMs: result.durationMs,
+    );
+    if (bitrate == null) return result;
+    return TagProbeResult(
+      title: result.title,
+      artist: result.artist,
+      album: result.album,
+      durationMs: result.durationMs,
+      bitrate: bitrate,
+      sampleRate: result.sampleRate,
+      fileSize: result.fileSize ?? fileSize,
+      format: result.format,
+      artwork: result.artwork,
+      lyrics: result.lyrics,
+      trackNumber: result.trackNumber,
+      discNumber: result.discNumber,
+    );
   }
 
   Future<TagProbeResult?> _probeRemoteIncremental(
@@ -507,7 +551,16 @@ class TagProbeService {
       }
     }
 
-    if (durationMs == parsed.durationMs && fileSize == parsed.fileSize) {
+    final bitrate = (parsed.bitrate ?? 0) > 0
+        ? parsed.bitrate
+        : estimateAudioBitrate(
+            fileSize: totalBytes ?? fileSize,
+            durationMs: durationMs,
+          );
+
+    if (durationMs == parsed.durationMs &&
+        fileSize == parsed.fileSize &&
+        bitrate == parsed.bitrate) {
       return parsed;
     }
 
@@ -516,7 +569,7 @@ class TagProbeService {
       artist: parsed.artist,
       album: parsed.album,
       durationMs: durationMs,
-      bitrate: parsed.bitrate,
+      bitrate: bitrate,
       sampleRate: parsed.sampleRate,
       fileSize: fileSize,
       format: parsed.format,

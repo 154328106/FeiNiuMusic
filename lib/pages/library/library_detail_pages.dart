@@ -69,6 +69,44 @@ String pinyinKey(String text) {
   return (p.isNotEmpty ? p : trimmed).toLowerCase();
 }
 
+List<SongEntity> sortAlbumDetailSongs(
+  Iterable<SongEntity> songs, {
+  required String sortKey,
+  required bool ascending,
+}) {
+  final sorted = songs.toList();
+
+  int albumOrder(SongEntity a, SongEntity b) {
+    final discA = (a.discNumber ?? 1) > 0 ? (a.discNumber ?? 1) : 1;
+    final discB = (b.discNumber ?? 1) > 0 ? (b.discNumber ?? 1) : 1;
+    var result = discA.compareTo(discB);
+    if (result != 0) return result;
+
+    final trackA = (a.trackNumber ?? 0) > 0 ? a.trackNumber! : 1 << 30;
+    final trackB = (b.trackNumber ?? 0) > 0 ? b.trackNumber! : 1 << 30;
+    result = trackA.compareTo(trackB);
+    if (result != 0) return result;
+    return pinyinKey(a.title).compareTo(pinyinKey(b.title));
+  }
+
+  int compare(SongEntity a, SongEntity b) {
+    switch (sortKey) {
+      case 'title':
+        return pinyinKey(a.title).compareTo(pinyinKey(b.title));
+      case 'artist':
+        return pinyinKey(a.artist).compareTo(pinyinKey(b.artist));
+      case 'duration':
+        return (a.durationMs ?? 0).compareTo(b.durationMs ?? 0);
+      case 'trackNumber':
+      default:
+        return albumOrder(a, b);
+    }
+  }
+
+  sorted.sort((a, b) => ascending ? compare(a, b) : compare(b, a));
+  return sorted;
+}
+
 Map<String, dynamic> _buildArtistDetailPayload(Map<String, dynamic> args) {
   final rawSongs = (args['songs'] as List).cast<Map>();
   final songs = rawSongs
@@ -478,6 +516,8 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
   late final _loading = createSignal(true);
   late final _songs = createSignal<List<SongEntity>>([]);
   late final _showCovers = createSignal(false);
+  late final _sortKey = createSignal('trackNumber');
+  late final _sortAscending = createSignal(true);
 
   @override
   void initState() {
@@ -496,10 +536,68 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
       }
       return raw == normalized;
     }).toList();
-    filtered.sort((a, b) => pinyinKey(a.title).compareTo(pinyinKey(b.title)));
     if (!mounted) return;
-    _songs.value = filtered;
+    _songs.value = sortAlbumDetailSongs(
+      filtered,
+      sortKey: _sortKey.value,
+      ascending: _sortAscending.value,
+    );
     _loading.value = false;
+  }
+
+  void _sortSongs() {
+    _songs.value = sortAlbumDetailSongs(
+      _songs.value,
+      sortKey: _sortKey.value,
+      ascending: _sortAscending.value,
+    );
+  }
+
+  void _showMoreSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return SortSheet(
+          title: '更多',
+          options: const [
+            SortOption(
+              key: 'trackNumber',
+              label: '轨道号',
+              icon: Icons.format_list_numbered_rounded,
+            ),
+            SortOption(key: 'title', label: '歌曲名称', icon: Icons.sort_by_alpha),
+            SortOption(
+              key: 'artist',
+              label: '歌手名称',
+              icon: Icons.person_outline,
+            ),
+            SortOption(key: 'duration', label: '歌曲时长', icon: Icons.schedule),
+          ],
+          currentKey: _sortKey.value,
+          ascending: _sortAscending.value,
+          onSelectKey: (value) {
+            _sortKey.value = value;
+            _sortSongs();
+          },
+          onSelectAscending: (value) {
+            _sortAscending.value = value;
+            _sortSongs();
+          },
+          extra: Watch.builder(
+            builder: (context) {
+              return SwitchListTile(
+                title: const Text('显示专辑封面'),
+                subtitle: const Text('关闭时显示歌曲序号'),
+                secondary: const Icon(Icons.image_outlined),
+                value: _showCovers.value,
+                onChanged: (value) => _showCovers.value = value,
+              );
+            },
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -514,15 +612,9 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
           elevation: 0,
           actions: [
             IconButton(
-              tooltip: _showCovers.value ? '显示序号' : '显示封面',
-              icon: Icon(
-                _showCovers.value
-                    ? Icons.image_outlined
-                    : Icons.format_list_numbered_rounded,
-              ),
-              onPressed: () {
-                _showCovers.value = !_showCovers.value;
-              },
+              tooltip: '更多',
+              icon: const Icon(Icons.more_vert_rounded),
+              onPressed: _showMoreSheet,
             ),
             const SizedBox(width: 8),
           ],

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
@@ -614,10 +615,77 @@ class _MarqueeTextState extends State<_MarqueeText>
   }
 }
 
-class SongInfoSheet extends StatelessWidget {
+class SongInfoSheet extends StatefulWidget {
   final SongEntity song;
 
   const SongInfoSheet({super.key, required this.song});
+
+  @override
+  State<SongInfoSheet> createState() => _SongInfoSheetState();
+}
+
+class _SongInfoSheetState extends State<SongInfoSheet> {
+  late SongEntity _song;
+  bool _loadingTechnicalMetadata = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _song = widget.song;
+    if ((_song.bitrate ?? 0) <= 0 || (_song.sampleRate ?? 0) <= 0) {
+      unawaited(_loadTechnicalMetadata());
+    }
+  }
+
+  Map<String, String>? _headers() {
+    final raw = (_song.headersJson ?? '').trim();
+    if (raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        return decoded.map(
+          (key, value) => MapEntry(key.toString(), value.toString()),
+        );
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> _loadTechnicalMetadata() async {
+    final uri = (_song.uri ?? '').trim();
+    if (uri.isEmpty) return;
+    setState(() => _loadingTechnicalMetadata = true);
+    try {
+      final result = await TagProbeService.instance.probeSongDedup(
+        uri: uri,
+        isLocal: _song.isLocal,
+        headers: _headers(),
+        includeArtwork: false,
+      );
+      if (result == null) return;
+      final updated = _song.copyWith(
+        durationMs: result.durationMs,
+        bitrate: result.bitrate,
+        sampleRate: result.sampleRate,
+        fileSize: result.fileSize,
+        format: result.format,
+        trackNumber: result.trackNumber,
+        discNumber: result.discNumber,
+        tagsParsed: true,
+      );
+      await SongDao().upsertSongs([updated]);
+      if (!mounted) return;
+      setState(() => _song = updated);
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('Failed to load technical song metadata: $error');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _loadingTechnicalMetadata = false);
+      }
+    }
+  }
 
   String _durationText(int? ms) {
     final v = ms ?? 0;
@@ -660,8 +728,8 @@ class SongInfoSheet extends StatelessWidget {
   }
 
   Future<String> _resolveSourceName() async {
-    if (song.isLocal) return '本地音乐';
-    final id = (song.sourceId ?? '').trim();
+    if (_song.isLocal) return '本地音乐';
+    final id = (_song.sourceId ?? '').trim();
     if (id.isEmpty) return '-';
     final sources = await WebDavSourceRepository.instance.loadSources();
     final matched = sources.cast<WebDavSource?>().firstWhere(
@@ -674,6 +742,7 @@ class SongInfoSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final song = _song;
     final theme = Theme.of(context);
     final secondary = theme.brightness == Brightness.dark
         ? Colors.white70
@@ -702,6 +771,8 @@ class SongInfoSheet extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (_loadingTechnicalMetadata)
+            const LinearProgressIndicator(minHeight: 2),
           row('标题', song.title),
           row('艺术家', song.artist),
           row('专辑', song.album ?? '-'),
