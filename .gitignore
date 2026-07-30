@@ -1,45 +1,110 @@
-# Miscellaneous
+# ============================================================
+# 操作系统 / 编辑器
+# ============================================================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
 *.class
 *.log
 *.pyc
-*.swp
-.DS_Store
-.atom/
-.build/
-.buildlog/
 .history
-.svn/
-.swiftpm/
-migrate_working_dir/
 
-# IntelliJ related
+# ============================================================
+# IDE
+# ============================================================
+.idea/
 *.iml
 *.ipr
 *.iws
-.idea/
+.atom/
+.svn/
+.vscode/
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
-
-# Flutter/Dart/Pub related
+# ============================================================
+# Flutter / Dart
+# ============================================================
+.dart_tool/
+.pub/
+.pub-cache/
+.buildlog/
+.build/
+.dart_toolchain/
+.version
+.flutter-plugins
+.flutter-plugins-dependencies
 **/doc/api/
 **/ios/Flutter/.last_build_id
-.dart_tool/
-.flutter-plugins-dependencies
-.pub-cache/
-.pub/
-/build/
 /coverage/
 
-# Symbolication related
+# Flutter 构建输出
+/build/
 app.*.symbols
-
-# Obfuscation related
 app.*.map.json
 
-# Android Studio will place build artifacts here
+# Flutter 版本管理（FVM）
+.fvm/
+.fvm/flutter_sdk
+
+# ============================================================
+# Android
+# ============================================================
+.gradle/
+.kotlin/
+.cxx/
+local.properties
+key.properties
+**/*.keystore
+**/*.jks
+
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Gradle wrapper（供 CI 下载，不提交二进制）
+/gradlew
+/gradlew.bat
+gradle-wrapper.jar
+
+# ============================================================
+# iOS / macOS
+# ============================================================
+**/ios/Pods/
+**/macos/Pods/
+.swiftpm/
+**/ios/Flutter/App.framework
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/GeneratedPluginRegistrant.*
+**/macos/Flutter/GeneratedPluginRegistrant.*
+**/ios/Runner/GeneratedPluginRegistrant.*
+**/macos/Runner/GeneratedPluginRegistrant.*
+
+# ============================================================
+# Windows
+# ============================================================
+**/windows/flutter/generated_plugin_registrant.*
+**/windows/flutter/generated_plugins.cmake
+**/windows/runner/GeneratedPluginRegistrant.*
+
+# ============================================================
+# Web
+# ============================================================
+/web/fonts/
+/web/icons/
+
+# ============================================================
+# Linux
+# ============================================================
+**/linux/flutter/generated_plugin_registrant.*
+**/linux/flutter/generated_plugins.cmake
+**/linux/runner/GeneratedPluginRegistrant.*
+
+# ============================================================
+# 其它
+# ============================================================
+migrate_working_dir/
+secrets.*
+.env
+.env.*
+*.env

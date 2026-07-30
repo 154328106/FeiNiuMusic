@@ -16,6 +16,7 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
   final double elevation;
   final double? height;
   final PreferredSizeWidget? bottom;
+  final bool? isRefreshing;
 
   const AppTopBar({
     super.key,
@@ -30,6 +31,7 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
     this.elevation = 0,
     this.height,
     this.bottom,
+    this.isRefreshing,
   });
 
   @override
@@ -57,12 +59,29 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
       statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
       statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
     );
+    final resolvedActions = <Widget>[...(actions ?? const [])];
+    if (isRefreshing == true) {
+      resolvedActions.insert(
+        0,
+        Padding(
+          padding: const EdgeInsets.only(right: 4),
+          child: SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: foregroundColor,
+            ),
+          ),
+        ),
+      );
+    }
     return AppBar(
       title:
           titleWidget ??
           (title != null ? Text(title!, style: titleStyle) : null),
       leading: leading,
-      actions: actions,
+      actions: resolvedActions,
       centerTitle: centerTitle ?? !miuix,
       automaticallyImplyLeading: showBackButton,
       backgroundColor: backgroundColor,

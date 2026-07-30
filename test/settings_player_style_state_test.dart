@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:nagomusic/app/state/settings_player_style_state.dart';
+import 'package:feiniu_music/app/state/settings_player_style_state.dart';
 
 void main() {
   test('player style preset loads and saves selected preset', () async {

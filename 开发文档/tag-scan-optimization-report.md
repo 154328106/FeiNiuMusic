@@ -9,7 +9,7 @@
 
 ## 背景
 
-NagoMusic 的本地音乐扫描 + 远程标签探测代码集中在以下三个文件：
+FeiNiuMusic 的本地音乐扫描 + 远程标签探测代码集中在以下三个文件：
 
 - `lib/app/services/db/dao/song_dao.dart` — 歌曲入库
 - `lib/app/services/local_music_service.dart` — 本地库全量 / 增量扫描

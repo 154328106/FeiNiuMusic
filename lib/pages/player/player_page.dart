@@ -5,8 +5,8 @@ import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
 import '../../app/router/app_page_route.dart';
 import '../../app/router/app_router.dart';
+import '../../app/services/feiniu/favorite_service.dart';
 import '../../app/services/lyrics/lyrics_service.dart';
-import '../../app/services/playlists_service.dart';
 import '../../app/services/player_service.dart';
 import '../../app/state/settings_state.dart';
 import '../../app/state/song_state.dart';
@@ -403,12 +403,12 @@ class _PosterPlayerLayout extends StatelessWidget {
         final title = song?.title.trim().isNotEmpty == true
             ? song!.title.trim()
             : '未知歌曲';
-        final artist = song?.artist.trim().isNotEmpty == true
-            ? song!.artist.trim()
-            : '未知艺术家';
+        final artist = song?.artistDisplayName.isNotEmpty == true
+            ? song!.artistDisplayName
+            : '未知歌手';
         return Column(
           children: [
-            _PosterArtwork(songSignal: player.currentSongSignal),
+            _PosterArtwork(songSignal: player.currentSongSignal, player: player),
             Expanded(
               child: Container(
                 width: double.infinity,
@@ -475,8 +475,9 @@ class _PosterPlayerLayout extends StatelessWidget {
 
 class _PosterArtwork extends StatelessWidget {
   final Signal<SongEntity?> songSignal;
+  final PlayerService player;
 
-  const _PosterArtwork({required this.songSignal});
+  const _PosterArtwork({required this.songSignal, required this.player});
 
   @override
   Widget build(BuildContext context) {
@@ -518,7 +519,7 @@ class _PosterArtwork extends StatelessWidget {
                         : ArtworkWidget(
                             song: song,
                             size: boxSize,
-                            borderRadius: 0,
+                            borderRadius: PlayerBackgroundSettings.roundCover.value ? boxSize / 2 : 0,
                             preferOriginal: true,
                             keepPreviousUntilLoaded: true,
                             placeholder: Skeletonizer(
@@ -533,7 +534,12 @@ class _PosterArtwork extends StatelessWidget {
                       child: OverflowBox(
                         maxWidth: boxSize,
                         maxHeight: boxSize,
-                        child: child,
+                        child: PlayerBackgroundSettings.rotateCover.value
+                            ? _RotatingCover(
+                                playing: player.isPlaying.value,
+                                child: child,
+                              )
+                            : child,
                       ),
                     );
                   },
@@ -675,10 +681,10 @@ class _PosterFavoriteButton extends StatefulWidget {
 }
 
 class _PosterFavoriteButtonState extends State<_PosterFavoriteButton> {
-  final PlaylistsService _playlists = PlaylistsService.instance;
+  final FeiNiuFavoriteService _favoriteService = FeiNiuFavoriteService.instance;
   bool _isFavorite = false;
   bool _loading = false;
-  String _favoriteName = PlaylistsService.favoritePlaylistName;
+  String _favoriteName = '我喜欢';
 
   @override
   void initState() {
@@ -706,47 +712,42 @@ class _PosterFavoriteButtonState extends State<_PosterFavoriteButton> {
       return;
     }
     setState(() => _loading = true);
-    final list = await _playlists.loadAll();
-    PlaylistEntity? favorite;
-    for (final p in list) {
-      if (p.isFavorite || p.id == PlaylistsService.favoritePlaylistId) {
-        favorite = p;
-        break;
-      }
+    try {
+      final favIds = await _favoriteService.getFavoriteIds();
+      if (!mounted || widget.song?.id != song.id) return;
+      setState(() {
+        _isFavorite = favIds.contains(song.id);
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
     }
-    if (!mounted || widget.song?.id != song.id) return;
-    final name = (favorite?.name ?? '').trim();
-    setState(() {
-      _isFavorite = favorite?.songIds.contains(song.id) ?? false;
-      _loading = false;
-      if (name.isNotEmpty) {
-        _favoriteName = name;
-      }
-    });
   }
 
   Future<void> _toggleFavorite() async {
     final song = widget.song;
     if (_loading || song == null) return;
     setState(() => _loading = true);
-    if (_isFavorite) {
-      await _playlists.removeSongs(PlaylistsService.favoritePlaylistId, [
-        song.id,
-      ]);
-      if (!mounted) return;
-      setState(() {
-        _isFavorite = false;
-        _loading = false;
-      });
-      AppToast.show(context, '已从$_favoriteName移出');
-    } else {
-      await _playlists.addSongs(PlaylistsService.favoritePlaylistId, [song.id]);
-      if (!mounted) return;
-      setState(() {
-        _isFavorite = true;
-        _loading = false;
-      });
-      AppToast.show(context, '已添加到$_favoriteName');
+    try {
+      if (_isFavorite) {
+        await _favoriteService.unfavorite(song.id);
+        if (!mounted) return;
+        setState(() {
+          _isFavorite = false;
+          _loading = false;
+        });
+        AppToast.show(context, '已取消收藏');
+      } else {
+        await _favoriteService.favorite(song.id);
+        if (!mounted) return;
+        setState(() {
+          _isFavorite = true;
+          _loading = false;
+        });
+        AppToast.show(context, '已收藏');
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -794,10 +795,12 @@ class _PosterSeekBarState extends State<_PosterSeekBar> with SignalsMixin {
       builder: (context) {
         final position = widget.player.positionSignal.value;
         final duration = widget.player.durationSignal.value;
+        final buffered = widget.player.bufferedPositionSignal.value;
         final totalMs = duration?.inMilliseconds ?? 0;
         final max = totalMs <= 0 ? 1.0 : totalMs.toDouble();
         final currentMs = position.inMilliseconds.clamp(0, max.toInt()).toInt();
         final value = (_dragValue.value ?? currentMs.toDouble()).clamp(0, max);
+        final bufferedRatio = totalMs > 0 ? (buffered.inMilliseconds / totalMs).clamp(0.0, 1.0) : 0.0;
         return Column(
           children: [
             Row(
@@ -814,61 +817,74 @@ class _PosterSeekBarState extends State<_PosterSeekBar> with SignalsMixin {
                   ),
                 ),
                 Expanded(
-                  child: SliderTheme(
-                    data: SliderTheme.of(context).copyWith(
-                      trackHeight: 3,
-                      thumbShape: const RoundSliderThumbShape(
-                        enabledThumbRadius: 6,
-                      ),
-                      overlayShape: const RoundSliderOverlayShape(
-                        overlayRadius: 12,
-                      ),
-                      activeTrackColor: scheme.onSurface.withValues(
-                        alpha: 0.64,
-                      ),
-                      inactiveTrackColor: scheme.onSurface.withValues(
-                        alpha: 0.14,
-                      ),
-                      thumbColor: scheme.onSurface,
-                    ),
-                    child: Slider(
-                      value: value.toDouble(),
-                      min: 0,
-                      max: max,
-                      onChanged: totalMs <= 0
-                          ? null
-                          : (next) => _dragValue.value = next,
-                      onChangeEnd: totalMs <= 0
-                          ? null
-                          : (next) {
-                              _dragValue.value = null;
+                  child: SizedBox(
+                    height: 24,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Positioned.fill(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 10),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(2),
+                              child: LinearProgressIndicator(
+                                value: bufferedRatio,
+                                backgroundColor: Colors.transparent,
+                                valueColor: AlwaysStoppedAnimation(scheme.onSurface.withValues(alpha: 0.22)),
+                                minHeight: 3,
+                              ),
+                            ),
+                          ),
+                        ),
+                        // 播放进度滑块
+                        SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: 3,
+                            trackShape: const RoundedRectSliderTrackShape(),
+                            thumbShape: const RoundSliderThumbShape(
+                              enabledThumbRadius: 6,
+                            ),
+                            overlayShape: const RoundSliderOverlayShape(
+                              overlayRadius: 12,
+                            ),
+                            activeTrackColor: scheme.onSurface.withValues(alpha: 0.64),
+                            inactiveTrackColor: scheme.onSurface.withValues(alpha: 0.13),
+                            thumbColor: scheme.onSurface,
+                          ),
+                          child: Slider(
+                            value: value.toDouble(),
+                            min: 0,
+                            max: max,
+                            onChanged: totalMs <= 0
+                                ? null
+                                : (next) => _dragValue.value = next,
+                            onChangeEnd: totalMs <= 0
+                                ? null
+                                : (next) {
+                                    _dragValue.value = null;
                               widget.player.seek(
                                 Duration(milliseconds: next.round()),
                               );
                             },
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
                 SizedBox(
-                  width: 48,
-                  child: Text(
-                    _format(duration),
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      color: scheme.onSurfaceVariant.withValues(alpha: 0.78),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            Container(
-              height: 1,
-              margin: const EdgeInsets.only(top: 2),
-              color: scheme.onSurface.withValues(alpha: 0.04),
+              width: 48,
+              child: Text(_format(duration), textAlign: TextAlign.right,
+                  style: TextStyle(color: scheme.onSurfaceVariant.withValues(alpha: 0.78), fontSize: 14, fontWeight: FontWeight.w600)),
             ),
           ],
+        ),
+        Container(
+          height: 1,
+          margin: const EdgeInsets.only(top: 2),
+          color: scheme.onSurface.withValues(alpha: 0.04),
+        ),
+      ],
         );
       },
     );
@@ -954,13 +970,19 @@ void _showPosterSongDetailSheet(BuildContext context, PlayerService player) {
       },
       onOpenArtist: (artistName) {
         Navigator.of(context).push(
-          buildAppPageRoute((_) => ArtistDetailPage(artistName: artistName)),
+          buildAppPageRoute((_) => ArtistDetailPage(
+            artistName: artistName,
+            artistGuid: song.firstArtistGuid,
+          )),
         );
       },
       onOpenAlbum: (albumName) {
-        Navigator.of(
-          context,
-        ).push(buildAppPageRoute((_) => AlbumDetailPage(albumName: albumName)));
+        Navigator.of(context).push(
+          buildAppPageRoute((_) => AlbumDetailPage(
+            albumName: albumName,
+            albumGuid: song.albumGuid,
+          )),
+        );
       },
     ),
   );
@@ -1021,17 +1043,32 @@ class _PlayerArtwork extends StatelessWidget {
                       height: boxSize,
                       child: _ArtworkShadowContainer(
                         border: border,
-                        child: ArtworkWidget(
-                          song: song,
-                          size: boxSize,
-                          borderRadius: 12,
-                          preferOriginal: true,
-                          keepPreviousUntilLoaded: true,
-                          placeholder: _ArtworkPlaceholder(
-                            border: border,
-                            label: song.title,
-                          ),
-                        ),
+                        child: PlayerBackgroundSettings.rotateCover.value
+                            ? _RotatingCover(
+                                playing: PlayerService.instance.isPlaying.value,
+                                child: ArtworkWidget(
+                                  song: song,
+                                  size: boxSize,
+                                  borderRadius: PlayerBackgroundSettings.roundCover.value ? boxSize / 2 : 12,
+                                  preferOriginal: true,
+                                  keepPreviousUntilLoaded: true,
+                                  placeholder: _ArtworkPlaceholder(
+                                    border: border,
+                                    label: song.title,
+                                  ),
+                                ),
+                              )
+                            : ArtworkWidget(
+                                song: song,
+                                size: boxSize,
+                                borderRadius: PlayerBackgroundSettings.roundCover.value ? boxSize / 2 : 12,
+                                preferOriginal: true,
+                                keepPreviousUntilLoaded: true,
+                                placeholder: _ArtworkPlaceholder(
+                                  border: border,
+                                  label: song.title,
+                                ),
+                              ),
                       ),
                     ),
                   );
@@ -1083,6 +1120,55 @@ class _ArtworkShadowContainer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ClipRRect(borderRadius: border, child: child);
+  }
+}
+
+class _RotatingCover extends StatefulWidget {
+  final bool playing;
+  final Widget child;
+
+  const _RotatingCover({required this.playing, required this.child});
+
+  @override
+  State<_RotatingCover> createState() => _RotatingCoverState();
+}
+
+class _RotatingCoverState extends State<_RotatingCover>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 20),
+    );
+    if (widget.playing) _controller.repeat();
+  }
+
+  @override
+  void didUpdateWidget(_RotatingCover oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.playing && !oldWidget.playing) {
+      _controller.repeat();
+    } else if (!widget.playing && oldWidget.playing) {
+      _controller.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: _controller,
+      child: widget.child,
+    );
   }
 }
 

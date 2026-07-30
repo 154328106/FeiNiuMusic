@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.lanke" "\0"
-            VALUE "FileDescription", "nagomusic" "\0"
+            VALUE "FileDescription", "feiniumusic" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "nagomusic" "\0"
+            VALUE "InternalName", "feiniumusic" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.lanke. All rights reserved." "\0"
-            VALUE "OriginalFilename", "nagomusic.exe" "\0"
-            VALUE "ProductName", "nagomusic" "\0"
+            VALUE "OriginalFilename", "feiniumusic.exe" "\0"
+            VALUE "ProductName", "feiniumusic" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

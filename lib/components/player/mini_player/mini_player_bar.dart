@@ -364,7 +364,7 @@ class _InfoContent extends StatelessWidget {
                 final lyric = currentLyric?.trim() ?? '';
                 final subtitle = showLyrics && lyric.isNotEmpty
                     ? lyric
-                    : song!.artist;
+                    : song!.artistDisplayName;
                 return _MiniPlayerSubtitleText(
                   text: subtitle,
                   useProgressMarquee: showLyrics && lyric.isNotEmpty,

@@ -16,7 +16,7 @@ class GradientSettingsPage extends StatefulWidget {
 
 class _GradientSettingsPageState extends State<GradientSettingsPage>
     with SignalsMixin {
-  late final _saturation = createSignal(1.0);
+  late final _saturation = createSignal(1.2);
   late final _hueShift = createSignal(0.0);
   late final _loading = createSignal(true);
   late final _coverColor = createSignal<Color?>(null);

@@ -5,7 +5,7 @@ import '../../state/song_state.dart';
 
 class LyriconService {
   static const MethodChannel _channel =
-      MethodChannel('com.lanke.nagomusic/lyricon');
+      MethodChannel('com.feiniu.music/lyricon');
 
   static Future<void> setPlaybackState(bool isPlaying) async {
     try {

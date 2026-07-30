@@ -1,19 +1,19 @@
 import 'dart:async';
+import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:signals_flutter/signals_flutter.dart' hide computed;
+import 'package:signals_flutter/signals_flutter.dart';
 
-import '../../app/services/block_list_service.dart';
-import '../../app/services/db/dao/song_dao.dart';
 import '../../app/router/app_page_route.dart';
-import '../../app/state/song_state.dart';
-import '../../app/utils/cache_version_store.dart';
+import '../../app/router/app_router.dart';
+import '../../app/services/feiniu/api_client.dart';
+import '../../app/services/feiniu/api_models.dart';
+import '../../app/utils/api_cache_manager.dart';
 import '../../app/utils/deferred_page_init_mixin.dart';
-import '../../app/utils/page_cache_store.dart';
-import '../../components/common/blocked_management_sheet.dart';
 import '../../components/index.dart';
+import '../../pages/search/search_page.dart';
 import 'library_detail_pages.dart';
 
 class AlbumsPage extends StatefulWidget {
@@ -28,29 +28,33 @@ class AlbumsPage extends StatefulWidget {
 const String albumsCacheScope = 'albums_groups';
 const String albumsPrefsSortMode = 'albums_sort_mode_v1';
 const String albumsPrefsSortAscending = 'albums_sort_ascending_v1';
-const String albumsPrefsBlockedAlbums = 'blocked_albums_v1';
 const String albumsDefaultSortMode = 'name';
 const bool albumsDefaultAscending = true;
-
-String albumsCacheKeyForVersion({
-  required int songVersion,
-  required String sortMode,
-  required bool ascending,
-  required List<String> blockedSorted,
-}) {
-  return 'songv:$songVersion|$sortMode|${ascending ? 1 : 0}|${blockedSorted.join(',')}';
-}
 
 class AlbumGroup {
   final String name;
   final int songCount;
-  final SongEntity representative;
+  final FeiNiuAlbum album;
+  final String? coverId;
 
-  const AlbumGroup({
-    required this.name,
-    required this.songCount,
-    required this.representative,
-  });
+  AlbumGroup.fromFeiNiuAlbum(FeiNiuAlbum a)
+      : name = a.name,
+        songCount = a.trackCount ?? 0,
+        album = a,
+        coverId = a.coverId;
+
+  AlbumGroup.fromFeiNiuAlbumJson(Map<String, dynamic> json)
+      : name = json['name'] as String,
+        songCount = json['songCount'] as int? ?? 0,
+        album = FeiNiuAlbum.fromJson(json['album'] as Map<String, dynamic>),
+        coverId = json['coverId'] as String?;
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'songCount': songCount,
+        'album': album.toJson(),
+        'coverId': coverId,
+      };
 }
 
 class _AlbumsPageState extends State<AlbumsPage>
@@ -58,24 +62,23 @@ class _AlbumsPageState extends State<AlbumsPage>
   static const String _prefsSortMode = albumsPrefsSortMode;
   static const String _prefsSortAscending = albumsPrefsSortAscending;
   static const String _prefsGridColumns = 'albums_grid_columns_v1';
-  static const String _prefsShowBlockedEntry = 'albums_show_blocked_entry_v1';
-  static const String _prefsBlockedAlbums = albumsPrefsBlockedAlbums;
-  static const String _cacheScope = albumsCacheScope;
 
-  final SongDao _songDao = SongDao();
   final ScrollController _gridController = ScrollController();
-  final ScrollController _yearController = ScrollController();
   final GlobalKey<AppPageScaffoldState> _scaffoldKey =
       GlobalKey<AppPageScaffoldState>();
-  final PageCacheStore _cacheStore = PageCacheStore.instance;
 
   late final _loading = createSignal(true);
+  late final _loadingMore = createSignal(false);
+  late final _isRefreshing = createSignal(false);
   late final _groups = createSignal<List<AlbumGroup>>([]);
   late final _sortMode = createSignal('name');
   late final _ascending = createSignal(true);
   late final _gridColumns = createSignal(2);
-  late final _showBlockedEntry = createSignal(true);
-  late final _blockedAlbums = createSignal<Set<String>>({});
+
+  int _currentPage = 1;
+  int _totalAlbums = 0;
+  bool _hasMore = true;
+  static const int _pageSize = 50;
 
   late final _indexPreviewLetter = createSignal<String?>(null);
   late final _indexPreviewVisible = createSignal(false);
@@ -94,6 +97,7 @@ class _AlbumsPageState extends State<AlbumsPage>
   @override
   void initState() {
     super.initState();
+    _gridController.addListener(_handleScroll);
     scheduleDeferredInit();
   }
 
@@ -105,14 +109,45 @@ class _AlbumsPageState extends State<AlbumsPage>
   @override
   void dispose() {
     _indexPreviewTimer?.cancel();
+    _gridController.removeListener(_handleScroll);
     _gridController.dispose();
-    _yearController.dispose();
     super.dispose();
+  }
+
+  void _handleScroll() {
+    if (!_gridController.hasClients || !_hasMore || _loadingMore.value) return;
+    final maxScroll = _gridController.position.maxScrollExtent;
+    final offset = _gridController.offset;
+    if (maxScroll - offset < 400) {
+      _loadMore();
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore.value || !_hasMore) return;
+    _loadingMore.value = true;
+    _currentPage++;
+    try {
+      final pageData = await FeiNiuApiClient.instance.getAlbumList(
+        page: _currentPage,
+        size: _pageSize,
+        sort: _apiSortParam(),
+      );
+      if (!mounted) return;
+      _hasMore = pageData.list.length >= _pageSize;
+      final groups =
+          pageData.list.map((a) => AlbumGroup.fromFeiNiuAlbum(a)).toList();
+      _groups.value = [..._groups.value, ...groups];
+    } catch (_) {
+      _currentPage--;
+    } finally {
+      if (mounted) _loadingMore.value = false;
+    }
   }
 
   Future<void> _init() async {
     await _loadPrefs();
-    await _load();
+    await _load(forceRefresh: false);
   }
 
   void _openDrawer() {
@@ -143,13 +178,9 @@ class _AlbumsPageState extends State<AlbumsPage>
     var cols = prefs.getInt(_prefsGridColumns) ?? 2;
     if (cols < 2) cols = 2;
     if (cols > 4) cols = 4;
-    final showBlocked = prefs.getBool(_prefsShowBlockedEntry) ?? true;
-    final blocked = await BlockListService.instance.load(_prefsBlockedAlbums);
     _sortMode.value = mode;
     _ascending.value = asc;
     _gridColumns.value = cols;
-    _showBlockedEntry.value = showBlocked;
-    _blockedAlbums.value = blocked;
   }
 
   Future<void> _savePrefs() async {
@@ -157,80 +188,125 @@ class _AlbumsPageState extends State<AlbumsPage>
     await prefs.setString(_prefsSortMode, _sortMode.value);
     await prefs.setBool(_prefsSortAscending, _ascending.value);
     await prefs.setInt(_prefsGridColumns, _gridColumns.value);
-    await prefs.setBool(_prefsShowBlockedEntry, _showBlockedEntry.value);
   }
 
-  Future<void> _load() async {
-    _loading.value = true;
-    final songs = await _songDao.fetchAllCached();
-    final blockedSorted = _blockedAlbums.value.toList()..sort();
-    final songVersion = CacheVersionStore.instance.getVersion(
-      SongDao.cacheVersionScope,
-    );
-    final cacheKey = albumsCacheKeyForVersion(
-      songVersion: songVersion,
-      sortMode: _sortMode.value,
-      ascending: _ascending.value,
-      blockedSorted: blockedSorted,
-    );
-    final cached = _cacheStore.get<List<AlbumGroup>>(_cacheScope, cacheKey);
+  void _preloadCovers(List<AlbumGroup> groups, {int count = 30}) {
+    if (groups.isEmpty || !mounted) return;
+    final api = FeiNiuApiClient.instance;
+    final headers = FeiNiuApiClient.imageAuthHeaders();
+    for (final g in groups.take(count)) {
+      if (g.coverId != null && g.coverId!.isNotEmpty) {
+        final url = api.coverUrl(g.coverId!, size: 120, updatedAt: null);
+        unawaited(precacheImage(
+          CachedNetworkImageProvider(url, headers: headers),
+          context,
+        ));
+      }
+    }
+  }
 
-    if (cached != null) {
-      _groups.value = cached
-          .map(
-            (g) => AlbumGroup(
-              name: g.name,
-              songCount: g.songCount,
-              representative: g.representative,
-            ),
-          )
-          .toList();
-      _loading.value = false;
+  String _apiSortParam() {
+    switch (_sortMode.value) {
+      case 'newTrackAddedAt':
+        return 'newTrackAddedAt,${_ascending.value ? 'asc' : 'desc'}';
+      case 'releaseYear':
+        return 'releaseYear,${_ascending.value ? 'asc' : 'desc'}';
+      case 'name':
+        return 'name,${_ascending.value ? 'asc' : 'desc'}';
+      case 'artistName':
+        return 'artistName,${_ascending.value ? 'asc' : 'desc'}';
+      case 'trackCount':
+        return 'trackCount,${_ascending.value ? 'asc' : 'desc'}';
+      default:
+        return 'newTrackAddedAt,desc';
+    }
+  }
+
+  Future<void> _load({bool forceRefresh = false}) async {
+    _currentPage = 1;
+    _hasMore = true;
+    final cacheKey = 'page=1&size=$_pageSize';
+
+    Future<List<AlbumGroup>> fetch() async {
+      final pageData = await FeiNiuApiClient.instance.getAlbumList(
+        page: 1,
+        size: _pageSize,
+        sort: _apiSortParam(),
+      );
+      _totalAlbums = pageData.total;
+      _hasMore = pageData.list.length >= _pageSize;
+      final groups =
+          pageData.list.map((a) => AlbumGroup.fromFeiNiuAlbum(a)).toList();
+      _sortGroups(groups);
+      return groups;
+    }
+
+    if (forceRefresh) {
+      _isRefreshing.value = true;
+      try {
+        final groups = await fetch();
+        if (mounted) {
+          _groups.value = groups;
+          _loading.value = false;
+          _preloadCovers(groups);
+        }
+        await ApiCacheManager.instance.set(
+          scope: 'album_list',
+          key: cacheKey,
+          jsonData: jsonEncode(groups.map((g) => g.toJson()).toList()),
+        );
+      } finally {
+        if (mounted) _isRefreshing.value = false;
+      }
       return;
     }
 
-    final groups = await compute(buildAlbumGroups, {
-      'songs': songs.map((e) => e.toMap()).toList(),
-      'blocked': blockedSorted,
-      'sortMode': _sortMode.value,
-      'ascending': _ascending.value,
-    });
+    // 非 forceRefresh 模式：有缓存秒加载，无缓存同步等网络
+    _isRefreshing.value = true;
+    try {
+      void onData(List<AlbumGroup>? data) {
+        if (mounted) {
+          if (data != null) {
+            _groups.value = data;
+            _loading.value = false;
+            _preloadCovers(data);
+          }
+          _isRefreshing.value = false; // 后台刷新完成
+        }
+      }
 
-    if (!mounted) return;
-    final mapped = groups
-        .map(
-          (e) => AlbumGroup(
-            name: e['name'] as String,
-            songCount: e['songCount'] as int,
-            representative: SongEntity.fromMap(
-              (e['representative'] as Map).cast<String, dynamic>(),
-            ),
-          ),
-        )
-        .toList();
-    _cacheStore.set(_cacheScope, cacheKey, mapped);
-    _groups.value = mapped;
-    _loading.value = false;
+      final cached = await ApiCacheManager.instance.cacheThenNetwork(
+        scope: 'album_list',
+        key: cacheKey,
+        fetch: fetch,
+        fromJson: (json) => (jsonDecode(json) as List)
+            .map((e) => AlbumGroup.fromFeiNiuAlbumJson(e as Map<String, dynamic>))
+            .toList(),
+        toJson: (data) => jsonEncode(data.map((g) => g.toJson()).toList()),
+        fetchCallback: onData,
+      );
+
+      if (cached != null) {
+        // 缓存命中 → 全屏转圈消失，右上角转圈保持直到后台刷新结束
+        if (mounted) {
+          _groups.value = cached;
+          _loading.value = false;
+          _preloadCovers(cached);
+        }
+      }
+      debugPrint('[AlbumsPage] load complete, groups=${_groups.value.length}, cached=$cached');
+    } catch (_) {
+      if (!mounted) return;
+      _isRefreshing.value = false;
+      if (_groups.value.isEmpty) _groups.value = [];
+      _loading.value = false;
+    }
   }
 
   void _sortGroups(List<AlbumGroup> groups) {
-    int yearOf(AlbumGroup g) {
-      final ms = g.representative.fileModifiedMs;
-      if (ms == null || ms <= 0) return 0;
-      return DateTime.fromMillisecondsSinceEpoch(ms).year;
-    }
-
     int compare(AlbumGroup a, AlbumGroup b) {
       if (_sortMode.value == 'songCount') {
         return a.songCount.compareTo(b.songCount);
-      }
-      if (_sortMode.value == 'artist') {
-        final aa = primaryArtistLabel(a.representative.artist);
-        final bb = primaryArtistLabel(b.representative.artist);
-        return pinyinKey(aa).compareTo(pinyinKey(bb));
-      }
-      if (_sortMode.value == 'year') {
-        return yearOf(a).compareTo(yearOf(b));
       }
       return pinyinKey(a.name).compareTo(pinyinKey(b.name));
     }
@@ -239,12 +315,10 @@ class _AlbumsPageState extends State<AlbumsPage>
     if (!_ascending.value) {
       groups.replaceRange(0, groups.length, groups.reversed);
     }
-    if (_sortMode.value != 'year') {
-      final idx = groups.indexWhere((g) => g.name == '未知专辑');
-      if (idx >= 0) {
-        final unknown = groups.removeAt(idx);
-        groups.insert(0, unknown);
-      }
+    final idx = groups.indexWhere((g) => g.name == '未知专辑');
+    if (idx >= 0) {
+      final unknown = groups.removeAt(idx);
+      groups.insert(0, unknown);
     }
   }
 
@@ -256,82 +330,57 @@ class _AlbumsPageState extends State<AlbumsPage>
         return SortSheet(
           title: '专辑排序',
           options: const [
-            SortOption(key: 'name', label: '名称', icon: Icons.sort_by_alpha),
-            SortOption(
-              key: 'songCount',
-              label: '歌曲数',
-              icon: Icons.music_note_outlined,
-            ),
-            SortOption(key: 'artist', label: '艺术家', icon: Icons.person_outline),
-            SortOption(
-              key: 'year',
-              label: '年份',
-              icon: Icons.calendar_today_outlined,
-            ),
+            SortOption(key: 'newTrackAddedAt', label: '更新日期', icon: Icons.update),
+            SortOption(key: 'releaseYear', label: '发行年份', icon: Icons.calendar_today),
+            SortOption(key: 'name', label: '专辑名', icon: Icons.sort_by_alpha),
+            SortOption(key: 'artistName', label: '歌手名', icon: Icons.person),
+            SortOption(key: 'trackCount', label: '歌曲数', icon: Icons.music_note_outlined),
           ],
           currentKey: _sortMode.value,
           ascending: _ascending.value,
           onSelectKey: (value) {
             _sortMode.value = value;
-            final groups = _groups.value.toList();
-            _sortGroups(groups);
-            _groups.value = groups;
             _savePrefs();
+            _load(forceRefresh: true);
           },
           onSelectAscending: (value) {
             _ascending.value = value;
-            final groups = _groups.value.toList();
-            _sortGroups(groups);
-            _groups.value = groups;
             _savePrefs();
+            _load(forceRefresh: true);
           },
           extra: Watch.builder(
             builder: (context) {
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SwitchListTile(
-                    title: const Text('显示已屏蔽入口'),
-                    value: _showBlockedEntry.value,
-                    onChanged: (v) {
-                      _showBlockedEntry.value = v;
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: SegmentedButton<int>(
+                    segments: const [
+                      ButtonSegment(
+                        value: 2,
+                        label: Text('二列'),
+                        icon: Icon(Icons.grid_view_rounded),
+                      ),
+                      ButtonSegment(
+                        value: 3,
+                        label: Text('三列'),
+                        icon: Icon(Icons.grid_view_rounded),
+                      ),
+                      ButtonSegment(
+                        value: 4,
+                        label: Text('四列'),
+                        icon: Icon(Icons.grid_view_rounded),
+                      ),
+                    ],
+                    selected: {_gridColumns.value},
+                    onSelectionChanged: (selection) {
+                      final v = selection.first;
+                      _gridColumns.value = v;
                       _savePrefs();
                     },
+                    showSelectedIcon: false,
                   ),
-                  if (_sortMode.value != 'year')
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: SegmentedButton<int>(
-                          segments: const [
-                            ButtonSegment(
-                              value: 2,
-                              label: Text('二列'),
-                              icon: Icon(Icons.grid_view_rounded),
-                            ),
-                            ButtonSegment(
-                              value: 3,
-                              label: Text('三列'),
-                              icon: Icon(Icons.grid_view_rounded),
-                            ),
-                            ButtonSegment(
-                              value: 4,
-                              label: Text('四列'),
-                              icon: Icon(Icons.grid_view_rounded),
-                            ),
-                          ],
-                          selected: {_gridColumns.value},
-                          onSelectionChanged: (selection) {
-                            final v = selection.first;
-                            _gridColumns.value = v;
-                            _savePrefs();
-                          },
-                          showSelectedIcon: false,
-                        ),
-                      ),
-                    ),
-                ],
+                ),
               );
             },
           ),
@@ -340,49 +389,9 @@ class _AlbumsPageState extends State<AlbumsPage>
     );
   }
 
-  Future<void> _blockAlbum(String name) async {
-    final trimmed = name.trim();
-    if (trimmed.isEmpty) return;
-    await BlockListService.instance.add(_prefsBlockedAlbums, trimmed);
-    _blockedAlbums.value = await BlockListService.instance.load(
-      _prefsBlockedAlbums,
-    );
-    if (!mounted) return;
-    AppToast.show(context, '已屏蔽专辑: $trimmed', type: ToastType.success);
-    await _load();
-  }
-
-  void _showBlockedAlbums() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) {
-        return BlockedManagementSheet(
-          title: '已屏蔽的专辑',
-          items: _blockedAlbums.value.toList()
-            ..sort((a, b) => pinyinKey(a).compareTo(pinyinKey(b))),
-          onUnblock: (name) async {
-            await BlockListService.instance.remove(_prefsBlockedAlbums, name);
-            _blockedAlbums.value = await BlockListService.instance.load(
-              _prefsBlockedAlbums,
-            );
-            if (context.mounted) {
-              Navigator.pop(context);
-              _load();
-            }
-          },
-        );
-      },
-    );
-  }
-
   void _scrollToIndex(int index, BuildContext context) {
     if (!_gridController.hasClients) return;
-    final headerHeight =
-        (_showBlockedEntry.value && _blockedAlbums.value.isNotEmpty)
-        ? 64.0 + 8.0
-        : 8.0;
+    const headerHeight = 8.0;
     final screenWidth = MediaQuery.of(context).size.width;
     final totalSpacing = 14.0 * (_gridColumns.value - 1);
     final totalPadding = 12.0 + 12.0;
@@ -400,8 +409,6 @@ class _AlbumsPageState extends State<AlbumsPage>
 
   Widget _buildGrid(BuildContext context) {
     final theme = Theme.of(context);
-    final headerCount =
-        (_showBlockedEntry.value && _blockedAlbums.value.isNotEmpty) ? 1 : 0;
     final showIndexBar = _groups.value.isNotEmpty;
     return Stack(
       children: [
@@ -409,91 +416,24 @@ class _AlbumsPageState extends State<AlbumsPage>
           controller: _gridController,
           slivers: [
             const SliverToBoxAdapter(child: SizedBox(height: 8)),
-            if (headerCount == 1)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                  child: SizedBox(
-                    height: 64,
-                    child: Material(
-                      color: theme.cardColor,
-                      borderRadius: BorderRadius.circular(16),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(16),
-                        onTap: _showBlockedAlbums,
-                        child: Row(
-                          children: [
-                            const SizedBox(width: 16),
-                            Icon(
-                              Icons.album_outlined,
-                              color: theme.colorScheme.error,
-                            ),
-                            const SizedBox(width: 12),
-                            const Expanded(child: Text('已屏蔽的专辑')),
-                            Text('${_blockedAlbums.value.length} 个'),
-                            const SizedBox(width: 8),
-                            const Icon(Icons.chevron_right_rounded),
-                            const SizedBox(width: 12),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 160),
               sliver: SliverGrid(
                 delegate: SliverChildBuilderDelegate((context, index) {
                   final g = _groups.value[index];
-                  final artist = primaryArtistLabel(g.representative.artist);
-                  final year = g.representative.fileModifiedMs == null
-                      ? ''
-                      : DateTime.fromMillisecondsSinceEpoch(
-                          g.representative.fileModifiedMs!,
-                        ).year.toString();
-                  final subtitle = year.isEmpty
-                      ? '${g.songCount}首 $artist'
-                      : '${g.songCount}首 $year $artist';
                   return InkWell(
                     borderRadius: BorderRadius.circular(16),
                     onTap: () {
                       Navigator.of(context).push(
                         buildAppPageRoute(
-                          (_) => AlbumDetailPage(albumName: g.name),
+                          (_) => AlbumDetailPage(
+                            albumName: g.name,
+                            albumGuid: g.album.guid,
+                          ),
                         ),
                       );
                     },
-                    onLongPress: () {
-                      showModalBottomSheet(
-                        context: context,
-                        backgroundColor: Colors.transparent,
-                        builder: (context) {
-                          return AppSheetPanel(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                ListTile(
-                                  leading: const Icon(
-                                    Icons.album_outlined,
-                                    color: Colors.red,
-                                  ),
-                                  title: const Text('屏蔽专辑'),
-                                  titleTextStyle: TextStyle(
-                                    color: Theme.of(context).colorScheme.error,
-                                  ),
-                                  onTap: () async {
-                                    Navigator.pop(context);
-                                    await _blockAlbum(g.name);
-                                  },
-                                ),
-                                const SizedBox(height: 8),
-                              ],
-                            ),
-                          );
-                        },
-                      );
-                    },
+                    onLongPress: () {},
                     child: Padding(
                       padding: const EdgeInsets.all(4),
                       child: LayoutBuilder(
@@ -529,20 +469,12 @@ class _AlbumsPageState extends State<AlbumsPage>
                                     }
                                     return Align(
                                       alignment: Alignment.topLeft,
-                                      child: ArtworkWidget(
-                                        song: g.representative,
+                                      child: _AlbumCover(
+                                        coverId: g.coverId,
                                         size: size,
                                         borderRadius: 16,
-                                        placeholder: Container(
-                                          width: size,
-                                          height: size,
-                                          decoration: BoxDecoration(
-                                            color: theme.cardColor,
-                                            borderRadius: BorderRadius.circular(
-                                              16,
-                                            ),
-                                          ),
-                                        ),
+                                        albumName: g.name,
+                                        placeholder: const SizedBox.shrink(),
                                       ),
                                     );
                                   },
@@ -557,7 +489,7 @@ class _AlbumsPageState extends State<AlbumsPage>
                               ),
                               const SizedBox(height: gapAfterTitle),
                               Text(
-                                subtitle,
+                                '${g.songCount}首',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: subtitleStyle,
@@ -618,6 +550,7 @@ class _AlbumsPageState extends State<AlbumsPage>
         extendBodyBehindAppBar: true,
         appBar: AppTopBar(
           title: '专辑',
+          isRefreshing: _isRefreshing.value,
           leading: IconButton(
             icon: Icon(
               useBottomNavigation
@@ -630,7 +563,13 @@ class _AlbumsPageState extends State<AlbumsPage>
           ),
           backgroundColor: Colors.transparent,
           elevation: 0,
-          actions: [SortActionButton(onTap: _showSortSheet)],
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.search),
+              onPressed: () => Navigator.pushNamed(context, AppRoutes.search, arguments: SearchCategory.album),
+            ),
+            SortActionButton(onTap: _showSortSheet),
+          ],
         ),
         drawer: useBottomNavigation
             ? null
@@ -639,163 +578,9 @@ class _AlbumsPageState extends State<AlbumsPage>
               ),
         body: Watch.builder(
           builder: (context) {
-            final headerCount =
-                (_showBlockedEntry.value && _blockedAlbums.value.isNotEmpty)
-                ? 1
-                : 0;
             return RefreshIndicator(
-              onRefresh: _load,
-              child: _sortMode.value == 'year'
-                  ? Builder(
-                      builder: (context) {
-                        final grouped = <int, List<AlbumGroup>>{};
-                        for (final g in _groups.value) {
-                          final ms = g.representative.fileModifiedMs;
-                          final year = ms == null || ms <= 0
-                              ? 0
-                              : DateTime.fromMillisecondsSinceEpoch(ms).year;
-                          grouped.putIfAbsent(year, () => []).add(g);
-                        }
-                        final years = grouped.keys.toList()
-                          ..sort(
-                            (a, b) => _ascending.value
-                                ? a.compareTo(b)
-                                : b.compareTo(a),
-                          );
-                        return ListView.builder(
-                          controller: _yearController,
-                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-                          itemCount: headerCount + years.length,
-                          itemBuilder: (context, index) {
-                            if (headerCount == 1 && index == 0) {
-                              return Card(
-                                margin: const EdgeInsets.symmetric(vertical: 8),
-                                elevation: 0,
-                                color: Theme.of(context).cardColor,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                child: ListTile(
-                                  leading: const Icon(
-                                    Icons.album_outlined,
-                                    color: Colors.red,
-                                  ),
-                                  title: const Text('已屏蔽的专辑'),
-                                  trailing: const Icon(Icons.chevron_right),
-                                  onTap: _showBlockedAlbums,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                ),
-                              );
-                            }
-                            final year = years[index - headerCount];
-                            final albums = grouped[year] ?? const [];
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Padding(
-                                  padding: const EdgeInsets.only(
-                                    top: 12,
-                                    bottom: 4,
-                                  ),
-                                  child: Text(
-                                    year == 0 ? '未知年份' : '$year',
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.titleMedium,
-                                  ),
-                                ),
-                                ListView.builder(
-                                  shrinkWrap: true,
-                                  physics: const NeverScrollableScrollPhysics(),
-                                  itemCount: albums.length,
-                                  itemBuilder: (context, i) {
-                                    final album = albums[i];
-                                    final artist = primaryArtistLabel(
-                                      album.representative.artist,
-                                    );
-                                    return GestureDetector(
-                                      onLongPressStart: (details) {
-                                        showModalBottomSheet(
-                                          context: context,
-                                          backgroundColor: Colors.transparent,
-                                          builder: (context) {
-                                            return AppSheetPanel(
-                                              child: Column(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  ListTile(
-                                                    leading: const Icon(
-                                                      Icons.album_outlined,
-                                                      color: Colors.red,
-                                                    ),
-                                                    title: const Text('屏蔽专辑'),
-                                                    titleTextStyle: TextStyle(
-                                                      color: Theme.of(
-                                                        context,
-                                                      ).colorScheme.error,
-                                                    ),
-                                                    onTap: () async {
-                                                      Navigator.pop(context);
-                                                      await _blockAlbum(
-                                                        album.name,
-                                                      );
-                                                    },
-                                                  ),
-                                                  const SizedBox(height: 8),
-                                                ],
-                                              ),
-                                            );
-                                          },
-                                        );
-                                      },
-                                      child: ListTile(
-                                        contentPadding: EdgeInsets.zero,
-                                        leading: ArtworkWidget(
-                                          song: album.representative,
-                                          size: 48,
-                                          borderRadius: 8,
-                                        ),
-                                        title: Text(
-                                          album.name,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: Theme.of(
-                                            context,
-                                          ).textTheme.bodyLarge,
-                                        ),
-                                        subtitle: Text(
-                                          '${album.songCount}首 · $artist',
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            color: Theme.of(
-                                              context,
-                                            ).textTheme.bodySmall?.color,
-                                          ),
-                                        ),
-                                        onTap: () {
-                                          Navigator.of(context).push(
-                                            buildAppPageRoute(
-                                              (_) => AlbumDetailPage(
-                                                albumName: album.name,
-                                              ),
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    );
-                                  },
-                                ),
-                              ],
-                            );
-                          },
-                        );
-                      },
-                    )
-                  : _buildGrid(context),
+              onRefresh: () => _load(forceRefresh: true),
+              child: _buildGrid(context),
             );
           },
         ),
@@ -808,65 +593,62 @@ class _AlbumsPageState extends State<AlbumsPage>
   }
 }
 
-List<Map<String, dynamic>> buildAlbumGroups(Map<String, dynamic> payload) {
-  final rawSongs = (payload['songs'] as List).cast<Map>();
-  final blocked = (payload['blocked'] as List).cast<String>().toSet();
-  final sortMode = (payload['sortMode'] as String?) ?? 'name';
-  final ascending = payload['ascending'] == true;
-  final map = <String, List<Map<String, dynamic>>>{};
-  for (final raw in rawSongs) {
-    final albumRaw = (raw['album']?.toString() ?? '').trim();
-    final key = albumRaw.isEmpty ? '未知专辑' : albumRaw;
-    map.putIfAbsent(key, () => []).add(raw.cast<String, dynamic>());
-  }
-  final groups = map.entries
-      .where((e) => !blocked.contains(e.key))
-      .map(
-        (e) => {
-          'name': e.key,
-          'songCount': e.value.length,
-          'representative': e.value.first,
-        },
-      )
-      .toList();
+class _AlbumCover extends StatelessWidget {
+  final String? coverId;
+  final double size;
+  final double borderRadius;
+  final Widget placeholder;
+  final String albumName;
 
-  int yearOf(Map<String, dynamic> g) {
-    final rep = g['representative'] as Map<String, dynamic>;
-    final ms = rep['fileModifiedMs'];
-    final value = ms is int ? ms : int.tryParse(ms?.toString() ?? '') ?? 0;
-    if (value <= 0) return 0;
-    return DateTime.fromMillisecondsSinceEpoch(value).year;
-  }
+  const _AlbumCover({
+    required this.coverId,
+    required this.size,
+    required this.borderRadius,
+    required this.placeholder,
+    required this.albumName,
+  });
 
-  int compare(Map<String, dynamic> a, Map<String, dynamic> b) {
-    if (sortMode == 'songCount') {
-      return (a['songCount'] as int).compareTo(b['songCount'] as int);
-    }
-    if (sortMode == 'artist') {
-      final repA = a['representative'] as Map<String, dynamic>;
-      final repB = b['representative'] as Map<String, dynamic>;
-      final aa = primaryArtistLabel(repA['artist']?.toString() ?? '');
-      final bb = primaryArtistLabel(repB['artist']?.toString() ?? '');
-      return pinyinKey(aa).compareTo(pinyinKey(bb));
-    }
-    if (sortMode == 'year') {
-      return yearOf(a).compareTo(yearOf(b));
-    }
-    return pinyinKey(
-      a['name'] as String,
-    ).compareTo(pinyinKey(b['name'] as String));
-  }
+  Map<String, String> _authHeaders() => FeiNiuApiClient.imageAuthHeaders();
 
-  groups.sort(compare);
-  if (!ascending) {
-    groups.replaceRange(0, groups.length, groups.reversed);
-  }
-  if (sortMode != 'year') {
-    final idx = groups.indexWhere((g) => g['name'] == '未知专辑');
-    if (idx >= 0) {
-      final unknown = groups.removeAt(idx);
-      groups.insert(0, unknown);
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    if (coverId == null || coverId!.isEmpty) {
+      return SizedBox(
+        width: size,
+        height: size,
+        child: Container(
+          decoration: BoxDecoration(
+            color: theme.cardColor,
+            borderRadius: BorderRadius.circular(borderRadius),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            albumName.isNotEmpty ? albumName.characters.first.toUpperCase() : '?',
+            style: TextStyle(
+              fontSize: size * 0.4,
+              fontWeight: FontWeight.bold,
+              color: theme.colorScheme.primary.withValues(alpha: 0.6),
+            ),
+          ),
+        ),
+      );
     }
+    final coverUrl =
+        FeiNiuApiClient.instance.coverUrl(coverId!, size: 120);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(borderRadius),
+      child: CachedNetworkImage(
+        imageUrl: coverUrl,
+        httpHeaders: _authHeaders(),
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        placeholder: (context, url) =>
+            SizedBox(width: size, height: size, child: placeholder),
+        errorWidget: (context, url, error) =>
+            SizedBox(width: size, height: size, child: placeholder),
+      ),
+    );
   }
-  return groups;
 }

@@ -1,25 +1,23 @@
+import 'dart:convert';
+
 class SongEntity {
   final String id;
   final String title;
-  final String artist;
-  final String? album;
+  final String artist; // JSON: [{"guid":"...","name":"..."}]
+  final String? album; // JSON: {"guid":"...","name":"..."}
   final String? uri;
-  final bool isLocal;
   final String? headersJson;
   final int? durationMs;
   final int? bitrate;
   final int? sampleRate;
   final int? fileSize;
   final String? format;
-  final String? sourceId;
-  final int? fileModifiedMs;
-  final String? localCoverPath;
-  final String? localAssetId;
-  final bool tagsParsed;
-  // Track/disc numbers pulled from ID3/Vorbis/M4A tags at scan time. Optional
-  // because plenty of loose singles / re-encodes carry no track metadata.
+  final bool isFavorite;
+  final String? coverId;
+  final String? audioSpec;
   final int? trackNumber;
   final int? discNumber;
+  final int? updatedAt; // 服务端 updatedAt 时间戳，用于 CDN 缓存刷新
 
   const SongEntity({
     required this.id,
@@ -27,21 +25,64 @@ class SongEntity {
     required this.artist,
     this.album,
     this.uri,
-    required this.isLocal,
     this.headersJson,
     this.durationMs,
     this.bitrate,
     this.sampleRate,
     this.fileSize,
     this.format,
-    this.sourceId,
-    this.fileModifiedMs,
-    this.localCoverPath,
-    this.localAssetId,
-    this.tagsParsed = false,
+    this.isFavorite = false,
+    this.coverId,
+    this.audioSpec,
     this.trackNumber,
     this.discNumber,
+    this.updatedAt,
   });
+
+  /// 解析 artist JSON 获取歌手显示名
+  String get artistDisplayName {
+    try {
+      final list = jsonDecode(artist) as List<dynamic>;
+      return list
+          .map((e) => (e as Map<String, dynamic>)['name'] as String? ?? '')
+          .where((n) => n.isNotEmpty)
+          .join(' / ');
+    } catch (_) {
+      return artist;
+    }
+  }
+
+  /// 解析第一个 artist 的 guid
+  String? get firstArtistGuid {
+    try {
+      final list = jsonDecode(artist) as List<dynamic>;
+      if (list.isEmpty) return null;
+      return (list.first as Map<String, dynamic>)['guid'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 解析 album JSON 获取专辑显示名
+  String get albumDisplayName {
+    try {
+      final map = jsonDecode(album ?? '{}') as Map<String, dynamic>;
+      return map['name'] as String? ?? album ?? '未知专辑';
+    } catch (_) {
+      return album ?? '未知专辑';
+    }
+  }
+
+  /// 解析 album JSON 获取专辑 guid
+  String? get albumGuid {
+    if (album == null) return null;
+    try {
+      final map = jsonDecode(album!) as Map<String, dynamic>;
+      return map['guid'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
 
   Map<String, dynamic> toMap() {
     return {
@@ -50,20 +91,19 @@ class SongEntity {
       'artist': artist,
       'album': album,
       'uri': uri,
-      'isLocal': isLocal ? 1 : 0,
+      'isLocal': 0, // 永远是云端
       'headersJson': headersJson,
       'durationMs': durationMs,
       'bitrate': bitrate,
       'sampleRate': sampleRate,
       'fileSize': fileSize,
       'format': format,
-      'sourceId': sourceId,
-      'fileModifiedMs': fileModifiedMs,
-      'localCoverPath': localCoverPath,
-      'localAssetId': localAssetId,
-      'tagsParsed': tagsParsed ? 1 : 0,
+      'isFavorite': isFavorite ? 1 : 0,
+      'coverId': coverId,
+      'audioSpec': audioSpec,
       'trackNumber': trackNumber,
       'discNumber': discNumber,
+      'updatedAt': updatedAt,
     };
   }
 
@@ -76,23 +116,21 @@ class SongEntity {
     return SongEntity(
       id: (map['id'] ?? '').toString(),
       title: (map['title'] ?? '未知标题').toString(),
-      artist: (map['artist'] ?? '未知艺术家').toString(),
+      artist: (map['artist'] ?? '未知歌手').toString(),
       album: map['album']?.toString(),
       uri: map['uri']?.toString(),
-      isLocal: map['isLocal'] == true || map['isLocal'] == 1,
       headersJson: map['headersJson']?.toString(),
       durationMs: parseInt(map['durationMs']),
       bitrate: parseInt(map['bitrate']),
       sampleRate: parseInt(map['sampleRate']),
       fileSize: parseInt(map['fileSize']),
       format: map['format']?.toString(),
-      sourceId: map['sourceId']?.toString(),
-      fileModifiedMs: parseInt(map['fileModifiedMs']),
-      localCoverPath: map['localCoverPath']?.toString(),
-      localAssetId: map['localAssetId']?.toString(),
-      tagsParsed: map['tagsParsed'] == true || map['tagsParsed'] == 1,
+      isFavorite: map['isFavorite'] == true || map['isFavorite'] == 1,
+      coverId: map['coverId']?.toString(),
+      audioSpec: map['audioSpec']?.toString(),
       trackNumber: parseInt(map['trackNumber']),
       discNumber: parseInt(map['discNumber']),
+      updatedAt: parseInt(map['updatedAt']),
     );
   }
 
@@ -102,20 +140,18 @@ class SongEntity {
     String? artist,
     String? album,
     String? uri,
-    bool? isLocal,
     String? headersJson,
     int? durationMs,
     int? bitrate,
     int? sampleRate,
     int? fileSize,
     String? format,
-    String? sourceId,
-    int? fileModifiedMs,
-    String? localCoverPath,
-    String? localAssetId,
-    bool? tagsParsed,
+    bool? isFavorite,
+    String? coverId,
+    String? audioSpec,
     int? trackNumber,
     int? discNumber,
+    int? updatedAt,
   }) {
     return SongEntity(
       id: id ?? this.id,
@@ -123,20 +159,18 @@ class SongEntity {
       artist: artist ?? this.artist,
       album: album ?? this.album,
       uri: uri ?? this.uri,
-      isLocal: isLocal ?? this.isLocal,
       headersJson: headersJson ?? this.headersJson,
       durationMs: durationMs ?? this.durationMs,
       bitrate: bitrate ?? this.bitrate,
       sampleRate: sampleRate ?? this.sampleRate,
       fileSize: fileSize ?? this.fileSize,
       format: format ?? this.format,
-      sourceId: sourceId ?? this.sourceId,
-      fileModifiedMs: fileModifiedMs ?? this.fileModifiedMs,
-      localCoverPath: localCoverPath ?? this.localCoverPath,
-      localAssetId: localAssetId ?? this.localAssetId,
-      tagsParsed: tagsParsed ?? this.tagsParsed,
+      isFavorite: isFavorite ?? this.isFavorite,
+      coverId: coverId ?? this.coverId,
+      audioSpec: audioSpec ?? this.audioSpec,
       trackNumber: trackNumber ?? this.trackNumber,
       discNumber: discNumber ?? this.discNumber,
+      updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 }

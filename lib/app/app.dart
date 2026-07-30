@@ -4,19 +4,21 @@ import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart' as shad;
 
 import '../components/layout/tablet_layout_host.dart';
+import '../pages/login/login_page.dart';
 import 'router/app_page_route.dart';
 import 'router/app_router.dart';
+import 'services/feiniu/auth_service.dart';
 import 'state/settings_state.dart';
 import 'theme/app_styles.dart';
 import 'theme/app_visual_theme.dart';
 
-class NagoMusicApp extends StatelessWidget {
+class FeiNiuMusicApp extends StatelessWidget {
   static final GlobalKey<NavigatorState> rootNavigatorKey =
       GlobalKey<NavigatorState>();
   static final GlobalKey<NavigatorState> baseNavigatorKey =
       GlobalKey<NavigatorState>();
 
-  const NagoMusicApp({super.key});
+  const FeiNiuMusicApp({super.key});
 
   ThemeData _applyDynamic(
     ThemeData base,
@@ -155,19 +157,27 @@ class NagoMusicApp extends StatelessWidget {
                         }
 
                         return MaterialApp(
-                          title: 'NagoMusic',
+                          title: '飞牛音乐',
                           navigatorKey: rootNavigatorKey,
                           theme: lightTheme,
                           darkTheme: darkTheme,
                           themeMode: mode,
                           scrollBehavior: const AppScrollBehavior(),
-                          home: TabletLayoutHost(
-                            navigatorKey: baseNavigatorKey,
-                            child: Navigator(
-                              key: baseNavigatorKey,
-                              initialRoute: AppRouter.initialRoute,
-                              onGenerateRoute: onGenerateRoute,
-                            ),
+                          home: ValueListenableBuilder<bool>(
+                            valueListenable: AuthService.instance.isLoggedIn,
+                            builder: (context, isLoggedIn, _) {
+                              if (!isLoggedIn) {
+                                return const LoginPage();
+                              }
+                              return TabletLayoutHost(
+                                navigatorKey: baseNavigatorKey,
+                                child: Navigator(
+                                  key: baseNavigatorKey,
+                                  initialRoute: AppRouter.initialRoute,
+                                  onGenerateRoute: onGenerateRoute,
+                                ),
+                              );
+                            },
                           ),
                           onGenerateRoute: onGenerateRoute,
                           builder: (context, child) {

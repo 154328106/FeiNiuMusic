@@ -1,6 +1,6 @@
 import 'package:flutter_lyric/core/lyric_model.dart' as fl;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nagomusic/app/services/lyrics/lyrics_parser.dart';
+import 'package:feiniu_music/app/services/lyrics/lyrics_parser.dart';
 
 void main() {
   test('parse translation line with same timestamp', () {

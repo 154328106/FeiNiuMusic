@@ -6,6 +6,9 @@ import '../../../state/song_state.dart';
 import '../../../utils/cache_version_store.dart';
 
 class SongDao {
+  static final SongDao instance = SongDao._();
+  SongDao._();
+
   static const String cacheVersionScope = 'song_library';
   static const int _maxIdsPerQuery = 500;
   static List<SongEntity>? _cachedAll;
@@ -50,18 +53,6 @@ class SongDao {
     return added;
   }
 
-  Future<int> countBySource(String sourceId) async {
-    final db = await DbHelper.instance.database;
-    final result = await db.rawQuery(
-      'SELECT COUNT(*) as total FROM ${DbConstants.tableSongs} WHERE sourceId = ?',
-      [sourceId],
-    );
-    if (result.isEmpty) return 0;
-    final value = result.first['total'];
-    if (value is int) return value;
-    return int.tryParse(value?.toString() ?? '') ?? 0;
-  }
-
   Future<int> countAll() async {
     final db = await DbHelper.instance.database;
     final result = await db.rawQuery(
@@ -73,28 +64,10 @@ class SongDao {
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
-  Future<int> countLocal() async {
-    return countBySource('local');
-  }
-
-  Future<int> countRemote() async {
-    final db = await DbHelper.instance.database;
-    final result = await db.rawQuery(
-      'SELECT COUNT(*) as total FROM ${DbConstants.tableSongs} WHERE sourceId != ?',
-      ['local'],
-    );
-    if (result.isEmpty) return 0;
-    final value = result.first['total'];
-    if (value is int) return value;
-    return int.tryParse(value?.toString() ?? '') ?? 0;
-  }
-
-  Future<List<SongEntity>> fetchAll({String? sourceId}) async {
+  Future<List<SongEntity>> fetchAll() async {
     final db = await DbHelper.instance.database;
     final rows = await db.query(
       DbConstants.tableSongs,
-      where: sourceId == null ? null : 'sourceId = ?',
-      whereArgs: sourceId == null ? null : [sourceId],
       orderBy: 'title COLLATE NOCASE',
     );
     return rows.map(SongEntity.fromMap).toList();
@@ -130,17 +103,6 @@ class SongDao {
     return ids.map((id) => map[id]).whereType<SongEntity>().toList();
   }
 
-  Future<Set<String>> fetchIdsBySource(String sourceId) async {
-    final db = await DbHelper.instance.database;
-    final rows = await db.query(
-      DbConstants.tableSongs,
-      columns: ['id'],
-      where: 'sourceId = ?',
-      whereArgs: [sourceId],
-    );
-    return rows.map((row) => row['id']).whereType<String>().toSet();
-  }
-
   Future<int> deleteByIds(List<String> ids) async {
     if (ids.isEmpty) return 0;
     final db = await DbHelper.instance.database;
@@ -155,30 +117,55 @@ class SongDao {
     return result;
   }
 
-  Future<int> deleteBySourceAndMaxDuration({
-    required String sourceId,
-    required int maxDurationMs,
-  }) async {
+  // region API 缓存
+
+  Future<void> cacheApiResponse(String key, String json, {int ttlMs = 300000}) async {
     final db = await DbHelper.instance.database;
-    final result = await db.delete(
-      DbConstants.tableSongs,
-      where: 'sourceId = ? AND durationMs IS NOT NULL AND durationMs < ?',
-      whereArgs: [sourceId, maxDurationMs],
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await db.insert(
+      DbConstants.tableApiCache,
+      {
+        'cache_key': key,
+        'json_data': json,
+        'cached_at_ms': now,
+        'ttl_ms': ttlMs,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
     );
-    _cachedAll = null;
-    CacheVersionStore.instance.bump(cacheVersionScope);
-    return result;
   }
 
-  Future<int> deleteBySource(String sourceId) async {
+  Future<String?> getCachedApiResponse(String key, {bool ignoreTtl = false}) async {
     final db = await DbHelper.instance.database;
-    final result = await db.delete(
-      DbConstants.tableSongs,
-      where: 'sourceId = ?',
-      whereArgs: [sourceId],
+    if (ignoreTtl) {
+      final rows = await db.query(
+        DbConstants.tableApiCache,
+        where: 'cache_key = ?',
+        whereArgs: [key],
+        limit: 1,
+      );
+      if (rows.isEmpty) return null;
+      return rows.first['json_data'] as String?;
+    }
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final rows = await db.query(
+      DbConstants.tableApiCache,
+      where: 'cache_key = ? AND (cached_at_ms + ttl_ms) > ?',
+      whereArgs: [key, now],
+      limit: 1,
     );
-    _cachedAll = null;
-    CacheVersionStore.instance.bump(cacheVersionScope);
-    return result;
+    if (rows.isEmpty) return null;
+    return rows.first['json_data'] as String?;
   }
+
+  Future<void> clearExpiredCache() async {
+    final db = await DbHelper.instance.database;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await db.delete(
+      DbConstants.tableApiCache,
+      where: '(cached_at_ms + ttl_ms) < ?',
+      whereArgs: [now],
+    );
+  }
+
+  // endregion
 }

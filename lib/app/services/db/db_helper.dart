@@ -32,18 +32,16 @@ CREATE TABLE ${DbConstants.tableSongs} (
   artist TEXT NOT NULL,
   album TEXT,
   uri TEXT,
-  isLocal INTEGER NOT NULL,
+  isLocal INTEGER NOT NULL DEFAULT 0,
   headersJson TEXT,
   durationMs INTEGER,
   bitrate INTEGER,
   sampleRate INTEGER,
   fileSize INTEGER,
   format TEXT,
-  sourceId TEXT,
-  fileModifiedMs INTEGER,
-  localCoverPath TEXT,
-  localAssetId TEXT,
-  tagsParsed INTEGER,
+  isFavorite INTEGER NOT NULL DEFAULT 0,
+  coverId TEXT,
+  audioSpec TEXT,
   trackNumber INTEGER,
   discNumber INTEGER
 )
@@ -56,12 +54,6 @@ CREATE TABLE ${DbConstants.tableSongs} (
         );
         await db.execute(
           'CREATE INDEX IF NOT EXISTS idx_songs_album ON ${DbConstants.tableSongs}(album COLLATE NOCASE)',
-        );
-        await db.execute(
-          'CREATE INDEX IF NOT EXISTS idx_songs_source ON ${DbConstants.tableSongs}(sourceId)',
-        );
-        await db.execute(
-          'CREATE INDEX IF NOT EXISTS idx_songs_source_title ON ${DbConstants.tableSongs}(sourceId, title COLLATE NOCASE)',
         );
         await db.execute('''
 CREATE TABLE ${DbConstants.tablePlaylists} (
@@ -124,6 +116,15 @@ CREATE TABLE ${DbConstants.tablePlaylistStats} (
         await db.execute(
           'CREATE INDEX IF NOT EXISTS idx_playlist_stats_playcount ON ${DbConstants.tablePlaylistStats}(playCount)',
         );
+        // 版本 11：API 响应缓存表
+        await db.execute('''
+CREATE TABLE IF NOT EXISTS ${DbConstants.tableApiCache} (
+  cache_key TEXT PRIMARY KEY,
+  json_data TEXT NOT NULL,
+  cached_at_ms INTEGER NOT NULL,
+  ttl_ms INTEGER NOT NULL
+)
+''');
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -162,12 +163,6 @@ CREATE TABLE ${DbConstants.tablePlaylistStats} (
           );
           await db.execute(
             'CREATE INDEX IF NOT EXISTS idx_songs_album ON ${DbConstants.tableSongs}(album COLLATE NOCASE)',
-          );
-          await db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_songs_source ON ${DbConstants.tableSongs}(sourceId)',
-          );
-          await db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_songs_source_title ON ${DbConstants.tableSongs}(sourceId, title COLLATE NOCASE)',
           );
         }
         if (oldVersion < 6) {
@@ -253,6 +248,39 @@ CREATE TABLE IF NOT EXISTS ${DbConstants.tablePlaylistStats} (
           await db.execute(
             'ALTER TABLE ${DbConstants.tableSongs} ADD COLUMN discNumber INTEGER',
           );
+        }
+        if (oldVersion < 11) {
+          // FeiNiu 迁移：添加云端专属字段，移除本地字段
+          // 添加新列（SQLite ALTER TABLE 只能加列不能删）
+          await db.execute(
+            'ALTER TABLE ${DbConstants.tableSongs} ADD COLUMN isFavorite INTEGER NOT NULL DEFAULT 0',
+          );
+          await db.execute(
+            'ALTER TABLE ${DbConstants.tableSongs} ADD COLUMN coverId TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE ${DbConstants.tableSongs} ADD COLUMN audioSpec TEXT',
+          );
+          // 创建 API 缓存表
+          await db.execute('''
+CREATE TABLE IF NOT EXISTS ${DbConstants.tableApiCache} (
+  cache_key TEXT PRIMARY KEY,
+  json_data TEXT NOT NULL,
+  cached_at_ms INTEGER NOT NULL,
+  ttl_ms INTEGER NOT NULL
+)
+''');
+        }
+        if (oldVersion < 12) {
+          // 确保 api_cache 表存在（v11 全新安装漏建）
+          await db.execute('''
+CREATE TABLE IF NOT EXISTS ${DbConstants.tableApiCache} (
+  cache_key TEXT PRIMARY KEY,
+  json_data TEXT NOT NULL,
+  cached_at_ms INTEGER NOT NULL,
+  ttl_ms INTEGER NOT NULL
+)
+''');
         }
       },
     );

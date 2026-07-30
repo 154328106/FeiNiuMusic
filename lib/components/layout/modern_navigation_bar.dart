@@ -6,7 +6,8 @@ import '../../app/state/settings_state.dart';
 const _primaryNavigationRoutes = <String>[
   AppRoutes.home,
   AppRoutes.songs,
-  AppRoutes.playlists,
+  AppRoutes.recent,
+  AppRoutes.favorites,
   AppRoutes.profile,
 ];
 
@@ -100,7 +101,7 @@ class ModernNavigationBar extends StatelessWidget {
     required this.onTap,
   });
 
-  static const List<String> _labels = ['首页', '歌曲', '歌单', '我的'];
+  static const List<String> _labels = ['首页', '歌曲', '最近', '收藏', '设置'];
 
   @override
   Widget build(BuildContext context) {

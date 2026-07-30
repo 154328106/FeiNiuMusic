@@ -8,7 +8,7 @@ class AndroidPlatformService {
   static final AndroidPlatformService instance = AndroidPlatformService._();
 
   static const MethodChannel _channel = MethodChannel(
-    'com.lanke.nagomusic/downloads',
+    'com.feiniu.music/downloads',
   );
 
   int? _sdkInt;

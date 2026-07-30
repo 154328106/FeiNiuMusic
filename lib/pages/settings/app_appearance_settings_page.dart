@@ -307,7 +307,7 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                         const SizedBox(height: 10),
                         Text(
                           style == AppNavigationStyle.bottomBar
-                              ? '四个常用入口固定在底部，专辑、艺术家与文件夹仍从音乐库进入'
+                              ? '四个常用入口固定在底部，专辑、歌手与文件夹仍从音乐库进入'
                               : '保留当前从左侧菜单访问各页面的方式',
                           style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(

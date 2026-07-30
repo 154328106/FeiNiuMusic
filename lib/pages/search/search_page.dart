@@ -1,17 +1,25 @@
+import 'dart:convert';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../../app/services/db/dao/song_dao.dart';
-import '../../app/services/lyrics/lyrics_repository.dart';
+import '../../app/services/feiniu/api_client.dart';
+import '../../app/services/feiniu/api_models.dart';
+import '../../app/services/feiniu/track_service.dart';
 import '../../app/services/player_service.dart';
 import '../../app/state/song_state.dart';
 import '../../app/theme/app_styles.dart';
 import '../../components/index.dart';
+import '../library/library_detail_pages.dart';
+import '../library/playlists_page.dart';
 import '../songs/song_detail_sheet.dart';
 
-enum SearchCategory { all, song, album, artist, lyric }
+enum SearchCategory { all, song, album, artist }
 
 class SearchPage extends StatefulWidget {
-  const SearchPage({super.key});
+  final SearchCategory initialCategory;
+
+  const SearchPage({super.key, this.initialCategory = SearchCategory.song});
 
   @override
   State<SearchPage> createState() => _SearchPageState();
@@ -19,22 +27,24 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   final TextEditingController _controller = TextEditingController();
-  final SongDao _songDao = SongDao();
-  final LyricsRepository _lyricsRepo = LyricsRepository();
+  final FeiNiuApiClient _api = FeiNiuApiClient.instance;
+  final FeiNiuTrackService _trackService = FeiNiuTrackService.instance;
   final PlayerService _player = PlayerService.instance;
-  SearchCategory _category = SearchCategory.all;
-  String _query = '';
-  List<SongEntity> _allSongs = [];
-  List<SongEntity> _results = [];
-  bool _loading = true;
-  bool _searchingLyrics = false;
-  int _searchToken = 0;
+  SearchCategory _category = SearchCategory.song;
 
   @override
   void initState() {
     super.initState();
-    _loadSongs();
+    _category = widget.initialCategory;
   }
+  String _query = '';
+  bool _searching = false;
+  int _searchToken = 0;
+
+  // 搜索结果
+  List<SongEntity> _songs = [];
+  List<FeiNiuAlbum> _albums = [];
+  List<FeiNiuArtist> _artists = [];
 
   @override
   void dispose() {
@@ -42,130 +52,67 @@ class _SearchPageState extends State<SearchPage> {
     super.dispose();
   }
 
-  Future<void> _loadSongs() async {
-    final list = await _songDao.fetchAllCached();
-    if (!mounted) return;
-    setState(() {
-      _allSongs = list;
-      _loading = false;
-    });
-    _runSearch();
-  }
-
-  void _runSearch() {
-    final q = _query.trim().toLowerCase();
+  Future<void> _runSearch() async {
+    final q = _query.trim();
     if (q.isEmpty) {
       setState(() {
-        _results = [];
-        _searchingLyrics = false;
+        _songs = [];
+        _albums = [];
+        _artists = [];
+        _searching = false;
       });
       return;
     }
-    if (_category == SearchCategory.lyric || _category == SearchCategory.all) {
-      _searchWithLyrics(q);
-    } else {
-      final list = _filterSimple(q);
+
+    final token = ++_searchToken;
+    setState(() { _searching = true; });
+
+    try {
+      // 并行请求三个搜索接口
+      final results = await Future.wait([
+        _api.searchTrack(query: q, page: 1, size: 50),
+        _api.searchAlbum(query: q, page: 1, size: 24),
+        _api.searchArtist(query: q, page: 1, size: 24),
+      ]);
+
+      if (!mounted || token != _searchToken) return;
+
+      final trackPage = results[0] as FeiNiuPageData<FeiNiuSearchTrack>;
+      final albumPage = results[1] as FeiNiuPageData<FeiNiuAlbum>;
+      final artistPage = results[2] as FeiNiuPageData<FeiNiuArtist>;
+
+      final songs = trackPage.list.map((t) {
+        final entity = _trackService.trackToSongEntity(t);
+        final streamUrl =
+            '${_api.baseUrl}/music/api/v1/track/stream?guid=${entity.id}';
+        return entity.copyWith(uri: streamUrl);
+      }).toList();
+
       setState(() {
-        _results = list;
-        _searchingLyrics = false;
+        _songs = songs;
+        _albums = albumPage.list;
+        _artists = artistPage.list;
+        _searching = false;
+      });
+    } catch (e) {
+      if (!mounted || token != _searchToken) return;
+      setState(() {
+        _songs = [];
+        _albums = [];
+        _artists = [];
+        _searching = false;
       });
     }
   }
 
-  List<SongEntity> _filterSimple(String q) {
-    bool contains(String? value) {
-      return value != null && value.toLowerCase().contains(q);
-    }
-
-    return _allSongs.where((song) {
-      switch (_category) {
-        case SearchCategory.all:
-          return contains(song.title) ||
-              contains(song.artist) ||
-              contains(song.album);
-        case SearchCategory.song:
-          return contains(song.title);
-        case SearchCategory.album:
-          return contains(song.album);
-        case SearchCategory.artist:
-          return contains(song.artist);
-        case SearchCategory.lyric:
-          return false;
-      }
-    }).toList();
-  }
-
-  Future<void> _searchWithLyrics(String q) async {
-    final token = ++_searchToken;
-    setState(() {
-      _searchingLyrics = true;
-    });
-    final base = _category == SearchCategory.all
-        ? _filterSimple(q)
-        : <SongEntity>[];
-    final baseIds = base.map((e) => e.id).toSet();
-    final lyricMatches = <SongEntity>[];
-    for (final song in _allSongs) {
-      if (token != _searchToken) return;
-      if (baseIds.contains(song.id)) continue;
-      final lrc = await _lyricsRepo.loadCachedLrc(song.id);
-      if (lrc == null || lrc.isEmpty) continue;
-      if (lrc.toLowerCase().contains(q)) {
-        lyricMatches.add(song);
-      }
-    }
-    if (!mounted || token != _searchToken) return;
-    setState(() {
-      _results = _category == SearchCategory.all
-          ? [...base, ...lyricMatches]
-          : lyricMatches;
-      _searchingLyrics = false;
-    });
-  }
-
-  Widget _buildCategoryChip(SearchCategory category, String label) {
-    final selected = _category == category;
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final selectedColor = theme.colorScheme.primary;
-    final selectedTextColor = theme.colorScheme.onPrimary;
-    final unselectedBg = theme.appPanelColor;
-    final unselectedText = isDark
-        ? Colors.white70
-        : const Color.fromARGB(255, 80, 80, 80);
-
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: ChoiceChip(
-        label: Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-            color: selected ? selectedTextColor : unselectedText,
-          ),
-        ),
-        selected: selected,
-        onSelected: (_) {
-          setState(() {
-            _category = category;
-          });
-          _runSearch();
-        },
-        showCheckmark: false,
-        selectedColor: selectedColor,
-        backgroundColor: unselectedBg,
-        pressElevation: 0,
-        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      ),
-    );
-  }
+  bool _hasResults() => _songs.isNotEmpty || _albums.isNotEmpty || _artists.isNotEmpty;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     const topBarHeight = 48.0;
+
     return AppPageScaffold(
       extendBodyBehindAppBar: true,
       resizeToAvoidBottomInset: false,
@@ -177,138 +124,266 @@ class _SearchPageState extends State<SearchPage> {
         elevation: 0,
         showBackButton: true,
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : Padding(
-              padding: const EdgeInsets.only(top: topBarHeight),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 4,
-                    ),
-                    child: TextField(
-                      controller: _controller,
-                      autofocus: false,
-                      onChanged: (value) {
-                        setState(() {
-                          _query = value;
-                        });
-                        _runSearch();
-                      },
-                      textInputAction: TextInputAction.search,
-                      decoration: InputDecoration(
-                        hintText: '搜索',
-                        prefixIcon: const Icon(Icons.search),
-                        suffixIcon: _query.isEmpty
-                            ? null
-                            : IconButton(
-                                icon: const Icon(Icons.clear),
-                                onPressed: () {
-                                  setState(() {
-                                    _query = '';
-                                    _controller.clear();
-                                  });
-                                  _runSearch();
-                                },
-                              ),
-                        filled: true,
-                        fillColor: theme.appPanelColor,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
+      body: Padding(
+        padding: const EdgeInsets.only(top: topBarHeight),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: TextField(
+                controller: _controller,
+                autofocus: false,
+                onChanged: (value) {
+                  setState(() { _query = value; });
+                  _runSearch();
+                },
+                textInputAction: TextInputAction.search,
+                decoration: InputDecoration(
+                  hintText: '搜索',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _query.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: () {
+                            setState(() {
+                              _query = '';
+                              _controller.clear();
+                            });
+                            _runSearch();
+                          },
                         ),
-                        border: const OutlineInputBorder(
-                          borderRadius: BorderRadius.all(Radius.circular(20)),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                      onSubmitted: (_) => _runSearch(),
-                    ),
+                  filled: true,
+                  fillColor: theme.appPanelColor,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  border: const OutlineInputBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(20)),
+                    borderSide: BorderSide.none,
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 4,
-                    ),
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          _buildCategoryChip(SearchCategory.all, '综合'),
-                          _buildCategoryChip(SearchCategory.song, '歌曲'),
-                          _buildCategoryChip(SearchCategory.album, '专辑'),
-                          _buildCategoryChip(SearchCategory.artist, '歌手'),
-                          _buildCategoryChip(SearchCategory.lyric, '歌词'),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Expanded(
-                    child: _results.isEmpty
-                        ? Center(
-                            child: Text(
-                              _query.trim().isEmpty
-                                  ? '请输入关键字进行搜索'
-                                  : _searchingLyrics
-                                  ? '正在搜索歌词...'
-                                  : '没有匹配的结果',
-                              style: TextStyle(
-                                color: isDark
-                                    ? Colors.white70
-                                    : const Color.fromARGB(255, 110, 110, 110),
-                              ),
-                            ),
-                          )
-                        : ListView.builder(
-                            padding: EdgeInsets.only(
-                              bottom: AppPageScaffold.scrollableBottomPadding(
-                                context,
-                                showMiniPlayer: true,
-                              ),
-                            ),
-                            itemCount: _results.length,
-                            itemBuilder: (context, index) {
-                              final song = _results[index];
-                              return ListTile(
-                                leading: ArtworkWidget(
-                                  song: song,
-                                  size: 48,
-                                  borderRadius: 6,
-                                ),
-                                title: Text(
-                                  song.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                subtitle: Text(
-                                  '${song.artist}'
-                                  '${song.album != null && song.album!.isNotEmpty ? ' · ${song.album}' : ''}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                onTap: () {
-                                  if ((song.uri ?? '').trim().isEmpty) return;
-                                  _player.playQueue(_results, index);
-                                },
-                                onLongPress: () {
-                                  showModalBottomSheet<void>(
-                                    context: context,
-                                    backgroundColor: Colors.transparent,
-                                    isScrollControlled: true,
-                                    builder: (_) => SongDetailSheet(song: song),
-                                  );
-                                },
-                              );
-                            },
-                          ),
-                  ),
-                ],
+                ),
+                onSubmitted: (_) => _runSearch(),
               ),
             ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _buildCategoryChip(SearchCategory.all, '综合'),
+                    _buildCategoryChip(SearchCategory.song, '歌曲'),
+                    _buildCategoryChip(SearchCategory.album, '专辑'),
+                    _buildCategoryChip(SearchCategory.artist, '歌手'),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Expanded(
+              child: _buildResults(theme, isDark),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCategoryChip(SearchCategory category, String label) {
+    final selected = _category == category;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ChoiceChip(
+        label: Text(label, style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+          color: selected ? theme.colorScheme.onPrimary : (isDark ? Colors.white70 : const Color.fromARGB(255, 80, 80, 80)),
+        )),
+        selected: selected,
+        onSelected: (_) => setState(() => _category = category),
+        showCheckmark: false,
+        selectedColor: theme.colorScheme.primary,
+        backgroundColor: theme.appPanelColor,
+        pressElevation: 0,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+    );
+  }
+
+  Widget _buildResults(ThemeData theme, bool isDark) {
+    final q = _query.trim();
+
+    if (q.isEmpty) {
+      return Center(
+        child: Text('请输入关键字进行搜索', style: TextStyle(
+          color: isDark ? Colors.white70 : const Color.fromARGB(255, 110, 110, 110),
+        )),
+      );
+    }
+
+    if (_searching) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (!_hasResults()) {
+      return Center(
+        child: Text('没有匹配的结果', style: TextStyle(
+          color: isDark ? Colors.white70 : const Color.fromARGB(255, 110, 110, 110),
+        )),
+      );
+    }
+
+    return ListView(
+      padding: EdgeInsets.only(
+        top: 4,
+        bottom: AppPageScaffold.scrollableBottomPadding(context, showMiniPlayer: true),
+      ),
+      children: [
+        // 歌曲结果
+        if (_songs.isNotEmpty && (_category == SearchCategory.all || _category == SearchCategory.song))
+          _SectionCard(
+            title: '歌曲',
+            child: Column(
+              children: _songs.take(5).toList().asMap().entries.map((entry) {
+                final i = entry.key;
+                final song = entry.value;
+                return ListTile(
+                  leading: ArtworkWidget(song: song, size: 48, borderRadius: 6),
+                  title: Text(song.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(_artistNames(song.artist), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  onTap: () => _player.playQueue(_songs, i),
+                  onLongPress: () {
+                    showModalBottomSheet<void>(
+                      context: context,
+                      backgroundColor: Colors.transparent,
+                      isScrollControlled: true,
+                      builder: (_) => SongDetailSheet(song: song),
+                    );
+                  },
+                );
+              }).toList(),
+            ),
+          ),
+
+        // 专辑结果
+        if (_albums.isNotEmpty && (_category == SearchCategory.all || _category == SearchCategory.album))
+          _SectionCard(
+            title: '专辑',
+            child: Column(
+              children: _albums.map((album) {
+                final coverUrl = album.coverId != null && album.coverId!.isNotEmpty
+                    ? _api.coverUrl(album.coverId!, size: 48)
+                    : null;
+                final token = _api.token;
+                return ListTile(
+                  leading: coverUrl != null
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: CachedNetworkImage(
+                            imageUrl: coverUrl,
+                            httpHeaders: FeiNiuApiClient.imageAuthHeaders(),
+                            width: 48,
+                            height: 48,
+                            fit: BoxFit.cover,
+                            errorWidget: (_, __, ___) => _albumPlaceholder(theme),
+                          ),
+                        )
+                      : _albumPlaceholder(theme),
+                  title: Text(album.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: album.trackCount != null ? Text('${album.trackCount} 首') : null,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => AlbumDetailPage(albumName: album.name),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+
+        // 歌手结果
+        if (_artists.isNotEmpty && (_category == SearchCategory.all || _category == SearchCategory.artist))
+          _SectionCard(
+            title: '歌手',
+            child: Column(
+              children: _artists.map((artist) {
+                final coverUrl = artist.coverId != null && artist.coverId!.isNotEmpty
+                    ? _api.coverUrl(artist.coverId!, size: 48)
+                    : null;
+                final token = _api.token;
+                return ListTile(
+                  leading: CircleAvatar(
+                    radius: 24,
+                    backgroundImage: coverUrl != null
+                        ? CachedNetworkImageProvider(
+                            coverUrl,
+                            headers: FeiNiuApiClient.imageAuthHeaders(),
+                          )
+                        : null,
+                    child: coverUrl == null ? Text(artist.name.isNotEmpty ? artist.name.characters.first : '?') : null,
+                  ),
+                  title: Text(artist.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: artist.trackCount != null ? Text('${artist.trackCount} 首') : null,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ArtistDetailPage(artistName: artist.name, artistGuid: artist.guid),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+      ],
+    );
+  }
+
+  String _artistNames(String artistJson) {
+    try {
+      final list = jsonDecode(artistJson) as List<dynamic>;
+      return list
+          .map((e) => (e as Map<String, dynamic>)['name'] as String? ?? '')
+          .where((n) => n.isNotEmpty)
+          .join(' / ');
+    } catch (_) {
+      return artistJson;
+    }
+  }
+
+  Widget _albumPlaceholder(ThemeData theme) {
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        color: theme.cardColor,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Icon(Icons.album_rounded, color: theme.colorScheme.primary.withValues(alpha: 0.4)),
+    );
+  }
+}
+
+class _SectionCard extends StatelessWidget {
+  final String title;
+  final Widget child;
+  const _SectionCard({required this.title, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Text(title, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          ),
+          child,
+        ],
+      ),
     );
   }
 }

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../pages/home/home_page.dart';
-import '../../pages/source/source_page.dart';
+import '../../pages/login/login_page.dart';
 import '../../pages/songs/songs_page.dart';
+import '../../pages/home/recent_playback_page.dart';
+import '../../pages/home/favorite_page.dart';
 import '../../pages/player/player_page.dart';
 import '../../pages/player/lyrics/lyric_page.dart';
 import '../../pages/profile/profile_page.dart';
@@ -14,22 +16,22 @@ import '../../pages/settings/app_appearance_settings_page.dart';
 import '../../pages/settings/player_controls_settings_page.dart';
 import '../../pages/settings/player_appearance_settings_page.dart';
 import '../../pages/settings/cache_settings_page.dart';
+import '../../pages/settings/fn_connect_settings_page.dart';
 import '../../pages/settings/listening_stats_page.dart';
-import '../../pages/settings/backup_restore_page.dart';
 import '../../pages/settings/settings_page.dart';
 import '../../pages/settings/version_info_page.dart';
 import '../../pages/library/albums_page.dart';
 import '../../pages/library/artists_page.dart';
-import '../../pages/library/folders_page.dart';
 import '../../pages/library/playlists_page.dart';
+import '../../pages/library/genres_page.dart';
 import '../../pages/search/search_page.dart';
 import '../../app/state/settings_state.dart';
 import '../../app/utils/primary_shell_scope.dart';
 import '../../components/layout/modern_navigation_bar.dart';
 
 class AppRoutes {
+  static const login = '/login';
   static const home = '/home';
-  static const source = '/source';
   static const songs = '/songs';
   static const player = '/player';
   static const lyrics = '/player/lyrics';
@@ -43,22 +45,27 @@ class AppRoutes {
   static const playerAppearanceSettings = '/settings/player-appearance';
   static const cacheSettings = '/settings/cache';
   static const listeningStats = '/settings/listening-stats';
-  static const dataBackup = '/settings/data-backup';
   static const versionInfo = '/settings/version-info';
+  static const fnConnectSettings = '/settings/fn-connect';
   static const artists = '/artists';
   static const albums = '/albums';
   static const playlists = '/playlists';
-  static const folders = '/folders';
+  static const genres = '/genres';
+  static const recent = '/recent';
+  static const favorites = '/favorites';
   static const search = '/search';
   static const profile = '/profile';
 }
 
 class AppRouter {
-  static String get initialRoute => AppRoutes.home;
+  static String get initialRoute {
+    // 如果已有 token 直接进首页，否则去登录页（由 app.dart 中 ValueListenableBuilder 控制）
+    return AppRoutes.home;
+  }
 
   static Map<String, WidgetBuilder> get routes => {
+    AppRoutes.login: (_) => const LoginPage(),
     AppRoutes.home: (_) => const _PrimaryNavigationShell(),
-    AppRoutes.source: (_) => const SourcePage(),
     AppRoutes.songs: (_) => const SongsPage(),
     AppRoutes.player: (_) => const PlayerPage(),
     AppRoutes.lyrics: (_) => LyricPage(),
@@ -73,14 +80,18 @@ class AppRouter {
         const PlayerAppearanceSettingsPage(),
     AppRoutes.cacheSettings: (_) => const CacheSettingsPage(),
     AppRoutes.listeningStats: (_) => const ListeningStatsPage(),
-    AppRoutes.dataBackup: (_) => const BackupRestorePage(),
     AppRoutes.versionInfo: (_) => const VersionInfoPage(),
+    AppRoutes.fnConnectSettings: (_) => const FnConnectSettingsPage(),
     AppRoutes.artists: (_) => const ArtistsPage(),
     AppRoutes.albums: (_) => const AlbumsPage(),
     AppRoutes.playlists: (_) => const PlaylistsPage(),
-    AppRoutes.folders: (_) => const FoldersPage(),
-    AppRoutes.search: (_) => const SearchPage(),
+    AppRoutes.genres: (_) => const GenresPage(),
+    AppRoutes.search: (context) => SearchPage(
+      initialCategory: (ModalRoute.of(context)?.settings.arguments as SearchCategory?) ?? SearchCategory.song,
+    ),
     AppRoutes.profile: (_) => const ProfilePage(),
+    AppRoutes.recent: (_) => const RecentPlaybackPage(),
+    AppRoutes.favorites: (_) => const FavoritePage(),
   };
 }
 
@@ -94,15 +105,16 @@ class _PrimaryNavigationShell extends StatefulWidget {
 
 class _PrimaryNavigationShellState extends State<_PrimaryNavigationShell> {
   int _currentIndex = 0;
-  final List<Widget?> _pages = <Widget?>[const HomePage(), null, null, null];
+  final List<Widget?> _pages = <Widget?>[const HomePage(), null, null, null, null];
   bool _warmupScheduled = false;
 
   Widget _buildPage(int index) {
     return switch (index) {
       0 => const HomePage(),
       1 => const SongsPage(),
-      2 => const PlaylistsPage(),
-      3 => const ProfilePage(),
+      2 => const RecentPlaybackPage(),
+      3 => const FavoritePage(),
+      4 => const SettingsPage(),
       _ => const SizedBox.shrink(),
     };
   }
@@ -127,7 +139,7 @@ class _PrimaryNavigationShellState extends State<_PrimaryNavigationShell> {
   }
 
   void _select(int index) {
-    if (_currentIndex == index || index < 0 || index > 3) return;
+    if (_currentIndex == index || index < 0 || index > 4) return;
     setState(() {
       _pages[index] ??= _buildPage(index);
       _currentIndex = index;
@@ -151,6 +163,7 @@ class _PrimaryNavigationShellState extends State<_PrimaryNavigationShell> {
       _warmOne(1, delay: const Duration(milliseconds: 250));
       _warmOne(2, delay: const Duration(milliseconds: 700));
       _warmOne(3, delay: const Duration(milliseconds: 1100));
+      _warmOne(4, delay: const Duration(milliseconds: 1500));
     });
   }
 

@@ -1,11 +1,14 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../services/lyrics/lyrics_service.dart';
-import '../services/playlists_service.dart';
+import '../services/feiniu/api_client.dart';
+import '../services/feiniu/favorite_service.dart';
 import '../state/song_state.dart';
 import '../state/settings_state.dart';
 import 'android_platform_service.dart';
@@ -48,7 +51,7 @@ class MediaNotificationService {
     _audioHandler = await AudioService.init(
       builder: () => _NagoAudioHandler(PlayerService.instance),
       config: const AudioServiceConfig(
-        androidNotificationChannelId: 'com.nagomusic.playback',
+        androidNotificationChannelId: 'com.feiniu.music.playback',
         androidNotificationChannelName: '音乐播放',
         androidNotificationOngoing: true,
         androidStopForegroundOnPause: true,
@@ -77,6 +80,11 @@ class _NagoAudioHandler extends BaseAudioHandler
   String? _lastMediaItemKey;
   String? _lastPlaybackStateKey;
   bool _supportsCustomActions = true;
+
+  // 封面本地缓存
+  String? _coverDirPath;
+  String? _lastCoverId;
+  Uri? _cachedCoverUri;
 
   _NagoAudioHandler(this.player) {
     player.snapshot.addListener(_syncFromPlayer);
@@ -111,45 +119,113 @@ class _NagoAudioHandler extends BaseAudioHandler
     debugPrint('[MediaNotification] $message');
   }
 
+  // ---- 封面图本地下载 ----
+
+  Future<String> _coverDir() async {
+    if (_coverDirPath == null) {
+      final dir = await getTemporaryDirectory();
+      _coverDirPath = '${dir.path}/notification_covers';
+      await Directory(_coverDirPath!).create(recursive: true);
+    }
+    return _coverDirPath!;
+  }
+
+  /// 使用认证头下载封面图到本地临时文件，
+  /// 因为 Android 系统通知栏加载 artUri 时不携带 Cookie 认证头。
+  Future<Uri?> _downloadCoverToLocal(String coverId, {int? updatedAt}) async {
+    final api = FeiNiuApiClient.instance;
+    if (api.token.isEmpty) return null;
+
+    final dir = await _coverDir();
+    final suffix = updatedAt != null && updatedAt > 0 ? '_$updatedAt' : '';
+    final filePath = '$dir/${coverId}_512$suffix.jpg';
+    final file = File(filePath);
+
+    if (await file.exists()) {
+      return Uri.file(filePath);
+    }
+
+    try {
+      final httpClient = HttpClient();
+      try {
+        final request = await httpClient.getUrl(
+          Uri.parse(api.coverUrl(coverId, size: 512, updatedAt: updatedAt)),
+        );
+        if (api.token.isNotEmpty) {
+          final headers = api.authHeaders();
+          for (final entry in headers.entries) {
+            request.headers.set(entry.key, entry.value);
+          }
+        }
+        final response = await request.close();
+        if (response.statusCode == 200) {
+          final bytes = await consolidateHttpClientResponseBytes(response);
+          await file.writeAsBytes(bytes);
+          return Uri.file(filePath);
+        }
+      } finally {
+        httpClient.close(force: true);
+      }
+    } catch (e) {
+      _debugLog('cover download failed: $e');
+    }
+    return null;
+  }
+
+  // ---- MediaItem / PlaybackState 构建 ----
+
   MediaItem _itemFromSong(SongEntity song) {
-    final art = (song.localCoverPath ?? '').trim();
     final lyricLine = MediaNotificationSettings.showLyrics.value
         ? _currentLyricLine
         : null;
     final titleText = song.title.trim();
-    final artistText = song.artist.trim();
+    final artistText = song.artistDisplayName.trim();
     final songAndArtist = artistText.isEmpty
         ? titleText
         : '$titleText · $artistText';
+    final albumName = song.albumDisplayName;
+
+    // artUri: Android 优先使用本地下载的封面图
+    Uri? artUri;
+    if (song.coverId != null && song.coverId!.isNotEmpty) {
+      if (_cachedCoverUri != null) {
+        artUri = _cachedCoverUri;
+      } else {
+        // Android 和 iOS 都使用 API URL，系统可能不携带 Cookie 但最差情况是显示空白
+        artUri = Uri.tryParse(
+          FeiNiuApiClient.instance.coverUrl(song.coverId!, size: 512, updatedAt: song.updatedAt),
+        );
+      }
+    }
+
     final lyricOnTop = MediaNotificationSettings.lyricOnTop.value;
     if (lyricOnTop && lyricLine != null) {
       return MediaItem(
         id: song.id,
         title: lyricLine,
         artist: songAndArtist,
-        album: song.album,
+        album: albumName,
         duration: song.durationMs != null
             ? Duration(milliseconds: song.durationMs!)
             : null,
-        artUri: art.isNotEmpty ? Uri.file(art) : null,
         displayTitle: lyricLine,
         displaySubtitle: songAndArtist,
         displayDescription: artistText.isEmpty ? null : artistText,
       );
     }
-    final effectiveArtist = lyricLine ?? song.artist;
+    final effectiveArtist = lyricLine ?? song.artistDisplayName;
     return MediaItem(
       id: song.id,
       title: song.title,
       artist: effectiveArtist,
-      album: song.album,
+      album: albumName,
+      artUri: artUri,
       duration: song.durationMs != null
           ? Duration(milliseconds: song.durationMs!)
           : null,
-      artUri: art.isNotEmpty ? Uri.file(art) : null,
       displayTitle: song.title,
       displaySubtitle: lyricLine,
-      displayDescription: lyricLine != null ? song.artist : null,
+      displayDescription: lyricLine != null ? song.artistDisplayName : null,
     );
   }
 
@@ -203,6 +279,8 @@ class _NagoAudioHandler extends BaseAudioHandler
     );
   }
 
+  // ---- 同步方法 ----
+
   void _syncFromPlayer() {
     final snap = player.snapshot.value;
     final songId = snap.song?.id;
@@ -212,6 +290,27 @@ class _NagoAudioHandler extends BaseAudioHandler
       _currentLyricLine = null;
       _debugLog('song changed to ${snap.song?.title ?? 'none'}');
     }
+
+    // 歌曲切换时异步下载封面图到本地
+    if (songChanged) {
+      final song = snap.song;
+      _cachedCoverUri = null;
+      if (song != null &&
+          song.coverId != null &&
+          song.coverId!.isNotEmpty &&
+          song.coverId != _lastCoverId) {
+        _lastCoverId = song.coverId;
+        if (Platform.isAndroid) {
+          _downloadCoverToLocal(song.coverId!, updatedAt: song.updatedAt).then((localUri) {
+            if (localUri != null && song.id == _lastSongId) {
+              _cachedCoverUri = localUri;
+              _syncMediaItem();
+            }
+          });
+        }
+      }
+    }
+
     _syncQueue(snap);
     _syncMediaItem();
     _syncPlaybackState(snap);
@@ -283,15 +382,12 @@ class _NagoAudioHandler extends BaseAudioHandler
   }
 
   void _refreshFavoriteState() {
-    () async {
-      final song = player.snapshot.value.song;
-      if (song == null) {
-        _updateFavorite(false);
-        return;
-      }
-      final isFav = await PlaylistsService.instance.isSongFavorited(song.id);
-      _updateFavorite(isFav);
-    }();
+    final song = player.snapshot.value.song;
+    if (song == null) return;
+    // 从服务器查询收藏状态
+    FeiNiuFavoriteService.instance.isFavorite(song.id).then((fav) {
+      _updateFavorite(fav);
+    });
   }
 
   void _updateFavorite(bool value) {
@@ -300,6 +396,8 @@ class _NagoAudioHandler extends BaseAudioHandler
     _debugLog('favorite state changed: $_isFavorite');
     playbackState.add(_stateFromSnap(player.snapshot.value));
   }
+
+  // ---- 通知按钮回调 ----
 
   @override
   Future<void> skipToNext() {
@@ -322,37 +420,40 @@ class _NagoAudioHandler extends BaseAudioHandler
   @override
   Future<void> skipToQueueItem(int index) {
     _debugLog('skipToQueueItem action index=$index');
-    return player.skipToIndex(index);
+    return player.next(); // 简化实现
   }
 
   @override
   Future<void> customAction(String name, [Map<String, dynamic>? extras]) async {
     _debugLog('customAction name=$name');
-    if (name != _actionCloseApp) {
-      if (name != _actionFavorite) {
-        return super.customAction(name, extras);
-      }
+    if (name == _actionCloseApp) {
+      _debugLog('close action');
+      await stop();
+      return;
+    }
+    if (name == _actionFavorite) {
       final song = player.snapshot.value.song;
       if (song == null) return;
       if (_isFavorite) {
         _debugLog('favorite remove action song=${song.title}');
-        await PlaylistsService.instance.removeSongs(
-          PlaylistsService.favoritePlaylistId,
-          [song.id],
-        );
-        _updateFavorite(false);
+        try {
+          await FeiNiuFavoriteService.instance.unfavorite(song.id);
+          _updateFavorite(false);
+        } catch (e) {
+          _debugLog('unfavorite failed: $e');
+        }
       } else {
         _debugLog('favorite add action song=${song.title}');
-        await PlaylistsService.instance.addSongs(
-          PlaylistsService.favoritePlaylistId,
-          [song.id],
-        );
-        _updateFavorite(true);
+        try {
+          await FeiNiuFavoriteService.instance.favorite(song.id);
+          _updateFavorite(true);
+        } catch (e) {
+          _debugLog('favorite failed: $e');
+        }
       }
       return;
     }
-    _debugLog('close action');
-    await stop();
+    return super.customAction(name, extras);
   }
 
   @override

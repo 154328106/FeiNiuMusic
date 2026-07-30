@@ -1,7 +1,7 @@
 export 'settings_background_state.dart';
 export 'settings_cache_state.dart';
+export 'settings_fn_state.dart';
 export 'settings_layout_state.dart';
-export 'settings_library_state.dart';
 export 'settings_notification_state.dart';
 export 'settings_playback_state.dart';
 export 'settings_player_style_state.dart';

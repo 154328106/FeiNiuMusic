@@ -48,12 +48,29 @@ class SideMenu extends StatelessWidget {
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
                   children: [
-                    _sectionLabel(context, '资源库'),
+                    _sectionLabel(context, '浏览'),
+                    _MenuItem(
+                      icon: Icons.home_rounded,
+                      label: '首页',
+                      onTap: () => _navigateAndClose(context, AppRoutes.home),
+                    ),
                     _MenuItem(
                       icon: Icons.music_note_rounded,
                       label: '歌曲',
                       onTap: () => _navigateAndClose(context, AppRoutes.songs),
                     ),
+                    _MenuItem(
+                      icon: Icons.history_rounded,
+                      label: '最近',
+                      onTap: () => _navigateAndClose(context, AppRoutes.recent),
+                    ),
+                    _MenuItem(
+                      icon: Icons.favorite_rounded,
+                      label: '收藏',
+                      onTap: () => _navigateAndClose(context, AppRoutes.favorites),
+                    ),
+                    const SizedBox(height: 8),
+                    _sectionLabel(context, '资源库'),
                     _MenuItem(
                       icon: Icons.album_rounded,
                       label: '专辑',
@@ -61,9 +78,15 @@ class SideMenu extends StatelessWidget {
                     ),
                     _MenuItem(
                       icon: Icons.people_rounded,
-                      label: '艺术家',
+                      label: '歌手',
                       onTap: () =>
                           _navigateAndClose(context, AppRoutes.artists),
+                    ),
+                    _MenuItem(
+                      icon: Icons.music_video_rounded,
+                      label: '风格',
+                      onTap: () =>
+                          _navigateAndClose(context, AppRoutes.genres),
                     ),
                     _MenuItem(
                       icon: Icons.queue_music_rounded,
@@ -71,24 +94,8 @@ class SideMenu extends StatelessWidget {
                       onTap: () =>
                           _navigateAndClose(context, AppRoutes.playlists),
                     ),
-                    _MenuItem(
-                      icon: Icons.folder_rounded,
-                      label: '文件夹',
-                      onTap: () =>
-                          _navigateAndClose(context, AppRoutes.folders),
-                    ),
-                    _MenuItem(
-                      icon: Icons.library_music_rounded,
-                      label: '音乐库',
-                      onTap: () => _navigateAndClose(context, AppRoutes.home),
-                    ),
                     const SizedBox(height: 8),
                     _sectionLabel(context, '更多'),
-                    _MenuItem(
-                      icon: Icons.radar_rounded,
-                      label: '音源',
-                      onTap: () => _navigateAndClose(context, AppRoutes.source),
-                    ),
                     _MenuItem(
                       icon: Icons.bar_chart_rounded,
                       label: '统计',
@@ -115,7 +122,7 @@ class SideMenu extends StatelessWidget {
     final scheme = theme.colorScheme;
     return Semantics(
       button: true,
-      label: '返回音乐库',
+      label: '返回首页',
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
         onTap: () => _navigateAndClose(context, AppRoutes.home),
@@ -137,7 +144,7 @@ class SideMenu extends StatelessWidget {
                     ),
                   ],
                 ),
-                child: Image.asset('开发文档/NagoAPP图标.png', fit: BoxFit.cover),
+                child: Image.asset('assets/icon/app_icon.png', fit: BoxFit.cover),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -146,7 +153,7 @@ class SideMenu extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'NagoMusic',
+                      '飞牛音乐',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.titleLarge?.copyWith(
@@ -156,7 +163,7 @@ class SideMenu extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '本地与云端音乐',
+                      '第三方客户端',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
@@ -196,7 +203,12 @@ class SideMenu extends StatelessWidget {
     }
     if (!context.mounted) return;
     _closeDrawer(context);
-    Navigator.pushNamedAndRemoveUntil(context, route, (route) => false);
+    // 路由带有底部导航栏的用 pushNamedAndRemoveUntil
+    if (route == AppRoutes.home || route == AppRoutes.songs) {
+      Navigator.pushNamedAndRemoveUntil(context, route, (route) => false);
+    } else {
+      Navigator.pushNamed(context, route);
+    }
   }
 
   void _pushAndClose(BuildContext context, String route) {

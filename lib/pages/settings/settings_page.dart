@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+
 import '../../app/router/app_router.dart';
+import '../../app/services/feiniu/auth_service.dart';
 import '../../app/state/settings_state.dart';
 import '../../components/index.dart';
 import '../player/widgets/player_background.dart';
+import '../login/login_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -18,7 +21,6 @@ class _SettingsPageState extends State<SettingsPage> {
     PlayerBackgroundSettings.ensureLoaded();
     AppPlaybackVolumeSettings.ensureLoaded();
     PlayerBottomActionSettings.ensureLoaded();
-    WebDavPlaybackSettings.ensureLoaded();
     MediaNotificationSettings.ensureLoaded();
     AppLayoutSettings.ensureLoaded();
     AppBackgroundSettings.ensureLoaded();
@@ -71,6 +73,17 @@ class _SettingsPageState extends State<SettingsPage> {
                 title: '功能',
                 children: [
                   AppSettingTile(
+                    title: 'FN Connect',
+                    subtitle: '连接偏好、当前连接与候选链路管理',
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () {
+                      Navigator.pushNamed(
+                        context,
+                        AppRoutes.fnConnectSettings,
+                      );
+                    },
+                  ),
+                  AppSettingTile(
                     title: '播放器控制',
                     subtitle: '管理底部操作栏与按钮顺序',
                     trailing: const Icon(Icons.chevron_right_rounded),
@@ -122,80 +135,8 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(height: 16),
               AppSettingSection(
-                title: '云端播放',
-                children: [
-                  ValueListenableBuilder<bool>(
-                    valueListenable: WebDavPlaybackSettings.prefetchEnabled,
-                    builder: (context, enabled, _) {
-                      return AppSettingSwitchTile(
-                        title: '预取下一首',
-                        subtitle: '提前缓存下一首减少卡顿',
-                        value: enabled,
-                        onChanged: (value) {
-                          WebDavPlaybackSettings.setPrefetchEnabled(value);
-                        },
-                      );
-                    },
-                  ),
-                  ValueListenableBuilder<bool>(
-                    valueListenable: WebDavPlaybackSettings.prefetchEnabled,
-                    builder: (context, enabled, _) {
-                      if (!enabled) return const SizedBox.shrink();
-                      return const SizedBox.shrink();
-                    },
-                  ),
-                  ValueListenableBuilder<bool>(
-                    valueListenable: WebDavPlaybackSettings.segmentedEnabled,
-                    builder: (context, enabled, _) {
-                      return AppSettingSwitchTile(
-                        title: '分段并发下载',
-                        subtitle: '提高弱网下缓存速度',
-                        value: enabled,
-                        onChanged: (value) {
-                          WebDavPlaybackSettings.setSegmentedEnabled(value);
-                        },
-                      );
-                    },
-                  ),
-                  ValueListenableBuilder<bool>(
-                    valueListenable: WebDavPlaybackSettings.segmentedEnabled,
-                    builder: (context, enabled, _) {
-                      if (!enabled) return const SizedBox.shrink();
-                      return ValueListenableBuilder<int>(
-                        valueListenable:
-                            WebDavPlaybackSettings.segmentConcurrency,
-                        builder: (context, count, _) {
-                          return AppSettingSlider(
-                            title: '分段并发数',
-                            description: '并发越高速度越快但更耗网络',
-                            value: count.toDouble(),
-                            min: 1,
-                            max: 8,
-                            divisions: 7,
-                            valueText: '$count',
-                            onChanged: (value) {
-                              WebDavPlaybackSettings.setSegmentConcurrency(
-                                value.round(),
-                              );
-                            },
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              AppSettingSection(
                 title: '应用',
                 children: [
-                  AppSettingTile(
-                    title: '数据备份',
-                    subtitle: '歌单、听歌统计等导出到本地或 WebDAV',
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () =>
-                        Navigator.pushNamed(context, AppRoutes.dataBackup),
-                  ),
                   AppSettingTile(
                     title: '版本信息',
                     subtitle: '版本号、检查更新与调试日志',
@@ -203,12 +144,37 @@ class _SettingsPageState extends State<SettingsPage> {
                     onTap: () =>
                         Navigator.pushNamed(context, AppRoutes.versionInfo),
                   ),
+                  AppSettingTile(
+                    title: '退出登录',
+                    subtitle: '退出当前账号并返回登录页',
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () async {
+                      final confirmed = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('退出登录'),
+                          content: const Text('确定退出当前账号吗？'),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+                            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确定')),
+                          ],
+                        ),
+                      );
+                      if (confirmed == true) {
+                        await AuthService.instance.logout();
+                        if (!context.mounted) return;
+                        Navigator.of(context).pushAndRemoveUntil(
+                          MaterialPageRoute(builder: (_) => const LoginPage()),
+                          (route) => false,
+                        );
+                      }
+                    },
+                  ),
                 ],
               ),
             ],
           ),
           bottomNavIndex: null,
-          onBottomNavTap: null,
         );
       },
     );

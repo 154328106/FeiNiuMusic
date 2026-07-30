@@ -26,7 +26,7 @@ class ListeningStatsPage extends StatefulWidget {
 
 class _ListeningStatsPageState extends State<ListeningStatsPage> {
   final StatsService _statsService = StatsService.instance;
-  final SongDao _songDao = SongDao();
+  final SongDao _songDao = SongDao.instance;
   final PlayerService _player = PlayerService.instance;
 
   bool _loading = true;
@@ -527,7 +527,6 @@ class _TrendBarChartState extends State<_TrendBarChart> {
   @override
   void didUpdateWidget(_TrendBarChart old) {
     super.didUpdateWidget(old);
-    // Reset selection when the dataset (week/month) changes length.
     if (old.bars.length != widget.bars.length) {
       _selected = null;
     }
@@ -541,7 +540,6 @@ class _TrendBarChartState extends State<_TrendBarChart> {
     final hasData = maxVal > 0;
     const chartHeight = 120.0;
 
-    // Default focus: the selected bar, else today's bar, else none.
     final todayIndex = bars.indexWhere((b) => b.highlight);
     final focusIndex = _selected ?? (todayIndex >= 0 ? todayIndex : null);
     final focus = focusIndex != null ? bars[focusIndex] : null;
@@ -549,7 +547,6 @@ class _TrendBarChartState extends State<_TrendBarChart> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Header: selected day + exact duration, or a hint.
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: focus != null
@@ -557,29 +554,18 @@ class _TrendBarChartState extends State<_TrendBarChart> {
                   children: [
                     Text(
                       focus.fullLabel,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: scheme.onSurface,
-                      ),
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: scheme.onSurface),
                     ),
                     const SizedBox(width: 8),
                     Text(
                       widget.tooltip(focus.value),
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: scheme.primary,
-                      ),
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: scheme.primary),
                     ),
                   ],
                 )
               : Text(
                   hasData ? '点击柱状查看当天时长' : '还没有这段时间的收听记录',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
-                  ),
+                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant.withValues(alpha: 0.7)),
                 ),
         ),
         SizedBox(
@@ -604,21 +590,13 @@ class _TrendBarChartState extends State<_TrendBarChart> {
                           height: barHeight,
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(6),
-                            border: isFocused
-                                ? Border.all(color: scheme.primary, width: 1.5)
-                                : null,
+                            border: isFocused ? Border.all(color: scheme.primary, width: 1.5) : null,
                             gradient: LinearGradient(
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
                               colors: (b.highlight || isFocused)
-                                  ? [
-                                      scheme.primary,
-                                      scheme.primary.withValues(alpha: 0.7),
-                                    ]
-                                  : [
-                                      scheme.primary.withValues(alpha: 0.5),
-                                      scheme.primary.withValues(alpha: 0.25),
-                                    ],
+                                  ? [scheme.primary, scheme.primary.withValues(alpha: 0.7)]
+                                  : [scheme.primary.withValues(alpha: 0.5), scheme.primary.withValues(alpha: 0.25)],
                             ),
                           ),
                         ),
@@ -641,9 +619,7 @@ class _TrendBarChartState extends State<_TrendBarChart> {
                 overflow: TextOverflow.clip,
                 style: TextStyle(
                   fontSize: 10,
-                  color: b.highlight
-                      ? scheme.primary
-                      : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                  color: b.highlight ? scheme.primary : scheme.onSurfaceVariant.withValues(alpha: 0.7),
                   fontWeight: b.highlight ? FontWeight.w700 : FontWeight.w500,
                 ),
               ),
@@ -713,22 +689,9 @@ class _CountTrailing extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        Text(
-          '$count 次',
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-            color: scheme.primary,
-          ),
-        ),
+        Text('$count 次', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: scheme.primary)),
         const SizedBox(height: 2),
-        Text(
-          time,
-          style: TextStyle(
-            fontSize: 11,
-            color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
-          ),
-        ),
+        Text(time, style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant.withValues(alpha: 0.7))),
       ],
     );
   }
@@ -768,14 +731,7 @@ class _EmptyHint extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 24),
       child: Center(
-        child: Text(
-          text,
-          style: TextStyle(
-            color: Theme.of(
-              context,
-            ).colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-          ),
-        ),
+        child: Text(text, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.7))),
       ),
     );
   }

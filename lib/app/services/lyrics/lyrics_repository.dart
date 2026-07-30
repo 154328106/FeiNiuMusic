@@ -5,26 +5,28 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../../state/song_state.dart';
-import '../metadata/tag_probe_service.dart';
+import '../feiniu/api_client.dart';
 
 class LyricsRepository {
+  /// 加载歌词，优先从缓存读取，未命中则从 API 获取
   Future<String?> loadLrc(SongEntity song) async {
-    final embedded = await _readFromEmbeddedTags(song);
-    if (embedded != null && embedded.trim().isNotEmpty) {
-      await _writeToCache(song.id, embedded);
-      return embedded;
-    }
-
+    // 1. 读取本地缓存
     final cached = await _readFromCache(song.id);
     if (cached != null && cached.trim().isNotEmpty) {
       return cached;
     }
 
-    final local = await _readFromLocalSidecar(song);
-    if (local != null && local.trim().isNotEmpty) {
-      await _writeToCache(song.id, local);
-      return local;
+    // 2. 从 API 获取
+    try {
+      final lyricText = await FeiNiuApiClient.instance.getLyricText(song.id);
+      if (lyricText != null && lyricText.trim().isNotEmpty) {
+        await _writeToCache(song.id, lyricText);
+        return lyricText;
+      }
+    } catch (_) {
+      // API 返回失败时静默处理
     }
+
     return null;
   }
 
@@ -42,7 +44,7 @@ class LyricsRepository {
     String content, {
     bool overwrite = false,
   }) async {
-    final c = content.replaceFirst('\uFEFF', '').trim();
+    final c = content.replaceFirst('﻿', '').trim();
     if (c.isEmpty) return;
     if (!overwrite) {
       final exists = await hasCachedLrc(songId);
@@ -103,80 +105,5 @@ class LyricsRepository {
       hash = (hash * prime) & mask64;
     }
     return hash.toUnsigned(64).toRadixString(16).padLeft(16, '0');
-  }
-
-  Future<String?> _readFromEmbeddedTags(SongEntity song) async {
-    final uri = (song.uri ?? '').trim();
-    if (uri.isEmpty) return null;
-    if (!song.isLocal) return null;
-    final result = await TagProbeService.instance.probeSongDedup(
-      uri: uri,
-      isLocal: true,
-      includeArtwork: false,
-    );
-    final t = (result?.lyrics ?? '').trim();
-    return t.isEmpty ? null : t;
-  }
-
-  Future<String?> _readFromLocalSidecar(SongEntity song) async {
-    final uri = (song.uri ?? '').trim();
-    if (uri.isEmpty) return null;
-
-    final audioFile = File(uri);
-    if (!await audioFile.exists()) return null;
-
-    final dir = p.dirname(uri);
-    final base = p.basenameWithoutExtension(uri);
-    final candidates = <String>[
-      p.join(dir, '$base.lrc'),
-      p.join(dir, '$base.LRC'),
-      if (song.title.trim().isNotEmpty) p.join(dir, '${song.title}.lrc'),
-      if (song.artist.trim().isNotEmpty && song.title.trim().isNotEmpty)
-        p.join(dir, '${song.artist} - ${song.title}.lrc'),
-      if (song.artist.trim().isNotEmpty && song.title.trim().isNotEmpty)
-        p.join(dir, '${song.title} - ${song.artist}.lrc'),
-    ];
-
-    for (final path in candidates) {
-      final file = File(path);
-      if (await file.exists()) {
-        final bytes = await file.readAsBytes();
-        return utf8.decode(bytes, allowMalformed: true);
-      }
-    }
-
-    try {
-      final dirHandle = Directory(dir);
-      if (!await dirHandle.exists()) return null;
-      final entries = <File>[];
-      // Async listing so a large lyrics folder never blocks the UI isolate.
-      await for (final entry in dirHandle.list(followLinks: false)) {
-        if (entry is File &&
-            p.extension(entry.path).toLowerCase() == '.lrc') {
-          entries.add(entry);
-        }
-      }
-      if (entries.isEmpty) return null;
-
-      final title = song.title.trim().toLowerCase();
-      final artist = song.artist.trim().toLowerCase();
-      File? best;
-      int bestScore = -1;
-      for (final f in entries) {
-        final name = p.basenameWithoutExtension(f.path).toLowerCase();
-        var score = 0;
-        if (title.isNotEmpty && name.contains(title)) score += 2;
-        if (artist.isNotEmpty && name.contains(artist)) score += 1;
-        if (score > bestScore) {
-          bestScore = score;
-          best = f;
-        }
-      }
-      if (best == null || bestScore <= 0) return null;
-      final bytes = await best.readAsBytes();
-      return utf8.decode(bytes, allowMalformed: true);
-    } catch (_) {
-      return null;
-    }
   }
 }

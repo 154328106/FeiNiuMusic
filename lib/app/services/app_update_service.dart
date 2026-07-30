@@ -23,9 +23,9 @@ class AppUpdateService {
   static final AppUpdateService instance = AppUpdateService._();
 
   static const String releasePageUrl =
-      'https://github.com/Keduoli03/NagoMusic/releases/latest';
+      'https://github.com/kuilei0926/FeiNiuMusic/releases/latest';
   static const String latestReleaseApiUrl =
-      'https://api.github.com/repos/Keduoli03/NagoMusic/releases/latest';
+      'https://api.github.com/repos/kuilei0926/FeiNiuMusic/releases/latest';
 
   final Dio _dio = Dio(
     BaseOptions(
@@ -54,20 +54,40 @@ class AppUpdateService {
   }
 
   Future<AppUpdateInfo> checkLatest(String currentVersion) async {
-    final response = await _dio.get<Map<String, dynamic>>(latestReleaseApiUrl);
-    final data = response.data ?? <String, dynamic>{};
-    final tag = (data['tag_name'] as String? ?? '').trim();
-    final name = (data['name'] as String?)?.trim();
-    final url = (data['html_url'] as String?)?.trim();
-    final body = (data['body'] as String?)?.trim();
-    final latest = tag.isEmpty ? currentVersion : _normalizeVersion(tag);
-    return AppUpdateInfo(
-      latestVersion: latest,
-      releaseName: name == null || name.isEmpty ? null : name,
-      releaseUrl: url == null || url.isEmpty ? releasePageUrl : url,
-      releaseNotes: body == null || body.isEmpty ? null : body,
-      hasUpdate: _compareVersions(latest, currentVersion) > 0,
-    );
+    try {
+      final response = await _dio.get(
+        latestReleaseApiUrl,
+        options: Options(
+          headers: {
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'FeiNiuMusic',
+          },
+        ),
+      );
+      final data = response.data as Map<String, dynamic>?;
+      if (data == null) {
+        return AppUpdateInfo(latestVersion: currentVersion, hasUpdate: false);
+      }
+
+      final tagName = (data['tag_name'] as String? ?? '').trim();
+      final latestName = tagName.startsWith('v') || tagName.startsWith('V')
+          ? tagName.substring(1)
+          : tagName;
+      final releaseName = data['name'] as String?;
+      final body = data['body'] as String?;
+      final htmlUrl = data['html_url'] as String?;
+
+      final hasUpdate = _compareVersions(latestName, currentVersion) > 0;
+      return AppUpdateInfo(
+        latestVersion: latestName,
+        hasUpdate: hasUpdate,
+        releaseName: releaseName,
+        releaseUrl: htmlUrl ?? releasePageUrl,
+        releaseNotes: body,
+      );
+    } catch (e) {
+      return AppUpdateInfo(latestVersion: currentVersion, hasUpdate: false);
+    }
   }
 
   String _normalizeVersion(String version) {

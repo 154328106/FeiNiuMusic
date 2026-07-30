@@ -1,378 +1,223 @@
 import 'package:flutter/material.dart';
+import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
-import '../../app/router/app_page_route.dart';
-import '../../app/services/db/dao/song_dao.dart';
+import '../../components/index.dart';
+import '../../app/services/feiniu/api_client.dart';
+import '../../app/services/feiniu/track_service.dart';
 import '../../app/services/player_service.dart';
-import '../../app/services/playlists_service.dart';
-import '../../app/services/stats_service.dart';
 import '../../app/state/song_state.dart';
 import '../../app/theme/app_styles.dart';
-import '../../components/common/app_list_tile.dart';
-import '../../components/common/artwork_widget.dart';
-import '../../components/common/glass_panel.dart';
-import '../../components/layout/base/app_page_scaffold.dart';
-import '../../components/layout/base/app_top_bar.dart';
-import '../library/library_detail_pages.dart';
-import '../library/playlists_page.dart';
-
-enum RecentPlaybackTab { songs, albums, playlists }
 
 class RecentPlaybackPage extends StatefulWidget {
-  final RecentPlaybackTab initialTab;
-
-  const RecentPlaybackPage({
-    super.key,
-    this.initialTab = RecentPlaybackTab.songs,
-  });
+  const RecentPlaybackPage({super.key});
 
   @override
   State<RecentPlaybackPage> createState() => _RecentPlaybackPageState();
 }
 
-class _RecentPlaybackPageState extends State<RecentPlaybackPage> {
-  final StatsService _statsService = StatsService.instance;
-  final SongDao _songDao = SongDao();
-  final PlaylistsService _playlistsService = PlaylistsService.instance;
+class _RecentPlaybackPageState extends State<RecentPlaybackPage>
+    with SignalsMixin {
+  final FeiNiuApiClient _api = FeiNiuApiClient.instance;
+  final FeiNiuTrackService _trackService = FeiNiuTrackService.instance;
   final PlayerService _player = PlayerService.instance;
+  final GlobalKey<AppPageScaffoldState> _scaffoldKey =
+      GlobalKey<AppPageScaffoldState>();
 
-  late RecentPlaybackTab _tab;
-  bool _loading = true;
-  List<_RecentSongRow> _songs = [];
-  List<_RecentAlbumRow> _albums = [];
-  List<_RecentPlaylistRow> _playlists = [];
+  late final _allSongs = createSignal<List<SongEntity>>([]);
+  late final _songs = createSignal<List<SongEntity>>([]);
+  late final _loading = createSignal(true);
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  bool _searchVisible = false;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
     super.initState();
-    _tab = widget.initialTab;
-    _load();
+    _loadHistory();
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-    });
-
-    final recentSongsFuture = _statsService.fetchRecentSongs(limit: 50);
-    final recentAlbumsFuture = _statsService.fetchRecentAlbums(limit: 50);
-    final recentPlaylistsFuture = _statsService.fetchRecentPlaylists(limit: 50);
-    final playlistsFuture = _playlistsService.loadAll();
-
-    final recentSongs = await recentSongsFuture;
-    final recentAlbums = await recentAlbumsFuture;
-    final recentPlaylists = await recentPlaylistsFuture;
-    final playlists = await playlistsFuture;
-
-    final songs = await _songDao.fetchByIds(
-      recentSongs.map((e) => e.songId).where((e) => e.isNotEmpty).toList(),
-    );
-    final songMap = <String, SongEntity>{
-      for (final song in songs) song.id: song,
-    };
-
-    final songRows = recentSongs
-        .map((stat) {
-          final song = songMap[stat.songId];
-          if (song == null) return null;
-          return _RecentSongRow(song: song, stat: stat);
-        })
-        .whereType<_RecentSongRow>()
-        .toList();
-
-    final albumRows = recentAlbums
-        .map((stat) {
-          final match = songRows
-              .map((row) => row.song)
-              .where((song) {
-                final album = (song.album ?? '').trim().isEmpty
-                    ? '未知专辑'
-                    : song.album!.trim();
-                return album == stat.albumName;
-              })
-              .cast<SongEntity?>()
-              .firstWhere((song) => song != null, orElse: () => null);
-          if (match == null) return null;
-          return _RecentAlbumRow(representative: match, stat: stat);
-        })
-        .whereType<_RecentAlbumRow>()
-        .toList();
-
-    final playlistMap = <String, PlaylistEntity>{
-      for (final playlist in playlists) playlist.id: playlist,
-    };
-    final playlistRows = recentPlaylists
-        .map((stat) {
-          final playlist = playlistMap[stat.playlistId];
-          if (playlist == null) return null;
-          return _RecentPlaylistRow(playlist: playlist, stat: stat);
-        })
-        .whereType<_RecentPlaylistRow>()
-        .toList();
-
-    if (!mounted) return;
-    setState(() {
-      _songs = songRows;
-      _albums = albumRows;
-      _playlists = playlistRows;
-      _loading = false;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AppPageScaffold(
-      extendBodyBehindAppBar: true,
-      appBar: const AppTopBar(
-        title: '最近播放',
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-      ),
-      body: RefreshIndicator(
-        onRefresh: _load,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(10, 12, 10, 140),
-          children: [
-            _buildTabBar(context),
-            const SizedBox(height: 16),
-            if (_loading)
-              const Padding(
-                padding: EdgeInsets.only(top: 48),
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else
-              ListTileTheme(
-                minLeadingWidth: 0,
-                horizontalTitleGap: 10,
-                minVerticalPadding: 0,
-                child: _buildList(context),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTabBar(BuildContext context) {
-    return GlassPanel(
-      borderRadius: BorderRadius.circular(16),
-      padding: const EdgeInsets.all(4),
-      color: Theme.of(context).appPanelElevatedColor,
-      child: Row(
-        children: [
-          _tabButton(context, label: '歌曲', tab: RecentPlaybackTab.songs),
-          _tabButton(context, label: '专辑', tab: RecentPlaybackTab.albums),
-          _tabButton(context, label: '歌单', tab: RecentPlaybackTab.playlists),
-        ],
-      ),
-    );
-  }
-
-  Widget _tabButton(
-    BuildContext context, {
-    required String label,
-    required RecentPlaybackTab tab,
-  }) {
-    final selected = _tab == tab;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () {
-          setState(() {
-            _tab = tab;
-          });
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: selected ? Theme.of(context).colorScheme.primary : null,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              color: selected
-                  ? Theme.of(context).colorScheme.onPrimary
-                  : Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildList(BuildContext context) {
-    final theme = Theme.of(context);
-    switch (_tab) {
-      case RecentPlaybackTab.songs:
-        if (_songs.isEmpty) return const Center(child: Text('暂无最近播放歌曲'));
-        final queue = _songs.map((e) => e.song).toList();
-        return _RecentPanel(
-          child: Column(
-            children: _songs.map((row) {
-              final subtitle = [
-                row.song.artist.trim(),
-                (row.song.album ?? '').trim().isEmpty
-                    ? '未知专辑'
-                    : row.song.album!.trim(),
-                '播放 ${row.stat.playCount} 次',
-              ].join(' · ');
-              return AppListTile(
-                leading: ArtworkWidget(
-                  song: row.song,
-                  size: 46,
-                  borderRadius: 10,
-                  placeholder: _RecentArtworkPlaceholder(
-                    label: row.song.title.isEmpty ? '?' : row.song.title[0],
-                  ),
-                ),
-                title: row.song.title,
-                subtitle: subtitle,
-                contentPadding: const EdgeInsets.only(left: 8, right: 6),
-                onTap: () async {
-                  final index = queue.indexWhere(
-                    (song) => song.id == row.song.id,
-                  );
-                  if (index < 0) return;
-                  await _player.playQueue(queue, index);
-                },
-              );
-            }).toList(),
-          ),
-        );
-      case RecentPlaybackTab.albums:
-        if (_albums.isEmpty) return const Center(child: Text('暂无最近播放专辑'));
-        return _RecentPanel(
-          child: Column(
-            children: _albums.map((row) {
-              final artist = row.representative.artist.trim().isEmpty
-                  ? '未知艺术家'
-                  : row.representative.artist.trim();
-              return AppListTile(
-                leading: ArtworkWidget(
-                  song: row.representative,
-                  size: 46,
-                  borderRadius: 10,
-                  placeholder: _RecentArtworkPlaceholder(
-                    label: row.stat.albumName.isEmpty
-                        ? '?'
-                        : row.stat.albumName[0],
-                  ),
-                ),
-                title: row.stat.albumName,
-                subtitle: '$artist · 播放 ${row.stat.playCount} 次',
-                contentPadding: const EdgeInsets.only(left: 8, right: 6),
-                onTap: () {
-                  Navigator.of(context).push(
-                    buildAppPageRoute(
-                      (_) => AlbumDetailPage(albumName: row.stat.albumName),
-                    ),
-                  );
-                },
-              );
-            }).toList(),
-          ),
-        );
-      case RecentPlaybackTab.playlists:
-        if (_playlists.isEmpty) return const Center(child: Text('暂无最近播放歌单'));
-        return _RecentPanel(
-          child: Column(
-            children: _playlists.map((row) {
-              final subtitle = row.playlist.isFavorite
-                  ? '我喜欢 · ${row.playlist.songIds.length} 首 · 播放 ${row.stat.playCount} 次'
-                  : '${row.playlist.songIds.length} 首 · 播放 ${row.stat.playCount} 次';
-              return AppListTile(
-                leading: Container(
-                  width: 46,
-                  height: 46,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
-                    color: theme.colorScheme.primary.withValues(alpha: 0.12),
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(
-                    row.playlist.isFavorite
-                        ? Icons.favorite_rounded
-                        : Icons.queue_music_rounded,
-                    color: theme.colorScheme.primary,
-                  ),
-                ),
-                title: row.playlist.name,
-                subtitle: subtitle,
-                contentPadding: const EdgeInsets.only(left: 8, right: 6),
-                onTap: () {
-                  Navigator.of(context).push(
-                    buildAppPageRoute(
-                      (_) => PlaylistDetailPage(playlistId: row.playlist.id),
-                    ),
-                  );
-                },
-              );
-            }).toList(),
-          ),
-        );
+  void _applyFilter() {
+    final all = _allSongs.value;
+    if (_searchQuery.isEmpty) {
+      _songs.value = all;
+    } else {
+      final q = _searchQuery.toLowerCase();
+      _songs.value = all.where((s) {
+        return s.title.toLowerCase().contains(q) ||
+            s.artistDisplayName.toLowerCase().contains(q);
+      }).toList();
     }
   }
-}
 
-class _RecentPanel extends StatelessWidget {
-  final Widget child;
-
-  const _RecentPanel({required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    return GlassPanel(
-      borderRadius: BorderRadius.circular(20),
-      color: Theme.of(context).appPanelElevatedColor,
-      child: child,
-    );
+  Future<void> _loadHistory() async {
+    _loading.value = true;
+    try {
+      final pageData = await _api.getPlayHistory(page: 1, size: 100);
+      final songs = pageData.list
+          .map((t) => _trackService.trackToSongEntity(t.toJson()))
+          .toList();
+      if (mounted) {
+        _allSongs.value = songs;
+        _applyFilter();
+      }
+    } catch (e) {
+      debugPrint('[RecentPlaybackPage] load error: $e');
+    }
+    if (mounted) _loading.value = false;
   }
-}
 
-class _RecentSongRow {
-  final SongEntity song;
-  final SongListeningStat stat;
-
-  const _RecentSongRow({required this.song, required this.stat});
-}
-
-class _RecentAlbumRow {
-  final SongEntity representative;
-  final AlbumPlaybackStat stat;
-
-  const _RecentAlbumRow({required this.representative, required this.stat});
-}
-
-class _RecentPlaylistRow {
-  final PlaylistEntity playlist;
-  final PlaylistPlaybackStat stat;
-
-  const _RecentPlaylistRow({required this.playlist, required this.stat});
-}
-
-class _RecentArtworkPlaceholder extends StatelessWidget {
-  final String label;
-
-  const _RecentArtworkPlaceholder({required this.label});
+  void _playSong(int index) {
+    final songs = _songs.value;
+    if (songs.isEmpty) return;
+    _player.playQueue(songs, index);
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      width: 46,
-      height: 46,
-      decoration: BoxDecoration(
-        color: theme.cardColor,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        label.substring(0, 1).toUpperCase(),
-        style: TextStyle(
-          color: theme.colorScheme.primary,
-          fontWeight: FontWeight.w700,
+    final scheme = theme.colorScheme;
+
+    return AppNavigationModeBuilder(
+      builder: (context, useBottomNavigation) => AppPageScaffold(
+        key: _scaffoldKey,
+        extendBodyBehindAppBar: true,
+        drawer: useBottomNavigation
+            ? null
+            : SideMenu(
+                onCloseDrawer: () => _scaffoldKey.currentState?.openDrawer(),
+              ),
+        bottomNavIndex: useBottomNavigation ? 2 : null,
+        onBottomNavTap: useBottomNavigation
+            ? (index) => navigateToPrimaryDestination(context, index)
+            : null,
+        appBar: AppTopBar(
+          title: '最近播放',
+          showBackButton: false,
+          leading: useBottomNavigation
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.menu_rounded),
+                  onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                ),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          actions: [
+            IconButton(
+              icon: Icon(_searchVisible ? Icons.search_off : Icons.search),
+              onPressed: () {
+                setState(() {
+                  _searchVisible = !_searchVisible;
+                  if (!_searchVisible) {
+                    _searchController.clear();
+                    _searchQuery = '';
+                    _applyFilter();
+                  }
+                });
+              },
+            ),
+          ],
+        ),
+        body: Column(
+          children: [
+            if (_searchVisible)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                child: TextField(
+                  controller: _searchController,
+                  autofocus: true,
+                  onChanged: (v) {
+                    setState(() => _searchQuery = v);
+                    _applyFilter();
+                  },
+                  decoration: InputDecoration(
+                    hintText: '搜索最近播放...',
+                    prefixIcon: const Icon(Icons.search, size: 20),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 18),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() => _searchQuery = '');
+                              _applyFilter();
+                            },
+                          )
+                        : null,
+                    filled: true,
+                    fillColor: theme.appPanelColor,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    border: const OutlineInputBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(20)),
+                      borderSide: BorderSide.none,
+                    ),
+                    isDense: true,
+                  ),
+                ),
+              ),
+            Expanded(
+              child: Watch.builder(
+                builder: (context) {
+                  if (_loading.value) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  final songs = _songs.value;
+                  if (songs.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.history_rounded, size: 64, color: scheme.primary),
+                          const SizedBox(height: 16),
+                          Text('还没有播放记录', style: TextStyle(color: scheme.onSurfaceVariant)),
+                        ],
+                      ),
+                    );
+                  }
+
+                  return RefreshIndicator(
+                    onRefresh: _loadHistory,
+                    child: ListView.builder(
+                      padding: EdgeInsets.fromLTRB(16, 12, 16, 160),
+                      itemCount: songs.length,
+                      itemBuilder: (context, index) {
+                        final song = songs[index];
+                        return InkWell(
+                          onTap: () => _playSong(index),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            child: Row(
+                              children: [
+                                ArtworkWidget(song: song, size: 48, borderRadius: 8),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(song.title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                                      const SizedBox(height: 2),
+                                      Text(song.artistDisplayName, maxLines: 1, overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );

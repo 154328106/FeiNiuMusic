@@ -139,8 +139,6 @@ class StatsService {
         .toList();
   }
 
-  /// Map of songId -> playCount for every song that has playback stats.
-  /// Used to sort the songs list by play count.
   Future<Map<String, int>> fetchPlayCounts() async {
     final db = await DbHelper.instance.database;
     final rows = await db.query(
@@ -154,8 +152,6 @@ class StatsService {
     return map;
   }
 
-  /// Map of songId -> lastPlayedMs. Powers the home recommender's recency /
-  /// time-of-day signals.
   Future<Map<String, int>> fetchLastPlayedTimestamps() async {
     final db = await DbHelper.instance.database;
     final rows = await db.query(
@@ -169,7 +165,8 @@ class StatsService {
     return map;
   }
 
-  Future<List<SongListeningStat>> fetchTopSongs({int limit = 20}) async {    final db = await DbHelper.instance.database;
+  Future<List<SongListeningStat>> fetchTopSongs({int limit = 20}) async {
+    final db = await DbHelper.instance.database;
     final rows = await db.query(
       DbConstants.tableSongStats,
       orderBy: 'playCount DESC, listenMs DESC',
@@ -422,9 +419,6 @@ class StatsService {
     });
   }
 
-  // ---- Backup / restore ----
-
-  /// Dumps all four stats tables as plain row maps for backup.
   Future<Map<String, List<Map<String, dynamic>>>> exportAll() async {
     final db = await DbHelper.instance.database;
     Future<List<Map<String, dynamic>>> dump(String table) async {
@@ -440,8 +434,6 @@ class StatsService {
     };
   }
 
-  /// Merge-import stats: cumulative counters are ADDED to existing values,
-  /// timestamps take the later value.
   Future<void> importMerge(Map<String, dynamic> data) async {
     final db = await DbHelper.instance.database;
     await db.transaction((txn) async {

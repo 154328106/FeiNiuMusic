@@ -1,12 +1,15 @@
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
+import '../../../app/services/feiniu/api_client.dart';
 import '../../../app/state/song_state.dart';
 
 class PlayerBackgroundSettings {
@@ -14,15 +17,19 @@ class PlayerBackgroundSettings {
   static const String _prefsDynamicGradientEnabled = 'dynamic_gradient_enabled';
   static const String _prefsSaturation = 'gradient_saturation';
   static const String _prefsHueShift = 'gradient_hue_shift';
+  static const String _prefsRoundCover = 'player_round_cover';
+  static const String _prefsRotateCover = 'player_rotate_cover';
 
   static final ValueNotifier<ThemeMode> playbackThemeMode = ValueNotifier(
     ThemeMode.system,
   );
   static final ValueNotifier<bool> dynamicGradientEnabled = ValueNotifier(
-    false,
+    true,
   );
-  static final ValueNotifier<double> saturation = ValueNotifier(1.0);
-  static final ValueNotifier<double> hueShift = ValueNotifier(0.0);
+  static final ValueNotifier<double> saturation = ValueNotifier(1.2);
+  static final ValueNotifier<double> hueShift = ValueNotifier(120.0);
+  static final ValueNotifier<bool> roundCover = ValueNotifier(true);
+  static final ValueNotifier<bool> rotateCover = ValueNotifier(true);
 
   static Future<void>? _loading;
 
@@ -56,9 +63,11 @@ class PlayerBackgroundSettings {
       prefs.getString(_prefsPlaybackThemeMode),
     );
     dynamicGradientEnabled.value =
-        prefs.getBool(_prefsDynamicGradientEnabled) ?? false;
-    saturation.value = prefs.getDouble(_prefsSaturation) ?? 1.0;
-    hueShift.value = prefs.getDouble(_prefsHueShift) ?? 0.0;
+        prefs.getBool(_prefsDynamicGradientEnabled) ?? true;
+    saturation.value = prefs.getDouble(_prefsSaturation) ?? 1.2;
+    hueShift.value = prefs.getDouble(_prefsHueShift) ?? 120.0;
+    roundCover.value = prefs.getBool(_prefsRoundCover) ?? true;
+    rotateCover.value = prefs.getBool(_prefsRotateCover) ?? true;
   }
 
   static Future<void> setPlaybackThemeMode(ThemeMode mode) async {
@@ -83,6 +92,18 @@ class PlayerBackgroundSettings {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_prefsHueShift, value);
     hueShift.value = value;
+  }
+
+  static Future<void> setRoundCover(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsRoundCover, value);
+    roundCover.value = value;
+  }
+
+  static Future<void> setRotateCover(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsRotateCover, value);
+    rotateCover.value = value;
   }
 }
 
@@ -161,8 +182,7 @@ class _PlayerBackgroundState extends State<PlayerBackground> {
     return Watch.builder(
       builder: (context) {
         final song = widget.songSignal.value;
-        final coverPath = song?.localCoverPath;
-        _handleCoverChange(coverPath);
+        _handleCoverChange(song?.coverId);
         return AnimatedBuilder(
           animation: Listenable.merge([
             PlayerBackgroundSettings.playbackThemeMode,
@@ -235,9 +255,19 @@ class _PlayerBackgroundState extends State<PlayerBackground> {
     setState(() => _dominantColor = color);
   }
 
-  Future<Color?> _computeDominantColor(String coverPath) async {
+  Future<Color?> _computeDominantColor(String coverId) async {
     try {
-      final bytes = await File(coverPath).readAsBytes();
+      final api = FeiNiuApiClient.instance;
+      final url = api.coverUrl(coverId, size: 40);
+      final dio = Dio();
+      final response = await dio.get(
+        url,
+        options: Options(
+          responseType: ResponseType.bytes,
+          headers: api.authHeaders(),
+        ),
+      );
+      final bytes = response.data as Uint8List;
       return averageImageColor(bytes);
     } catch (_) {
       return null;

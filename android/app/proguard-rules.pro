@@ -1,4 +1,4 @@
-# ProGuard / R8 keep rules for nagomusic release builds.
+# ProGuard / R8 keep rules for feiniumusic release builds.
 # Flutter and most plugins ship their own consumer rules; these cover the
 # libraries in this app that rely on reflection or are otherwise stripped.
 

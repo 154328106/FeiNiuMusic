@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:nagomusic/app/state/settings_playback_state.dart';
+import 'package:feiniu_music/app/state/settings_playback_state.dart';
 
 void main() {
   test('app playback volume loads, saves, and clamps values', () async {

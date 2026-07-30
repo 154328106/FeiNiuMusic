@@ -7,12 +7,12 @@
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:nagomusic/app/app.dart';
-import 'package:nagomusic/pages/home/home_page.dart';
+import 'package:feiniu_music/app/app.dart';
+import 'package:feiniu_music/pages/home/home_page.dart';
 
 void main() {
   testWidgets('Home page renders', (WidgetTester tester) async {
-    await tester.pumpWidget(const NagoMusicApp());
+    await tester.pumpWidget(const FeiNiuMusicApp());
     await tester.pumpAndSettle();
     expect(find.byType(HomePage), findsOneWidget);
   });

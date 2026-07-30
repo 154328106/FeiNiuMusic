@@ -3,8 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signals/signals.dart';
 
-import 'package:nagomusic/app/state/song_state.dart';
-import 'package:nagomusic/pages/player/widgets/player_background.dart';
+import 'package:feiniu_music/app/state/song_state.dart';
+import 'package:feiniu_music/pages/player/widgets/player_background.dart';
 
 double? _auroraSaturation(WidgetTester tester) =>
     _auroraField(tester, 'saturation');

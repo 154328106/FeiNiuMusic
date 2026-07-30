@@ -6,9 +6,12 @@ import 'package:lpinyin/lpinyin.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
 import '../../app/router/app_page_route.dart';
-import '../../app/services/db/dao/song_dao.dart';
+import '../../app/services/feiniu/api_client.dart';
+import '../../app/services/feiniu/api_models.dart';
+import '../../app/services/feiniu/track_service.dart';
 import '../../app/services/player_service.dart';
-import '../../app/services/stats_service.dart';
+import '../../app/services/feiniu/favorite_service.dart';
+
 import '../../app/state/song_state.dart';
 import '../../components/index.dart';
 import '../songs/song_detail_sheet.dart';
@@ -39,23 +42,14 @@ List<String> splitArtists(String raw) {
 
 String primaryArtistLabel(String rawArtist) {
   final list = splitArtists(rawArtist);
-  if (list.isEmpty) return '未知艺术家';
+  if (list.isEmpty) return '未知歌手';
   if (list.length == 1) return list.first;
   return '${list.first} 等';
 }
 
 String albumYearFromSongs(List<SongEntity> songs) {
   if (songs.isEmpty) return '';
-  final years = <int>[];
-  for (final s in songs) {
-    final ms = s.fileModifiedMs;
-    if (ms == null || ms <= 0) continue;
-    years.add(DateTime.fromMillisecondsSinceEpoch(ms).year);
-  }
-  if (years.isEmpty) return '';
-  years.sort();
-  final y = years.first;
-  return y <= 0 ? '' : y.toString();
+  return '';
 }
 
 String pinyinKey(String text) {
@@ -117,7 +111,7 @@ Map<String, dynamic> _buildArtistDetailPayload(Map<String, dynamic> args) {
 
   final filtered = songs.where((song) {
     final raw = song.artist.trim();
-    if (normalized == '未知艺术家') {
+    if (normalized == '未知歌手') {
       return raw.isEmpty;
     }
     return splitArtists(raw).contains(normalized);
@@ -156,15 +150,21 @@ Map<String, dynamic> _buildArtistDetailPayload(Map<String, dynamic> args) {
 
 class ArtistDetailPage extends StatefulWidget {
   final String artistName;
+  final String? artistGuid;
 
-  const ArtistDetailPage({super.key, required this.artistName});
+  const ArtistDetailPage({
+    super.key,
+    required this.artistName,
+    this.artistGuid,
+  });
 
   @override
   State<ArtistDetailPage> createState() => _ArtistDetailPageState();
 }
 
 class _ArtistDetailPageState extends State<ArtistDetailPage> with SignalsMixin {
-  final SongDao _songDao = SongDao();
+  final FeiNiuApiClient _apiClient = FeiNiuApiClient.instance;
+  final FeiNiuTrackService _trackService = FeiNiuTrackService.instance;
 
   late final _loading = createSignal(true);
   late final _songs = createSignal<List<SongEntity>>([]);
@@ -172,6 +172,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> with SignalsMixin {
   late final _albumNames = createSignal<Set<String>>(<String>{});
   late final _albumGroups = createSignal<List<_AlbumGroup>>([]);
   late final _representative = createSignal<SongEntity?>(null);
+  late final _isRefreshing = createSignal(false);
 
   @override
   void initState() {
@@ -180,38 +181,52 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> with SignalsMixin {
   }
 
   Future<void> _load() async {
+    _isRefreshing.value = true;
     _loading.value = true;
-    final all = await _songDao.fetchAll();
-    final payload = await compute(_buildArtistDetailPayload, {
-      'songs': all.map((e) => e.toMap()).toList(),
-      'artistName': widget.artistName,
-    });
+
+    // API path: when artistGuid is provided
+    if (widget.artistGuid != null) {
+      try {
+        final pageData = await _apiClient.getArtistTracks(
+          artistGUID: widget.artistGuid!,
+          page: 1,
+          size: 200,
+        );
+        if (!mounted) return;
+        final songs = pageData.list
+            .map((t) => _trackService.trackToSongEntity(t))
+            .toList();
+
+        // Group by album for the album section
+        final albumMap = <String, List<SongEntity>>{};
+        for (final s in songs) {
+          final albumName = s.albumDisplayName;
+          albumMap.putIfAbsent(albumName, () => []).add(s);
+        }
+        final albumGroups = albumMap.entries
+            .map((e) => _AlbumGroup(name: e.key, songs: e.value))
+            .toList()
+          ..sort(
+            (a, b) => pinyinKey(a.name).compareTo(pinyinKey(b.name)),
+          );
+
+        _songs.value = songs;
+        _albumNames.value = albumMap.keys.toSet();
+        _albumGroups.value = albumGroups;
+        _representative.value = songs.isNotEmpty ? songs.first : null;
+        _loading.value = false;
+        _isRefreshing.value = false;
+        return;
+      } catch (e) {
+        debugPrint('[ArtistDetailPage] API error: $e');
+        // Fall through to fallback
+      }
+    }
+
+    // Fallback: nothing
     if (!mounted) return;
-    final songs = (payload['songs'] as List)
-        .map((e) => SongEntity.fromMap((e as Map).cast<String, dynamic>()))
-        .toList();
-    final albumNames = (payload['albumNames'] as List)
-        .map((e) => e as String)
-        .toSet();
-    final albumGroups = (payload['albumGroups'] as List)
-        .map((e) => (e as Map).cast<String, dynamic>())
-        .map(
-          (e) => _AlbumGroup(
-            name: e['name'] as String,
-            songs: (e['songs'] as List)
-                .map(
-                  (song) =>
-                      SongEntity.fromMap((song as Map).cast<String, dynamic>()),
-                )
-                .toList(),
-          ),
-        )
-        .toList();
-    _songs.value = songs;
-    _albumNames.value = albumNames;
-    _albumGroups.value = albumGroups;
-    _representative.value = songs.isNotEmpty ? songs.first : null;
     _loading.value = false;
+    _isRefreshing.value = false;
   }
 
   @override
@@ -380,9 +395,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> with SignalsMixin {
                           ),
                         ),
                         title: song.title,
-                        subtitle: song.album?.trim().isNotEmpty == true
-                            ? song.album!.trim()
-                            : '未知专辑',
+                        subtitle: song.albumDisplayName,
                         titleColor: titleColor,
                         subtitleColor: subtitleColor,
                         contentPadding: const EdgeInsets.only(
@@ -404,6 +417,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> with SignalsMixin {
                                   buildAppPageRoute(
                                     (_) => ArtistDetailPage(
                                       artistName: artistName,
+                                      artistGuid: song.firstArtistGuid,
                                     ),
                                   ),
                                 );
@@ -412,7 +426,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> with SignalsMixin {
                                 Navigator.of(context).push(
                                   buildAppPageRoute(
                                     (_) =>
-                                        AlbumDetailPage(albumName: albumName),
+                                        AlbumDetailPage(albumName: albumName, albumGuid: song.albumGuid),
                                   ),
                                 );
                               },
@@ -502,20 +516,25 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> with SignalsMixin {
 
 class AlbumDetailPage extends StatefulWidget {
   final String albumName;
+  final String? albumGuid;
 
-  const AlbumDetailPage({super.key, required this.albumName});
+  const AlbumDetailPage({
+    super.key,
+    required this.albumName,
+    this.albumGuid,
+  });
 
   @override
   State<AlbumDetailPage> createState() => _AlbumDetailPageState();
 }
 
 class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
-  final SongDao _songDao = SongDao();
-  final StatsService _statsService = StatsService.instance;
+  final FeiNiuApiClient _apiClient = FeiNiuApiClient.instance;
+  final FeiNiuTrackService _trackService = FeiNiuTrackService.instance;
 
   late final _loading = createSignal(true);
   late final _songs = createSignal<List<SongEntity>>([]);
-  late final _showCovers = createSignal(false);
+  late final _showCovers = createSignal(true);
   late final _sortKey = createSignal('trackNumber');
   late final _sortAscending = createSignal(true);
 
@@ -527,21 +546,35 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
 
   Future<void> _load() async {
     _loading.value = true;
-    final all = await _songDao.fetchAll();
-    final normalized = widget.albumName.trim();
-    final filtered = all.where((song) {
-      final raw = (song.album ?? '').trim();
-      if (normalized == '未知专辑') {
-        return raw.isEmpty || raw == '未知专辑';
+
+    // API path: when albumGuid is provided
+    if (widget.albumGuid != null) {
+      try {
+        final pageData = await _apiClient.getAlbumTracks(
+          albumGUID: widget.albumGuid!,
+          page: 1,
+          size: 200,
+        );
+        if (!mounted) return;
+        final songs = pageData.list
+            .map((t) => _trackService.trackToSongEntity(t))
+            .toList();
+        _songs.value = sortAlbumDetailSongs(
+          songs,
+          sortKey: _sortKey.value,
+          ascending: _sortAscending.value,
+        );
+        _loading.value = false;
+        return;
+      } catch (e) {
+        debugPrint('[AlbumDetailPage] API error: $e');
+        // Fall through to fallback
       }
-      return raw == normalized;
-    }).toList();
+    }
+
+    // Fallback: empty
     if (!mounted) return;
-    _songs.value = sortAlbumDetailSongs(
-      filtered,
-      sortKey: _sortKey.value,
-      ascending: _sortAscending.value,
-    );
+    _songs.value = [];
     _loading.value = false;
   }
 
@@ -627,8 +660,8 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
             final songs = _songs.value;
             final representative = songs.isNotEmpty ? songs.first : null;
             final artistLabel = representative != null
-                ? primaryArtistLabel(representative.artist)
-                : '未知艺术家';
+                ? primaryArtistLabel(representative.artistDisplayName)
+                : '未知歌手';
             final year = albumYearFromSongs(songs);
             final songCountText = '${songs.length}首';
             final infoText = year.isEmpty
@@ -637,7 +670,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
 
             final Set<String> participatingArtists = {};
             for (final song in songs) {
-              participatingArtists.addAll(splitArtists(song.artist));
+              participatingArtists.addAll(splitArtists(song.artistDisplayName));
             }
             final sortedArtists = participatingArtists.toList()
               ..sort((a, b) => pinyinKey(a).compareTo(pinyinKey(b)));
@@ -750,9 +783,6 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
                         onPressed: songs.isEmpty
                             ? null
                             : () async {
-                                await _statsService.recordAlbumPlay(
-                                  widget.albumName,
-                                );
                                 await player.playQueue(songs, 0);
                               },
                       ),
@@ -804,7 +834,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
                                 ),
                               ),
                         title: song.title,
-                        subtitle: song.artist,
+                        subtitle: song.artistDisplayName,
                         titleColor: titleColor,
                         subtitleColor: subtitleColor,
                         contentPadding: const EdgeInsets.only(
@@ -812,7 +842,6 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
                           right: 16,
                         ),
                         onTap: () async {
-                          await _statsService.recordAlbumPlay(widget.albumName);
                           await player.playQueue(songs, index);
                         },
                         onLongPress: () {
@@ -827,6 +856,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
                                   buildAppPageRoute(
                                     (_) => ArtistDetailPage(
                                       artistName: artistName,
+                                      artistGuid: song.firstArtistGuid,
                                     ),
                                   ),
                                 );
@@ -835,7 +865,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
                                 Navigator.of(context).push(
                                   buildAppPageRoute(
                                     (_) =>
-                                        AlbumDetailPage(albumName: albumName),
+                                        AlbumDetailPage(albumName: albumName, albumGuid: song.albumGuid),
                                   ),
                                 );
                               },
@@ -858,7 +888,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                     child: Text(
-                      '参与创作的艺术家',
+                      '参与创作的歌手',
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
@@ -866,7 +896,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
                   ),
                   ...sortedArtists.map((artist) {
                     final artistSong = songs.firstWhere(
-                      (s) => splitArtists(s.artist).contains(artist),
+                      (s) => splitArtists(s.artistDisplayName).contains(artist),
                       orElse: () => songs.first,
                     );
                     final initial = artist.isNotEmpty ? artist[0] : '?';

@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:nagomusic/app/services/navidrome/navidrome_source_repository.dart';
+import 'package:feiniu_music/app/services/navidrome/navidrome_source_repository.dart';
 
 void main() {
   test('builds token based Subsonic API URLs under endpoint path', () {

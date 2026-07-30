@@ -464,7 +464,7 @@ class _BottomActions extends StatelessWidget {
                     actions.add(
                       IconButton(
                         icon: Icon(icon, color: iconColor),
-                        onPressed: player.cyclePlaybackMode,
+                        onPressed: () => player.cyclePlaybackMode(),
                       ),
                     );
                   }
@@ -568,12 +568,18 @@ class _BottomActions extends StatelessWidget {
         },
         onOpenArtist: (artistName) {
           Navigator.of(context).push(
-            buildAppPageRoute((_) => ArtistDetailPage(artistName: artistName)),
+            buildAppPageRoute((_) => ArtistDetailPage(
+              artistName: artistName,
+              artistGuid: song.firstArtistGuid,
+            )),
           );
         },
         onOpenAlbum: (albumName) {
           Navigator.of(context).push(
-            buildAppPageRoute((_) => AlbumDetailPage(albumName: albumName)),
+            buildAppPageRoute((_) => AlbumDetailPage(
+              albumName: albumName,
+              albumGuid: song.albumGuid,
+            )),
           );
         },
       ),
@@ -975,10 +981,13 @@ class _PlaylistSheetState extends State<_PlaylistSheet> {
                         },
                         itemCount: total,
                         itemBuilder: (context, index) {
+                          if (index < 0 || index >= queue.length) {
+                            return const SizedBox.shrink();
+                          }
                           final song = queue[index];
                           final isCurrent = index == currentIndex;
                           return RepaintBoundary(
-                            key: ValueKey(song.id),
+                            key: ValueKey('${song.id}_$index'),
                             child: _QueueItem(
                               song: song,
                               index: index,
@@ -1142,7 +1151,7 @@ class _QueueItem extends StatelessWidget {
     final artistColor = isCurrent
         ? accent.withValues(alpha: 0.78)
         : secondaryTextColor.withValues(alpha: 0.82);
-    final artist = song.artist.trim().isEmpty ? '未知艺术家' : song.artist.trim();
+    final artist = song.artistDisplayName.isEmpty ? '未知歌手' : song.artistDisplayName;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),

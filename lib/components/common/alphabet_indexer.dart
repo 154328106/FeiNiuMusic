@@ -249,7 +249,7 @@ class DraggableScrollbar extends StatelessWidget {
     final clampedDy = dy.clamp(0.0, totalHeight);
     final fraction = clampedDy / totalHeight;
 
-    final targetIndex = (fraction * (itemCount - 1)).floor();
+    final targetIndex = (fraction * (itemCount - 1)).floor().clamp(0, itemCount - 1);
 
     if (onScrollRequest != null) {
       onScrollRequest!(targetIndex);

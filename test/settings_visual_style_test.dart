@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:nagomusic/app/state/settings_theme_state.dart';
-import 'package:nagomusic/app/theme/app_visual_theme.dart';
+import 'package:feiniu_music/app/state/settings_theme_state.dart';
+import 'package:feiniu_music/app/theme/app_visual_theme.dart';
 
 void main() {
   test(

@@ -20,8 +20,8 @@ class VersionInfoPage extends StatefulWidget {
 }
 
 class _VersionInfoPageState extends State<VersionInfoPage> {
-  static const String _appName = 'NagoMusic';
-  static const String _iconAsset = '开发文档/NagoAPP图标.png';
+  static const String _appName = '飞牛音乐';
+  static const String _iconAsset = 'assets/icon/app_icon.png';
 
   final DebugLogService _debugLogs = DebugLogService.instance;
 
@@ -87,7 +87,7 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
     await _debugLogs.ensureLoaded();
     final now = DateTime.now();
     final filename =
-        'nagomusic-debug-${now.year}${_two(now.month)}${_two(now.day)}-${_two(now.hour)}${_two(now.minute)}${_two(now.second)}.txt';
+        'feiniu-music-debug-${now.year}${_two(now.month)}${_two(now.day)}-${_two(now.hour)}${_two(now.minute)}${_two(now.second)}.txt';
     final dir = await getApplicationDocumentsDirectory();
     final file = File(p.join(dir.path, filename));
     await file.writeAsString(_debugLogs.exportText(), flush: true);

@@ -24,7 +24,7 @@ class PlayerHeader extends StatelessWidget {
       builder: (context) {
         final song = songSignal.value;
         final title = song?.title ?? '未知歌曲';
-        final artist = song?.artist ?? '未知歌手';
+        final artist = song?.artistDisplayName ?? '未知歌手';
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           child: Row(

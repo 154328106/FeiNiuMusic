@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nagomusic/app/state/song_state.dart';
-import 'package:nagomusic/pages/home/home_recommender.dart';
+import 'package:feiniu_music/app/state/song_state.dart';
+import 'package:feiniu_music/pages/home/home_recommender.dart';
 
 void main() {
   test('cold-start discovery modes use distinct stable fallback sequences', () {

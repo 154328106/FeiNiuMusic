@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:audio_session/audio_session.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
@@ -9,12 +10,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signals/signals.dart';
 
 import 'db/dao/song_dao.dart';
+import 'feiniu/api_client.dart';
+import 'feiniu/auth_service.dart';
+import 'feiniu/track_service.dart';
 import 'lyrics/lyrics_repository.dart';
-import 'artwork_cache_helper.dart';
-import 'audio_proxy_server.dart';
-import 'cache/audio_cache_service.dart';
-import 'metadata/tag_probe_service.dart';
-import 'media_notification_service.dart';
 import 'stats_service.dart';
 import '../state/settings_state.dart';
 import '../state/song_state.dart';
@@ -30,9 +29,7 @@ class PlayerService with WidgetsBindingObserver {
   final _state = AppPlayerState.instance;
 
   final AudioPlayer _player = AudioPlayer();
-  final AudioCacheService _audioCache = AudioCacheService.instance;
-  final AudioProxyServer _proxy = AudioProxyServer.instance;
-  final SongDao _songDao = SongDao();
+  final SongDao _songDao = SongDao.instance;
   final LyricsRepository _lyricsRepo = LyricsRepository();
   final StatsService _statsService = StatsService.instance;
   AudioSession? _audioSession;
@@ -93,7 +90,23 @@ class PlayerService with WidgetsBindingObserver {
   DateTime? _lastSnapshotEmit;
   Timer? _snapshotTimer;
   int _prefetchTriggeredIndex = -1;
+  int _lastPositionExtendIndex = -1;
   bool _recoveringCurrentSource = false;
+
+  /// _appendRoamAndPlay 正在运行时跳过 _indexSub 的冗余状态同步
+  bool _suppressIndexSync = false;
+
+  /// roam 串行化计数：>0 表示有请求进行中或待处理
+  int _roamAppendQueuedCount = 0;
+
+  /// 切换为随机播放后，当前曲目播完时执行 roam 转换
+  bool _roamTransitionPending = false;
+
+  Future<List<SongEntity>> Function()? queueExtender;
+  bool _isExtendingQueue = false;
+
+  /// Current roam ID for shuffle mode (roam-next API chain)
+  String? roamId;
 
   static const String _prefsQueueKey = 'playback_queue_v1';
   static const String _prefsIndexKey = 'playback_index_v1';
@@ -142,25 +155,7 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   Future<void> _hydrateAndSetCurrentSong(SongEntity song) async {
-    if (song.isLocal) return;
-    try {
-      final cachedList = await _songDao.fetchByIds([song.id]);
-      if (cachedList.isNotEmpty) {
-        final cached = cachedList.first;
-        if (cached.localCoverPath != null &&
-            cached.localCoverPath != song.localCoverPath) {
-          final updated = song.copyWith(localCoverPath: cached.localCoverPath);
-          currentSong.value = updated;
-          _warmupPlaybackSources(
-            updated,
-            nextSong: _nextSongForIndex(queue.value, currentIndex.value),
-          );
-          _emitSnapshot();
-        }
-      }
-    } catch (e) {
-      if (kDebugMode) debugPrint('Hydration failed: $e');
-    }
+    currentSong.value = song;
   }
 
   Future<void> _init() async {
@@ -200,6 +195,7 @@ class PlayerService with WidgetsBindingObserver {
       }
       position.value = value;
       _maybePrefetchByRemaining(value);
+      _maybeExtendByRemaining(value);
       _emitSnapshot();
     });
     _durationSub = _player.durationStream.listen((value) {
@@ -222,12 +218,20 @@ class PlayerService with WidgetsBindingObserver {
       if (wasPlaying && !state.playing) {
         _schedulePersistPlaybackState(immediate: true);
       }
+      // 随机模式：当前曲目自然播完且没有任何正在进行或队列中的填充请求时，自动触发填充
+      if (state.processingState == ProcessingState.completed &&
+          playbackMode.value == PlaybackMode.shuffle &&
+          !_suppressIndexSync &&
+          _roamAppendQueuedCount <= 0) {
+        _roamTransitionPending = false;
+        unawaited(_appendRoamAndPlay());
+      }
     });
     _errorSub = _player.errorStream.listen((error) {
       unawaited(_handlePlayerError(error));
     });
     _indexSub = _player.currentIndexStream.listen((idx) {
-      if (idx == null) return;
+      if (idx == null || _suppressIndexSync) return;
       currentIndex.value = idx;
       _prefetchTriggeredIndex = -1;
       final list = queue.value;
@@ -247,13 +251,30 @@ class PlayerService with WidgetsBindingObserver {
         _maybeProbeSong(song);
         _scheduleDeferredProbe(song);
         _hydrateAndSetCurrentSong(song);
+        if (songChanged) {
+          unawaited(FeiNiuApiClient.instance.reportTrackPlay(song.id));
+        }
         _warmupPlaybackSources(song, nextSong: _nextSongForIndex(list, idx));
+        if (songChanged && song.coverId != null && song.coverId!.isNotEmpty) {
+          unawaited(precacheImage(
+            CachedNetworkImageProvider(
+              FeiNiuApiClient.instance.coverUrl(song.coverId!, size: 800, updatedAt: song.updatedAt),
+              headers: FeiNiuApiClient.imageAuthHeaders(),
+            ),
+            WidgetsBinding.instance.rootElement!,
+          ));
+        }
       } else {
         position.value = Duration.zero;
         bufferedPosition.value = Duration.zero;
         duration.value = null;
       }
       _emitSnapshot(force: true);
+      // 队列快播完时自动扩展（仅顺序/单曲模式，随机模式由位置触发）
+      if (playbackMode.value != PlaybackMode.shuffle &&
+          idx >= 0 && list.isNotEmpty && idx >= list.length - 2) {
+        unawaited(_autoExtendQueue());
+      }
     });
     _loopModeSub = _player.loopModeStream.listen((loopMode) {
       if (playbackMode.value == PlaybackMode.shuffle) return;
@@ -263,8 +284,17 @@ class PlayerService with WidgetsBindingObserver {
       _schedulePersistPlaybackState();
     });
     _shuffleSub = _player.shuffleModeEnabledStream.listen((enabled) {
+      // We manage shuffle via roam-next API, not just_audio's internal shuffle.
+      // Never let this stream override PlaybackMode.shuffle state.
+      if (playbackMode.value == PlaybackMode.shuffle) {
+        if (enabled) {
+          _player.setShuffleModeEnabled(false);
+        }
+        return;
+      }
       if (enabled) {
         playbackMode.value = PlaybackMode.shuffle;
+        _player.setShuffleModeEnabled(false);
       } else {
         final loopMode = _player.loopMode;
         playbackMode.value = loopMode == LoopMode.one
@@ -298,6 +328,10 @@ class PlayerService with WidgetsBindingObserver {
 
   Future<void> playQueue(List<SongEntity> songs, int startIndex) async {
     _clearRestoreSession();
+    queueExtender = null;
+    _isExtendingQueue = false;
+    roamId = null;
+    _roamTransitionPending = false;
     final playable = songs
         .where((s) => (s.uri ?? '').trim().isNotEmpty)
         .toList();
@@ -336,13 +370,7 @@ class PlayerService with WidgetsBindingObserver {
 
         final current = playable[actualIndex];
         final uri = (current.uri ?? '').trim();
-        if (!current.isLocal && uri.startsWith('http')) {
-          final headers = _headersFromSong(current);
-          await _audioCache.removeCachedFiles(uri: uri, headers: headers);
-          await TagProbeService.instance.removeRemoteProbeCache(
-            uri: uri,
-            headers: headers,
-          );
+        if (uri.startsWith('http')) {
         }
 
         try {
@@ -378,7 +406,6 @@ class PlayerService with WidgetsBindingObserver {
 
     if (playbackMode.value == PlaybackMode.shuffle) {
       await _player.setShuffleModeEnabled(true);
-      await _player.shuffle();
     }
 
     try {
@@ -407,6 +434,21 @@ class PlayerService with WidgetsBindingObserver {
     _prefetchUpcoming();
   }
 
+  void _maybeExtendByRemaining(Duration positionValue) {
+    if (queueExtender == null) return;
+    final total = duration.value;
+    if (total == null || total.inMilliseconds <= 0) return;
+    final remaining = total - positionValue;
+    if (remaining.inSeconds > 15) return;
+    final idx = currentIndex.value;
+    if (idx < 0 || idx == _lastPositionExtendIndex) return;
+    final list = queue.value;
+    if (idx >= list.length - 2) {
+      _lastPositionExtendIndex = idx;
+      unawaited(_autoExtendQueue());
+    }
+  }
+
   Future<void> _prefetchUpcoming() async {
     if (!WebDavPlaybackSettings.prefetchEnabled.value) return;
     final list = queue.value;
@@ -415,24 +457,7 @@ class PlayerService with WidgetsBindingObserver {
     final nextIndex = startIndex + 1;
     if (nextIndex < 0 || nextIndex >= list.length) return;
     final song = list[nextIndex];
-    final raw = (song.uri ?? '').trim();
-    if (song.isLocal || !raw.startsWith('http')) return;
     _debugLog('prefetch upcoming index=$nextIndex song=${song.title}');
-    final headers = _headersFromSong(song);
-    final cached = await _audioCache.getCompleteCachedFile(
-      uri: raw,
-      headers: headers,
-    );
-    if (cached != null) return;
-    if (WebDavPlaybackSettings.segmentedEnabled.value) {
-      _audioCache.startBackgroundDownloadSegmented(
-        uri: raw,
-        headers: headers,
-        maxConcurrentSegments: WebDavPlaybackSettings.segmentConcurrency.value,
-      );
-    } else {
-      _audioCache.startBackgroundDownload(uri: raw, headers: headers);
-    }
   }
 
   Future<void> removeSongsById(
@@ -499,6 +524,8 @@ class PlayerService with WidgetsBindingObserver {
   Future<void> stopAndClear() async {
     _debugLog('stopAndClear');
     _clearRestoreSession();
+    queueExtender = null;
+    _isExtendingQueue = false;
     _stopBackgroundAudioKeepAlive();
     try {
       await _player.stop();
@@ -582,7 +609,7 @@ class PlayerService with WidgetsBindingObserver {
 
     final failedSong = list[failedIndex];
     final rawUri = (failedSong.uri ?? '').trim();
-    if (failedSong.isLocal || !rawUri.startsWith('http')) {
+    if (!rawUri.startsWith('http')) {
       if (kDebugMode) {
         debugPrint('PlayerService player error on non-remote source: $error');
       }
@@ -591,14 +618,8 @@ class PlayerService with WidgetsBindingObserver {
 
     _recoveringCurrentSource = true;
     try {
-      final headers = _headersFromSong(failedSong);
       _debugLog(
         'recover current source index=$failedIndex song=${failedSong.title} error=${error.message}',
-      );
-      await _audioCache.removeCachedFiles(uri: rawUri, headers: headers);
-      await TagProbeService.instance.removeRemoteProbeCache(
-        uri: rawUri,
-        headers: headers,
       );
       _invalidateResolvedSource(failedSong);
       await _resolvePlayableUri(failedSong, forceRefresh: true);
@@ -650,6 +671,13 @@ class PlayerService with WidgetsBindingObserver {
 
   Future<void> next() async {
     _clearRestoreSession();
+    if (playbackMode.value == PlaybackMode.shuffle) {
+      _roamTransitionPending = false;
+      await _appendRoamAndPlay();
+      return;
+    }
+    // 离开随机模式 → 清除过渡标记
+    _roamTransitionPending = false;
     final wasPlaying = _player.playing;
     await _player.seekToNext();
     if (!wasPlaying) {
@@ -657,8 +685,99 @@ class PlayerService with WidgetsBindingObserver {
     }
   }
 
+  /// 随机模式：调 roam-start 或 roam-next 获取随机曲目
+  /// 首次清空旧队列，后续保留旧队列只追加
+  Future<void> _appendRoamAndPlay() async {
+    if (_roamAppendQueuedCount > 0) {
+      _roamAppendQueuedCount++;
+      return;
+    }
+    _roamAppendQueuedCount = 1;
+    _suppressIndexSync = true;
+    try {
+      final deviceId = await AuthService.instance.ensureDeviceId();
+
+      final isFirst = roamId == null || roamId!.isEmpty;
+
+      String newRoamId;
+      dynamic roamTrackData;
+      SongEntity? nextTrack;
+      if (isFirst) {
+        final startResponse =
+            await FeiNiuApiClient.instance.getRoamStart(deviceId);
+        newRoamId = startResponse.current.roamId;
+        roamTrackData = startResponse.current;
+        if (startResponse.next != null) {
+          nextTrack = FeiNiuTrackService.instance.trackToSongEntity(
+            startResponse.next!.track.toJson(),
+          );
+        }
+      } else {
+        final response =
+            await FeiNiuApiClient.instance.getRoamNext(deviceId, roamId!);
+        if (response.current == null) return;
+        newRoamId = response.current!.roamId;
+        roamTrackData = response.current!;
+        if (response.next != null) {
+          nextTrack = FeiNiuTrackService.instance.trackToSongEntity(
+            response.next!.track.toJson(),
+          );
+        }
+      }
+
+      roamId = newRoamId;
+      final track = FeiNiuTrackService.instance.trackToSongEntity(
+        roamTrackData.track.toJson(),
+      );
+
+      // 首次清空旧队列，后续保留旧队列只追加
+      // roam-next 返回的 current 是上一轮的 next，和 baseQueue.last 相同时跳过
+      final baseQueue = isFirst ? <SongEntity>[] : queue.value;
+      final dedupedBase = baseQueue.isNotEmpty && track.id == baseQueue.last.id
+          ? baseQueue.sublist(0, baseQueue.length - 1)
+          : baseQueue;
+      final newQueue = nextTrack != null
+          ? [...dedupedBase, track, nextTrack]
+          : [...dedupedBase, track];
+      final appendedIndex = dedupedBase.length;
+
+      // 用 _applyLogicalQueue 统一更新所有状态，只触发一次 UI 重建
+      _suppressIndexSync = false;
+      _applyLogicalQueue(newQueue, appendedIndex);
+
+      final allSources = <AudioSource>[];
+      for (final s in newQueue) {
+        allSources.add(await _sourceForSong(s));
+      }
+      await _player.setAudioSources(
+        allSources,
+        initialIndex: appendedIndex,
+        initialPosition: Duration.zero,
+        preload: true,
+      );
+      await _player.setLoopMode(LoopMode.all);
+      await _player.play();
+
+      _maybeProbeSong(track);
+      unawaited(FeiNiuApiClient.instance.reportTrackPlay(track.id));
+    } catch (e) {
+      if (kDebugMode) debugPrint('PlayerService appendRoamAndPlay error: $e');
+      if (!_player.playing) {
+        try { await _player.seekToNext(); } catch (_) {}
+        if (!_player.playing) try { await _player.play(); } catch (_) {}
+      }
+    } finally {
+      _roamAppendQueuedCount--;
+      if (_roamAppendQueuedCount > 0) {
+        _roamAppendQueuedCount = 0;
+        unawaited(_appendRoamAndPlay());
+      }
+    }
+  }
+
   Future<void> previous() async {
     _clearRestoreSession();
+    _roamTransitionPending = false;
     final wasPlaying = _player.playing;
     await _player.seekToPrevious();
     if (!wasPlaying) {
@@ -767,6 +886,20 @@ class PlayerService with WidgetsBindingObserver {
 
   Future<void> setPlaybackMode(PlaybackMode mode) async {
     playbackMode.value = mode;
+    // Switch to shuffle: just mark the mode, keep the current queue and
+    // playing song unchanged. The next "next" call will fetch a random
+    // track from the server via roam-next.
+    if (mode == PlaybackMode.shuffle) {
+      // 进入随机模式：保持当前曲目继续播放，标记过渡
+      // 用 LoopMode.one 阻止 just_audio 自动切歌，让我们自己控制
+      await _player.setShuffleModeEnabled(false);
+      await _player.setLoopMode(LoopMode.one);
+      _roamTransitionPending = true;
+      if (roamId == null || roamId!.isEmpty) {
+        unawaited(_appendRoamAndPlay());
+      }
+      return;
+    }
     await _applyPlaybackMode(mode);
     _schedulePersistPlaybackState();
   }
@@ -1049,12 +1182,10 @@ class PlayerService with WidgetsBindingObserver {
 
   Future<void> _startPlayback() async {
     _debugLog('startPlayback song=${currentSong.value?.title ?? 'none'}');
-    await MediaNotificationService.init(force: true);
     final active = await _setAudioSessionActive(true);
     if (!active) {
       throw Exception('Failed to activate audio session');
     }
-    await _ensureRestoredPlaybackReady();
     await _player.play();
     _completeRestoreSessionIfReady();
     _startBackgroundAudioKeepAliveIfNeeded();
@@ -1159,15 +1290,6 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   Future<void> _ensureRestoredPlaybackReady() async {
-    final session = _restoreSession;
-    if (session == null || session.prepareFailed) return;
-    final preparing = _restorePrepareFuture;
-    if (preparing != null) {
-      await preparing;
-    }
-    if (session.seekApplied) return;
-    await _seekRestoredPosition(session.position);
-    session.seekApplied = true;
   }
 
   Future<void> _seekRestoredPosition(Duration restored) async {
@@ -1230,8 +1352,7 @@ class PlayerService with WidgetsBindingObserver {
   Future<void> _applyPlaybackMode(PlaybackMode mode) async {
     if (mode == PlaybackMode.shuffle) {
       await _player.setLoopMode(LoopMode.all);
-      await _player.setShuffleModeEnabled(true);
-      await _player.shuffle();
+      await _player.setShuffleModeEnabled(false);
       return;
     }
     await _player.setShuffleModeEnabled(false);
@@ -1383,7 +1504,7 @@ class PlayerService with WidgetsBindingObserver {
 
   Future<void> _warmupSource(SongEntity song) async {
     final rawUri = (song.uri ?? '').trim();
-    if (song.isLocal || !rawUri.startsWith('http')) return;
+    if (!rawUri.startsWith('http')) return;
     try {
       await _resolvePlayableUri(song);
     } catch (e) {
@@ -1396,6 +1517,63 @@ class PlayerService with WidgetsBindingObserver {
   void _invalidateResolvedSource(SongEntity song) {
     _resolvedRemoteSources.remove(song.id);
     _sourceResolveInflight.remove(song.id);
+  }
+
+  Future<void> _autoExtendQueue() async {
+    if (_isExtendingQueue) return;
+    final extender = queueExtender;
+    if (extender == null) return;
+
+    _isExtendingQueue = true;
+    try {
+      final newSongs = await extender();
+      if (newSongs.isEmpty) return;
+      await _appendToQueue(newSongs);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('PlayerService autoExtendQueue error: $e');
+      }
+    } finally {
+      _isExtendingQueue = false;
+    }
+  }
+
+  Future<void> _appendToQueue(List<SongEntity> newSongs) async {
+    if (newSongs.isEmpty) return;
+
+    final oldQueue = queue.value;
+    final currentIdx = currentIndex.value;
+    final pos = position.value;
+    final wasPlaying = isPlaying.value;
+
+    final allSongs = [...oldQueue, ...newSongs];
+    queue.value = allSongs;
+
+    final allSources = <AudioSource>[];
+    for (final song in allSongs) {
+      allSources.add(await _sourceForSong(song));
+    }
+
+    try {
+      await _player.setAudioSources(
+        allSources,
+        initialIndex: currentIdx,
+        initialPosition: pos,
+        preload: true,
+      );
+
+      if (_player.shuffleModeEnabled) {
+        await _player.setShuffleModeEnabled(true);
+      }
+
+      if (wasPlaying && !_player.playing) {
+        await _player.play();
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('PlayerService appendToQueue error: $e');
+      }
+    }
   }
 
   void _applyLogicalQueue(List<SongEntity> songs, int currentQueueIndex) {
@@ -1462,7 +1640,7 @@ class PlayerService with WidgetsBindingObserver {
     bool forceRefresh = false,
   }) async {
     final rawUri = (song.uri ?? '').trim();
-    if (song.isLocal || !rawUri.startsWith('http')) {
+    if (!rawUri.startsWith('http')) {
       return Uri.file(rawUri);
     }
 
@@ -1484,30 +1662,16 @@ class PlayerService with WidgetsBindingObserver {
     if (inflight != null) return inflight;
 
     final future = () async {
-      final remoteUri = _getSafeUri(rawUri);
-      final finalRemoteUri = remoteUri ?? Uri.parse(rawUri);
-      final uriStr = finalRemoteUri.toString();
-      final cacheFile = await _audioCache.getCacheFile(
-        uri: uriStr,
-        headers: headers,
-      );
-      final proxyUri = await _proxy.registerSource(
-        uri: finalRemoteUri,
-        headers: {
-          ...?headers,
-          'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          'Accept': '*/*',
-        },
-        cacheFile: cacheFile,
-      );
+      final api = FeiNiuApiClient.instance;
+      final streamUrl = api.streamUrl(song.id);
+      final finalUri = Uri.parse(streamUrl);
       _resolvedRemoteSources[song.id] = _ResolvedRemoteSource(
         rawUri: rawUri,
         headersFingerprint: headersKey,
-        proxyUri: proxyUri,
+        proxyUri: finalUri,
         resolvedAt: DateTime.now(),
       );
-      return proxyUri;
+      return finalUri;
     }();
 
     _sourceResolveInflight[song.id] = future;
@@ -1520,35 +1684,10 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   Future<void> _maybeProbeSongAsync(SongEntity song) async {
-    final hasCover = (song.localCoverPath ?? '').trim().isNotEmpty;
+    final hasCover = false;
     final hasDuration = (song.durationMs ?? 0) > 0;
     final hasLyrics = await _lyricsRepo.hasCachedLrc(song.id);
-    final uri = (song.uri ?? '').trim();
-    final shouldProbe =
-        !song.tagsParsed || !hasCover || !hasDuration || !hasLyrics;
-    if (!shouldProbe) return;
-
-    if (song.isLocal) {
-      if (uri.isEmpty) return;
-      final key =
-          'local:${song.id}:${hasCover ? 1 : 0}:${hasDuration ? 1 : 0}:${song.tagsParsed ? 1 : 0}';
-      if (_probeInflight.containsKey(key)) return;
-      final future = _probeLocalAndPersist(song, uri: uri);
-      _probeInflight[key] = future;
-      future.whenComplete(() => _probeInflight.remove(key));
-      return;
-    }
-
-    if (!uri.startsWith('http')) return;
-
-    final headers = _headersFromSong(song);
-    final key =
-        '${song.id}:${hasCover ? 1 : 0}:${hasDuration ? 1 : 0}:${song.tagsParsed ? 1 : 0}';
-    if (_probeInflight.containsKey(key)) return;
-
-    final future = _probeAndPersist(song, uri: uri, headers: headers);
-    _probeInflight[key] = future;
-    future.whenComplete(() => _probeInflight.remove(key));
+    if (hasCover && hasDuration && hasLyrics) return;
   }
 
   void _scheduleDeferredProbe(SongEntity song) {
@@ -1574,7 +1713,6 @@ class PlayerService with WidgetsBindingObserver {
   Future<void> _persistSongUpdate(
     SongEntity song, {
     int? durationMs,
-    String? localCoverPath,
     String? title,
     String? artist,
     String? album,
@@ -1582,7 +1720,6 @@ class PlayerService with WidgetsBindingObserver {
     int? sampleRate,
     int? fileSize,
     String? format,
-    bool? tagsParsed,
   }) async {
     final next = SongEntity(
       id: song.id,
@@ -1590,18 +1727,12 @@ class PlayerService with WidgetsBindingObserver {
       artist: artist ?? song.artist,
       album: album ?? song.album,
       uri: song.uri,
-      isLocal: song.isLocal,
       headersJson: song.headersJson,
       durationMs: durationMs ?? song.durationMs,
       bitrate: bitrate ?? song.bitrate,
       sampleRate: sampleRate ?? song.sampleRate,
       fileSize: fileSize ?? song.fileSize,
       format: format ?? song.format,
-      sourceId: song.sourceId,
-      fileModifiedMs: song.fileModifiedMs,
-      localCoverPath: localCoverPath ?? song.localCoverPath,
-      localAssetId: song.localAssetId,
-      tagsParsed: tagsParsed ?? song.tagsParsed,
     );
 
     await _songDao.upsertSongs([next]);
@@ -1628,111 +1759,13 @@ class PlayerService with WidgetsBindingObserver {
   Future<void> _probeAndPersist(
     SongEntity song, {
     required String uri,
-    Map<String, String>? headers,
   }) async {
-    final result = await TagProbeService.instance.probeSongDedup(
-      uri: uri,
-      isLocal: false,
-      headers: headers,
-      includeArtwork: true,
-    );
-    if (result == null) return;
-
-    String? coverPath = song.localCoverPath;
-    final artwork = result.artwork;
-    if ((coverPath ?? '').trim().isEmpty &&
-        artwork != null &&
-        artwork.isNotEmpty) {
-      final cached = await ArtworkCacheHelper.cacheCompressedArtwork(
-        bytes: artwork,
-        key: song.id,
-      );
-      if (cached != null && cached.isNotEmpty) {
-        coverPath = cached;
-      }
-    }
-
-    final lyrics = (result.lyrics ?? '').trim();
-    if (lyrics.isNotEmpty) {
-      await _lyricsRepo.saveLrcToCache(song.id, lyrics, overwrite: false);
-    }
-
-    final title = (result.title ?? '').trim().isNotEmpty
-        ? result.title!.trim()
-        : null;
-    final artist = (result.artist ?? '').trim().isNotEmpty
-        ? result.artist!.trim()
-        : null;
-    final album = (result.album ?? '').trim().isNotEmpty
-        ? result.album!.trim()
-        : null;
-    await _persistSongUpdate(
-      song,
-      title: title,
-      artist: artist,
-      album: album,
-      durationMs: result.durationMs,
-      bitrate: result.bitrate,
-      sampleRate: result.sampleRate,
-      fileSize: result.fileSize,
-      format: result.format,
-      localCoverPath: coverPath,
-      tagsParsed: true,
-    );
   }
 
   Future<void> _probeLocalAndPersist(
     SongEntity song, {
     required String uri,
   }) async {
-    final result = await TagProbeService.instance.probeSongDedup(
-      uri: uri,
-      isLocal: true,
-      includeArtwork: true,
-    );
-    if (result == null) return;
-
-    String? coverPath = song.localCoverPath;
-    final artwork = result.artwork;
-    if ((coverPath ?? '').trim().isEmpty &&
-        artwork != null &&
-        artwork.isNotEmpty) {
-      final cached = await ArtworkCacheHelper.cacheCompressedArtwork(
-        bytes: artwork,
-        key: song.id,
-      );
-      if (cached != null && cached.isNotEmpty) {
-        coverPath = cached;
-      }
-    }
-
-    final lyrics = (result.lyrics ?? '').trim();
-    if (lyrics.isNotEmpty) {
-      await _lyricsRepo.saveLrcToCache(song.id, lyrics, overwrite: false);
-    }
-
-    final title = (result.title ?? '').trim().isNotEmpty
-        ? result.title!.trim()
-        : null;
-    final artist = (result.artist ?? '').trim().isNotEmpty
-        ? result.artist!.trim()
-        : null;
-    final album = (result.album ?? '').trim().isNotEmpty
-        ? result.album!.trim()
-        : null;
-    await _persistSongUpdate(
-      song,
-      title: title,
-      artist: artist,
-      album: album,
-      durationMs: result.durationMs,
-      bitrate: result.bitrate,
-      sampleRate: result.sampleRate,
-      fileSize: result.fileSize,
-      format: result.format,
-      localCoverPath: coverPath,
-      tagsParsed: true,
-    );
   }
 
   Uri? _getSafeUri(String uriStr) {
@@ -1761,13 +1794,14 @@ class PlayerService with WidgetsBindingObserver {
     SongEntity song, {
     bool forceRefresh = false,
   }) async {
-    final rawUri = (song.uri ?? '').trim();
-    if (song.isLocal || !rawUri.startsWith('http')) {
-      return AudioSource.file(rawUri);
+    final api = FeiNiuApiClient.instance;
+    if (api.baseUrl.isNotEmpty) {
+      final streamUrl = api.streamUrl(song.id);
+      final headers = FeiNiuApiClient.imageAuthHeaders();
+      return AudioSource.uri(Uri.parse(streamUrl), headers: headers);
     }
-
-    final local = await _resolvePlayableUri(song, forceRefresh: forceRefresh);
-    return AudioSource.uri(local);
+    final rawUri = (song.uri ?? '').trim();
+    return AudioSource.file(rawUri);
   }
 
   Future<void> dispose() async {
@@ -1840,3 +1874,8 @@ class _PlaybackSourceQueue {
 
   const _PlaybackSourceQueue({required this.songs, required this.sources});
 }
+
+
+
+
+

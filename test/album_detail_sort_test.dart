@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nagomusic/app/state/song_state.dart';
-import 'package:nagomusic/pages/library/library_detail_pages.dart';
+import 'package:feiniu_music/app/state/song_state.dart';
+import 'package:feiniu_music/pages/library/library_detail_pages.dart';
 
 void main() {
   SongEntity song(

@@ -178,6 +178,7 @@ class AppPageScaffoldState extends State<AppPageScaffold>
         }
         final stack = AppBackground(
           child: Stack(
+            clipBehavior: Clip.none,
             children: [
               AnimatedBuilder(
                 animation: _drawerController,
@@ -235,10 +236,16 @@ class AppPageScaffoldState extends State<AppPageScaffold>
                 child: RepaintBoundary(child: page),
               ),
               if (miniPlayer != null)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: effectiveMiniPlayerBottom,
+                AnimatedBuilder(
+                  animation: _drawerController,
+                  builder: (context, child) {
+                    return Positioned(
+                      left: drawerWidth * _drawerController.value,
+                      right: 0,
+                      bottom: effectiveMiniPlayerBottom,
+                      child: child!,
+                    );
+                  },
                   child: miniPlayer,
                 ),
               AnimatedBuilder(

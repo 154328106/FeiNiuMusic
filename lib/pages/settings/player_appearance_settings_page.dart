@@ -217,6 +217,32 @@ class _PlayerAppearanceSettingsPageState
                   );
                 },
               ),
+              ValueListenableBuilder<bool>(
+                valueListenable: PlayerBackgroundSettings.roundCover,
+                builder: (context, enabled, _) {
+                  return AppSettingSwitchTile(
+                    title: '圆形封面',
+                    subtitle: '播放页封面以圆形显示',
+                    value: enabled,
+                    onChanged: (value) {
+                      PlayerBackgroundSettings.setRoundCover(value);
+                    },
+                  );
+                },
+              ),
+              ValueListenableBuilder<bool>(
+                valueListenable: PlayerBackgroundSettings.rotateCover,
+                builder: (context, enabled, _) {
+                  return AppSettingSwitchTile(
+                    title: '旋转封面',
+                    subtitle: '播放时封面缓慢旋转',
+                    value: enabled,
+                    onChanged: (value) {
+                      PlayerBackgroundSettings.setRotateCover(value);
+                    },
+                  );
+                },
+              ),
             ],
           ),
         ],
