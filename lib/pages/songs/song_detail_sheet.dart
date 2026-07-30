@@ -295,7 +295,7 @@ class _AppVolumeControl extends StatelessWidget {
               color: colors.onSurfaceVariant,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 20),
           Expanded(
             child: ValueListenableBuilder<double>(
               valueListenable: AppPlaybackVolumeSettings.volume,

@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 
 import '../../app/state/settings_state.dart';
@@ -48,15 +50,15 @@ class GlassPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Listen to panelOpacity so dragging the "面板透明度" slider updates
+    // Listen to panelBlurStrength so dragging the "高斯模糊强度" slider updates
     // every panel instantly, without needing to leave and re-enter the page.
     return ValueListenableBuilder<double>(
-      valueListenable: AppBackgroundSettings.panelOpacity,
-      builder: (context, _, _) => _buildPanel(context),
+      valueListenable: AppBackgroundSettings.panelBlurStrength,
+      builder: (context, blurStrength, _) => _buildPanel(context, blurStrength),
     );
   }
 
-  Widget _buildPanel(BuildContext context) {
+  Widget _buildPanel(BuildContext context, double blurStrength) {
     final theme = Theme.of(context);
     final resolvedColor = color ?? theme.appPanelColor;
     final resolvedBorderColor = borderColor ?? theme.appPanelBorderColor;
@@ -98,9 +100,22 @@ class GlassPanel extends StatelessWidget {
             ),
     );
 
-    return ClipRRect(
+    Widget result = ClipRRect(
       borderRadius: _resolvedBorderRadius,
       child: material,
     );
+
+    // 启用高斯模糊时叠加 BackdropFilter
+    if (blurStrength > 0) {
+      result = ClipRRect(
+        borderRadius: _resolvedBorderRadius,
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: blurStrength, sigmaY: blurStrength),
+          child: result,
+        ),
+      );
+    }
+
+    return result;
   }
 }

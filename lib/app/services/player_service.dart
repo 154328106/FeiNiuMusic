@@ -19,6 +19,7 @@ import '../state/settings_state.dart';
 import '../state/song_state.dart';
 export '../state/player_state.dart';
 import '../state/player_state.dart';
+import 'feiniu/roam_service.dart';
 
 class PlayerService with WidgetsBindingObserver {
   static final PlayerService instance = PlayerService._internal();
@@ -33,6 +34,7 @@ class PlayerService with WidgetsBindingObserver {
   final LyricsRepository _lyricsRepo = LyricsRepository();
   final StatsService _statsService = StatsService.instance;
   AudioSession? _audioSession;
+  Timer? _statsFlushTimer;
 
   ValueNotifier<Duration> get position => _state.position;
   ValueNotifier<Duration?> get duration => _state.duration;
@@ -351,7 +353,11 @@ class PlayerService with WidgetsBindingObserver {
     Future<bool> setSourcesOnce() async {
       try {
         final sourceQueue = await _buildPlaybackSourceQueue(playable);
-        await _loadPlaybackSourceQueue(sourceQueue, initialIndex: actualIndex);
+        await _loadPlaybackSourceQueue(
+          sourceQueue,
+          initialIndex: actualIndex,
+          // 当前歌曲先独占带宽，等剩余 < 30s 时再触发预加载
+        );
         return true;
       } catch (e) {
         if (kDebugMode) {
@@ -458,6 +464,20 @@ class PlayerService with WidgetsBindingObserver {
     if (nextIndex < 0 || nextIndex >= list.length) return;
     final song = list[nextIndex];
     _debugLog('prefetch upcoming index=$nextIndex song=${song.title}');
+
+    // 提前解析下一首歌的播放 URL，使 HTTP 连接就绪，切歌时无缝衔接
+    await _warmupSource(song);
+
+    // 预加载下一首歌的 800px 封面图，切歌时封面立显
+    if (song.coverId != null && song.coverId!.isNotEmpty) {
+      unawaited(precacheImage(
+        CachedNetworkImageProvider(
+          FeiNiuApiClient.instance.coverUrl(song.coverId!, size: 800, updatedAt: song.updatedAt),
+          headers: FeiNiuApiClient.imageAuthHeaders(),
+        ),
+        WidgetsBinding.instance.rootElement!,
+      ));
+    }
   }
 
   Future<void> removeSongsById(
@@ -527,6 +547,8 @@ class PlayerService with WidgetsBindingObserver {
     queueExtender = null;
     _isExtendingQueue = false;
     _stopBackgroundAudioKeepAlive();
+    _statsFlushTimer?.cancel();
+    await _statsService.flush();
     try {
       await _player.stop();
     } catch (_) {}
@@ -873,6 +895,75 @@ class PlayerService with WidgetsBindingObserver {
     }
   }
 
+  /// 从当前状态直接启动漫游随机播放：清空队列 → roam-start 获取随机曲目 → playQueue → 设置 queueExtender
+  Future<void> startRoamPlayback() async {
+    _clearRestoreSession();
+    queueExtender = null;
+    _isExtendingQueue = false;
+    roamId = null;
+    _roamTransitionPending = false;
+    _roamAppendQueuedCount = 0;
+
+    // 停止并清空当前播放
+    try {
+      await _player.stop();
+    } catch (_) {}
+    isPlaying.value = false;
+    position.value = Duration.zero;
+    duration.value = null;
+    queue.value = const [];
+    currentIndex.value = -1;
+    currentSong.value = null;
+
+    try {
+      final deviceId = await AuthService.instance.ensureDeviceId();
+      final response = await FeiNiuApiClient.instance.getRoamStart(deviceId);
+      roamId = response.current.roamId;
+
+      final track = FeiNiuTrackService.instance.trackToSongEntity(
+        response.current.track.toJson(),
+      );
+      final songs = <SongEntity>[track];
+      if (response.next != null) {
+        songs.add(FeiNiuTrackService.instance.trackToSongEntity(
+          response.next!.track.toJson(),
+        ));
+      }
+
+      playQueue(songs, 0);
+      // playQueue 会清空 roamId，恢复它
+      roamId = response.current.roamId;
+      // 切换为随机播放模式
+      await setPlaybackMode(PlaybackMode.shuffle);
+      // 设置队列扩展器，播完自动拉下一首随机
+      queueExtender = _defaultRoamQueueExtender;
+    } catch (e) {
+      _debugLog('startRoamPlayback error: $e');
+    }
+  }
+
+  /// 默认漫游队列扩展器 — 每次队列快播完时调用 roam-next 获取新歌曲追加
+  Future<List<SongEntity>> _defaultRoamQueueExtender() async {
+    try {
+      final id = roamId;
+      if (id == null || id.isEmpty) return [];
+
+      final deviceId = await AuthService.instance.ensureDeviceId();
+      final response = await FeiNiuApiClient.instance.getRoamNext(deviceId, id);
+      if (response.next == null) return [];
+
+      roamId = response.next!.roamId;
+
+      final song = FeiNiuTrackService.instance.trackToSongEntity(
+        response.next!.track.toJson(),
+      );
+      return [song];
+    } catch (e) {
+      _debugLog('defaultRoamQueueExtender error: $e');
+      return [];
+    }
+  }
+
   Future<void> cyclePlaybackMode() async {
     final current = playbackMode.value;
     final next = switch (current) {
@@ -1063,6 +1154,11 @@ class PlayerService with WidgetsBindingObserver {
     snapshot.value = nextSnapshot;
     _statsService.onSnapshot(nextSnapshot);
     _schedulePersistPlaybackState();
+    // 定期刷写统计到数据库（每 15s），确保 app 被杀时数据不丢
+    _statsFlushTimer?.cancel();
+    _statsFlushTimer = Timer(const Duration(seconds: 15), () {
+      _statsService.flush();
+    });
   }
 
   Future<void> _restorePlaybackState() async {
@@ -1091,6 +1187,7 @@ class PlayerService with WidgetsBindingObserver {
     try {
       await _setAudioSessionActive(false);
     } catch (_) {}
+    _statsService.flush();
   }
 
   Future<_PlaybackRestoreState?> _readPersistedPlaybackState() async {
@@ -1199,7 +1296,9 @@ class PlayerService with WidgetsBindingObserver {
       allowZeroOverride: !(_restoreSession?.protectPosition ?? false),
     );
     await _persistPlaybackStateNow();
-    await _setAudioSessionActive(false);
+    // 暂停时不释放音频 session，保留 ExoPlayer 缓冲区，
+    // 这样再次 seek/play 时能秒播而无需重新缓冲。
+    // await _setAudioSessionActive(false);
   }
 
   void _handleAudioInterruption(AudioInterruptionEvent event) {
@@ -1808,6 +1907,8 @@ class PlayerService with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     AppPlaybackVolumeSettings.volume.removeListener(_handleAppVolumeChanged);
     cancelSleepTimer();
+    _statsFlushTimer?.cancel();
+    _statsService.flush();
     await _positionSub?.cancel();
     await _durationSub?.cancel();
     await _bufferSub?.cancel();

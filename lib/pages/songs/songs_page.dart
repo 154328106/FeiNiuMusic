@@ -95,34 +95,57 @@ class _SongsPageState extends State<SongsPage>
     if (songs.isEmpty || !mounted) return;
     final api = FeiNiuApiClient.instance;
     final headers = FeiNiuApiClient.imageAuthHeaders();
+    int loaded = 0, skipped = 0;
     for (final song in songs.take(count)) {
       if (song.coverId != null && song.coverId!.isNotEmpty) {
-        final url = api.coverUrl(song.coverId!, size: 240, updatedAt: song.updatedAt);
+        final url = api.coverUrl(song.coverId!, size: 120, updatedAt: song.updatedAt);
         unawaited(precacheImage(
           CachedNetworkImageProvider(url, headers: headers),
           context,
-        ));
+        ).then((_) => loaded++).catchError((e) {
+          debugPrint('[SongsPage] cover precache failed song=${song.title} coverId=${song.coverId}: $e');
+        }));
+      } else {
+        skipped++;
       }
+    }
+    if (loaded > 0 || skipped > 0) {
+      debugPrint('[SongsPage] preloadCovers count=${songs.length} loaded=$loaded skipped=$skipped');
     }
   }
 
   Future<void> _loadSongs({bool forceRefresh = false}) async {
+    debugPrint('[SongsPage] _loadSongs forceRefresh=$forceRefresh sort=${_apiSortParam()}');
     _currentPage = 1;
     _hasMoreSongs = true;
 
     Future<List<SongEntity>> fetch() async {
       final sort = _apiSortParam();
-      final pageData = await _api.getTrackList(
-        page: 1,
-        size: _pageSize,
-        sort: sort,
-      );
-      final songs = pageData.list
-          .map((t) => _trackService.trackToSongEntity(t.toJson()))
-          .toList();
-      _totalSongs = pageData.total;
-      _hasMoreSongs = songs.length >= _pageSize;
-      return songs;
+      debugPrint('[SongsPage] fetch page=1 size=$_pageSize sort=$sort');
+      try {
+        final pageData = await _api.getTrackList(
+          page: 1,
+          size: _pageSize,
+          sort: sort,
+        );
+        debugPrint('[SongsPage] fetch ok total=${pageData.total} items=${pageData.list.length}');
+        final songs = pageData.list
+            .map((t) {
+              try {
+                return _trackService.trackToSongEntity(t.toJson());
+              } catch (e) {
+                debugPrint('[SongsPage] trackToSongEntity error: $e');
+                rethrow;
+              }
+            })
+            .toList();
+        _totalSongs = pageData.total;
+        _hasMoreSongs = songs.length >= _pageSize;
+        return songs;
+      } catch (e) {
+        debugPrint('[SongsPage] fetch error: $e');
+        rethrow;
+      }
     }
 
     if (forceRefresh) {
@@ -139,6 +162,9 @@ class _SongsPageState extends State<SongsPage>
           key: _cacheKey(),
           jsonData: jsonEncode(songs.map((s) => s.toMap()).toList()),
         );
+        debugPrint('[SongsPage] forceRefresh done, songs=${songs.length}');
+      } catch (e) {
+        debugPrint('[SongsPage] forceRefresh error: $e');
       } finally {
         if (mounted) _isRefreshing.value = false;
       }
@@ -151,6 +177,7 @@ class _SongsPageState extends State<SongsPage>
       void onData(List<SongEntity>? data) {
         if (mounted) {
           if (data != null) {
+            debugPrint('[SongsPage] onData songs=${data.length}');
             _songs.value = data;
             _isLoading.value = false;
             _preloadCovers(data);
@@ -163,29 +190,47 @@ class _SongsPageState extends State<SongsPage>
         scope: 'track_list',
         key: _cacheKey(),
         fetch: fetch,
-        fromJson: (json) => (jsonDecode(json) as List)
-            .map((e) => SongEntity.fromMap(e as Map<String, dynamic>))
-            .toList(),
-        toJson: (data) => jsonEncode(data.map((s) => s.toMap()).toList()),
+        fromJson: (json) {
+          try {
+            final list = (jsonDecode(json) as List)
+                .map((e) => SongEntity.fromMap(e as Map<String, dynamic>))
+                .toList();
+            debugPrint('[SongsPage] cache parse ok, items=${list.length}');
+            return list;
+          } catch (e) {
+            debugPrint('[SongsPage] cache parse error: $e');
+            rethrow;
+          }
+        },
+        toJson: (data) {
+          final json = jsonEncode(data.map((s) => s.toMap()).toList());
+          debugPrint('[SongsPage] toJson items=${data.length} size=${json.length}B');
+          return json;
+        },
         fetchCallback: onData,
       );
 
       if (cached != null) {
         // 缓存命中 → 全屏转圈消失，右上角转圈保持直到后台刷新结束
+        debugPrint('[SongsPage] cache hit, songs=${cached.length}, background refresh started');
         if (mounted) {
           _songs.value = cached;
           _isLoading.value = false;
           _preloadCovers(cached);
           // _isRefreshing 保持 true，后台刷新完成后 onData 会关掉
         }
+      } else {
+        debugPrint('[SongsPage] cache miss, loaded from network');
       }
-      debugPrint('[SongsPage] load complete, songs=${_songs.value.length}, cached=$cached');
     } catch (e) {
-      debugPrint('[SongsPage] load error: $e');
+      debugPrint('[SongsPage] load error type=${e.runtimeType}: $e');
       if (mounted) {
         _isRefreshing.value = false;
         if (_songs.value.isEmpty) {
           _isLoading.value = false;
+          debugPrint('[SongsPage] no cached data, showing empty state');
+        } else {
+          debugPrint('[SongsPage] has stale data on screen, hiding refresher');
         }
       }
     }
@@ -195,6 +240,7 @@ class _SongsPageState extends State<SongsPage>
     if (_isLoadingMore.value || !_hasMoreSongs) return;
     _isLoadingMore.value = true;
     _currentPage++;
+    debugPrint('[SongsPage] _loadMoreSongs page=$_currentPage sort=${_apiSortParam()}');
     try {
       final sort = _apiSortParam();
       final pageData = await _api.getTrackList(
@@ -202,16 +248,19 @@ class _SongsPageState extends State<SongsPage>
         size: _pageSize,
         sort: sort,
       );
+      debugPrint('[SongsPage] loadMore ok total=${pageData.total} items=${pageData.list.length}');
       final songs = pageData.list
           .map((t) => _trackService.trackToSongEntity(t.toJson()))
           .toList();
       _hasMoreSongs = songs.length >= _pageSize;
+      debugPrint('[SongsPage] loadMore hasMore=$_hasMoreSongs currentTotal=${_songs.value.length}');
       if (mounted) {
         _songs.value = [..._songs.value, ...songs];
         _isLoadingMore.value = false;
       }
     } catch (e) {
       _currentPage--;
+      debugPrint('[SongsPage] loadMore error type=${e.runtimeType}: $e');
       if (mounted) _isLoadingMore.value = false;
     }
   }
@@ -374,6 +423,18 @@ class _SongsPageState extends State<SongsPage>
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                       child: Row(
                         children: [
+                          InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: () => _player.startRoamPlayback(),
+                            child: Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: Icon(
+                                Icons.shuffle_rounded,
+                                size: 18,
+                                color: scheme.primary,
+                              ),
+                            ),
+                          ),
                           Text(
                             '共 $_totalSongs 首',
                             style: TextStyle(

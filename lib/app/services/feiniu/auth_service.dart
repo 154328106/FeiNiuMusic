@@ -113,8 +113,9 @@ class AuthService {
   Future<void> logout() async {
     await FeiNiuApiClient.instance.clearAuth();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_prefsUsername);
-    await prefs.remove(_prefsPassword);
+    // 不清除 username/password，保留用于退出登录后自动填充
+    // await prefs.remove(_prefsUsername);
+    // await prefs.remove(_prefsPassword);
     isLoggedIn.value = false;
     serverUrl.value = null;
     username.value = null;

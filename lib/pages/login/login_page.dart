@@ -69,16 +69,27 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _silentProbe(String fnId) async {
     try {
       final preference = AppFnConnectionSettings.connectionPreference.value;
-      final result = await FnConnectionProbeService.instance.probe(
-        fnId: fnId,
-        preference: preference,
-      );
+      final cache = AppFnConnectionSettings.cachedConnection;
+
+      final result = cache != null
+          ? await FnConnectionProbeService.instance.probeWithCache(
+              cachedUrl: cache.url,
+              cachedIsRelay: cache.isRelay,
+              fnId: fnId,
+              preference: preference,
+            )
+          : await FnConnectionProbeService.instance.probe(
+              fnId: fnId,
+              preference: preference,
+            );
+
       if (!mounted) return;
       // 保存连接信息，显示在设置页
       AppFnConnectionSettings.saveProbeResult(
         fnId: fnId,
         url: result.serverUrl,
         method: result.probeMethod,
+        isRelay: result.isRelay,
       );
     } catch (_) {
       // 静默探测失败不显示错误，等用户手动操作
@@ -134,10 +145,19 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       final preference = AppFnConnectionSettings.connectionPreference.value;
-      final result = await FnConnectionProbeService.instance.probe(
-        fnId: fnId,
-        preference: preference,
-      );
+      final cache = AppFnConnectionSettings.cachedConnection;
+
+      final result = cache != null
+          ? await FnConnectionProbeService.instance.probeWithCache(
+              cachedUrl: cache.url,
+              cachedIsRelay: cache.isRelay,
+              fnId: fnId,
+              preference: preference,
+            )
+          : await FnConnectionProbeService.instance.probe(
+              fnId: fnId,
+              preference: preference,
+            );
 
       // 探测成功，用成功 URL 继续登录（中继模式的 relayMode 标记一并传递）
       // 同时保存连接信息供设置页显示
@@ -145,6 +165,7 @@ class _LoginPageState extends State<LoginPage> {
         fnId: fnId,
         url: result.serverUrl,
         method: result.probeMethod,
+        isRelay: result.isRelay,
       );
       await _performLogin(result.serverUrl, username, password,
           relayMode: result.isRelay);

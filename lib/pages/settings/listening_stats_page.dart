@@ -80,11 +80,10 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
       final song = songMap[stat.songId];
       if (song == null) continue;
       topSongs.add(_SongStatRow(song: song, stat: stat));
-      final artist = song.artist.trim().isEmpty ? '未知艺术家' : song.artist.trim();
+      final artist = song.artistDisplayName.trim().isEmpty ? '未知艺术家' : song.artistDisplayName.trim();
       (artistAcc[artist] ??= _AggAccum(artist, song)).add(stat);
-      final album = (song.album ?? '').trim().isEmpty
-          ? '未知专辑'
-          : song.album!.trim();
+      final albumName = song.albumDisplayName.trim();
+      final album = albumName.isEmpty ? '未知专辑' : albumName;
       (albumAcc[album] ??= _AggAccum(album, song)).add(stat);
     }
     List<_AggRow> rank(Map<String, _AggAccum> acc) {
@@ -312,7 +311,7 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
               ),
               title: song.title,
               subtitle:
-                  '${song.artist} · ${_durationText(song.durationMs)}',
+                  '${song.artistDisplayName} · ${_durationText(song.durationMs)}',
               selected: false,
               multiSelect: false,
               isHighlighted: current?.id == song.id,
@@ -372,8 +371,14 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
             Navigator.of(context).push(
               buildAppPageRoute<void>(
                 (_) => isAlbum
-                    ? AlbumDetailPage(albumName: row.name)
-                    : ArtistDetailPage(artistName: row.name),
+                    ? AlbumDetailPage(
+                        albumName: row.name,
+                        albumGuid: row.sample.albumGuid,
+                      )
+                    : ArtistDetailPage(
+                        artistName: row.name,
+                        artistGuid: row.sample.firstArtistGuid,
+                      ),
               ),
             );
           },

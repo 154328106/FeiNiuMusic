@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/router/app_router.dart';
 import '../../app/services/feiniu/auth_service.dart';
+import '../../app/services/player_service.dart';
 import '../../components/index.dart';
 
 /// 底部导航第 4 项「我的」入口页。
@@ -116,6 +117,8 @@ class ProfilePage extends StatelessWidget {
       ),
     );
     if (confirmed == true) {
+      // 退出登录前先停止音乐播放
+      await PlayerService.instance.stopAndClear();
       await AuthService.instance.logout();
       if (!context.mounted) return;
       Navigator.of(context).pushReplacementNamed(AppRoutes.login);

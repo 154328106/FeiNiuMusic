@@ -73,19 +73,20 @@ extension AppThemeSurfaceX on ThemeData {
         (backgroundPath != null && backgroundPath.trim().isNotEmpty);
   }
 
+  /// 模糊时用纯黑/纯白极低不透明度打底，背景清晰透出；
+  /// 无模糊时保持原有半透明面板（85%）。
   Color get appPanelColor {
-    final panelOpacity = AppBackgroundSettings.panelOpacity.value;
-    if (panelOpacity <= 0) return Colors.transparent;
-
-    if (AppThemeSettings.visualStyle.value == AppVisualStyle.miuix) {
-      // miuix panels used to be forced fully opaque; honour the transparency
-      // slider here too so users get a single unified control.
-      return colorScheme.surface.withValues(alpha: panelOpacity);
+    final panelBlur = AppBackgroundSettings.panelBlurStrength.value;
+    final hasBlur = panelBlur > 0;
+    if (hasBlur) {
+      // 启用高斯模糊：底色几乎透明，模糊效果靠 BackdropFilter 实现
+      final isDark = brightness == Brightness.dark;
+      return isDark
+          ? Colors.black.withValues(alpha: 0.06)
+          : Colors.white.withValues(alpha: 0.06);
     }
+    // 无模糊时保持原有半透明面板
     final isDark = brightness == Brightness.dark;
-    // Panel opacity is now an unconditional control — no more gating on a
-    // separate "glass effect" toggle. 1.0 = fully solid panel, 0.0 = fully
-    // transparent (the background/glow shows through).
     final base = isDark
         ? Color.alphaBlend(
             colorScheme.primary.withValues(alpha: 0.08),
@@ -95,7 +96,7 @@ extension AppThemeSurfaceX on ThemeData {
             colorScheme.primary.withValues(alpha: 0.12),
             Colors.white,
           );
-    return base.withValues(alpha: panelOpacity);
+    return base.withValues(alpha: 0.85);
   }
 
   Color get appPanelShadowColor {

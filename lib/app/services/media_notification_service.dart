@@ -1,8 +1,9 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:io' as io;
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -41,7 +42,7 @@ class MediaNotificationService {
     }
     _initStarted = true;
     _debugLog('init start force=$force');
-    if (Platform.isAndroid) {
+    if (io.Platform.isAndroid) {
       final status = await Permission.notification.status;
       if (!status.isGranted) {
         _debugLog('requesting Android notification permission');
@@ -63,7 +64,6 @@ class MediaNotificationService {
   }
 
   static void _debugLog(String message) {
-    if (!kDebugMode) return;
     debugPrint('[MediaNotification] $message');
   }
 }
@@ -115,60 +115,109 @@ class _NagoAudioHandler extends BaseAudioHandler
   }
 
   void _debugLog(String message) {
-    if (!kDebugMode) return;
+    // 使用 debugPrint 让日志在 DebugLogService 开启时可见
     debugPrint('[MediaNotification] $message');
   }
 
-  // ---- 封面图本地下载 ----
+  // ---- 封面图本地缓存 ----
+
+  /// flutter_cache_manager（CachedNetworkImage 共用）实例，
+  /// 封面图在 App 内已被 CachedNetworkImage 下载过，直接拿本地文件即可。
+  static final DefaultCacheManager _coverCache = DefaultCacheManager();
 
   Future<String> _coverDir() async {
     if (_coverDirPath == null) {
       final dir = await getTemporaryDirectory();
       _coverDirPath = '${dir.path}/notification_covers';
-      await Directory(_coverDirPath!).create(recursive: true);
+      await io.Directory(_coverDirPath!).create(recursive: true);
     }
     return _coverDirPath!;
   }
 
-  /// 使用认证头下载封面图到本地临时文件，
-  /// 因为 Android 系统通知栏加载 artUri 时不携带 Cookie 认证头。
-  Future<Uri?> _downloadCoverToLocal(String coverId, {int? updatedAt}) async {
-    final api = FeiNiuApiClient.instance;
-    if (api.token.isEmpty) return null;
+  /// 从 flutter_cache_manager 获取本地封面文件。
+  /// Android 系统通知栏加载 artUri 时不携带 Cookie 认证头，
+  /// 所以必须使用本地文件 URI 而不是远程 API URL。
+  Future<Uri?> _getLocalCoverUri(String coverId, {int? updatedAt}) async {
+    final url = FeiNiuApiClient.instance.coverUrl(
+      coverId, size: 120, updatedAt: updatedAt,
+    );
+    _debugLog('getLocalCoverUri coverId=$coverId url=$url');
 
-    final dir = await _coverDir();
-    final suffix = updatedAt != null && updatedAt > 0 ? '_$updatedAt' : '';
-    final filePath = '$dir/${coverId}_512$suffix.jpg';
-    final file = File(filePath);
-
-    if (await file.exists()) {
-      return Uri.file(filePath);
+    // 1. 先查 flutter_cache_manager 已有缓存（CachedNetworkImage 可能已下载过）
+    try {
+      final cacheObject = await _coverCache.getFileFromCache(url);
+      if (cacheObject != null) {
+        final cachedPath = cacheObject.file.path;
+        _debugLog('cache hit path=$cachedPath');
+        final cachedFile = io.File(cachedPath);
+        if (await cachedFile.exists()) {
+          return Uri.file(cachedPath);
+        }
+        _debugLog('cache file not found on disk path=$cachedPath');
+      } else {
+        _debugLog('cache miss');
+      }
+    } catch (e) {
+      _debugLog('get local cover from cache failed: $e');
     }
 
+    // 2. 让 flutter_cache_manager 下载到缓存（带认证头，完成后加入缓存池）
     try {
-      final httpClient = HttpClient();
+      // getSingleFile 返回 package:file 的 File 对象，与 dart:io File 不兼容
+      final cacheFile = await _coverCache.getSingleFile(url,
+        headers: FeiNiuApiClient.imageAuthHeaders(),
+      );
+      final localPath = cacheFile.path;
+      _debugLog('getSingleFile ok path=$localPath');
+      final localFile = io.File(localPath);
+      if (await localFile.exists()) {
+        return Uri.file(localPath);
+      }
+      _debugLog('getSingleFile file not found on disk');
+    } catch (e) {
+      _debugLog('get local cover via cache manager failed: $e');
+    }
+
+    // 3. fallback：下载到 notification_covers 目录（自签名证书兼容）
+    try {
+      final dir = await _coverDir();
+      final suffix = updatedAt != null && updatedAt > 0 ? '_$updatedAt' : '';
+      final filePath = '$dir/${coverId}_512$suffix.jpg';
+      final file = io.File(filePath);
+      if (await file.exists()) {
+        _debugLog('fallback file exists path=$filePath');
+        return Uri.file(filePath);
+      }
+
+      _debugLog('fallback downloading url=$url');
+      final httpClient = io.HttpClient()
+        ..badCertificateCallback = (_, __, ___) => true;
       try {
-        final request = await httpClient.getUrl(
-          Uri.parse(api.coverUrl(coverId, size: 512, updatedAt: updatedAt)),
-        );
-        if (api.token.isNotEmpty) {
-          final headers = api.authHeaders();
+        final request = await httpClient.getUrl(Uri.parse(url));
+        if (FeiNiuApiClient.instance.token.isNotEmpty) {
+          final headers = FeiNiuApiClient.instance.authHeaders();
           for (final entry in headers.entries) {
             request.headers.set(entry.key, entry.value);
           }
         }
         final response = await request.close();
         if (response.statusCode == 200) {
-          final bytes = await consolidateHttpClientResponseBytes(response);
+          final bytes = await response.fold<List<int>>(
+            <int>[],
+            (prev, chunk) => prev..addAll(chunk),
+          );
+          _debugLog('fallback download ok size=${bytes.length}');
           await file.writeAsBytes(bytes);
           return Uri.file(filePath);
         }
+        _debugLog('fallback download failed status=${response.statusCode}');
       } finally {
         httpClient.close(force: true);
       }
     } catch (e) {
-      _debugLog('cover download failed: $e');
+      _debugLog('cover download fallback failed: $e');
     }
+    _debugLog('getLocalCoverUri returning null');
     return null;
   }
 
@@ -185,15 +234,15 @@ class _NagoAudioHandler extends BaseAudioHandler
         : '$titleText · $artistText';
     final albumName = song.albumDisplayName;
 
-    // artUri: Android 优先使用本地下载的封面图
+    // artUri: Android 优先使用本地文件 URI。
     Uri? artUri;
     if (song.coverId != null && song.coverId!.isNotEmpty) {
       if (_cachedCoverUri != null) {
         artUri = _cachedCoverUri;
       } else {
-        // Android 和 iOS 都使用 API URL，系统可能不携带 Cookie 但最差情况是显示空白
+        // 本地封面尚未就绪时发远程 URL，audio_service 会自动下载并缓存
         artUri = Uri.tryParse(
-          FeiNiuApiClient.instance.coverUrl(song.coverId!, size: 512, updatedAt: song.updatedAt),
+          FeiNiuApiClient.instance.coverUrl(song.coverId!, size: 120, updatedAt: song.updatedAt),
         );
       }
     }
@@ -226,6 +275,8 @@ class _NagoAudioHandler extends BaseAudioHandler
       displayTitle: song.title,
       displaySubtitle: lyricLine,
       displayDescription: lyricLine != null ? song.artistDisplayName : null,
+      // audio_service 加载 artUri 时使用这些 HTTP 请求头（用于服务器认证）
+      artHeaders: FeiNiuApiClient.imageAuthHeaders(),
     );
   }
 
@@ -291,31 +342,68 @@ class _NagoAudioHandler extends BaseAudioHandler
       _debugLog('song changed to ${snap.song?.title ?? 'none'}');
     }
 
-    // 歌曲切换时异步下载封面图到本地
+    // 核心改动：先发 MediaItem（远程 URL + artHeaders），
+    // audio_service 内部会自动下载封面转为 Bitmap 通知栏显示。
+    // 同时后台获取本地缓存路径，进一步替换为 file://。
     if (songChanged) {
       final song = snap.song;
+      final oldCoverId = _lastCoverId;
       _cachedCoverUri = null;
       if (song != null &&
           song.coverId != null &&
           song.coverId!.isNotEmpty &&
-          song.coverId != _lastCoverId) {
+          song.coverId != oldCoverId) {
         _lastCoverId = song.coverId;
-        if (Platform.isAndroid) {
-          _downloadCoverToLocal(song.coverId!, updatedAt: song.updatedAt).then((localUri) {
-            if (localUri != null && song.id == _lastSongId) {
-              _cachedCoverUri = localUri;
-              _syncMediaItem();
-            }
-          });
+        // 先发送 MediaItem（带 artHeaders，audio_service 会自动下载缓存封面）
+        _syncQueue(snap);
+        _syncMediaItem();
+        // 后台异步下载本地封面，缓存后替换 MediaItem 为 file:// URI
+        if (io.Platform.isAndroid) {
+          _syncAndUpdateCover(song);
         }
+      } else {
+        _syncQueue(snap);
+        _syncMediaItem();
       }
+    } else {
+      _syncQueue(snap);
+      _syncMediaItem();
     }
-
-    _syncQueue(snap);
-    _syncMediaItem();
     _syncPlaybackState(snap);
     if (songChanged) {
       _refreshFavoriteState();
+    }
+  }
+
+  /// 获取本地封面后立即刷新通知，确保通知栏从第一次渲染就用本地文件。
+  Future<void> _syncAndUpdateCover(SongEntity song) async {
+    if (song.coverId == null || song.coverId!.isEmpty) return;
+    _debugLog('syncAndUpdateCover song=${song.title} coverId=${song.coverId}');
+    final localUri = await _getLocalCoverUri(
+      song.coverId!,
+      updatedAt: song.updatedAt,
+    );
+    _debugLog('syncAndUpdateCover localUri=$localUri');
+    if (localUri != null && song.id == _lastSongId) {
+      _cachedCoverUri = localUri;
+    }
+    // 拿到本地封面（或返回 null）后再同步队列和当前曲目
+    _syncQueue(player.snapshot.value);
+    _syncMediaItem();
+  }
+
+  /// 后台尝试将封面替换为本地文件。
+  /// 优先使用 CachedNetworkImage 已有的磁盘缓存（不发起网络请求），
+  /// 缓存不存在时通过 flutter_cache_manager 下载至本地缓存。
+  Future<void> _tryUpdateCoverLocal(SongEntity song) async {
+    if (song.coverId == null || song.coverId!.isEmpty) return;
+    final localUri = await _getLocalCoverUri(
+      song.coverId!,
+      updatedAt: song.updatedAt,
+    );
+    if (localUri != null && song.id == _lastSongId) {
+      _cachedCoverUri = localUri;
+      _syncMediaItem();
     }
   }
 

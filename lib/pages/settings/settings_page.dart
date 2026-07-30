@@ -135,6 +135,19 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(height: 16),
               AppSettingSection(
+                title: '启动',
+                children: [
+                  AppSettingTile(
+                    title: '启动设置',
+                    subtitle: '启动时自动打开播放界面',
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () =>
+                        Navigator.pushNamed(context, AppRoutes.launchSettings),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              AppSettingSection(
                 title: '应用',
                 children: [
                   AppSettingTile(

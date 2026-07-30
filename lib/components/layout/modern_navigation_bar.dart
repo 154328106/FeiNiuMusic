@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 
 import '../../app/router/app_router.dart';
@@ -108,19 +110,19 @@ class ModernNavigationBar extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
-    // Follow the same panel-opacity slider used by cards / setting panels so
-    // the bottom bar visually belongs to the same surface family. Dragging
-    // "面板透明度" to 100% turns the bar fully transparent — the page glow
-    // (or background image) shows through instead of a hard white slab.
+    // Follow the same panel blur slider used by cards/setting panels so
+    // the bottom bar visually belongs to the same surface family.
     return ValueListenableBuilder<double>(
-      valueListenable: AppBackgroundSettings.panelOpacity,
-      builder: (context, panelOpacity, _) {
-        final tinted = Color.alphaBlend(
-          scheme.primary.withValues(alpha: isDark ? 0.05 : 0.03),
-          scheme.surface,
-        );
-        final barColor = tinted.withValues(alpha: panelOpacity);
-        return Material(
+      valueListenable: AppBackgroundSettings.panelBlurStrength,
+      builder: (context, _, __) {
+        final blurStrength = AppBackgroundSettings.panelBlurStrength.value;
+        final isBlurred = blurStrength > 0;
+        final barColor = isBlurred
+            ? (isDark
+                ? Colors.black.withValues(alpha: 0.06)
+                : Colors.white.withValues(alpha: 0.04))
+            : scheme.surface.withValues(alpha: 0.85);
+        Widget navBar = Material(
           color: barColor,
           elevation: 0,
           child: SafeArea(
@@ -142,6 +144,16 @@ class ModernNavigationBar extends StatelessWidget {
             ),
           ),
         );
+        // 启用高斯模糊时包裹 BackdropFilter
+        if (blurStrength > 0) {
+          navBar = ClipRect(
+            child: BackdropFilter(
+              filter: ui.ImageFilter.blur(sigmaX: blurStrength, sigmaY: blurStrength),
+              child: navBar,
+            ),
+          );
+        }
+        return navBar;
       },
     );
   }

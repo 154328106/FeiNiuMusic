@@ -21,7 +21,9 @@ class LyricPage extends StatelessWidget {
             child: SafeArea(
               child: Column(
                 children: [
-                  PlayerTopBar(onBack: () => Navigator.pop(context)),
+                  PlayerTopBar(
+                    onBack: () => Navigator.pop(context),
+                  ),
                   Expanded(child: const PlayerLyricsView()),
                 ],
               ),

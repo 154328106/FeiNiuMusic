@@ -640,22 +640,17 @@ class _PlayerSheetView extends StatelessWidget {
               child: PlayerBackground(songSignal: player.currentSongSignal),
             ),
             RepaintBoundary(
-              child: ValueListenableBuilder<bool>(
-                valueListenable: AppBackgroundSettings.glassEffectEnabled,
-                builder: (context, glassEnabled, _) {
-                  return ValueListenableBuilder<double>(
-                    valueListenable: AppBackgroundSettings.panelBlurStrength,
-                    builder: (context, blurStrength, _) {
-                      final mask = Container(color: maskColor);
-                      if (!glassEnabled || blurStrength <= 0) return mask;
-                      return BackdropFilter(
-                        filter: ui.ImageFilter.blur(
-                          sigmaX: blurStrength,
-                          sigmaY: blurStrength,
-                        ),
-                        child: mask,
-                      );
-                    },
+              child: ValueListenableBuilder<double>(
+                valueListenable: AppBackgroundSettings.panelBlurStrength,
+                builder: (context, blurStrength, _) {
+                  final mask = Container(color: maskColor);
+                  if (blurStrength <= 0) return mask;
+                  return BackdropFilter(
+                    filter: ui.ImageFilter.blur(
+                      sigmaX: blurStrength,
+                      sigmaY: blurStrength,
+                    ),
+                    child: mask,
                   );
                 },
               ),

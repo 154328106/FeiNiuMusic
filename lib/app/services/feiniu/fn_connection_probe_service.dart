@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart' as crypto;
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../state/settings_fn_state.dart';
 import 'fn_models.dart';
 
 /// FN 连接探测服务（单例）
@@ -101,6 +102,94 @@ class FnConnectionProbeService {
   /// 取消当前探测
   void cancel() {
     _cancelToken?.cancel();
+  }
+
+  /// 缓存优先探测
+  ///
+  /// 优先快速验证上次成功的连接 URL 是否仍可用（200ms 超时），
+  /// 缓存可用则直接返回，不可用时回退到完整分层探测。
+  ///
+  /// [cachedUrl] - 上次成功连接的 URL（来自 AppFnConnectionSettings）
+  /// [cachedIsRelay] - 上次连接是否为中继模式
+  /// [fnId] - FNID
+  /// [preference] - 连接偏好模式
+  ///
+  /// 返回 [ConnectionProbeResult]，包含最终成功的 URL。
+  /// 所有链路失败时抛出 [Exception]。
+  Future<ConnectionProbeResult> probeWithCache({
+    required String cachedUrl,
+    required bool cachedIsRelay,
+    required String fnId,
+    required FnConnectionPreference preference,
+  }) async {
+    if (isProbing.value) {
+      throw Exception('探测正在进行中，请等待完成');
+    }
+
+    // Step 1: 快速验证缓存连接（200ms 超时）
+    isProbing.value = true;
+
+    try {
+      if (kDebugMode) {
+        debugPrint('[FnProbe] Trying cached connection: $cachedUrl');
+      }
+
+      try {
+        final cachedOptions = Options(
+          connectTimeout: const Duration(milliseconds: 200),
+          receiveTimeout: const Duration(seconds: 1),
+          sendTimeout: const Duration(seconds: 1),
+          followRedirects: false,
+          validateStatus: (_) => true,
+          headers: cachedIsRelay ? {'Cookie': 'mode=relay'} : null,
+        );
+
+        await _probeDio.getUri(
+          Uri.parse(cachedUrl),
+          options: cachedOptions,
+        );
+
+        // 缓存连接可用，直接返回
+        if (kDebugMode) {
+          debugPrint('[FnProbe] Cached connection still valid: $cachedUrl');
+        }
+        return ConnectionProbeResult(
+          serverUrl: cachedUrl,
+          probeMethod: '缓存连接',
+          isRelay: cachedIsRelay,
+        );
+      } on DioException {
+        // 缓存连接不可用，回退到完整探测
+        if (kDebugMode) {
+          debugPrint('[FnProbe] Cached connection failed, falling back to full probe');
+        }
+      }
+
+      // Step 2: 回退到完整探测
+      _cancelToken = CancelToken();
+      final params = await _callFnConnectionApi(fnId, _cancelToken!);
+      final result = await _hierarchicalProbe(
+        fnId,
+        params,
+        preference,
+        _cancelToken!,
+      );
+
+      if (kDebugMode) {
+        debugPrint(
+          '[FnProbe] Full probe succeeded: ${result.serverUrl} (${result.probeMethod})',
+        );
+      }
+      return result;
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) {
+        throw Exception('探测已取消');
+      }
+      throw Exception('连接探测失败：${_dioErrorMessage(e)}');
+    } finally {
+      isProbing.value = false;
+      _cancelToken = null;
+    }
   }
 
   /// 调用 FN 接口获取连接参数

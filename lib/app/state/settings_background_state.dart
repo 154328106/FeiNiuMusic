@@ -9,7 +9,7 @@ class AppBackgroundSettings {
   static const String _prefsBackgroundBlurSigma =
       'setting_background_blur_sigma';
   static const String _prefsPageGlowEnabled = 'setting_page_glow_enabled';
-  static const String _prefsPanelOpacity = 'setting_panel_opacity';
+  static const String _prefsPanelBlur = 'setting_panel_blur';
 
   static final ValueNotifier<String?> backgroundImagePath = ValueNotifier(null);
   static final ValueNotifier<double> backgroundMaskOpacity = ValueNotifier(
@@ -19,13 +19,8 @@ class AppBackgroundSettings {
   // that "透明度=0" still looked hazy — that was this constant-16 blur.
   static final ValueNotifier<double> backgroundBlurSigma = ValueNotifier(16);
   static final ValueNotifier<bool> pageGlowEnabled = ValueNotifier(false);
-  static final ValueNotifier<double> panelOpacity = ValueNotifier(0.72);
-
-  // Legacy notifiers — the "毛玻璃质感" feature was removed. They are kept so
-  // widgets that still read them compile without a rewrite, but their values
-  // are pinned to "off" and no UI can flip them back on.
-  static final ValueNotifier<bool> glassEffectEnabled = ValueNotifier(false);
-  static final ValueNotifier<double> panelBlurStrength = ValueNotifier(0);
+  /// 面板高斯模糊强度（0 = 无模糊，32 = 最大模糊）
+  static final ValueNotifier<double> panelBlurStrength = ValueNotifier(20);
 
   static Future<void>? _loading;
 
@@ -39,13 +34,7 @@ class AppBackgroundSettings {
     backgroundBlurSigma.value =
         (prefs.getDouble(_prefsBackgroundBlurSigma) ?? 16).clamp(0.0, 32.0);
     pageGlowEnabled.value = prefs.getBool(_prefsPageGlowEnabled) ?? false;
-    panelOpacity.value = (prefs.getDouble(_prefsPanelOpacity) ?? 0.72).clamp(
-      0.0,
-      1.0,
-    );
-    // Legacy — always report "glass off" regardless of what's on disk.
-    glassEffectEnabled.value = false;
-    panelBlurStrength.value = 0;
+    panelBlurStrength.value = (prefs.getDouble(_prefsPanelBlur) ?? 20).clamp(0.0, 32.0);
   }
 
   static Future<void> setBackgroundImagePath(String? path) async {
@@ -79,10 +68,10 @@ class AppBackgroundSettings {
     pageGlowEnabled.value = enabled;
   }
 
-  static Future<void> setPanelOpacity(double value) async {
+  static Future<void> setPanelBlur(double value) async {
     final prefs = await SharedPreferences.getInstance();
-    final next = value.clamp(0.0, 1.0);
-    await prefs.setDouble(_prefsPanelOpacity, next);
-    panelOpacity.value = next;
+    final next = value.clamp(0.0, 32.0);
+    await prefs.setDouble(_prefsPanelBlur, next);
+    panelBlurStrength.value = next;
   }
 }

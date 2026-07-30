@@ -196,7 +196,7 @@ class _AlbumsPageState extends State<AlbumsPage>
     final headers = FeiNiuApiClient.imageAuthHeaders();
     for (final g in groups.take(count)) {
       if (g.coverId != null && g.coverId!.isNotEmpty) {
-        final url = api.coverUrl(g.coverId!, size: 120, updatedAt: null);
+        final url = api.coverUrl(g.coverId!, size: 300, updatedAt: null);
         unawaited(precacheImage(
           CachedNetworkImageProvider(url, headers: headers),
           context,
@@ -635,7 +635,7 @@ class _AlbumCover extends StatelessWidget {
       );
     }
     final coverUrl =
-        FeiNiuApiClient.instance.coverUrl(coverId!, size: 120);
+        FeiNiuApiClient.instance.coverUrl(coverId!, size: 300);
     return ClipRRect(
       borderRadius: BorderRadius.circular(borderRadius),
       child: CachedNetworkImage(

@@ -109,7 +109,10 @@ class _PlayerPageState extends State<PlayerPage>
     final rootNavigator = Navigator.of(context, rootNavigator: true);
     if (rootNavigator.canPop()) {
       rootNavigator.pop();
+      return;
     }
+    // 自动打开场景：PlayerPage 是唯一路由，回到首页
+    navigator.pushReplacementNamed(AppRoutes.home);
   }
 
   @override
@@ -122,12 +125,12 @@ class _PlayerPageState extends State<PlayerPage>
 
   @override
   Widget build(BuildContext context) {
-    // Let system back / predictive-back pop the player route normally. Using
-    // canPop:false here made HarmonyOS predictive-back render "exit to home"
-    // and sometimes commit it, jumping to the desktop instead of closing the
-    // player. The drag-to-dismiss path calls _closePlayer() directly.
+    // 系统返回键：可退时正常 pop，不可退时（自动打开场景）走 _closePlayer 回到首页
     return PopScope(
-      canPop: true,
+      canPop: Navigator.of(context).canPop(),
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _closePlayer();
+      },
       child: Scaffold(
         backgroundColor: Colors.transparent,
         resizeToAvoidBottomInset: false,
@@ -940,52 +943,12 @@ class _PosterControls extends StatelessWidget {
               icon: const Icon(Icons.skip_next_rounded),
               onPressed: player.next,
             ),
-            IconButton(
-              iconSize: 30,
-              color: iconColor,
-              icon: const Icon(Icons.more_vert_rounded),
-              onPressed: () => _showPosterSongDetailSheet(context, player),
-            ),
+            const Spacer(),
           ],
         );
       },
     );
   }
-}
-
-void _showPosterSongDetailSheet(BuildContext context, PlayerService player) {
-  final song = player.currentSong.value;
-  if (song == null) {
-    AppToast.show(context, '暂无歌曲');
-    return;
-  }
-  showModalBottomSheet(
-    context: context,
-    backgroundColor: Colors.transparent,
-    isScrollControlled: true,
-    builder: (_) => SongDetailSheet(
-      song: song,
-      onOpenPlayerAppearanceSettings: () {
-        Navigator.of(context).pushNamed(AppRoutes.playerAppearanceSettings);
-      },
-      onOpenArtist: (artistName) {
-        Navigator.of(context).push(
-          buildAppPageRoute((_) => ArtistDetailPage(
-            artistName: artistName,
-            artistGuid: song.firstArtistGuid,
-          )),
-        );
-      },
-      onOpenAlbum: (albumName) {
-        Navigator.of(context).push(
-          buildAppPageRoute((_) => AlbumDetailPage(
-            albumName: albumName,
-            albumGuid: song.albumGuid,
-          )),
-        );
-      },
-    ),
-  );
 }
 
 class _PlayerArtwork extends StatelessWidget {

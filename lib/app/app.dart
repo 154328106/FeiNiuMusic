@@ -163,95 +163,48 @@ class FeiNiuMusicApp extends StatelessWidget {
                           darkTheme: darkTheme,
                           themeMode: mode,
                           scrollBehavior: const AppScrollBehavior(),
-                          home: ValueListenableBuilder<bool>(
-                            valueListenable: AuthService.instance.isLoggedIn,
-                            builder: (context, isLoggedIn, _) {
-                              if (!isLoggedIn) {
-                                return const LoginPage();
-                              }
-                              return TabletLayoutHost(
-                                navigatorKey: baseNavigatorKey,
-                                child: Navigator(
-                                  key: baseNavigatorKey,
-                                  initialRoute: AppRouter.initialRoute,
-                                  onGenerateRoute: onGenerateRoute,
-                                ),
-                              );
-                            },
+                          home: _AppStartupGate(
+                            baseNavigatorKey: baseNavigatorKey,
+                            onGenerateRoute: onGenerateRoute,
                           ),
                           onGenerateRoute: onGenerateRoute,
                           builder: (context, child) {
-                            return ValueListenableBuilder<double>(
-                              valueListenable:
-                                  AppBackgroundSettings.panelOpacity,
-                              builder: (context, panelOpacity, _) {
-                                return ValueListenableBuilder<double>(
-                                  valueListenable:
-                                      AppBackgroundSettings.panelBlurStrength,
-                                  builder:
-                                      (
-                                        context,
-                                        panelBlurStrength,
-                                        unusedChild,
-                                      ) {
-                                        final theme = Theme.of(context);
-                                        final isDark =
-                                            theme.brightness == Brightness.dark;
-                                        final navColor =
-                                            theme.colorScheme.surface;
-                                        final overlay = SystemUiOverlayStyle(
-                                          statusBarColor: Colors.transparent,
-                                          statusBarIconBrightness: isDark
-                                              ? Brightness.light
-                                              : Brightness.dark,
-                                          statusBarBrightness: isDark
-                                              ? Brightness.dark
-                                              : Brightness.light,
-                                          systemNavigationBarColor: navColor,
-                                          systemNavigationBarIconBrightness:
-                                              isDark
-                                              ? Brightness.light
-                                              : Brightness.dark,
-                                          systemNavigationBarDividerColor:
-                                              navColor,
-                                        );
-                                        Widget content =
-                                            AnnotatedRegion<
-                                              SystemUiOverlayStyle
-                                            >(
-                                              value: overlay,
-                                              child:
-                                                  child ??
-                                                  const SizedBox.shrink(),
-                                            );
-                                        if (visualStyle ==
-                                            AppVisualStyle.miuix) {
-                                          final shadMode = switch (mode) {
-                                            ThemeMode.light =>
-                                              shad.ThemeMode.light,
-                                            ThemeMode.dark =>
-                                              shad.ThemeMode.dark,
-                                            ThemeMode.system =>
-                                              shad.ThemeMode.system,
-                                          };
-                                          content = shad.ShadcnLayer(
-                                            theme: buildMiuixShadTheme(
-                                              lightTheme.colorScheme,
-                                            ),
-                                            darkTheme: buildMiuixShadTheme(
-                                              darkTheme.colorScheme,
-                                            ),
-                                            themeMode: shadMode,
-                                            scaling:
-                                                const shad.AdaptiveScaling(),
-                                            child: content,
-                                          );
-                                        }
-                                        return content;
-                                      },
-                                );
-                              },
+                            final theme = Theme.of(context);
+                            final isDark = theme.brightness == Brightness.dark;
+                            final navColor = theme.colorScheme.surface;
+                            final overlay = SystemUiOverlayStyle(
+                              statusBarColor: Colors.transparent,
+                              statusBarIconBrightness: isDark
+                                  ? Brightness.light
+                                  : Brightness.dark,
+                              statusBarBrightness: isDark
+                                  ? Brightness.dark
+                                  : Brightness.light,
+                              systemNavigationBarColor: navColor,
+                              systemNavigationBarIconBrightness: isDark
+                                  ? Brightness.light
+                                  : Brightness.dark,
+                              systemNavigationBarDividerColor: navColor,
                             );
+                            Widget content = AnnotatedRegion<SystemUiOverlayStyle>(
+                              value: overlay,
+                              child: child ?? const SizedBox.shrink(),
+                            );
+                            if (visualStyle == AppVisualStyle.miuix) {
+                              final shadMode = switch (mode) {
+                                ThemeMode.light => shad.ThemeMode.light,
+                                ThemeMode.dark => shad.ThemeMode.dark,
+                                ThemeMode.system => shad.ThemeMode.system,
+                              };
+                              content = shad.ShadcnLayer(
+                                theme: buildMiuixShadTheme(lightTheme.colorScheme),
+                                darkTheme: buildMiuixShadTheme(darkTheme.colorScheme),
+                                themeMode: shadMode,
+                                scaling: const shad.AdaptiveScaling(),
+                                child: content,
+                              );
+                            }
+                            return content;
                           },
                         );
                       },
@@ -261,6 +214,46 @@ class FeiNiuMusicApp extends StatelessWidget {
               },
             );
           },
+        );
+      },
+    );
+  }
+}
+
+/// APP 启动门控
+///
+/// 登录状态切换门控：
+/// - 未登录 → LoginPage
+/// - 已登录 → 直接进主页面（后台探测在 main() 中异步执行，不阻塞首页渲染）
+class _AppStartupGate extends StatefulWidget {
+  final GlobalKey<NavigatorState> baseNavigatorKey;
+  final Route<dynamic> Function(RouteSettings) onGenerateRoute;
+
+  const _AppStartupGate({
+    required this.baseNavigatorKey,
+    required this.onGenerateRoute,
+  });
+
+  @override
+  State<_AppStartupGate> createState() => _AppStartupGateState();
+}
+
+class _AppStartupGateState extends State<_AppStartupGate> {
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: AuthService.instance.isLoggedIn,
+      builder: (context, isLoggedIn, _) {
+        if (!isLoggedIn) {
+          return const LoginPage();
+        }
+        return TabletLayoutHost(
+          navigatorKey: widget.baseNavigatorKey,
+          child: Navigator(
+            key: widget.baseNavigatorKey,
+            initialRoute: AppRouter.initialRoute,
+            onGenerateRoute: widget.onGenerateRoute,
+          ),
         );
       },
     );

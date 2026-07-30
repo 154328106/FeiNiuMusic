@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
+import 'package:sqflite/sqflite.dart';
 
 import '../state/player_state.dart';
+import '../state/song_state.dart';
 import 'db/db_constants.dart';
 import 'db/db_helper.dart';
 
@@ -68,6 +70,7 @@ class StatsService {
 
   DateTime? _lastTickAt;
   String? _currentSongId;
+  SongEntity? _currentSong;
   int _currentSongPlayedMs = 0;
   bool _currentPlayCounted = false;
   int _pendingSongListenMs = 0;
@@ -86,6 +89,7 @@ class StatsService {
     if (_currentSongId != song.id) {
       _flushPending();
       _currentSongId = song.id;
+      _currentSong = song;
       _currentSongPlayedMs = 0;
       _currentPlayCounted = false;
     }
@@ -316,6 +320,15 @@ class StatsService {
       final dayKey = _dayKey(now);
       await db.transaction((txn) async {
         if (songListenMs > 0 || songPlayCount > 0) {
+          // 保存歌曲元数据到 songs 表，供排行榜页查询
+          final currentSong = _currentSong;
+          if (currentSong != null) {
+            txn.insert(
+              DbConstants.tableSongs,
+              currentSong.toMap(),
+              conflictAlgorithm: ConflictAlgorithm.replace,
+            );
+          }
           final rows = await txn.query(
             DbConstants.tableSongStats,
             columns: ['listenMs', 'playCount'],

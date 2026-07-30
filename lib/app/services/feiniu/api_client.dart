@@ -132,8 +132,9 @@ class FeiNiuApiClient {
     _relayMode = false;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('feiniu_music_token');
-    await prefs.remove('feiniu_server_url');
-    await prefs.remove('feiniu_username');
+    // 保留 serverUrl 和 username 用于退出登录后自动填充
+    // await prefs.remove('feiniu_server_url');
+    // await prefs.remove('feiniu_username');
     await prefs.remove('feiniu_relay_mode');
   }
 

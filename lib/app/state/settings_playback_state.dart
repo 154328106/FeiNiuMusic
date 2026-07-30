@@ -93,7 +93,7 @@ class AppLaunchUpdateSettings {
   static const String _prefsAutoCheckUpdate = 'app_auto_check_update_on_launch';
 
   static final ValueNotifier<bool> autoCheckUpdateOnLaunch = ValueNotifier(
-    false,
+    true,
   );
   static bool hasCheckedUpdateThisSession = false;
 
@@ -104,7 +104,7 @@ class AppLaunchUpdateSettings {
   static Future<void> _doLoad() async {
     final prefs = await SharedPreferences.getInstance();
     autoCheckUpdateOnLaunch.value =
-        prefs.getBool(_prefsAutoCheckUpdate) ?? false;
+        prefs.getBool(_prefsAutoCheckUpdate) ?? true;
   }
 
   static Future<void> setAutoCheckUpdateOnLaunch(bool enabled) async {
@@ -220,5 +220,33 @@ class MiniPlayerInfoSettings {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefsShowLyricsInSubtitle, enabled);
     showLyricsInSubtitle.value = enabled;
+  }
+}
+
+/// 启动后是否自动打开播放界面
+class AppLaunchNavigationSettings {
+  static const String _prefsAutoOpenPlayerOnLaunch =
+      'app_auto_open_player_on_launch';
+
+  static final ValueNotifier<bool> autoOpenPlayerOnLaunch =
+      ValueNotifier(false);
+
+  /// 标记本次 session 是否已处理过启动跳转（仅启动首次生效）
+  static bool hasHandledNavigationThisSession = false;
+
+  static Future<void>? _loading;
+
+  static Future<void> ensureLoaded() => _loading ??= _doLoad();
+
+  static Future<void> _doLoad() async {
+    final prefs = await SharedPreferences.getInstance();
+    autoOpenPlayerOnLaunch.value =
+        prefs.getBool(_prefsAutoOpenPlayerOnLaunch) ?? false;
+  }
+
+  static Future<void> setAutoOpenPlayerOnLaunch(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsAutoOpenPlayerOnLaunch, enabled);
+    autoOpenPlayerOnLaunch.value = enabled;
   }
 }

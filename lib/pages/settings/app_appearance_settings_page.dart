@@ -549,28 +549,23 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                 },
               ),
               ValueListenableBuilder<double>(
-                valueListenable: AppBackgroundSettings.panelOpacity,
+                valueListenable: AppBackgroundSettings.panelBlurStrength,
                 builder: (context, value, _) {
-                  // Slider shows *transparency* (what the label says), while
-                  // storage keeps *opacity*. Invert on the way in/out so the
-                  // user's mental model matches: 100% = fully see-through,
-                  // 0% = solid panel.
-                  final transparencyPercent = ((1 - value) * 100).clamp(0, 100);
                   return AppSettingSlider(
-                    title: '面板透明度',
-                    description: '调节卡片、列表面板等半透明程度（100% = 完全透明）',
-                    value: transparencyPercent.toDouble(),
+                    title: '高斯模糊强度',
+                    description: '调节面板、底部音乐条等毛玻璃模糊程度（0 = 无模糊，32 = 最强模糊）',
+                    value: value,
                     min: 0,
-                    max: 100,
-                    divisions: 100,
-                    valueText: '${transparencyPercent.round()}%',
+                    max: 32,
+                    divisions: 32,
+                    valueText: value == 0 ? '关闭' : value.toStringAsFixed(0),
                     onChanged: (next) {
-                      final opacity = (1 - next / 100).clamp(0.0, 1.0);
-                      AppBackgroundSettings.setPanelOpacity(opacity);
+                      AppBackgroundSettings.setPanelBlur(next);
                     },
                   );
                 },
               ),
+              const SizedBox(height: 8),
               ValueListenableBuilder<bool>(
                 valueListenable: AppBackgroundSettings.pageGlowEnabled,
                 builder: (context, enabled, _) {

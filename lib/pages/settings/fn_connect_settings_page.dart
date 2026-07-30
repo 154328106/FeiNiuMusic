@@ -60,6 +60,7 @@ class _FnConnectSettingsPageState extends State<FnConnectSettingsPage> {
           url: success.serverUrl,
           method: success.probeMethod,
           candidateResults: result.candidates,
+          isRelay: success.isRelay,
         );
 
         // 更新 API 客户端
@@ -103,6 +104,7 @@ class _FnConnectSettingsPageState extends State<FnConnectSettingsPage> {
         fnId: fnId,
         url: candidate.address,
         method: candidate.description,
+        isRelay: candidate.isRelay,
       );
 
       if (!mounted) return;
@@ -270,6 +272,27 @@ class _FnConnectSettingsPageState extends State<FnConnectSettingsPage> {
                         },
                       ),
                     ],
+                  );
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // === 忽略 SSL 证书校验 ===
+          AppSettingSection(
+            title: '安全',
+            children: [
+              ValueListenableBuilder<bool>(
+                valueListenable: AppFnConnectionSettings.ignoreSsl,
+                builder: (context, ignoreSsl, _) {
+                  return SwitchListTile(
+                    title: const Text('忽略 SSL 证书校验'),
+                    subtitle: const Text('自签名证书或 IP 直连时开启'),
+                    value: ignoreSsl,
+                    onChanged: (value) {
+                      AppFnConnectionSettings.setIgnoreSsl(value);
+                    },
                   );
                 },
               ),

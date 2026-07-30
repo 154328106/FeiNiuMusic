@@ -63,11 +63,8 @@ class MiniPlayerBar extends StatelessWidget {
 
         final isDark = theme.brightness == Brightness.dark;
         final bgColor = isDark
-            ? scheme.surfaceContainerHigh.withValues(alpha: 0.86)
-            : Color.alphaBlend(
-                scheme.primary.withValues(alpha: 0.025),
-                Colors.white.withValues(alpha: 0.90),
-              );
+            ? Colors.black.withValues(alpha: 0.06)
+            : Colors.white.withValues(alpha: 0.08);
 
         final border = Border.all(
           color: isDark
@@ -157,23 +154,9 @@ class MiniPlayerBar extends StatelessWidget {
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(borderRadius),
-              child: ValueListenableBuilder<bool>(
-                valueListenable: AppBackgroundSettings.glassEffectEnabled,
-                builder: (context, glassEnabled, _) {
-                  return ValueListenableBuilder<double>(
-                    valueListenable: AppBackgroundSettings.panelBlurStrength,
-                    builder: (context, blurStrength, _) {
-                      if (!glassEnabled || blurStrength <= 0) return content;
-                      return BackdropFilter(
-                        filter: ImageFilter.blur(
-                          sigmaX: blurStrength,
-                          sigmaY: blurStrength,
-                        ),
-                        child: content,
-                      );
-                    },
-                  );
-                },
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                child: content,
               ),
             ),
           ),

@@ -143,6 +143,7 @@ class FnAutoReconnectService {
         fnId: fnId,
         url: result.serverUrl,
         method: result.probeMethod,
+        isRelay: result.isRelay,
       );
 
       // 如果 baseUrl 变了，更新 API 客户端的 baseUrl

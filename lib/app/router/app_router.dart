@@ -20,6 +20,7 @@ import '../../pages/settings/fn_connect_settings_page.dart';
 import '../../pages/settings/listening_stats_page.dart';
 import '../../pages/settings/settings_page.dart';
 import '../../pages/settings/version_info_page.dart';
+import '../../pages/settings/launch_settings_page.dart';
 import '../../pages/library/albums_page.dart';
 import '../../pages/library/artists_page.dart';
 import '../../pages/library/playlists_page.dart';
@@ -47,6 +48,7 @@ class AppRoutes {
   static const listeningStats = '/settings/listening-stats';
   static const versionInfo = '/settings/version-info';
   static const fnConnectSettings = '/settings/fn-connect';
+  static const launchSettings = '/settings/launch';
   static const artists = '/artists';
   static const albums = '/albums';
   static const playlists = '/playlists';
@@ -82,6 +84,7 @@ class AppRouter {
     AppRoutes.listeningStats: (_) => const ListeningStatsPage(),
     AppRoutes.versionInfo: (_) => const VersionInfoPage(),
     AppRoutes.fnConnectSettings: (_) => const FnConnectSettingsPage(),
+    AppRoutes.launchSettings: (_) => const LaunchSettingsPage(),
     AppRoutes.artists: (_) => const ArtistsPage(),
     AppRoutes.albums: (_) => const AlbumsPage(),
     AppRoutes.playlists: (_) => const PlaylistsPage(),
@@ -125,6 +128,16 @@ class _PrimaryNavigationShellState extends State<_PrimaryNavigationShell> {
     primaryNavigationShellActive = true;
     primaryNavigationIndex.value = _currentIndex;
     primaryNavigationIndex.addListener(_handleExternalSelection);
+
+    // 启动时如果开启了自动打开播放界面，在下一帧跳转（仅本次 session 首次）
+    if (AppLaunchNavigationSettings.autoOpenPlayerOnLaunch.value &&
+        !AppLaunchNavigationSettings.hasHandledNavigationThisSession) {
+      AppLaunchNavigationSettings.hasHandledNavigationThisSession = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        Navigator.pushNamed(context, AppRoutes.player);
+      });
+    }
   }
 
   @override

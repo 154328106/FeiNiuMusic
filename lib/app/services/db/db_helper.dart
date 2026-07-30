@@ -43,7 +43,8 @@ CREATE TABLE ${DbConstants.tableSongs} (
   coverId TEXT,
   audioSpec TEXT,
   trackNumber INTEGER,
-  discNumber INTEGER
+  discNumber INTEGER,
+  updatedAt INTEGER
 )
 ''');
         await db.execute(
@@ -281,6 +282,13 @@ CREATE TABLE IF NOT EXISTS ${DbConstants.tableApiCache} (
   ttl_ms INTEGER NOT NULL
 )
 ''');
+        }
+        if (oldVersion < 13) {
+          // v12 遗漏了 updatedAt 列，导致 StatsService._flushPending 写入
+          // SongEntity.toMap() 时因缺失列使事务回滚，统计数据和歌曲元数据全丢失。
+          await db.execute(
+            'ALTER TABLE ${DbConstants.tableSongs} ADD COLUMN updatedAt INTEGER',
+          );
         }
       },
     );

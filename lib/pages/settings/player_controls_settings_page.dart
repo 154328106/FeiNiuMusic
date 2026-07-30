@@ -18,7 +18,6 @@ class _PlayerControlsSettingsPageState
     super.initState();
     AppPlaybackVolumeSettings.ensureLoaded();
     PlayerBottomActionSettings.ensureLoaded();
-    AppLaunchPlaybackSettings.ensureLoaded();
     MiniPlayerInfoSettings.ensureLoaded();
   }
 
@@ -88,21 +87,6 @@ class _PlayerControlsSettingsPageState
                     divisions: 20,
                     valueText: '$percent%',
                     onChanged: AppPlaybackVolumeSettings.setVolume,
-                  );
-                },
-              ),
-              ValueListenableBuilder<bool>(
-                valueListenable: AppLaunchPlaybackSettings.autoPlayOnAppLaunch,
-                builder: (context, enabled, _) {
-                  return AppSettingTile(
-                    title: '进入应用自动播放',
-                    subtitle: '打开应用后自动开始播放当前歌曲',
-                    trailing: Switch.adaptive(
-                      value: enabled,
-                      onChanged: (value) {
-                        AppLaunchPlaybackSettings.setAutoPlayOnAppLaunch(value);
-                      },
-                    ),
                   );
                 },
               ),
