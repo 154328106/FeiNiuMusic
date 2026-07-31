@@ -3,14 +3,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart' as shad;
 
+import '../components/dialog/app_update_dialog.dart';
 import '../components/layout/tablet_layout_host.dart';
 import '../pages/login/login_page.dart';
 import 'router/app_page_route.dart';
 import 'router/app_router.dart';
+import 'services/app_update_service.dart';
 import 'services/feiniu/auth_service.dart';
 import 'state/settings_state.dart';
 import 'theme/app_styles.dart';
 import 'theme/app_visual_theme.dart';
+import 'utils/route_visibility.dart';
 
 class FeiNiuMusicApp extends StatelessWidget {
   static final GlobalKey<NavigatorState> rootNavigatorKey =
@@ -163,6 +166,7 @@ class FeiNiuMusicApp extends StatelessWidget {
                           darkTheme: darkTheme,
                           themeMode: mode,
                           scrollBehavior: const AppScrollBehavior(),
+                          navigatorObservers: [appRouteObserver],
                           home: _AppStartupGate(
                             baseNavigatorKey: baseNavigatorKey,
                             onGenerateRoute: onGenerateRoute,
@@ -186,10 +190,11 @@ class FeiNiuMusicApp extends StatelessWidget {
                                   : Brightness.dark,
                               systemNavigationBarDividerColor: navColor,
                             );
-                            Widget content = AnnotatedRegion<SystemUiOverlayStyle>(
-                              value: overlay,
-                              child: child ?? const SizedBox.shrink(),
-                            );
+                            Widget content =
+                                AnnotatedRegion<SystemUiOverlayStyle>(
+                                  value: overlay,
+                                  child: child ?? const SizedBox.shrink(),
+                                );
                             if (visualStyle == AppVisualStyle.miuix) {
                               final shadMode = switch (mode) {
                                 ThemeMode.light => shad.ThemeMode.light,
@@ -197,8 +202,12 @@ class FeiNiuMusicApp extends StatelessWidget {
                                 ThemeMode.system => shad.ThemeMode.system,
                               };
                               content = shad.ShadcnLayer(
-                                theme: buildMiuixShadTheme(lightTheme.colorScheme),
-                                darkTheme: buildMiuixShadTheme(darkTheme.colorScheme),
+                                theme: buildMiuixShadTheme(
+                                  lightTheme.colorScheme,
+                                ),
+                                darkTheme: buildMiuixShadTheme(
+                                  darkTheme.colorScheme,
+                                ),
                                 themeMode: shadMode,
                                 scaling: const shad.AdaptiveScaling(),
                                 child: content,
@@ -239,6 +248,8 @@ class _AppStartupGate extends StatefulWidget {
 }
 
 class _AppStartupGateState extends State<_AppStartupGate> {
+  bool _scheduledAutoCheck = false;
+
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<bool>(
@@ -246,6 +257,12 @@ class _AppStartupGateState extends State<_AppStartupGate> {
       builder: (context, isLoggedIn, _) {
         if (!isLoggedIn) {
           return const LoginPage();
+        }
+        // 已登录进入主界面：首帧后自动检查更新（仅一次/会话，开关开启且有
+        // 新版本才弹窗，不阻塞渲染）。登录后才触发，避免登录页被更新弹窗遮挡。
+        if (!_scheduledAutoCheck) {
+          _scheduledAutoCheck = true;
+          _scheduleAutoCheckUpdate();
         }
         return TabletLayoutHost(
           navigatorKey: widget.baseNavigatorKey,
@@ -257,5 +274,33 @@ class _AppStartupGateState extends State<_AppStartupGate> {
         );
       },
     );
+  }
+
+  /// 启动后延迟自动检查更新：给首页首帧留出渲染空间，检查在后台静默进行，
+  /// 有新版本时才弹窗提示。整个会话只检查一次。
+  void _scheduleAutoCheckUpdate() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _autoCheckUpdate();
+    });
+  }
+
+  Future<void> _autoCheckUpdate() async {
+    await AppLaunchUpdateSettings.ensureLoaded();
+    if (!AppLaunchUpdateSettings.autoCheckUpdateOnLaunch.value) return;
+    if (AppLaunchUpdateSettings.hasCheckedUpdateThisSession) return;
+    AppLaunchUpdateSettings.hasCheckedUpdateThisSession = true;
+    try {
+      final current = await AppUpdateService.instance.currentVersion();
+      final info = await AppUpdateService.instance.checkLatest(current);
+      if (!mounted || !info.hasUpdate) return;
+      await showAppUpdateDialog(
+        context,
+        info: info,
+        currentVersion: current,
+      );
+    } catch (_) {
+      // 静默失败：自动检查失败不打扰用户，手动检查仍可用
+    }
   }
 }
