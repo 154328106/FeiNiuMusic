@@ -1,14 +1,17 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/feiniu/fn_models.dart';
 
-/// 连接偏好设置（公网优先 / 中继优先）
+/// 连接优先级设置（内网 / 公网 IPv6 / 公网 IPv4 / 中继 拖拽排序）与 HTTPS/HTTP 优先
 ///
 /// 遵循与 AppLayoutSettings 相同的模式：
 /// - ValueNotifier 驱动 UI 响应式更新
 /// - SharedPreferences 持久化用户选择
 class AppFnConnectionSettings {
+  static const String _prefsConnectionOrder = 'fn_connection_order';
+  static const String _prefsPreferHttps = 'fn_connection_prefer_https';
   static const String _prefsConnectionPreference = 'fn_connection_preference';
   static const String _prefsLastFnId = 'fn_last_fnid';
   static const String _prefsConnectionUrl = 'fn_connection_url';
@@ -19,9 +22,12 @@ class AppFnConnectionSettings {
   /// 服务器是否可达（false 时在顶部显示连接失败横幅）
   static final ValueNotifier<bool> serverConnected = ValueNotifier(true);
 
-  /// 当前连接偏好
-  static final ValueNotifier<FnConnectionPreference> connectionPreference =
-      ValueNotifier(FnConnectionPreference.publicFirst);
+  /// 当前连接优先级顺序（可拖拽自定义）
+  static final ValueNotifier<List<ProbeCandidateGroup>> connectionOrder =
+      ValueNotifier(List.of(kDefaultConnectionOrder));
+
+  /// 直连组内是否优先 HTTPS
+  static final ValueNotifier<bool> preferHttps = ValueNotifier(true);
 
   /// 上次使用的 FNID（用于启动时自动探测）
   static String? lastFnId;
@@ -56,15 +62,43 @@ class AppFnConnectionSettings {
   /// 懒惰加载：首次调用时从 SharedPreferences 读取
   static Future<void> ensureLoaded() => _loading ??= _doLoad();
 
+  /// 测试用：重置懒加载与内存状态，使 ensureLoaded 可重新读取
+  @visibleForTesting
+  static void resetForTest() {
+    _loading = null;
+    connectionOrder.value = List.of(kDefaultConnectionOrder);
+    preferHttps.value = true;
+  }
+
   static Future<void> _doLoad() async {
     final prefs = await SharedPreferences.getInstance();
 
-    // 连接偏好
-    final raw = prefs.getString(_prefsConnectionPreference);
-    connectionPreference.value = FnConnectionPreference.values.firstWhere(
-      (v) => v.name == raw,
-      orElse: () => FnConnectionPreference.publicFirst,
-    );
+    // 连接优先级（含旧「公网/中继优先」偏好迁移）
+    final storedOrder = prefs.getStringList(_prefsConnectionOrder);
+    if (storedOrder != null) {
+      connectionOrder.value = _normalizeOrder(storedOrder);
+    } else {
+      // 迁移：旧 relayFirst = 内网 → 中继 → 公网 IPv6 → 公网 IPv4
+      final legacy = prefs.getString(_prefsConnectionPreference);
+      if (legacy == 'relayFirst') {
+        connectionOrder.value = const [
+          ProbeCandidateGroup.internal,
+          ProbeCandidateGroup.relay,
+          ProbeCandidateGroup.publicIPv6,
+          ProbeCandidateGroup.publicIPv4,
+        ];
+      } else {
+        connectionOrder.value = List.of(kDefaultConnectionOrder);
+      }
+      await prefs.setStringList(
+        _prefsConnectionOrder,
+        connectionOrder.value.map((g) => g.name).toList(),
+      );
+      await prefs.remove(_prefsConnectionPreference);
+    }
+
+    // HTTPS 优先
+    preferHttps.value = prefs.getBool(_prefsPreferHttps) ?? true;
 
     // 上次 FNID
     lastFnId = prefs.getString(_prefsLastFnId);
@@ -82,15 +116,52 @@ class AppFnConnectionSettings {
     ignoreSsl.value = prefs.getBool(_prefsIgnoreSsl) ?? true;
   }
 
-  /// 设置连接偏好并持久化
-  static Future<void> setConnectionPreference(
-    FnConnectionPreference pref, {
-    VoidCallback? onPreferenceChanged,
+  /// 设置连接优先级顺序并持久化
+  static Future<void> setConnectionOrder(
+    List<ProbeCandidateGroup> order, {
+    VoidCallback? onOrderChanged,
+  }) async {
+    final normalized = _normalizeOrder(order.map((g) => g.name).toList());
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      _prefsConnectionOrder,
+      normalized.map((g) => g.name).toList(),
+    );
+    connectionOrder.value = normalized;
+    onOrderChanged?.call();
+  }
+
+  /// 设置直连是否优先 HTTPS 并持久化
+  static Future<void> setPreferHttps(
+    bool value, {
+    VoidCallback? onChanged,
   }) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_prefsConnectionPreference, pref.name);
-    connectionPreference.value = pref;
-    onPreferenceChanged?.call();
+    await prefs.setBool(_prefsPreferHttps, value);
+    preferHttps.value = value;
+    onChanged?.call();
+  }
+
+  /// 清洗连接优先级顺序：丢弃未知分组、去重、追加缺失的默认分组
+  static List<ProbeCandidateGroup> _normalizeOrder(List<String>? raw) {
+    final seen = <ProbeCandidateGroup>{};
+    final result = <ProbeCandidateGroup>[];
+    if (raw != null) {
+      for (final name in raw) {
+        for (final group in ProbeCandidateGroup.values) {
+          if (group.name == name && seen.add(group)) {
+            result.add(group);
+            break;
+          }
+        }
+      }
+    }
+    for (final group in kDefaultConnectionOrder) {
+      if (seen.add(group)) {
+        result.add(group);
+      }
+    }
+    return result;
   }
 
   /// 保存本次探测结果（FNID + 连接 URL + 连接方式 + 候选链路列表）

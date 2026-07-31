@@ -68,20 +68,13 @@ class _LoginPageState extends State<LoginPage> {
   /// 静默探测（只探测不登录，更新连接信息显示）
   Future<void> _silentProbe(String fnId) async {
     try {
-      final preference = AppFnConnectionSettings.connectionPreference.value;
       final cache = AppFnConnectionSettings.cachedConnection;
 
-      final result = cache != null
-          ? await FnConnectionProbeService.instance.probeWithCache(
-              cachedUrl: cache.url,
-              cachedIsRelay: cache.isRelay,
-              fnId: fnId,
-              preference: preference,
-            )
-          : await FnConnectionProbeService.instance.probe(
-              fnId: fnId,
-              preference: preference,
-            );
+      final result = await FnConnectionProbeService.instance.probeSmart(
+        cachedUrl: cache?.url,
+        cachedIsRelay: cache?.isRelay ?? false,
+        fnId: fnId,
+      );
 
       if (!mounted) return;
       // 保存连接信息，显示在设置页
@@ -140,20 +133,13 @@ class _LoginPageState extends State<LoginPage> {
     _probeOverlay = ProbeOverlay.show(context);
 
     try {
-      final preference = AppFnConnectionSettings.connectionPreference.value;
       final cache = AppFnConnectionSettings.cachedConnection;
 
-      final result = cache != null
-          ? await FnConnectionProbeService.instance.probeWithCache(
-              cachedUrl: cache.url,
-              cachedIsRelay: cache.isRelay,
-              fnId: fnId,
-              preference: preference,
-            )
-          : await FnConnectionProbeService.instance.probe(
-              fnId: fnId,
-              preference: preference,
-            );
+      final result = await FnConnectionProbeService.instance.probeSmart(
+        cachedUrl: cache?.url,
+        cachedIsRelay: cache?.isRelay ?? false,
+        fnId: fnId,
+      );
 
       // 探测成功，用成功 URL 继续登录（中继模式的 relayMode 标记一并传递）
       // 同时保存连接信息供设置页显示

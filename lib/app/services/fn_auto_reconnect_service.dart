@@ -175,11 +175,7 @@ class FnAutoReconnectService {
 
   Future<void> _doReconnect(String fnId) async {
     try {
-      final preference = AppFnConnectionSettings.connectionPreference.value;
-      final result = await FnConnectionProbeService.instance.probe(
-        fnId: fnId,
-        preference: preference,
-      );
+      final result = await FnConnectionProbeService.instance.probe(fnId: fnId);
 
       if (kDebugMode) {
         debugPrint(

@@ -69,11 +69,9 @@ class _StartupProbeScreenState extends State<StartupProbeScreen>
     }
 
     final cache = AppFnConnectionSettings.cachedConnection;
-    final preference = AppFnConnectionSettings.connectionPreference.value;
 
     setState(() {
-      _detailText =
-          cache != null ? '优先使用缓存节点' : '正在尝试多种连接方式';
+      _detailText = cache != null ? '优先使用缓存节点' : '正在尝试多种连接方式';
     });
 
     // 给动画一点时间先渲染
@@ -81,50 +79,27 @@ class _StartupProbeScreenState extends State<StartupProbeScreen>
     if (!mounted) return;
 
     try {
-      if (cache != null) {
-        final result = await FnConnectionProbeService.instance.probeWithCache(
-          cachedUrl: cache.url,
-          cachedIsRelay: cache.isRelay,
-          fnId: fnId,
-          preference: preference,
-        );
+      final result = await FnConnectionProbeService.instance.probeSmart(
+        cachedUrl: cache?.url,
+        cachedIsRelay: cache?.isRelay ?? false,
+        fnId: fnId,
+      );
 
-        setState(() => _statusText = '连接成功');
+      setState(() => _statusText = '连接成功');
 
-        await AppFnConnectionSettings.saveProbeResult(
-          fnId: fnId,
-          url: result.serverUrl,
-          method: result.probeMethod,
-          isRelay: result.isRelay,
-        );
+      await AppFnConnectionSettings.saveProbeResult(
+        fnId: fnId,
+        url: result.serverUrl,
+        method: result.probeMethod,
+        isRelay: result.isRelay,
+      );
 
-        // 更新 API 客户端
-        final currentBase = FeiNiuApiClient.instance.baseUrl;
-        if (currentBase != result.serverUrl) {
-          await FeiNiuApiClient.instance.setBaseUrl(result.serverUrl);
-        }
-        FeiNiuApiClient.instance.setRelayMode(result.isRelay);
-      } else {
-        final result = await FnConnectionProbeService.instance.probe(
-          fnId: fnId,
-          preference: preference,
-        );
-
-        setState(() => _statusText = '连接成功');
-
-        await AppFnConnectionSettings.saveProbeResult(
-          fnId: fnId,
-          url: result.serverUrl,
-          method: result.probeMethod,
-          isRelay: result.isRelay,
-        );
-
-        final currentBase = FeiNiuApiClient.instance.baseUrl;
-        if (currentBase != result.serverUrl) {
-          await FeiNiuApiClient.instance.setBaseUrl(result.serverUrl);
-        }
-        FeiNiuApiClient.instance.setRelayMode(result.isRelay);
+      // 更新 API 客户端
+      final currentBase = FeiNiuApiClient.instance.baseUrl;
+      if (currentBase != result.serverUrl) {
+        await FeiNiuApiClient.instance.setBaseUrl(result.serverUrl);
       }
+      FeiNiuApiClient.instance.setRelayMode(result.isRelay);
     } catch (_) {
       if (!mounted) return;
       setState(() => _detailText = '探测暂不可用，进入主页面后自动重试');
@@ -161,8 +136,9 @@ class _StartupProbeScreenState extends State<StartupProbeScreen>
                       ]
                     : [
                         theme.colorScheme.surface,
-                        theme.colorScheme.primaryContainer
-                            .withValues(alpha: 0.25),
+                        theme.colorScheme.primaryContainer.withValues(
+                          alpha: 0.25,
+                        ),
                       ],
               ),
             ),
@@ -206,8 +182,9 @@ class _StartupProbeScreenState extends State<StartupProbeScreen>
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                  color: theme.colorScheme.primary
-                                      .withValues(alpha: 0.15),
+                                  color: theme.colorScheme.primary.withValues(
+                                    alpha: 0.15,
+                                  ),
                                   width: 2,
                                 ),
                               ),
@@ -222,8 +199,9 @@ class _StartupProbeScreenState extends State<StartupProbeScreen>
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                  color: theme.colorScheme.primary
-                                      .withValues(alpha: 0.08),
+                                  color: theme.colorScheme.primary.withValues(
+                                    alpha: 0.08,
+                                  ),
                                   width: 1.5,
                                 ),
                               ),
@@ -320,13 +298,7 @@ class _StartupArcPainter extends CustomPainter {
       size.width - thickness,
       size.height - thickness,
     );
-    canvas.drawArc(
-      rect,
-      -3.14159 / 2,
-      arcLength * 3.14159 * 2,
-      false,
-      paint,
-    );
+    canvas.drawArc(rect, -3.14159 / 2, arcLength * 3.14159 * 2, false, paint);
   }
 
   @override

@@ -7,7 +7,11 @@ class FnConnectionResponse {
   final String msg;
   final FnConnectionParams? data;
 
-  const FnConnectionResponse({required this.code, required this.msg, this.data});
+  const FnConnectionResponse({
+    required this.code,
+    required this.msg,
+    this.data,
+  });
 
   bool get isSuccess => code == 0;
 
@@ -64,37 +68,154 @@ class FnConnectionParams {
     final port = json['port'] as Map<String, dynamic>? ?? {};
 
     return FnConnectionParams(
-      internalIPv4s: (json['ipv4'] as List<dynamic>?)
+      internalIPv4s:
+          (json['ipv4'] as List<dynamic>?)?.map((e) => e as String).toList() ??
+          [],
+      publicIPv4s:
+          (json['publicIpv4'] as List<dynamic>?)
               ?.map((e) => e as String)
               .toList() ??
           [],
-      publicIPv4s: (json['publicIpv4'] as List<dynamic>?)
-              ?.map((e) => e as String)
-              .toList() ??
-          [],
-      publicIPv6s: (json['publicIpv6'] as List<dynamic>?)
+      publicIPv6s:
+          (json['publicIpv6'] as List<dynamic>?)
               ?.map((e) => e as String)
               .toList() ??
           [],
       httpsPort: port['httpsPort'] as int? ?? 5667,
       httpPort: port['httpPort'] as int? ?? 5666,
-      relayAddresses: (json['fn'] as List<dynamic>?)
-              ?.map((e) => e as String)
-              .toList() ??
+      relayAddresses:
+          (json['fn'] as List<dynamic>?)?.map((e) => e as String).toList() ??
           [],
     );
   }
 }
 
-/// 连接偏好模式
-enum FnConnectionPreference {
-  /// 公网优先（默认）
-  /// 内网→IPv6→IPv4→中继
-  publicFirst,
+/// 默认连接优先级顺序
+const List<ProbeCandidateGroup> kDefaultConnectionOrder = [
+  ProbeCandidateGroup.internal,
+  ProbeCandidateGroup.publicIPv6,
+  ProbeCandidateGroup.publicIPv4,
+  ProbeCandidateGroup.relay,
+];
 
-  /// 中继优先
-  /// 内网→中继（跳过公网直连）
-  relayFirst,
+/// 连接分组展示元数据
+extension ProbeCandidateGroupX on ProbeCandidateGroup {
+  /// 中文标题
+  String get title => switch (this) {
+    ProbeCandidateGroup.internal => '内网',
+    ProbeCandidateGroup.publicIPv6 => '公网 IPv6',
+    ProbeCandidateGroup.publicIPv4 => '公网 IPv4',
+    ProbeCandidateGroup.relay => '中继',
+  };
+
+  /// 拖拽排序列表副标题
+  String get subtitle => switch (this) {
+    ProbeCandidateGroup.internal => '局域网内直连，延迟最低',
+    ProbeCandidateGroup.publicIPv6 => '公网 IPv6 直连',
+    ProbeCandidateGroup.publicIPv4 => '公网 IPv4 直连',
+    ProbeCandidateGroup.relay => '中继转发，兜底链路',
+  };
+}
+
+/// 单条候选链路（构建阶段的规格描述）
+class ProbeCandidateSpec {
+  final String address;
+  final String description;
+  final ProbeCandidateGroup group;
+  final String? ipLabel;
+  final bool relayMode;
+
+  const ProbeCandidateSpec({
+    required this.address,
+    required this.description,
+    required this.group,
+    this.ipLabel,
+    this.relayMode = false,
+  });
+}
+
+/// 按用户优先级顺序构建候选链路列表（纯函数，可单测）
+///
+/// [order] - 分组优先级顺序（内网 / 公网 IPv6 / 公网 IPv4 / 中继）
+/// [preferHttps] - 直连组内优先 HTTPS（中继始终仅 HTTPS）
+///
+/// 地址列表为空的分组不贡献候选；中继组恒有兜底地址（fnId.5ddd.com）。
+List<ProbeCandidateSpec> buildProbeCandidateSpecs({
+  required String fnId,
+  required FnConnectionParams params,
+  required List<ProbeCandidateGroup> order,
+  required bool preferHttps,
+}) {
+  final specs = <ProbeCandidateSpec>[];
+  final schemes = preferHttps ? ['https', 'http'] : ['http', 'https'];
+
+  for (final group in order) {
+    switch (group) {
+      case ProbeCandidateGroup.internal:
+        for (final ip in params.internalIPv4s) {
+          for (final scheme in schemes) {
+            final isHttps = scheme == 'https';
+            final port = isHttps ? params.httpsPort : params.httpPort;
+            specs.add(
+              ProbeCandidateSpec(
+                address: '$scheme://$ip:$port',
+                description: '${scheme.toUpperCase()} ($ip:$port)',
+                group: group,
+                ipLabel: ip,
+              ),
+            );
+          }
+        }
+      case ProbeCandidateGroup.publicIPv6:
+        for (final ipv6 in params.publicIPv6s) {
+          for (final scheme in schemes) {
+            final isHttps = scheme == 'https';
+            final port = isHttps ? params.httpsPort : params.httpPort;
+            specs.add(
+              ProbeCandidateSpec(
+                address: '$scheme://[$ipv6]:$port',
+                description: '${scheme.toUpperCase()} ($ipv6:$port)',
+                group: group,
+                ipLabel: ipv6,
+              ),
+            );
+          }
+        }
+      case ProbeCandidateGroup.publicIPv4:
+        for (final ipv4 in params.publicIPv4s) {
+          for (final scheme in schemes) {
+            final isHttps = scheme == 'https';
+            final port = isHttps ? params.httpsPort : params.httpPort;
+            specs.add(
+              ProbeCandidateSpec(
+                address: '$scheme://$ipv4:$port',
+                description: '${scheme.toUpperCase()} ($ipv4:$port)',
+                group: group,
+                ipLabel: ipv4,
+              ),
+            );
+          }
+        }
+      case ProbeCandidateGroup.relay:
+        // 中继链路只保留 HTTPS（沿用原有行为）
+        final relayAddresses = params.relayAddresses.isNotEmpty
+            ? params.relayAddresses
+            : <String>[fnId.endsWith('.5ddd.com') ? fnId : '$fnId.5ddd.com'];
+        for (final addr in relayAddresses) {
+          final domain = addr.replaceFirst(RegExp(r':\d+$'), '');
+          specs.add(
+            ProbeCandidateSpec(
+              address: 'https://$domain',
+              description: 'HTTPS ($domain)',
+              group: group,
+              relayMode: true,
+            ),
+          );
+        }
+    }
+  }
+
+  return specs;
 }
 
 /// 连接探测结果
@@ -116,12 +237,7 @@ class ConnectionProbeResult {
 }
 
 /// 候选链路分组
-enum ProbeCandidateGroup {
-  internal,
-  publicIPv6,
-  publicIPv4,
-  relay,
-}
+enum ProbeCandidateGroup { internal, publicIPv6, publicIPv4, relay }
 
 /// 单条候选链路探测结果
 ///
@@ -159,18 +275,13 @@ class ProbeCandidateResult {
   });
 
   /// 分组中文标题
-  String get groupTitle => switch (group) {
-        ProbeCandidateGroup.internal => '内网',
-        ProbeCandidateGroup.publicIPv6 => '公网 IPv6',
-        ProbeCandidateGroup.publicIPv4 => '公网 IPv4',
-        ProbeCandidateGroup.relay => '中继',
-      };
+  String get groupTitle => group.title;
 
   /// 分组排序优先级
   int get groupOrder => switch (group) {
-        ProbeCandidateGroup.internal => 0,
-        ProbeCandidateGroup.publicIPv6 => 1,
-        ProbeCandidateGroup.publicIPv4 => 2,
-        ProbeCandidateGroup.relay => 3,
-      };
+    ProbeCandidateGroup.internal => 0,
+    ProbeCandidateGroup.publicIPv6 => 1,
+    ProbeCandidateGroup.publicIPv4 => 2,
+    ProbeCandidateGroup.relay => 3,
+  };
 }

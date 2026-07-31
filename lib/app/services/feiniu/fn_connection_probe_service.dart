@@ -24,8 +24,7 @@ import 'fn_models.dart';
 class FnConnectionProbeService {
   FnConnectionProbeService._();
 
-  static final FnConnectionProbeService instance =
-      FnConnectionProbeService._();
+  static final FnConnectionProbeService instance = FnConnectionProbeService._();
 
   /// FN 接口签名常量
   static const String _authxPrefix = 'NDzZTVxnRKP8Z0jXg1VAMonaG8akvh';
@@ -35,25 +34,29 @@ class FnConnectionProbeService {
   final ValueNotifier<bool> isProbing = ValueNotifier(false);
 
   /// 独立 Dio 实例，不与主 API 客户端共享配置
-  final Dio _probeDio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 2),
-    receiveTimeout: const Duration(seconds: 2),
-    sendTimeout: const Duration(seconds: 2),
-    followRedirects: false,
-  ));
+  final Dio _probeDio = Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 2),
+      receiveTimeout: const Duration(seconds: 2),
+      sendTimeout: const Duration(seconds: 2),
+      followRedirects: false,
+    ),
+  );
 
   CancelToken? _cancelToken;
 
   /// 执行分层探测
   ///
   /// [fnId] - FNID（如 "kuilei0926"）
-  /// [preference] - 连接偏好模式
+  /// [order] - 连接优先级顺序，默认读 [AppFnConnectionSettings.connectionOrder]
+  /// [preferHttps] - 直连组内是否优先 HTTPS，默认读 [AppFnConnectionSettings.preferHttps]
   ///
   /// 返回 [ConnectionProbeResult]，包含最终成功的 URL。
   /// 所有链路失败时抛出 [Exception]。
   Future<ConnectionProbeResult> probe({
     required String fnId,
-    required FnConnectionPreference preference,
+    List<ProbeCandidateGroup>? order,
+    bool? preferHttps,
   }) async {
     if (isProbing.value) {
       throw Exception('探测正在进行中，请等待完成');
@@ -71,15 +74,14 @@ class FnConnectionProbeService {
 
       // Step 2: 分层探测
       if (kDebugMode) {
-        debugPrint(
-          '[FnProbe] Starting hierarchical probe, mode=${preference.name}',
-        );
+        debugPrint('[FnProbe] Starting hierarchical probe');
       }
       final result = await _hierarchicalProbe(
         fnId,
         params,
-        preference,
-        _cancelToken!,
+        cancelToken: _cancelToken!,
+        order: order ?? AppFnConnectionSettings.connectionOrder.value,
+        preferHttps: preferHttps ?? AppFnConnectionSettings.preferHttps.value,
       );
 
       if (kDebugMode) {
@@ -104,75 +106,111 @@ class FnConnectionProbeService {
     _cancelToken?.cancel();
   }
 
-  /// 缓存优先探测
+  /// 缓存优先探测（仅升级，不降级）
   ///
-  /// 优先快速验证上次成功的连接 URL 是否仍可用（200ms 超时），
-  /// 缓存可用则直接返回，不可用时回退到完整分层探测。
+  /// 下次打开优先验证上次成功连接的 URL 是否仍可用（200ms 快探）：
+  /// - 缓存可达：仅探测优先级高于缓存的候选，若更高优先级链路可达则自动切换（升级）；
+  ///   否则保持缓存连接（不降级）。
+  /// - 缓存不可达或已不在当前候选列表（陈旧地址）：回退到完整分层探测。
   ///
   /// [cachedUrl] - 上次成功连接的 URL（来自 AppFnConnectionSettings）
   /// [cachedIsRelay] - 上次连接是否为中继模式
   /// [fnId] - FNID
-  /// [preference] - 连接偏好模式
+  /// [order] - 连接优先级顺序，默认读 [AppFnConnectionSettings.connectionOrder]
+  /// [preferHttps] - 直连组内是否优先 HTTPS，默认读 [AppFnConnectionSettings.preferHttps]
   ///
   /// 返回 [ConnectionProbeResult]，包含最终成功的 URL。
   /// 所有链路失败时抛出 [Exception]。
-  Future<ConnectionProbeResult> probeWithCache({
-    required String cachedUrl,
-    required bool cachedIsRelay,
+  Future<ConnectionProbeResult> probeSmart({
     required String fnId,
-    required FnConnectionPreference preference,
+    String? cachedUrl,
+    bool cachedIsRelay = false,
+    List<ProbeCandidateGroup>? order,
+    bool? preferHttps,
   }) async {
     if (isProbing.value) {
       throw Exception('探测正在进行中，请等待完成');
     }
 
-    // Step 1: 快速验证缓存连接（200ms 超时）
+    final effOrder = order ?? AppFnConnectionSettings.connectionOrder.value;
+    final effHttps = preferHttps ?? AppFnConnectionSettings.preferHttps.value;
+
     isProbing.value = true;
+    _cancelToken = CancelToken();
 
     try {
       if (kDebugMode) {
         debugPrint('[FnProbe] Trying cached connection: $cachedUrl');
       }
 
-      try {
-        final cachedOptions = Options(
-          connectTimeout: const Duration(milliseconds: 200),
-          receiveTimeout: const Duration(seconds: 1),
-          sendTimeout: const Duration(seconds: 1),
-          followRedirects: false,
-          validateStatus: (_) => true,
-          headers: cachedIsRelay ? {'Cookie': 'mode=relay'} : null,
-        );
+      // Step 1: 获取参数并构建按优先级排序的候选列表
+      final params = await _callFnConnectionApi(fnId, _cancelToken!);
+      final candidates = buildProbeCandidateSpecs(
+        fnId: fnId,
+        params: params,
+        order: effOrder,
+        preferHttps: effHttps,
+      );
 
-        await _probeDio.getUri(
-          Uri.parse(cachedUrl),
-          options: cachedOptions,
+      // Step 2: 缓存优先快探
+      if (cachedUrl != null && cachedUrl.isNotEmpty) {
+        final cachedIndex = candidates.indexWhere(
+          (c) => c.address == cachedUrl,
         );
+        if (cachedIndex >= 0) {
+          final cacheOk = await _tryCachedAddress(
+            cachedUrl,
+            cachedIsRelay,
+            _cancelToken!,
+          );
+          if (cacheOk) {
+            if (_cancelToken!.isCancelled) throw Exception('探测已取消');
 
-        // 缓存连接可用，直接返回
-        if (kDebugMode) {
-          debugPrint('[FnProbe] Cached connection still valid: $cachedUrl');
+            // 探测优先级更高的候选（索引 < cachedIndex），首个可达者即升级
+            final better = candidates.sublist(0, cachedIndex);
+            if (better.isNotEmpty) {
+              final results = await Future.wait(
+                better.map((c) => _tryAddressWithDetail(c, _cancelToken!)),
+              );
+              for (var i = 0; i < results.length; i++) {
+                if (_cancelToken!.isCancelled) throw Exception('探测已取消');
+                if (results[i].isReachable) {
+                  if (kDebugMode) {
+                    debugPrint(
+                      '[FnProbe] ✓ Upgraded (priority ${i + 1}): ${results[i].description}',
+                    );
+                  }
+                  return ConnectionProbeResult(
+                    serverUrl: results[i].address,
+                    probeMethod: results[i].description,
+                    isRelay: results[i].isRelay,
+                  );
+                }
+              }
+            }
+
+            // 无更高优先级可达，保持缓存连接
+            if (kDebugMode) {
+              debugPrint('[FnProbe] Cached connection still valid: $cachedUrl');
+            }
+            return ConnectionProbeResult(
+              serverUrl: cachedUrl,
+              probeMethod: '缓存连接',
+              isRelay: cachedIsRelay,
+            );
+          }
+          // 缓存不可达 → 回退完整探测
         }
-        return ConnectionProbeResult(
-          serverUrl: cachedUrl,
-          probeMethod: '缓存连接',
-          isRelay: cachedIsRelay,
-        );
-      } on DioException {
-        // 缓存连接不可用，回退到完整探测
-        if (kDebugMode) {
-          debugPrint('[FnProbe] Cached connection failed, falling back to full probe');
-        }
+        // 缓存不在当前候选列表（陈旧地址）→ 忽略缓存，完整探测
       }
 
-      // Step 2: 回退到完整探测
-      _cancelToken = CancelToken();
-      final params = await _callFnConnectionApi(fnId, _cancelToken!);
+      // Step 3: 完整分层探测
       final result = await _hierarchicalProbe(
         fnId,
         params,
-        preference,
-        _cancelToken!,
+        cancelToken: _cancelToken!,
+        order: effOrder,
+        preferHttps: effHttps,
       );
 
       if (kDebugMode) {
@@ -192,6 +230,34 @@ class FnConnectionProbeService {
     }
   }
 
+  /// 快速验证缓存连接是否可达（200ms 快探）
+  Future<bool> _tryCachedAddress(
+    String url,
+    bool isRelay,
+    CancelToken cancelToken,
+  ) async {
+    try {
+      await _probeDio.getUri(
+        Uri.parse(url),
+        cancelToken: cancelToken,
+        options: Options(
+          connectTimeout: const Duration(milliseconds: 200),
+          receiveTimeout: const Duration(seconds: 1),
+          sendTimeout: const Duration(seconds: 1),
+          followRedirects: false,
+          validateStatus: (_) => true,
+          headers: isRelay ? {'Cookie': 'mode=relay'} : null,
+        ),
+      );
+      return true;
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) {
+        rethrow;
+      }
+      return false;
+    }
+  }
+
   /// 调用 FN 接口获取连接参数
   Future<FnConnectionParams> _callFnConnectionApi(
     String fnId,
@@ -208,9 +274,7 @@ class FnConnectionProbeService {
       options: Options(
         connectTimeout: const Duration(seconds: 10),
         receiveTimeout: const Duration(seconds: 10),
-        headers: {
-          'authx': _computeAuthx('post', apiPath, data),
-        },
+        headers: {'authx': _computeAuthx('post', apiPath, data)},
       ),
     );
 
@@ -219,9 +283,7 @@ class FnConnectionProbeService {
     );
 
     if (!parsed.isSuccess || parsed.data == null) {
-      throw Exception(
-        parsed.msg.isNotEmpty ? parsed.msg : 'FNID 查询失败，请检查输入',
-      );
+      throw Exception(parsed.msg.isNotEmpty ? parsed.msg : 'FNID 查询失败，请检查输入');
     }
 
     return parsed.data!;
@@ -240,9 +302,19 @@ class FnConnectionProbeService {
     final c = method == 'get'
         ? _sortAndSerializeQuery(data as Map<String, dynamic>?)
         : jsonEncode(data);
-    final nonce = (Random().nextInt(900000) + 100000).toString().padLeft(6, '0');
+    final nonce = (Random().nextInt(900000) + 100000).toString().padLeft(
+      6,
+      '0',
+    );
     final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-    final raw = [_authxPrefix, url, nonce, timestamp, _md5(c), _apiKey].join('_');
+    final raw = [
+      _authxPrefix,
+      url,
+      nonce,
+      timestamp,
+      _md5(c),
+      _apiKey,
+    ].join('_');
     final sign = _md5(raw);
     return 'nonce=$nonce&timestamp=$timestamp&sign=$sign';
   }
@@ -254,89 +326,9 @@ class FnConnectionProbeService {
   static String _sortAndSerializeQuery(Map<String, dynamic>? params) {
     if (params == null || params.isEmpty) return '';
     final keys = params.keys.toList()..sort();
-    return keys.map((k) => '$k=${Uri.encodeComponent(params[k].toString())}').join('&');
-  }
-
-  /// 构建候选链路列表（按优先级排序）
-  List<_ProbeCandidate> _buildCandidateList(
-    String fnId,
-    FnConnectionParams params,
-    FnConnectionPreference preference,
-  ) {
-    final candidates = <_ProbeCandidate>[];
-
-    // --- 第一层：内网 IPv4 ---
-    for (final ip in params.internalIPv4s) {
-      candidates.add(_ProbeCandidate(
-        address: 'https://$ip:${params.httpsPort}',
-        description: 'HTTPS ($ip:${params.httpsPort})',
-        group: ProbeCandidateGroup.internal,
-        ipLabel: ip,
-      ));
-      candidates.add(_ProbeCandidate(
-        address: 'http://$ip:${params.httpPort}',
-        description: 'HTTP ($ip:${params.httpPort})',
-        group: ProbeCandidateGroup.internal,
-        ipLabel: ip,
-      ));
-    }
-
-    if (preference == FnConnectionPreference.publicFirst) {
-      // --- 第二层：公网 IPv6 ---
-      for (final ipv6 in params.publicIPv6s) {
-        candidates.add(_ProbeCandidate(
-          address: 'https://[$ipv6]:${params.httpsPort}',
-          description: 'HTTPS ($ipv6:${params.httpsPort})',
-          group: ProbeCandidateGroup.publicIPv6,
-          ipLabel: ipv6,
-        ));
-        candidates.add(_ProbeCandidate(
-          address: 'http://[$ipv6]:${params.httpPort}',
-          description: 'HTTP ($ipv6:${params.httpPort})',
-          group: ProbeCandidateGroup.publicIPv6,
-          ipLabel: ipv6,
-        ));
-      }
-
-      // --- 第三层：公网 IPv4 ---
-      for (final ipv4 in params.publicIPv4s) {
-        candidates.add(_ProbeCandidate(
-          address: 'https://$ipv4:${params.httpsPort}',
-          description: 'HTTPS ($ipv4:${params.httpsPort})',
-          group: ProbeCandidateGroup.publicIPv4,
-          ipLabel: ipv4,
-        ));
-        candidates.add(_ProbeCandidate(
-          address: 'http://$ipv4:${params.httpPort}',
-          description: 'HTTP ($ipv4:${params.httpPort})',
-          group: ProbeCandidateGroup.publicIPv4,
-          ipLabel: ipv4,
-        ));
-      }
-    }
-
-    // --- 兜底：中继链路（只保留 HTTPS） ---
-    if (params.relayAddresses.isNotEmpty) {
-      for (final addr in params.relayAddresses) {
-        final relayDomain = addr.replaceFirst(RegExp(r':\d+$'), '');
-        candidates.add(_ProbeCandidate(
-          address: 'https://$relayDomain',
-          description: 'HTTPS ($relayDomain)',
-          group: ProbeCandidateGroup.relay,
-          relayMode: true,
-        ));
-      }
-    } else {
-      final relayDomain = fnId.endsWith('.5ddd.com') ? fnId : '$fnId.5ddd.com';
-      candidates.add(_ProbeCandidate(
-        address: 'https://$relayDomain',
-        description: 'HTTPS ($relayDomain)',
-        group: ProbeCandidateGroup.relay,
-        relayMode: true,
-      ));
-    }
-
-    return candidates;
+    return keys
+        .map((k) => '$k=${Uri.encodeComponent(params[k].toString())}')
+        .join('&');
   }
 
   /// 探测所有候选链路（用于「FN Connect」设置页完整展示）
@@ -345,12 +337,16 @@ class FnConnectionProbeService {
   /// 同时返回首个可用连接。
   ///
   /// 返回一个元组：(所有候选结果列表, 首个成功的 [ConnectionProbeResult] 或 null)
-  Future<({
-    List<ProbeCandidateResult> candidates,
-    ConnectionProbeResult? firstSuccess,
-  })> probeAllCandidates({
+  Future<
+    ({
+      List<ProbeCandidateResult> candidates,
+      ConnectionProbeResult? firstSuccess,
+    })
+  >
+  probeAllCandidates({
     required String fnId,
-    required FnConnectionPreference preference,
+    List<ProbeCandidateGroup>? order,
+    bool? preferHttps,
   }) async {
     if (isProbing.value) {
       throw Exception('探测正在进行中，请等待完成');
@@ -361,7 +357,12 @@ class FnConnectionProbeService {
 
     try {
       final params = await _callFnConnectionApi(fnId, _cancelToken!);
-      final candidates = _buildCandidateList(fnId, params, preference);
+      final candidates = buildProbeCandidateSpecs(
+        fnId: fnId,
+        params: params,
+        order: order ?? AppFnConnectionSettings.connectionOrder.value,
+        preferHttps: preferHttps ?? AppFnConnectionSettings.preferHttps.value,
+      );
 
       // 并行探测所有候选（默认所有候选中继模式共 4 条以上，并行可加速）
       final results = await Future.wait(
@@ -370,11 +371,13 @@ class FnConnectionProbeService {
 
       final firstSuccess = results
           .where((r) => r.isReachable)
-          .map((r) => ConnectionProbeResult(
-                serverUrl: r.address,
-                probeMethod: r.description,
-                isRelay: r.isRelay,
-              ))
+          .map(
+            (r) => ConnectionProbeResult(
+              serverUrl: r.address,
+              probeMethod: r.description,
+              isRelay: r.isRelay,
+            ),
+          )
           .firstOrNull;
 
       return (candidates: results, firstSuccess: firstSuccess);
@@ -392,11 +395,17 @@ class FnConnectionProbeService {
   /// 并发探测所有候选地址，按优先级取首个可用
   Future<ConnectionProbeResult> _hierarchicalProbe(
     String fnId,
-    FnConnectionParams params,
-    FnConnectionPreference preference,
-    CancelToken cancelToken,
-  ) async {
-    final candidates = _buildCandidateList(fnId, params, preference);
+    FnConnectionParams params, {
+    required CancelToken cancelToken,
+    required List<ProbeCandidateGroup> order,
+    required bool preferHttps,
+  }) async {
+    final candidates = buildProbeCandidateSpecs(
+      fnId: fnId,
+      params: params,
+      order: order,
+      preferHttps: preferHttps,
+    );
 
     // 并发探测所有候选
     final results = await Future.wait(
@@ -411,7 +420,9 @@ class FnConnectionProbeService {
       final r = results[i];
       if (r.isReachable) {
         if (kDebugMode) {
-          debugPrint('[FnProbe] ✓ Success (priority ${i + 1}): ${r.description}');
+          debugPrint(
+            '[FnProbe] ✓ Success (priority ${i + 1}): ${r.description}',
+          );
         }
         return ConnectionProbeResult(
           serverUrl: r.address,
@@ -428,18 +439,13 @@ class FnConnectionProbeService {
         .map((r) => '${r.description}: ${r.error}')
         .join('\n');
     final totalFailed = results.where((r) => !r.isReachable).length;
-    final suffix = totalFailed > 5
-        ? '\n...以及其他 ${totalFailed - 5} 个地址'
-        : '';
-    throw Exception(
-      '所有链路均无法连接，请检查网络或稍后重试。\n$errors$suffix',
-    );
+    final suffix = totalFailed > 5 ? '\n...以及其他 ${totalFailed - 5} 个地址' : '';
+    throw Exception('所有链路均无法连接，请检查网络或稍后重试。\n$errors$suffix');
   }
-
 
   /// 探测单条链路并返回探测结果详情
   Future<ProbeCandidateResult> _tryAddressWithDetail(
-    _ProbeCandidate candidate,
+    ProbeCandidateSpec candidate,
     CancelToken cancelToken,
   ) async {
     try {
@@ -449,9 +455,7 @@ class FnConnectionProbeService {
         sendTimeout: const Duration(seconds: 1),
         followRedirects: false,
         validateStatus: (_) => true,
-        headers: candidate.relayMode
-            ? {'Cookie': 'mode=relay'}
-            : null,
+        headers: candidate.relayMode ? {'Cookie': 'mode=relay'} : null,
       );
 
       await _probeDio.getUri(
@@ -502,21 +506,4 @@ class FnConnectionProbeService {
         return e.message ?? '未知网络错误';
     }
   }
-}
-
-/// 单条候选链路
-class _ProbeCandidate {
-  final String address;
-  final String description;
-  final ProbeCandidateGroup group;
-  final String? ipLabel;
-  final bool relayMode;
-
-  const _ProbeCandidate({
-    required this.address,
-    required this.description,
-    required this.group,
-    this.ipLabel,
-    this.relayMode = false,
-  });
 }

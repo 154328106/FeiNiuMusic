@@ -77,15 +77,12 @@ void _warmupConnection() {
   final cache = AppFnConnectionSettings.cachedConnection;
   if (cache == null) return;
 
-  final preference = AppFnConnectionSettings.connectionPreference.value;
-
   // fire-and-forget：不 await，不抛异常到顶层
   FnConnectionProbeService.instance
-      .probeWithCache(
+      .probeSmart(
         cachedUrl: cache.url,
         cachedIsRelay: cache.isRelay,
         fnId: fnId,
-        preference: preference,
       )
       .then((result) {
         // 缓存验证成功且 URL 没变，不做任何事

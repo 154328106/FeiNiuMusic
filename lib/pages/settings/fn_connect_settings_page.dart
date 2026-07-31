@@ -33,7 +33,10 @@ class _FnConnectSettingsPageState extends State<FnConnectSettingsPage> {
   }
 
   /// 执行全量探测
-  Future<void> _startFullProbe({FnConnectionPreference? overridePref}) async {
+  Future<void> _startFullProbe({
+    List<ProbeCandidateGroup>? overrideOrder,
+    bool? overridePreferHttps,
+  }) async {
     final fnId = AppFnConnectionSettings.lastFnId;
     if (fnId == null || fnId.isEmpty) {
       AppToast.show(context, '没有可用的 FNID，请先使用 FNID 登录', type: ToastType.error);
@@ -45,11 +48,10 @@ class _FnConnectSettingsPageState extends State<FnConnectSettingsPage> {
     });
 
     try {
-      final pref =
-          overridePref ?? AppFnConnectionSettings.connectionPreference.value;
       final result = await FnConnectionProbeService.instance.probeAllCandidates(
         fnId: fnId,
-        preference: pref,
+        order: overrideOrder,
+        preferHttps: overridePreferHttps,
       );
 
       if (!mounted) return;
@@ -246,37 +248,68 @@ class _FnConnectSettingsPageState extends State<FnConnectSettingsPage> {
           ),
           const SizedBox(height: 16),
 
-          // === 连接偏好 ===
+          // === 连接优先级 ===
           AppSettingSection(
-            title: '连接偏好',
+            title: '连接优先级',
             children: [
-              ValueListenableBuilder<FnConnectionPreference>(
-                valueListenable: AppFnConnectionSettings.connectionPreference,
-                builder: (context, currentPref, _) {
-                  return Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      RadioListTile<FnConnectionPreference>(
-                        title: const Text('公网优先'),
-                        subtitle: const Text('内网 → 公网 IPv6 → IPv4 → 中继兜底'),
-                        value: FnConnectionPreference.publicFirst,
-                        groupValue: currentPref,
-                        onChanged: (value) {
-                          if (value == null) return;
-                          _setPreference(value);
-                        },
-                      ),
-                      RadioListTile<FnConnectionPreference>(
-                        title: const Text('中继优先'),
-                        subtitle: const Text('内网 → 跳过公网直连，直接中继连接'),
-                        value: FnConnectionPreference.relayFirst,
-                        groupValue: currentPref,
-                        onChanged: (value) {
-                          if (value == null) return;
-                          _setPreference(value);
-                        },
-                      ),
-                    ],
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 12, 4, 4),
+                child: Text(
+                  '拖拽调整顺序，排在上方的连接优先尝试',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              ValueListenableBuilder<List<ProbeCandidateGroup>>(
+                valueListenable: AppFnConnectionSettings.connectionOrder,
+                builder: (context, order, _) {
+                  return ReorderableListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    buildDefaultDragHandles: false,
+                    onReorder: (oldIndex, newIndex) {
+                      if (newIndex > oldIndex) newIndex -= 1;
+                      final next = List<ProbeCandidateGroup>.from(order);
+                      final item = next.removeAt(oldIndex);
+                      next.insert(newIndex, item);
+                      _setConnectionOrder(next);
+                    },
+                    itemCount: order.length,
+                    itemBuilder: (context, index) {
+                      final group = order[index];
+                      return AppSettingTile(
+                        key: ValueKey('conn_order_${group.name}'),
+                        title: group.title,
+                        subtitle: group.subtitle,
+                        trailing: ReorderableDragStartListener(
+                          index: index,
+                          child: const Padding(
+                            padding: EdgeInsets.only(left: 8),
+                            child: Icon(Icons.drag_handle_rounded),
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // === 传输协议 ===
+          AppSettingSection(
+            title: '传输协议',
+            children: [
+              ValueListenableBuilder<bool>(
+                valueListenable: AppFnConnectionSettings.preferHttps,
+                builder: (context, preferHttps, _) {
+                  return AppSettingSwitchTile(
+                    title: 'HTTPS 优先',
+                    subtitle: '开启时优先使用 HTTPS 端口，关闭时优先使用 HTTP 端口',
+                    value: preferHttps,
+                    onChanged: _setPreferHttps,
                   );
                 },
               ),
@@ -325,7 +358,9 @@ class _FnConnectSettingsPageState extends State<FnConnectSettingsPage> {
                     );
                   }
 
-                  // 按分组排序并分组显示，组内再按 IP 分割
+                  // 按分组排序并分组显示（可达组在前，组间按用户优先级排序）
+                  final userOrder =
+                      AppFnConnectionSettings.connectionOrder.value;
                   final grouped =
                       <ProbeCandidateGroup, List<ProbeCandidateResult>>{};
                   for (final r in results) {
@@ -342,6 +377,9 @@ class _FnConnectSettingsPageState extends State<FnConnectSettingsPage> {
                       if (aReachable != bReachable) {
                         return aReachable.compareTo(bReachable);
                       }
+                      final aOrder = userOrder.indexWhere((g) => g == a.key);
+                      final bOrder = userOrder.indexWhere((g) => g == b.key);
+                      if (aOrder != bOrder) return aOrder.compareTo(bOrder);
                       return a.value.first.groupOrder.compareTo(
                         b.value.first.groupOrder,
                       );
@@ -451,17 +489,20 @@ class _FnConnectSettingsPageState extends State<FnConnectSettingsPage> {
     );
   }
 
-  void _setPreference(FnConnectionPreference pref) {
+  void _setConnectionOrder(List<ProbeCandidateGroup> order) {
     if (FnConnectionProbeService.instance.isProbing.value) {
       FnConnectionProbeService.instance.cancel();
     }
-    AppFnConnectionSettings.setConnectionPreference(
-      pref,
-      onPreferenceChanged: () {
-        // 偏好变化后自动重新探测
-        _startFullProbe(overridePref: pref);
-      },
-    );
+    // 保存顺序，下次连接（启动 / 登录 / 自动重连）时按新顺序生效
+    AppFnConnectionSettings.setConnectionOrder(order);
+  }
+
+  void _setPreferHttps(bool value) {
+    if (FnConnectionProbeService.instance.isProbing.value) {
+      FnConnectionProbeService.instance.cancel();
+    }
+    // 保存协议偏好，下次连接时按新偏好生效
+    AppFnConnectionSettings.setPreferHttps(value);
   }
 
   void _toggleUnreachableGroup(ProbeCandidateGroup group) {
