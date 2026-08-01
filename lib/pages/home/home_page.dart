@@ -16,6 +16,7 @@ import '../../app/utils/api_cache_manager.dart';
 import '../../components/index.dart';
 import '../library/library_detail_pages.dart';
 import '../library/playlists_page.dart';
+import '../songs/song_detail_sheet.dart';
 
 /// 首页缓存
 class _HomeCacheData {
@@ -310,6 +311,16 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
     _player.playQueue(q, idx >= 0 ? idx : 0);
   }
 
+  /// 长按歌曲 → 弹出与歌曲页同款的长按面板
+  void _showSongDetail(SongEntity song) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => SongDetailSheet(song: song),
+    );
+  }
+
   /// 漫游播放 — 播放首页当前显示的漫游歌曲，播完后自动下一首随机
   void _playRoam() {
     final song = _roamSong.value;
@@ -443,6 +454,7 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
                       child: _SongGridList(
                         songs: _favoriteSongs.value,
                         onTap: (song) => _playSong(song, _favoriteSongs.value),
+                        onLongPress: _showSongDetail,
                       ),
                     ),
                   const SizedBox(height: 16),
@@ -454,6 +466,7 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
                       child: _SongGridList(
                         songs: _recentSongs.value,
                         onTap: (song) => _playSong(song, _recentSongs.value),
+                        onLongPress: _showSongDetail,
                       ),
                     ),
                   const SizedBox(height: 16),
@@ -465,6 +478,7 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
                       child: _SongGridList(
                         songs: _recentTracks.value,
                         onTap: (song) => _playSong(song, _recentTracks.value),
+                        onLongPress: _showSongDetail,
                       ),
                     ),
                   const SizedBox(height: 16),
@@ -547,8 +561,13 @@ class _HomeSectionCard extends StatelessWidget {
 class _SongGridList extends StatelessWidget {
   final List<SongEntity> songs;
   final ValueChanged<SongEntity> onTap;
+  final ValueChanged<SongEntity>? onLongPress;
 
-  const _SongGridList({required this.songs, required this.onTap});
+  const _SongGridList({
+    required this.songs,
+    required this.onTap,
+    this.onLongPress,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -579,6 +598,9 @@ class _SongGridList extends StatelessWidget {
                       child: InkWell(
                         borderRadius: BorderRadius.circular(12),
                         onTap: () => onTap(song),
+                        onLongPress: onLongPress == null
+                            ? null
+                            : () => onLongPress!(song),
                         child: Row(
                           children: [
                             Stack(

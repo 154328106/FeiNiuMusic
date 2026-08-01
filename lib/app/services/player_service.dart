@@ -970,9 +970,21 @@ class PlayerService with WidgetsBindingObserver {
     final nextQueue = List<SongEntity>.from(oldQueue);
     nextQueue.insert(insertAt, song);
 
-    final wasPlaying = isPlaying.value;
-    final pos = position.value;
-    await _reloadQueue(nextQueue, idx, play: wasPlaying, initialPosition: pos);
+    // 用 insertAudioSource 原地插入，避免 _reloadQueue 全量重建导致当前播放卡顿
+    final source = await _sourceForSong(song);
+    _applyLogicalQueue(nextQueue, idx);
+    try {
+      await _player.insertAudioSource(insertAt, source);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('PlayerService.playNext insertAudioSource failed: $e');
+      }
+      // 插入失败（罕见）回退全量重建，保证队列一致
+      final wasPlaying = isPlaying.value;
+      final pos = position.value;
+      await _reloadQueue(nextQueue, idx, play: wasPlaying, initialPosition: pos);
+      return;
+    }
 
     if (playbackMode.value == PlaybackMode.shuffle) {
       await _player.setShuffleModeEnabled(true);
@@ -997,9 +1009,23 @@ class PlayerService with WidgetsBindingObserver {
     final nextQueue = List<SongEntity>.from(oldQueue);
     nextQueue.insertAll(insertAt, toInsert);
 
-    final wasPlaying = isPlaying.value;
-    final pos = position.value;
-    await _reloadQueue(nextQueue, idx, play: wasPlaying, initialPosition: pos);
+    // 用 insertAudioSources 原地插入，避免 _reloadQueue 全量重建导致当前播放卡顿
+    final sources = await Future.wait(
+      toInsert.map((s) => _sourceForSong(s)),
+    );
+    _applyLogicalQueue(nextQueue, idx);
+    try {
+      await _player.insertAudioSources(insertAt, sources);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('PlayerService.insertNext insertAudioSources failed: $e');
+      }
+      // 插入失败（罕见）回退全量重建，保证队列一致
+      final wasPlaying = isPlaying.value;
+      final pos = position.value;
+      await _reloadQueue(nextQueue, idx, play: wasPlaying, initialPosition: pos);
+      return;
+    }
 
     if (playbackMode.value == PlaybackMode.shuffle) {
       await _player.setShuffleModeEnabled(true);
