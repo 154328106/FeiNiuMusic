@@ -20,6 +20,7 @@ import '../../pages/settings/fn_connect_settings_page.dart';
 import '../../pages/settings/listening_stats_page.dart';
 import '../../pages/settings/settings_page.dart';
 import '../../pages/settings/version_info_page.dart';
+import '../../pages/settings/volume_settings_page.dart';
 import '../../pages/settings/launch_settings_page.dart';
 import '../../pages/library/albums_page.dart';
 import '../../pages/library/artists_page.dart';
@@ -47,6 +48,7 @@ class AppRoutes {
   static const cacheSettings = '/settings/cache';
   static const listeningStats = '/settings/listening-stats';
   static const versionInfo = '/settings/version-info';
+  static const volumeScheduleSettings = '/settings/volume-schedule';
   static const fnConnectSettings = '/settings/fn-connect';
   static const launchSettings = '/settings/launch';
   static const artists = '/artists';
@@ -83,6 +85,7 @@ class AppRouter {
     AppRoutes.cacheSettings: (_) => const CacheSettingsPage(),
     AppRoutes.listeningStats: (_) => const ListeningStatsPage(),
     AppRoutes.versionInfo: (_) => const VersionInfoPage(),
+    AppRoutes.volumeScheduleSettings: (_) => const VolumeSettingsPage(),
     AppRoutes.fnConnectSettings: (_) => const FnConnectSettingsPage(),
     AppRoutes.launchSettings: (_) => const LaunchSettingsPage(),
     AppRoutes.artists: (_) => const ArtistsPage(),

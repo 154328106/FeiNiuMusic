@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
@@ -104,6 +105,7 @@ class _SongsPageState extends State<SongsPage>
           context,
         ).then((_) => loaded++).catchError((e) {
           debugPrint('[SongsPage] cover precache failed song=${song.title} coverId=${song.coverId}: $e');
+          return 0; // 预缓存失败静默，不阻断后续封面
         }));
       } else {
         skipped++;
@@ -452,7 +454,7 @@ class _SongsPageState extends State<SongsPage>
                         itemCount: songs.length + (_isLoadingMore.value ? 1 : 0),
                         itemExtent: _itemExtent,
                         addAutomaticKeepAlives: true,
-                        cacheExtent: 300,
+                        scrollCacheExtent: ScrollCacheExtent.pixels(300),
                         itemBuilder: (context, index) {
                           if (index >= songs.length) {
                             return const Center(

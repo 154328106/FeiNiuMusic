@@ -158,8 +158,7 @@ class _FnConnectSettingsPageState extends State<FnConnectSettingsPage> {
               return ValueListenableBuilder<String?>(
                 valueListenable:
                     AppFnConnectionSettings.currentConnectionMethod,
-                builder: (context, method, _) {
-                  final methodText = method ?? '';
+                builder: (context, _, _) {
                   // 用真实的中继标记判断（探测时由 relayMode 写入），
                   // 不能靠描述文字（如 HTTPS (xxx.5ddd.com) 不含「中继」字样）
                   final isRelay = AppFnConnectionSettings.lastIsRelay;
@@ -261,8 +260,7 @@ class _FnConnectSettingsPageState extends State<FnConnectSettingsPage> {
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     buildDefaultDragHandles: false,
-                    onReorder: (oldIndex, newIndex) {
-                      if (newIndex > oldIndex) newIndex -= 1;
+                    onReorderItem: (oldIndex, newIndex) {
                       final next = List<ProbeCandidateGroup>.from(order);
                       final item = next.removeAt(oldIndex);
                       next.insert(newIndex, item);

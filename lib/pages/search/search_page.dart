@@ -11,7 +11,6 @@ import '../../app/state/song_state.dart';
 import '../../app/theme/app_styles.dart';
 import '../../components/index.dart';
 import '../library/library_detail_pages.dart';
-import '../library/playlists_page.dart';
 import '../songs/song_detail_sheet.dart';
 
 enum SearchCategory { all, song, album, artist }
@@ -276,7 +275,6 @@ class _SearchPageState extends State<SearchPage> {
                 final coverUrl = album.coverId != null && album.coverId!.isNotEmpty
                     ? _api.coverUrl(album.coverId!, size: 48)
                     : null;
-                final token = _api.token;
                 return ListTile(
                   leading: coverUrl != null
                       ? ClipRRect(
@@ -287,7 +285,7 @@ class _SearchPageState extends State<SearchPage> {
                             width: 48,
                             height: 48,
                             fit: BoxFit.cover,
-                            errorWidget: (_, __, ___) => _albumPlaceholder(theme),
+                            errorWidget: (_, _, _) => _albumPlaceholder(theme),
                           ),
                         )
                       : _albumPlaceholder(theme),
@@ -312,7 +310,6 @@ class _SearchPageState extends State<SearchPage> {
                 final coverUrl = artist.coverId != null && artist.coverId!.isNotEmpty
                     ? _api.coverUrl(artist.coverId!, size: 48)
                     : null;
-                final token = _api.token;
                 return ListTile(
                   leading: CircleAvatar(
                     radius: 24,

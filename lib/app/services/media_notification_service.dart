@@ -191,7 +191,7 @@ class _NagoAudioHandler extends BaseAudioHandler
 
       _debugLog('fallback downloading url=$url');
       final httpClient = io.HttpClient()
-        ..badCertificateCallback = (_, __, ___) => true;
+        ..badCertificateCallback = (_, _, _) => true;
       try {
         final request = await httpClient.getUrl(Uri.parse(url));
         if (FeiNiuApiClient.instance.token.isNotEmpty) {
@@ -395,18 +395,6 @@ class _NagoAudioHandler extends BaseAudioHandler
   /// 后台尝试将封面替换为本地文件。
   /// 优先使用 CachedNetworkImage 已有的磁盘缓存（不发起网络请求），
   /// 缓存不存在时通过 flutter_cache_manager 下载至本地缓存。
-  Future<void> _tryUpdateCoverLocal(SongEntity song) async {
-    if (song.coverId == null || song.coverId!.isEmpty) return;
-    final localUri = await _getLocalCoverUri(
-      song.coverId!,
-      updatedAt: song.updatedAt,
-    );
-    if (localUri != null && song.id == _lastSongId) {
-      _cachedCoverUri = localUri;
-      _syncMediaItem();
-    }
-  }
-
   void _syncQueue(PlaybackSnapshot snap) {
     final queueKey = snap.queue.map((song) => song.id).join('|');
     if (queueKey == _lastQueueKey) return;

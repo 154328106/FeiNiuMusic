@@ -15,13 +15,12 @@ import 'audio/stream_cache_service.dart';
 import 'feiniu/api_client.dart';
 import 'feiniu/auth_service.dart';
 import 'feiniu/track_service.dart';
-import 'lyrics/lyrics_repository.dart';
 import 'stats_service.dart';
+import 'volume_schedule_service.dart';
 import '../state/settings_state.dart';
 import '../state/song_state.dart';
 export '../state/player_state.dart';
 import '../state/player_state.dart';
-import 'feiniu/roam_service.dart';
 
 class PlayerService with WidgetsBindingObserver {
   static final PlayerService instance = PlayerService._internal();
@@ -33,7 +32,6 @@ class PlayerService with WidgetsBindingObserver {
 
   final AudioPlayer _player = AudioPlayer();
   final SongDao _songDao = SongDao.instance;
-  final LyricsRepository _lyricsRepo = LyricsRepository();
   final StatsService _statsService = StatsService.instance;
   AudioSession? _audioSession;
   Timer? _statsFlushTimer;
@@ -83,7 +81,6 @@ class PlayerService with WidgetsBindingObserver {
   _PlaybackRestoreState? _restoreSession;
   Future<void>? _restorePrepareFuture;
   DateTime? _sleepEndAt;
-  final Map<String, Future<void>> _probeInflight = {};
   final Map<String, int> _durationPersistedMs = {};
   final Map<String, _ResolvedRemoteSource> _resolvedRemoteSources = {};
   final Map<String, Future<Uri>> _sourceResolveInflight = {};
@@ -147,6 +144,8 @@ class PlayerService with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _stopBackgroundAudioKeepAlive();
+      // 后台期间 Timer 挂起，resume 立即重检定时音量（时间窗可能已跨越）。
+      VolumeScheduleService.instance.checkNow();
       if (isPlaying.value) {
         unawaited(_ensureAudiblePlayback());
       }
@@ -179,6 +178,7 @@ class PlayerService with WidgetsBindingObserver {
     _persistTimer?.cancel();
     _debugLog('init start');
     await AppPlaybackVolumeSettings.ensureLoaded();
+    await VolumeScheduleService.instance.ensureStarted();
     await WebDavPlaybackSettings.ensureLoaded();
     await AppCacheSettings.ensureLoaded();
     await AppLaunchPlaybackSettings.ensureLoaded();
@@ -872,10 +872,11 @@ class PlayerService with WidgetsBindingObserver {
         try {
           await _player.seekToNext();
         } catch (_) {}
-        if (!_player.playing)
+        if (!_player.playing) {
           try {
             await _player.play();
           } catch (_) {}
+        }
       }
     } finally {
       _roamAppendQueuedCount--;
@@ -1175,34 +1176,39 @@ class PlayerService with WidgetsBindingObserver {
     final oldQueue = List<SongEntity>.from(queue.value);
     if (oldQueue.isEmpty) return;
     if (oldIndex < 0 || oldIndex >= oldQueue.length) return;
+    // newIndex 为移除 oldIndex 元素后的目标下标（0..oldQueue.length），
+    // 由调用方（ReorderableListView.onReorderItem）负责调整。
     if (newIndex < 0 || newIndex > oldQueue.length) return;
-    var targetIndex = newIndex;
-    if (targetIndex > oldIndex) targetIndex -= 1;
+    final targetIndex = newIndex;
     if (targetIndex == oldIndex) return;
-
-    final current = currentSong.value;
-    final currentId = current?.id;
-    final wasPlaying = isPlaying.value;
-    final pos = position.value;
 
     final item = oldQueue.removeAt(oldIndex);
     oldQueue.insert(targetIndex, item);
 
-    var startIndex = 0;
-    if (currentId != null) {
-      final idx = oldQueue.indexWhere((s) => s.id == currentId);
-      if (idx >= 0) startIndex = idx;
-    }
-
-    await _reloadQueue(
-      oldQueue,
-      startIndex,
-      play: wasPlaying,
-      initialPosition: pos,
-    );
-
-    if (playbackMode.value == PlaybackMode.shuffle) {
-      await _player.setShuffleModeEnabled(true);
+    // 只就地移动音频源，不重建整个播放管线（避免正在播放的歌曲卡顿）。
+    // 先同步逻辑队列，让 _indexSub 在 currentIndexStream 变化时能取到最新顺序。
+    queue.value = oldQueue;
+    _emitSnapshot(force: true);
+    try {
+      await _player.moveAudioSource(oldIndex, targetIndex);
+    } catch (e) {
+      // 移动失败（罕见）：回退为全量重建以恢复逻辑队列与实际源一致。
+      if (kDebugMode) debugPrint('PlayerService reorderQueue move failed: $e');
+      final current = currentSong.value;
+      final currentId = current?.id;
+      final wasPlaying = isPlaying.value;
+      final pos = position.value;
+      var startIndex = 0;
+      if (currentId != null) {
+        final idx = oldQueue.indexWhere((s) => s.id == currentId);
+        if (idx >= 0) startIndex = idx;
+      }
+      await _reloadQueue(
+        oldQueue,
+        startIndex,
+        play: wasPlaying,
+        initialPosition: pos,
+      );
     }
   }
 
@@ -1483,8 +1489,6 @@ class PlayerService with WidgetsBindingObserver {
       }
     }
   }
-
-  Future<void> _ensureRestoredPlaybackReady() async {}
 
   Future<void> _seekRestoredPosition(Duration restored) async {
     _isSeeking = true;
@@ -1874,14 +1878,7 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   void _maybeProbeSong(SongEntity song) {
-    unawaited(_maybeProbeSongAsync(song));
-  }
-
-  Future<void> _maybeProbeSongAsync(SongEntity song) async {
-    final hasCover = false;
-    final hasDuration = (song.durationMs ?? 0) > 0;
-    final hasLyrics = await _lyricsRepo.hasCachedLrc(song.id);
-    if (hasCover && hasDuration && hasLyrics) return;
+    // 音频探测逻辑已移除，保留此调用点占位以便未来扩展。
   }
 
   void _scheduleDeferredProbe(SongEntity song) {
@@ -1947,35 +1944,6 @@ class PlayerService with WidgetsBindingObserver {
         nextSong: _nextSongForIndex(queue.value, currentIndex.value),
       );
       _emitSnapshot(force: true);
-    }
-  }
-
-  Future<void> _probeAndPersist(SongEntity song, {required String uri}) async {}
-
-  Future<void> _probeLocalAndPersist(
-    SongEntity song, {
-    required String uri,
-  }) async {}
-
-  Uri? _getSafeUri(String uriStr) {
-    try {
-      final uri = Uri.parse(uriStr);
-      // Heuristic: If path contains %25 (encoded %), it might be double encoded (e.g. %2520 instead of %20).
-      // We want to decode it so that the resulting Uri uses proper single encoding.
-      if (uri.path.contains('%25')) {
-        try {
-          return Uri.parse(Uri.decodeFull(uriStr));
-        } catch (_) {
-          return uri;
-        }
-      }
-      return uri;
-    } catch (_) {
-      try {
-        return Uri.parse(Uri.encodeFull(uriStr));
-      } catch (_) {
-        return null;
-      }
     }
   }
 

@@ -13,7 +13,6 @@ import '../../app/services/feiniu/playlist_service.dart';
 import '../../app/services/feiniu/track_service.dart';
 import '../../app/services/player_service.dart';
 import '../../app/router/app_page_route.dart';
-import '../../app/router/app_router.dart';
 import '../../app/state/song_state.dart';
 import '../../app/utils/api_cache_manager.dart';
 import '../../app/utils/deferred_page_init_mixin.dart';
@@ -52,7 +51,6 @@ class _PlaylistsPageState extends State<PlaylistsPage>
   void _preloadCovers(List<FeiNiuPlaylist> items, {int count = 20}) {
     if (items.isEmpty || !mounted) return;
     final api = FeiNiuApiClient.instance;
-    final token = api.token;
     final headers = FeiNiuApiClient.imageAuthHeaders();
     for (final p in items.take(count)) {
       if (p.coverId != null && p.coverId!.isNotEmpty) {
@@ -446,7 +444,6 @@ class _PlaylistsPageState extends State<PlaylistsPage>
                           itemCount: _filteredPlaylists.value.length,
                           itemBuilder: (context, index) {
                             final p = _filteredPlaylists.value[index];
-                      final token = FeiNiuApiClient.instance.token;
                       final scheme = Theme.of(context).colorScheme;
                       return Column(
                         key: ValueKey(p.guid),
@@ -463,7 +460,7 @@ class _PlaylistsPageState extends State<PlaylistsPage>
                                       memCacheWidth: 48,
                                       memCacheHeight: 48,
                                       fit: BoxFit.cover,
-                                      errorWidget: (_, __, ___) => Icon(Icons.queue_music_rounded, color: scheme.primary),
+                                      errorWidget: (_, _, _) => Icon(Icons.queue_music_rounded, color: scheme.primary),
                                     ),
                                   )
                                 : Icon(Icons.queue_music_rounded, color: scheme.primary),
@@ -521,7 +518,6 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
     with SignalsMixin {
   final FeiNiuPlaylistService _service = FeiNiuPlaylistService.instance;
   final FeiNiuTrackService _trackService = FeiNiuTrackService.instance;
-  final PlayerService _player = PlayerService.instance;
 
   late final _loading = createSignal(true);
   late final _songs = createSignal<List<SongEntity>>([]);

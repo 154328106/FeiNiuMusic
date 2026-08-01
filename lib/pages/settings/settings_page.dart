@@ -91,6 +91,15 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ),
                   AppSettingTile(
+                    title: '音量设置',
+                    subtitle: '应用音量与定时音量',
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => Navigator.pushNamed(
+                      context,
+                      AppRoutes.volumeScheduleSettings,
+                    ),
+                  ),
+                  AppSettingTile(
                     title: '通知设置',
                     subtitle: '媒体通知显示与按钮偏好',
                     trailing: const Icon(Icons.chevron_right_rounded),

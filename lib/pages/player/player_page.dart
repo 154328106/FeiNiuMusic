@@ -3,7 +3,6 @@ import 'package:flutter_lyric/core/lyric_model.dart';
 import 'package:skeletonizer/skeletonizer.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
-import '../../app/router/app_page_route.dart';
 import '../../app/router/app_router.dart';
 import '../../app/services/feiniu/favorite_service.dart';
 import '../../app/services/lyrics/lyrics_service.dart';
@@ -14,8 +13,6 @@ import '../../app/utils/route_visibility.dart';
 import '../../components/common/artwork_widget.dart';
 import '../../components/feedback/app_toast.dart';
 import '../../components/player/lyric_preview.dart';
-import '../library/library_detail_pages.dart';
-import '../songs/song_detail_sheet.dart';
 import 'lyrics/lyric_view.dart';
 import 'widgets/player_background.dart';
 import 'widgets/player_bottom_panel.dart';
@@ -685,7 +682,6 @@ class _PosterFavoriteButtonState extends State<_PosterFavoriteButton> {
   final FeiNiuFavoriteService _favoriteService = FeiNiuFavoriteService.instance;
   bool _isFavorite = false;
   bool _loading = false;
-  String _favoriteName = '我喜欢';
 
   @override
   void initState() {

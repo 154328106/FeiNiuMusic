@@ -1,16 +1,13 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:lpinyin/lpinyin.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
 import '../../app/router/app_page_route.dart';
 import '../../app/services/feiniu/api_client.dart';
-import '../../app/services/feiniu/api_models.dart';
 import '../../app/services/feiniu/track_service.dart';
 import '../../app/services/player_service.dart';
-import '../../app/services/feiniu/favorite_service.dart';
 
 import '../../app/state/song_state.dart';
 import '../../components/index.dart';
@@ -99,53 +96,6 @@ List<SongEntity> sortAlbumDetailSongs(
 
   sorted.sort((a, b) => ascending ? compare(a, b) : compare(b, a));
   return sorted;
-}
-
-Map<String, dynamic> _buildArtistDetailPayload(Map<String, dynamic> args) {
-  final rawSongs = (args['songs'] as List).cast<Map>();
-  final songs = rawSongs
-      .map((e) => SongEntity.fromMap(e.cast<String, dynamic>()))
-      .toList();
-  final artistName = (args['artistName'] as String?) ?? '';
-  final normalized = artistName.trim();
-
-  final filtered = songs.where((song) {
-    final raw = song.artist.trim();
-    if (normalized == '未知歌手') {
-      return raw.isEmpty;
-    }
-    return splitArtists(raw).contains(normalized);
-  }).toList();
-  filtered.sort((a, b) => pinyinKey(a.title).compareTo(pinyinKey(b.title)));
-
-  final albumNames = <String>{};
-  final groupedAlbums = <String, List<SongEntity>>{};
-  for (final s in filtered) {
-    final raw = (s.album ?? '').trim();
-    final key = raw.isEmpty ? '未知专辑' : raw;
-    albumNames.add(key);
-    groupedAlbums.putIfAbsent(key, () => []).add(s);
-  }
-  final albumGroups =
-      groupedAlbums.entries
-          .map(
-            (e) => {
-              'name': e.key,
-              'songs': e.value.map((song) => song.toMap()).toList(),
-            },
-          )
-          .toList()
-        ..sort(
-          (a, b) => pinyinKey(
-            a['name'] as String,
-          ).compareTo(pinyinKey(b['name'] as String)),
-        );
-
-  return {
-    'songs': filtered.map((e) => e.toMap()).toList(),
-    'albumNames': albumNames.toList(),
-    'albumGroups': albumGroups,
-  };
 }
 
 class ArtistDetailPage extends StatefulWidget {

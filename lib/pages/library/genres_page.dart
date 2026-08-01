@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
@@ -21,8 +19,6 @@ class GenresPage extends StatefulWidget {
 
 class _GenresPageState extends State<GenresPage> with SignalsMixin {
   final FeiNiuApiClient _api = FeiNiuApiClient.instance;
-  final FeiNiuTrackService _trackService = FeiNiuTrackService.instance;
-  final PlayerService _player = PlayerService.instance;
   final GlobalKey<AppPageScaffoldState> _scaffoldKey =
       GlobalKey<AppPageScaffoldState>();
 

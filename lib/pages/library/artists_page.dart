@@ -76,7 +76,6 @@ class _ArtistsPageState extends State<ArtistsPage>
   late final _filterUnknown = createSignal(false);
 
   int _currentPage = 1;
-  int _totalArtists = 0;
   bool _hasMore = true;
   static const int _pageSize = 100;
 
@@ -175,7 +174,6 @@ class _ArtistsPageState extends State<ArtistsPage>
         page: 1,
         size: _pageSize,
       );
-      _totalArtists = pageData.total;
       _hasMore = pageData.list.length >= _pageSize;
       final groups = pageData.list
           .map((a) => ArtistGroup.fromFeiNiuArtist(a))
@@ -456,7 +454,6 @@ class _ArtistAvatar extends StatelessWidget {
         coverId!,
         size: 120,
       );
-      final token = FeiNiuApiClient.instance.token;
       return CircleAvatar(
         radius: radius,
         backgroundImage: CachedNetworkImageProvider(

@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
 import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/feiniu/favorite_service.dart';
@@ -10,7 +9,6 @@ import '../../app/services/player_service.dart';
 import '../../app/state/settings_state.dart';
 import '../../app/state/song_state.dart';
 import '../../components/common/app_list_tile.dart';
-import '../../components/common/sheet_panels.dart';
 import '../../components/feedback/app_toast.dart';
 import '../library/playlists_page.dart';
 
@@ -249,8 +247,8 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
         memCacheWidth: 52,
         memCacheHeight: 52,
         fit: BoxFit.cover,
-        placeholder: (_, __) => _coverPlaceholder(theme, song.title),
-        errorWidget: (_, __, ___) => _coverPlaceholder(theme, song.title),
+        placeholder: (_, _) => _coverPlaceholder(theme, song.title),
+        errorWidget: (_, _, _) => _coverPlaceholder(theme, song.title),
       );
     }
     return _coverPlaceholder(theme, song.title);

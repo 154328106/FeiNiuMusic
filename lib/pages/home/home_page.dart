@@ -3,20 +3,14 @@ import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:signals/signals.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
 import '../../app/router/app_page_route.dart';
-import '../../app/router/app_router.dart';
 import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/feiniu/api_models.dart';
 import '../../app/services/feiniu/auth_service.dart';
-import '../../app/services/feiniu/favorite_service.dart';
-import '../../app/services/feiniu/playlist_service.dart';
-import '../../app/services/feiniu/roam_service.dart';
 import '../../app/services/feiniu/track_service.dart';
 import '../../app/services/player_service.dart';
-import '../../app/state/settings_state.dart';
 import '../../app/state/song_state.dart';
 import '../../app/utils/api_cache_manager.dart';
 import '../../components/index.dart';
@@ -82,13 +76,8 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> with SignalsMixin {
-  Map<String, String> _authHeaders() => FeiNiuApiClient.imageAuthHeaders();
-
   final FeiNiuApiClient _api = FeiNiuApiClient.instance;
-  final FeiNiuRoamService _roam = FeiNiuRoamService.instance;
   final FeiNiuTrackService _trackService = FeiNiuTrackService.instance;
-  final FeiNiuPlaylistService _playlistService = FeiNiuPlaylistService.instance;
-  final FeiNiuFavoriteService _favoriteService = FeiNiuFavoriteService.instance;
   final PlayerService _player = PlayerService.instance;
   final GlobalKey<AppPageScaffoldState> _scaffoldKey =
       GlobalKey<AppPageScaffoldState>();
@@ -125,14 +114,21 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
           jsonDecode(cachedJson) as Map<String, dynamic>,
         );
         if (!mounted) return;
-        if (cached.favorites != null) _favoriteSongs.value = cached.favorites!;
-        if (cached.recentSongs != null)
+        if (cached.favorites != null) {
+          _favoriteSongs.value = cached.favorites!;
+        }
+        if (cached.recentSongs != null) {
           _recentSongs.value = cached.recentSongs!;
-        if (cached.recentAlbums != null)
+        }
+        if (cached.recentAlbums != null) {
           _recentAlbums.value = cached.recentAlbums!;
-        if (cached.playlists != null) _playlists.value = cached.playlists!;
-        if (cached.recentTracks != null)
+        }
+        if (cached.playlists != null) {
+          _playlists.value = cached.playlists!;
+        }
+        if (cached.recentTracks != null) {
           _recentTracks.value = cached.recentTracks!;
+        }
         _loading.value = false;
         _preloadHomeCovers();
       } catch (e, stack) {
@@ -698,9 +694,9 @@ class _AlbumHorizontalList extends StatelessWidget {
                               width: 100,
                               height: 100,
                               fit: BoxFit.cover,
-                              placeholder: (_, __) =>
+                              placeholder: (_, _) =>
                                   _albumPlaceholder(theme, album.name),
-                              errorWidget: (_, __, ___) =>
+                              errorWidget: (_, _, _) =>
                                   _albumPlaceholder(theme, album.name),
                             ),
                           )
@@ -797,9 +793,9 @@ class _PlaylistHorizontalList extends StatelessWidget {
                               width: 100,
                               height: 100,
                               fit: BoxFit.cover,
-                              placeholder: (_, __) =>
+                              placeholder: (_, _) =>
                                   _playlistPlaceholder(theme),
-                              errorWidget: (_, __, ___) =>
+                              errorWidget: (_, _, _) =>
                                   _playlistPlaceholder(theme),
                             ),
                           )

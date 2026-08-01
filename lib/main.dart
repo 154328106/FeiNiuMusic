@@ -11,7 +11,6 @@ import 'app/services/media_notification_service.dart';
 import 'app/services/feiniu/api_client.dart';
 import 'app/services/feiniu/auth_service.dart';
 import 'app/services/feiniu/fn_connection_probe_service.dart';
-import 'app/state/settings_fn_state.dart';
 import 'app/state/settings_state.dart';
 
 Future<void> main() async {
@@ -61,7 +60,7 @@ class _SslOverride extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) {
     final client = super.createHttpClient(context);
-    client.badCertificateCallback = (_, __, ___) {
+    client.badCertificateCallback = (_, _, _) {
       // 实时读取用户 SSL 忽略偏好
       return AppFnConnectionSettings.ignoreSsl.value;
     };

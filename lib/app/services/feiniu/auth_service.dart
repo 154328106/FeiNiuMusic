@@ -25,8 +25,6 @@ class AuthService {
   String? _deviceId;
 
   // SharedPreferences 键名（仅用于 logout 清理）
-  static const String _prefsToken = 'feiniu_music_token';
-  static const String _prefsServerUrl = 'feiniu_server_url';
   static const String _prefsUsername = 'feiniu_username';
   static const String _prefsPassword = 'feiniu_password';
   static const String _prefsDeviceId = 'feiniu_device_id';
@@ -37,7 +35,6 @@ class AuthService {
     if (hasAuth) {
       final prefs = await SharedPreferences.getInstance();
       final savedUsername = prefs.getString(_prefsUsername) ?? '';
-      final savedPassword = prefs.getString(_prefsPassword) ?? '';
       serverUrl.value = FeiNiuApiClient.instance.baseUrl;
       username.value = savedUsername;
       isLoggedIn.value = true;
@@ -112,10 +109,6 @@ class AuthService {
   /// 退出登录
   Future<void> logout() async {
     await FeiNiuApiClient.instance.clearAuth();
-    final prefs = await SharedPreferences.getInstance();
-    // 不清除 username/password，保留用于退出登录后自动填充
-    // await prefs.remove(_prefsUsername);
-    // await prefs.remove(_prefsPassword);
     isLoggedIn.value = false;
     serverUrl.value = null;
     username.value = null;

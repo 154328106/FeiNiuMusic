@@ -10,7 +10,7 @@ import 'api_models.dart';
 
 /// FeiNiu API 客户端 — 基于 Dio 的单例 HTTP 客户端
 ///
-/// 所有请求自动携带 Cookie: music-token=<token> 认证。
+/// 所有请求自动携带 `Cookie: music-token=<token>` 认证。
 /// 中继模式下额外携带 Cookie: mode=relay，并手动处理 302 重定向以保持中继 Cookie。
 class FeiNiuApiClient {
   FeiNiuApiClient._() {
@@ -129,7 +129,6 @@ class FeiNiuApiClient {
     _baseUrl = _baseUrl.endsWith('/')
         ? _baseUrl.substring(0, _baseUrl.length - 1)
         : _baseUrl;
-    _authBaseUrl = _baseUrl;
     _token = token;
     _relayMode = relayMode;
     final prefs = await SharedPreferences.getInstance();
@@ -239,9 +238,6 @@ class FeiNiuApiClient {
 
     return redirectResponse;
   }
-
-  /// 认证用的 baseUrl（用户输入的，仅到端口）
-  String _authBaseUrl = '';
 
   /// API 基础路径前缀
   static const String _apiPrefix = '/music/api/v1';

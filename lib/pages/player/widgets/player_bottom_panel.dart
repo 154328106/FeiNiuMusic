@@ -934,56 +934,105 @@ class _PlaylistSheetState extends State<_PlaylistSheet> {
                       ),
                     )
                   : RepaintBoundary(
-                      child: ReorderableListView.builder(
-                        scrollController: _controller,
-                        itemExtent: _itemExtent,
-                        buildDefaultDragHandles: false,
-                        proxyDecorator: (child, index, animation) {
-                          return AnimatedBuilder(
-                            animation: animation,
-                            builder: (context, child) {
-                              final animValue = Curves.easeInOut.transform(
-                                animation.value,
-                              );
-                              final elevation = ui.lerpDouble(0, 6, animValue)!;
-                              return Material(
-                                elevation: elevation,
-                                color: Colors.transparent,
-                                shadowColor: Colors.black.withValues(
-                                  alpha: 0.3,
-                                ),
-                                child: child,
-                              );
-                            },
-                            child: child,
-                          );
-                        },
-                        onReorder: (oldIndex, newIndex) {
-                          widget.player.reorderQueue(oldIndex, newIndex);
-                        },
-                        itemCount: total,
-                        itemBuilder: (context, index) {
-                          if (index < 0 || index >= queue.length) {
-                            return const SizedBox.shrink();
-                          }
-                          final song = queue[index];
-                          final isCurrent = index == currentIndex;
-                          return RepaintBoundary(
-                            key: ValueKey('${song.id}_$index'),
-                            child: _QueueItem(
-                              song: song,
-                              index: index,
-                              isCurrent: isCurrent,
-                              playing: playing,
-                              accent: scheme.primary,
-                              textColor: textColor,
-                              secondaryTextColor: secondaryTextColor,
-                              onTap: () => widget.player.skipToIndex(index),
-                              onRemove: () =>
-                                  widget.player.removeFromQueue(index),
+                      child: Column(
+                        children: [
+                          if (mode == PlaybackMode.shuffle)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 6,
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.info_outline_rounded,
+                                    size: 14,
+                                    color: secondaryTextColor.withValues(
+                                      alpha: 0.7,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      '随机模式下由系统随机选歌，队列不可排序',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: secondaryTextColor.withValues(
+                                          alpha: 0.7,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          );
-                        },
+                          Expanded(
+                            child: ReorderableListView.builder(
+                              scrollController: _controller,
+                              itemExtent: _itemExtent,
+                              buildDefaultDragHandles: false,
+                              proxyDecorator: (child, index, animation) {
+                                return AnimatedBuilder(
+                                  animation: animation,
+                                  builder: (context, child) {
+                                    final animValue = Curves.easeInOut.transform(
+                                      animation.value,
+                                    );
+                                    final elevation = ui.lerpDouble(
+                                      0,
+                                      6,
+                                      animValue,
+                                    )!;
+                                    return Material(
+                                      elevation: elevation,
+                                      color: Colors.transparent,
+                                      shadowColor: Colors.black.withValues(
+                                        alpha: 0.3,
+                                      ),
+                                      child: child,
+                                    );
+                                  },
+                                  child: child,
+                                );
+                              },
+                              // 随机（漫游）模式下队列顺序无意义，禁用拖拽排序
+                              onReorderItem: mode == PlaybackMode.shuffle
+                                  ? null
+                                  : (oldIndex, newIndex) {
+                                      widget.player.reorderQueue(
+                                        oldIndex,
+                                        newIndex,
+                                      );
+                                    },
+                              itemCount: total,
+                              itemBuilder: (context, index) {
+                                if (index < 0 || index >= queue.length) {
+                                  return const SizedBox.shrink();
+                                }
+                                final song = queue[index];
+                                final isCurrent = index == currentIndex;
+                                return RepaintBoundary(
+                                  key: ValueKey('${song.id}_$index'),
+                                  child: _QueueItem(
+                                    song: song,
+                                    index: index,
+                                    isCurrent: isCurrent,
+                                    playing: playing,
+                                    canReorder: mode != PlaybackMode.shuffle,
+                                    accent: scheme.primary,
+                                    textColor: textColor,
+                                    secondaryTextColor: secondaryTextColor,
+                                    onTap: () => widget.player.skipToIndex(
+                                      index,
+                                    ),
+                                    onRemove: () => widget.player
+                                        .removeFromQueue(index),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
                       ),
                     ),
             ),
@@ -1109,6 +1158,7 @@ class _QueueItem extends StatelessWidget {
   final int index;
   final bool isCurrent;
   final bool playing;
+  final bool canReorder;
   final Color accent;
   final Color textColor;
   final Color secondaryTextColor;
@@ -1120,6 +1170,7 @@ class _QueueItem extends StatelessWidget {
     required this.index,
     required this.isCurrent,
     required this.playing,
+    required this.canReorder,
     required this.accent,
     required this.textColor,
     required this.secondaryTextColor,
@@ -1187,17 +1238,18 @@ class _QueueItem extends StatelessWidget {
                   ),
                   onPressed: onRemove,
                 ),
-                ReorderableDelayedDragStartListener(
-                  index: index,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Icon(
-                      Icons.drag_handle_rounded,
-                      color: secondaryTextColor.withValues(alpha: 0.55),
-                      size: 20,
+                if (canReorder)
+                  ReorderableDelayedDragStartListener(
+                    index: index,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Icon(
+                        Icons.drag_handle_rounded,
+                        color: secondaryTextColor.withValues(alpha: 0.55),
+                        size: 20,
+                      ),
                     ),
                   ),
-                ),
               ],
             ),
           ),

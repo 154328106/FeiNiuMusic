@@ -114,7 +114,7 @@ class ModernNavigationBar extends StatelessWidget {
     // the bottom bar visually belongs to the same surface family.
     return ValueListenableBuilder<double>(
       valueListenable: AppBackgroundSettings.panelBlurStrength,
-      builder: (context, _, __) {
+      builder: (context, _, _) {
         final blurStrength = AppBackgroundSettings.panelBlurStrength.value;
         final isBlurred = blurStrength > 0;
         final barColor = isBlurred

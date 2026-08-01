@@ -27,7 +27,6 @@ class _StartupProbeScreenState extends State<StartupProbeScreen>
 
   String _statusText = '正在探测连接...';
   String _detailText = '';
-  bool _probing = true;
   bool _done = false;
 
   @override
@@ -62,7 +61,6 @@ class _StartupProbeScreenState extends State<StartupProbeScreen>
     final fnId = AppFnConnectionSettings.lastFnId;
     if (fnId == null || fnId.isEmpty) {
       setState(() {
-        _probing = false;
         _done = true;
       });
       return;

@@ -76,7 +76,6 @@ class _AlbumsPageState extends State<AlbumsPage>
   late final _gridColumns = createSignal(2);
 
   int _currentPage = 1;
-  int _totalAlbums = 0;
   bool _hasMore = true;
   static const int _pageSize = 50;
 
@@ -233,7 +232,6 @@ class _AlbumsPageState extends State<AlbumsPage>
         size: _pageSize,
         sort: _apiSortParam(),
       );
-      _totalAlbums = pageData.total;
       _hasMore = pageData.list.length >= _pageSize;
       final groups =
           pageData.list.map((a) => AlbumGroup.fromFeiNiuAlbum(a)).toList();
