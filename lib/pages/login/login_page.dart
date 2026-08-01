@@ -183,26 +183,7 @@ class _LoginPageState extends State<LoginPage> {
       ProbeOverlay.hide(_probeOverlay);
       _probeOverlay = null;
 
-      // 安全码检查：尚未存过安全码才询问。验证端点网络异常按「不需要」处理。
-      if (AppFnConnectionSettings.accessCode == null) {
-        try {
-          final requires = await AccessCodeService.instance.requiresAccessCode(
-            result.serverUrl,
-            isRelay: result.isRelay,
-          );
-          if (requires && mounted) {
-            final code = await AccessCodeDialog.show(
-              context,
-              baseUrl: result.serverUrl,
-              isRelay: result.isRelay,
-            );
-            if (code == null) return; // 用户取消 → 中止登录
-          }
-        } on DioException {
-          // 验证端点不可达（服务器未开启该端点 / 网络异常）→ 继续登录
-        }
-      }
-
+      // 安全码检查在 _performLogin 内统一处理（域名/IP 直连共用同一逻辑）
       await _performLogin(
         result.serverUrl,
         username,
@@ -228,6 +209,12 @@ class _LoginPageState extends State<LoginPage> {
     bool relayMode = false,
   }) async {
     try {
+      // 安全码检查（仅未存过才询问）：域名/IP 直连与 FNID 登录共用
+      final proceed = await _ensureAccessCodeIfNeeded(
+        serverUrl,
+        isRelay: relayMode,
+      );
+      if (!proceed) return; // 用户取消 → 中止登录
       await AuthService.instance.login(
         serverUrl,
         username,
@@ -251,6 +238,35 @@ class _LoginPageState extends State<LoginPage> {
 
     if (!mounted) return;
     Navigator.of(context).pushReplacementNamed(AppRoutes.home);
+  }
+
+  /// 若本地尚未存过安全码，探测服务器是否需要并（需要时）弹窗询问。
+  ///
+  /// 返回 false 表示用户取消输入安全码（中止登录）；true 表示无需安全码
+  /// 或安全码已确认。验证端点网络异常按「不需要」处理（与 FNID 登录一致）。
+  Future<bool> _ensureAccessCodeIfNeeded(
+    String serverUrl, {
+    bool isRelay = false,
+  }) async {
+    if (AppFnConnectionSettings.accessCode != null) return true;
+    try {
+      final requires = await AccessCodeService.instance.requiresAccessCode(
+        serverUrl,
+        isRelay: isRelay,
+      );
+      if (requires && mounted) {
+        final code = await AccessCodeDialog.show(
+          context,
+          baseUrl: serverUrl,
+          isRelay: isRelay,
+        );
+        return code != null; // 取消 → false
+      }
+      return true;
+    } on DioException {
+      // 验证端点不可达（服务器未开启该端点 / 网络异常）→ 按不需要处理
+      return true;
+    }
   }
 
   /// 当前是否可以点击登录按钮
