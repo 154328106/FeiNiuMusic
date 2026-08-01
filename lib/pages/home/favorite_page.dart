@@ -11,6 +11,8 @@ import '../../app/services/player_service.dart';
 import '../../app/state/song_state.dart';
 import '../../app/utils/api_cache_manager.dart';
 import '../../app/theme/app_styles.dart';
+import '../library/library_detail_pages.dart';
+import '../songs/song_detail_sheet.dart';
 
 class FavoritePage extends StatefulWidget {
   const FavoritePage({super.key});
@@ -22,7 +24,6 @@ class FavoritePage extends StatefulWidget {
 class _FavoritePageState extends State<FavoritePage> with SignalsMixin {
   final FeiNiuApiClient _api = FeiNiuApiClient.instance;
   final FeiNiuTrackService _trackService = FeiNiuTrackService.instance;
-  final FeiNiuFavoriteService _favoriteService = FeiNiuFavoriteService.instance;
   final PlayerService _player = PlayerService.instance;
   final GlobalKey<AppPageScaffoldState> _scaffoldKey =
       GlobalKey<AppPageScaffoldState>();
@@ -143,38 +144,6 @@ class _FavoritePageState extends State<FavoritePage> with SignalsMixin {
     _player.playQueue(songs, index);
   }
 
-  Future<void> _unfavoriteSong(SongEntity song, int index) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('取消收藏'),
-        content: Text('确定取消收藏「${song.title}」吗？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('确定'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) {
-      try {
-        await _favoriteService.unfavorite(song.id);
-        if (!mounted) return;
-        final updated = List<SongEntity>.from(_allSongs.value)..removeAt(index);
-        _allSongs.value = updated;
-        _applyFilter();
-      } catch (e) {
-        if (!mounted) return;
-        AppToast.show(context, '操作失败', type: ToastType.error);
-      }
-    }
-  }
-
   void _showSortSheet() {
     showModalBottomSheet(
       context: context,
@@ -202,6 +171,71 @@ class _FavoritePageState extends State<FavoritePage> with SignalsMixin {
           },
         );
       },
+    );
+  }
+
+  /// 长按歌曲 → 弹出与歌曲页同款的长按面板（SongDetailSheet），
+  /// 并附带「取消收藏」（取消后从列表移除）。
+  void _showSongDetail(SongEntity song) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => SongDetailSheet(
+        song: song,
+        onOpenArtist: (name) {
+          final artistGuid = song.firstArtistGuid;
+          if (artistGuid != null) {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => ArtistDetailPage(
+                  artistName: name,
+                  artistGuid: artistGuid,
+                ),
+              ),
+            );
+          }
+        },
+        onOpenAlbum: (name) {
+          final guid = song.albumGuid;
+          if (guid != null) {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => AlbumDetailPage(
+                  albumName: name,
+                  albumGuid: guid,
+                ),
+              ),
+            );
+          }
+        },
+        extraActions: [
+          AppListTile(
+            leading: Icon(
+              Icons.favorite_border_rounded,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            title: '取消收藏',
+            titleColor: Theme.of(context).colorScheme.error,
+            onTap: () async {
+              try {
+                await FeiNiuFavoriteService.instance.unfavorite(song.id);
+                if (!mounted) return;
+                final updated = List<SongEntity>.from(_allSongs.value)
+                  ..removeWhere((s) => s.id == song.id);
+                _allSongs.value = updated;
+                _applyFilter();
+                AppToast.show(context, '已取消收藏');
+              } catch (e) {
+                if (!mounted) return;
+                AppToast.show(context, '操作失败', type: ToastType.error);
+              }
+              if (!mounted) return;
+              Navigator.of(context).pop();
+            },
+          ),
+        ],
+      ),
     );
   }
 
@@ -346,7 +380,7 @@ class _FavoritePageState extends State<FavoritePage> with SignalsMixin {
                               final song = songs[index];
                               return InkWell(
                                 onTap: () => _playSong(index),
-                                onLongPress: () => _unfavoriteSong(song, index),
+                                onLongPress: () => _showSongDetail(song),
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(
                                     vertical: 6,

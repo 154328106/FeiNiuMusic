@@ -10,6 +10,7 @@ import '../../app/state/settings_state.dart';
 import '../../app/state/song_state.dart';
 import '../../components/common/app_list_tile.dart';
 import '../../components/feedback/app_toast.dart';
+import '../library/library_detail_pages.dart';
 import '../library/playlists_page.dart';
 
 class SongDetailSheet extends StatefulWidget {
@@ -19,6 +20,10 @@ class SongDetailSheet extends StatefulWidget {
   final ValueChanged<String>? onOpenAlbum;
   final VoidCallback? onOpenPlayerAppearanceSettings;
 
+  /// 额外操作项（如「移出最近播放」），渲染在「添加到歌单」之后。
+  /// 由调用方决定是否传，避免所有入口都显示。
+  final List<AppListTile>? extraActions;
+
   const SongDetailSheet({
     super.key,
     required this.song,
@@ -26,6 +31,7 @@ class SongDetailSheet extends StatefulWidget {
     this.onOpenArtist,
     this.onOpenAlbum,
     this.onOpenPlayerAppearanceSettings,
+    this.extraActions,
   });
 
   @override
@@ -189,6 +195,8 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                 Navigator.of(context).pop();
               },
             ),
+            if (widget.extraActions != null)
+              ...widget.extraActions!,
             if (widget.onOpenPlayerAppearanceSettings != null)
               AppListTile(
                 leading: const Icon(Icons.tune_rounded),
@@ -205,7 +213,23 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
               onTap: () {
                 final nav = Navigator.of(context);
                 nav.pop();
-                widget.onOpenArtist?.call(primaryArtist);
+                final callback = widget.onOpenArtist;
+                if (callback != null) {
+                  callback(primaryArtist);
+                } else {
+                  // 未提供回调时自行导航（默认行为，供未传回调的调用点使用）
+                  final guid = song.firstArtistGuid;
+                  if (guid != null) {
+                    nav.push(
+                      MaterialPageRoute(
+                        builder: (_) => ArtistDetailPage(
+                          artistName: primaryArtist,
+                          artistGuid: guid,
+                        ),
+                      ),
+                    );
+                  }
+                }
               },
             ),
             if (canOpenAlbum)
@@ -215,7 +239,23 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                 onTap: () {
                   final nav = Navigator.of(context);
                   nav.pop();
-                  widget.onOpenAlbum?.call(song.albumDisplayName);
+                  final callback = widget.onOpenAlbum;
+                  if (callback != null) {
+                    callback(song.albumDisplayName);
+                  } else {
+                    // 未提供回调时自行导航（默认行为）
+                    final guid = song.albumGuid;
+                    if (guid != null) {
+                      nav.push(
+                        MaterialPageRoute(
+                          builder: (_) => AlbumDetailPage(
+                            albumName: song.albumDisplayName,
+                            albumGuid: guid,
+                          ),
+                        ),
+                      );
+                    }
+                  }
                 },
               ),
             if (song.audioSpec != null && song.audioSpec!.isNotEmpty)

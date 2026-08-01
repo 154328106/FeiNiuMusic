@@ -49,6 +49,10 @@ ThemeData buildMiuixMaterialTheme(ThemeData base, ColorScheme source) {
 
   return base.copyWith(
     colorScheme: scheme,
+    // Material 3 深色模式下 primaryColor 默认派生为暗色（近黑），导致
+    // 用 Theme.of(context).primaryColor 作背景的确认按钮在深色下看不见。
+    // 统一改为 colorScheme.primary（深色下为浅色，配合 onPrimary 文字对比清晰）。
+    primaryColor: scheme.primary,
     scaffoldBackgroundColor: background,
     canvasColor: background,
     cardColor: surface,

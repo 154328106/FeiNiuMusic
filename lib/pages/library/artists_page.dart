@@ -454,13 +454,13 @@ class _ArtistAvatar extends StatelessWidget {
         coverId!,
         size: 120,
       );
+      // 有封面图：完整显示图片，不叠加首字母
       return CircleAvatar(
         radius: radius,
         backgroundImage: CachedNetworkImageProvider(
           coverUrl,
           headers: FeiNiuApiClient.imageAuthHeaders(),
         ),
-        child: Text(initial),
       );
     }
 

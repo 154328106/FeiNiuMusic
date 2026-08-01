@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
 import '../../app/router/app_page_route.dart';
@@ -17,6 +18,11 @@ class GenresPage extends StatefulWidget {
   State<GenresPage> createState() => _GenresPageState();
 }
 
+const String genresPrefsSortKey = 'genres_sort_key_v1';
+const String genresPrefsSortAscending = 'genres_sort_ascending_v1';
+const String genresDefaultSortKey = 'trackCount';
+const bool genresDefaultAscending = false;
+
 class _GenresPageState extends State<GenresPage> with SignalsMixin {
   final FeiNiuApiClient _api = FeiNiuApiClient.instance;
   final GlobalKey<AppPageScaffoldState> _scaffoldKey =
@@ -24,22 +30,76 @@ class _GenresPageState extends State<GenresPage> with SignalsMixin {
 
   late final _loading = createSignal(true);
   late final _genres = createSignal<List<FeiNiuGenre>>([]);
+  late final _sortKey = createSignal(genresDefaultSortKey);
+  late final _ascending = createSignal(genresDefaultAscending);
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _init();
+  }
+
+  Future<void> _init() async {
+    await _loadPrefs();
+    await _load();
+  }
+
+  Future<void> _loadPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    var key = (prefs.getString(genresPrefsSortKey) ?? genresDefaultSortKey).trim();
+    if (key.isEmpty) key = genresDefaultSortKey;
+    _sortKey.value = key;
+    _ascending.value = prefs.getBool(genresPrefsSortAscending) ?? genresDefaultAscending;
+  }
+
+  Future<void> _savePrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(genresPrefsSortKey, _sortKey.value);
+    await prefs.setBool(genresPrefsSortAscending, _ascending.value);
   }
 
   Future<void> _load() async {
     _loading.value = true;
     try {
-      final pageData = await _api.getGenreList(page: 1, size: 200, sort: 'trackCount,desc');
+      final sort = '${_sortKey.value},${_ascending.value ? 'asc' : 'desc'}';
+      final pageData = await _api.getGenreList(page: 1, size: 200, sort: sort);
       if (mounted) _genres.value = pageData.list;
     } catch (e) {
       debugPrint('[GenresPage] load error: $e');
     }
     if (mounted) _loading.value = false;
+  }
+
+  void _showSortSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return SortSheet(
+          title: '风格排序',
+          options: const [
+            SortOption(key: 'name', label: '风格名', icon: Icons.sort_by_alpha),
+            SortOption(
+              key: 'trackCount',
+              label: '歌曲数',
+              icon: Icons.music_note_outlined,
+            ),
+          ],
+          currentKey: _sortKey.value,
+          ascending: _ascending.value,
+          onSelectKey: (value) {
+            _sortKey.value = value;
+            _savePrefs();
+            _load();
+          },
+          onSelectAscending: (value) {
+            _ascending.value = value;
+            _savePrefs();
+            _load();
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -61,6 +121,9 @@ class _GenresPageState extends State<GenresPage> with SignalsMixin {
                 ),
           backgroundColor: Colors.transparent,
           elevation: 0,
+          actions: [
+            SortActionButton(onTap: _showSortSheet),
+          ],
         ),
         drawer: useBottomNavigation
             ? null

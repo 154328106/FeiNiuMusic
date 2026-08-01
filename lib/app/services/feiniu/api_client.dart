@@ -816,6 +816,22 @@ class FeiNiuApiClient {
     return response.data ?? const FeiNiuPageData(list: [], total: 0);
   }
 
+  /// 移出最近播放（批量删除播放历史）。
+  ///
+  /// 请求 `POST /play-history/delete`，body `{"trackGUIDs":["..."]}`。
+  /// 服务器返回 `{"code":0,...}` 表示成功；非 0 抛异常。
+  Future<void> deletePlayHistory(List<String> trackGUIDs) async {
+    if (trackGUIDs.isEmpty) return;
+    final data = await _post(
+      '/play-history/delete',
+      data: {'trackGUIDs': trackGUIDs},
+    );
+    final response = FeiNiuResponse.fromJson(data, null);
+    if (!response.isSuccess) {
+      throw Exception(response.msg.isNotEmpty ? response.msg : '移出最近播放失败');
+    }
+  }
+
   // endregion
 
   // region 21. 歌单列表

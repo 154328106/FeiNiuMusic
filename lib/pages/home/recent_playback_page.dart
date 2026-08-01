@@ -7,6 +7,8 @@ import '../../app/services/feiniu/track_service.dart';
 import '../../app/services/player_service.dart';
 import '../../app/state/song_state.dart';
 import '../../app/theme/app_styles.dart';
+import '../library/library_detail_pages.dart';
+import '../songs/song_detail_sheet.dart';
 
 class RecentPlaybackPage extends StatefulWidget {
   const RecentPlaybackPage({super.key});
@@ -76,6 +78,67 @@ class _RecentPlaybackPageState extends State<RecentPlaybackPage>
     final songs = _songs.value;
     if (songs.isEmpty) return;
     _player.playQueue(songs, index);
+  }
+
+  /// 长按歌曲 → 弹出与歌曲页同款的长按面板，并附带「移出最近播放」。
+  void _showSongDetail(SongEntity song) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => SongDetailSheet(
+        song: song,
+        onOpenArtist: (name) {
+          final artistGuid = song.firstArtistGuid;
+          if (artistGuid != null) {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => ArtistDetailPage(
+                  artistName: name,
+                  artistGuid: artistGuid,
+                ),
+              ),
+            );
+          }
+        },
+        onOpenAlbum: (name) {
+          final guid = song.albumGuid;
+          if (guid != null) {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => AlbumDetailPage(
+                  albumName: name,
+                  albumGuid: guid,
+                ),
+              ),
+            );
+          }
+        },
+        extraActions: [
+          AppListTile(
+            leading: const Icon(Icons.delete_outline_rounded),
+            title: '移出最近播放',
+            titleColor: Theme.of(context).colorScheme.error,
+            onTap: () async {
+              try {
+                await _api.deletePlayHistory([song.id]);
+                if (!mounted) return;
+                final updated = List<SongEntity>.from(_allSongs.value)
+                  ..removeWhere((s) => s.id == song.id);
+                _allSongs.value = updated;
+                _applyFilter();
+                AppToast.show(context, '已移出最近播放');
+              } catch (e) {
+                if (!mounted) return;
+                AppToast.show(context, '操作失败', type: ToastType.error);
+              }
+              if (!mounted) return;
+              Navigator.of(context).pop();
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -228,6 +291,7 @@ class _RecentPlaybackPageState extends State<RecentPlaybackPage>
                               final song = songs[index];
                               return InkWell(
                                 onTap: () => _playSong(index),
+                                onLongPress: () => _showSongDetail(song),
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(
                                     vertical: 6,
