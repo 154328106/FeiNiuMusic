@@ -112,8 +112,8 @@ class AuthService {
     isLoggedIn.value = false;
     serverUrl.value = null;
     username.value = null;
-    // 清除连接信息
-    AppFnConnectionSettings.clearConnection();
+    // 清除连接信息（含安全码）
+    await AppFnConnectionSettings.clearConnection();
     if (kDebugMode) {
       debugPrint('[AuthService] Logged out');
     }

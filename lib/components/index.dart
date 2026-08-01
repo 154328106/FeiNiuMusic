@@ -21,6 +21,7 @@ export 'layout/base/app_page_scaffold.dart';
 export 'layout/side_menu.dart';
 export 'player/mini_player/mini_player_bar.dart';
 export 'dialog/app_dialog.dart';
+export 'dialog/access_code_dialog.dart';
 export 'feedback/app_toast.dart';
 export 'feedback/probe_overlay.dart';
 export 'feedback/startup_probe_screen.dart';

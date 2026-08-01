@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../state/settings_fn_state.dart';
 import 'api_models.dart';
 
 /// FeiNiu API 客户端 — 基于 Dio 的单例 HTTP 客户端
@@ -159,14 +160,25 @@ class FeiNiuApiClient {
     await prefs.remove('feiniu_relay_mode');
   }
 
+  /// 安全码请求头（未设置安全码时返回空）
+  static Map<String, String> accessCodeHeaders() {
+    final code = AppFnConnectionSettings.accessCode;
+    if (code == null || code.isEmpty) return const {};
+    return {
+      'x-access-code': base64.encode(utf8.encode(code)),
+      'x-access-source': 'app',
+    };
+  }
+
   /// 获取认证请求头
   ///
   /// 中继模式时自动追加 Cookie: mode=relay。
+  /// 已设置安全码时自动携带 x-access-code / x-access-source。
   Map<String, String> authHeaders() {
     if (_relayMode) {
-      return {'Cookie': 'music-token=$_token; mode=relay'};
+      return {'Cookie': 'music-token=$_token; mode=relay', ...accessCodeHeaders()};
     }
-    return {'Cookie': 'music-token=$_token'};
+    return {'Cookie': 'music-token=$_token', ...accessCodeHeaders()};
   }
 
   /// 获取图片/音频等资源请求认证头（静态方法，用于 CachedNetworkImage 等）
@@ -175,10 +187,10 @@ class FeiNiuApiClient {
   static Map<String, String> imageAuthHeaders() {
     final inst = instance;
     final token = inst._token;
-    if (token.isEmpty) return {};
+    if (token.isEmpty) return accessCodeHeaders();
     return inst._relayMode
-        ? {'Cookie': 'mode=relay; music-token=$token'}
-        : {'Cookie': 'music-token=$token'};
+        ? {'Cookie': 'mode=relay; music-token=$token', ...accessCodeHeaders()}
+        : {'Cookie': 'music-token=$token', ...accessCodeHeaders()};
   }
 
   /// 手动处理 3xx 重定向
@@ -222,7 +234,7 @@ class FeiNiuApiClient {
       redirectUri,
       options: Options(
         method: response.requestOptions.method,
-        headers: {'Cookie': effectiveCookie},
+        headers: {'Cookie': effectiveCookie, ...accessCodeHeaders()},
         followRedirects: false,
         validateStatus: (_) => true,
         responseType: ResponseType.json,
@@ -334,7 +346,12 @@ class FeiNiuApiClient {
         'password': hashedPassword,
         'deviceId': deviceId,
       },
-      options: Options(headers: relayMode ? {'Cookie': 'mode=relay'} : null),
+      options: Options(
+        headers: {
+          if (relayMode) 'Cookie': 'mode=relay',
+          ...accessCodeHeaders(),
+        },
+      ),
     );
     final data = response.data is Map<String, dynamic>
         ? response.data as Map<String, dynamic>

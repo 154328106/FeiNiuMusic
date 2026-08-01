@@ -18,6 +18,7 @@ class AppFnConnectionSettings {
   static const String _prefsConnectionMethod = 'fn_connection_method';
   static const String _prefsIsRelay = 'fn_connection_is_relay';
   static const String _prefsIgnoreSsl = 'fn_connection_ignore_ssl';
+  static const String _prefsAccessCode = 'fn_access_code';
 
   /// 服务器是否可达（false 时在顶部显示连接失败横幅）
   static final ValueNotifier<bool> serverConnected = ValueNotifier(true);
@@ -48,6 +49,13 @@ class AppFnConnectionSettings {
   /// 是否忽略 SSL 证书校验（默认开启）
   static final ValueNotifier<bool> ignoreSsl = ValueNotifier(true);
 
+  /// 安全码（原始字符串，未 base64）
+  ///
+  /// 登录时验证并写入；此后所有 API / 图片 / 音频流请求自动携带
+  /// `x-access-code: base64(安全码)`。登出时随 [clearConnection] 清除，
+  /// 下次登录重新询问。
+  static String? accessCode;
+
   /// 最近一次全量探测结果（每个候选链路的状态）
   ///
   /// 用于「FN Connect」设置页展示完整列表，null 表示从未全量探测过。
@@ -68,6 +76,7 @@ class AppFnConnectionSettings {
     _loading = null;
     connectionOrder.value = List.of(kDefaultConnectionOrder);
     preferHttps.value = true;
+    accessCode = null;
   }
 
   static Future<void> _doLoad() async {
@@ -114,6 +123,7 @@ class AppFnConnectionSettings {
     }
     lastIsRelay = prefs.getBool(_prefsIsRelay) ?? false;
     ignoreSsl.value = prefs.getBool(_prefsIgnoreSsl) ?? true;
+    accessCode = prefs.getString(_prefsAccessCode);
   }
 
   /// 设置连接优先级顺序并持久化
@@ -208,6 +218,18 @@ class AppFnConnectionSettings {
     onChanged?.call();
   }
 
+  /// 设置安全码并持久化（空值则清除）
+  static Future<void> setAccessCode(String? code) async {
+    final trimmed = code?.trim() ?? '';
+    accessCode = trimmed.isEmpty ? null : trimmed;
+    final prefs = await SharedPreferences.getInstance();
+    if (accessCode == null) {
+      await prefs.remove(_prefsAccessCode);
+    } else {
+      await prefs.setString(_prefsAccessCode, accessCode!);
+    }
+  }
+
   /// 获取上次成功探测的缓存连接信息（用于优先探测）
   ///
   /// 返回 (url, isRelay) 或 null（无缓存）
@@ -226,8 +248,10 @@ class AppFnConnectionSettings {
     await prefs.remove(_prefsConnectionMethod);
     await prefs.remove(_prefsIsRelay);
     await prefs.remove(_prefsIgnoreSsl);
+    await prefs.remove(_prefsAccessCode);
     lastIsRelay = false;
     ignoreSsl.value = true;
+    accessCode = null;
     currentConnectionUrl.value = null;
     currentConnectionMethod.value = null;
     serverConnected.value = true;

@@ -45,6 +45,13 @@ class FnConnectionProbeService {
 
   CancelToken? _cancelToken;
 
+  /// 在途连接探测（probe / probeSmart 单飞行共用）
+  ///
+  /// 相同 FNID 的并发调用复用同一探测请求，避免重复探测——例如登录页自动
+  /// 静默探测与用户点击登录同时发起时，只探测一次、共享同一结果。
+  Future<ConnectionProbeResult>? _inflightProbe;
+  String? _inflightProbeFnId;
+
   /// 执行分层探测
   ///
   /// [fnId] - FNID（如 "kuilei0926"）
@@ -57,11 +64,23 @@ class FnConnectionProbeService {
     required String fnId,
     List<ProbeCandidateGroup>? order,
     bool? preferHttps,
-  }) async {
-    if (isProbing.value) {
-      throw Exception('探测正在进行中，请等待完成');
-    }
+  }) {
+    return _joinOrStartProbe(
+      fnId: fnId,
+      start: () => _probeCore(
+        fnId: fnId,
+        order: order,
+        preferHttps: preferHttps,
+      ),
+    );
+  }
 
+  /// 分层探测核心实现（被 [probe] 调用，受单飞行守卫）
+  Future<ConnectionProbeResult> _probeCore({
+    required String fnId,
+    List<ProbeCandidateGroup>? order,
+    bool? preferHttps,
+  }) async {
     isProbing.value = true;
     _cancelToken = CancelToken();
 
@@ -98,7 +117,56 @@ class FnConnectionProbeService {
     } finally {
       isProbing.value = false;
       _cancelToken = null;
+      _clearInflightProbe();
     }
+  }
+
+  /// 单飞行入口：相同 FNID 的并发探测复用同一在途请求，结果共享，不重复探测。
+  ///
+  /// 不同 FNID 并发（理论场景：用户在登录页改了 FNID 立即再点）仍走旧的
+  /// 「探测进行中」守卫，避免拿到错误 FNID 的探测结果。全量探测
+  /// （[probeAllCandidates]）在途时同样拒绝新探测，避免 cancel token 被覆盖。
+  Future<ConnectionProbeResult> _joinOrStartProbe({
+    required String fnId,
+    required Future<ConnectionProbeResult> Function() start,
+  }) {
+    final inflight = _inflightProbe;
+    if (inflight != null) {
+      if (_inflightProbeFnId == fnId) {
+        return inflight; // 复用同一探测，结果共享
+      }
+      throw Exception('探测正在进行中，请等待完成');
+    }
+    if (isProbing.value) {
+      throw Exception('探测正在进行中，请等待完成');
+    }
+    final future = start();
+    // 探测完成（成功或失败）后自动清空在途标记，下一次可正常发起
+    final tracked = future.whenComplete(_clearInflightProbe);
+    _inflightProbe = tracked;
+    _inflightProbeFnId = fnId;
+    return tracked;
+  }
+
+  void _clearInflightProbe() {
+    _inflightProbe = null;
+    _inflightProbeFnId = null;
+  }
+
+  @visibleForTesting
+  void resetForTest() {
+    _inflightProbe = null;
+    _inflightProbeFnId = null;
+    _cancelToken = null;
+    isProbing.value = false;
+  }
+
+  @visibleForTesting
+  Future<ConnectionProbeResult> joinOrStartProbeForTest({
+    required String fnId,
+    required Future<ConnectionProbeResult> Function() start,
+  }) {
+    return _joinOrStartProbe(fnId: fnId, start: start);
   }
 
   /// 取消当前探测
@@ -127,11 +195,27 @@ class FnConnectionProbeService {
     bool cachedIsRelay = false,
     List<ProbeCandidateGroup>? order,
     bool? preferHttps,
-  }) async {
-    if (isProbing.value) {
-      throw Exception('探测正在进行中，请等待完成');
-    }
+  }) {
+    return _joinOrStartProbe(
+      fnId: fnId,
+      start: () => _probeSmartCore(
+        fnId: fnId,
+        cachedUrl: cachedUrl,
+        cachedIsRelay: cachedIsRelay,
+        order: order,
+        preferHttps: preferHttps,
+      ),
+    );
+  }
 
+  /// 缓存优先探测核心实现（被 [probeSmart] 调用，受单飞行守卫）
+  Future<ConnectionProbeResult> _probeSmartCore({
+    required String fnId,
+    String? cachedUrl,
+    bool cachedIsRelay = false,
+    List<ProbeCandidateGroup>? order,
+    bool? preferHttps,
+  }) async {
     final effOrder = order ?? AppFnConnectionSettings.connectionOrder.value;
     final effHttps = preferHttps ?? AppFnConnectionSettings.preferHttps.value;
 
@@ -227,6 +311,7 @@ class FnConnectionProbeService {
     } finally {
       isProbing.value = false;
       _cancelToken = null;
+      _clearInflightProbe();
     }
   }
 
@@ -433,14 +518,7 @@ class FnConnectionProbeService {
     }
 
     // 全部失败
-    final errors = results
-        .where((r) => !r.isReachable && r.error != null)
-        .take(5)
-        .map((r) => '${r.description}: ${r.error}')
-        .join('\n');
-    final totalFailed = results.where((r) => !r.isReachable).length;
-    final suffix = totalFailed > 5 ? '\n...以及其他 ${totalFailed - 5} 个地址' : '';
-    throw Exception('所有链路均无法连接，请检查网络或稍后重试。\n$errors$suffix');
+    throw Exception('所有链路均无法连接，请检查网络或稍后重试。');
   }
 
   /// 探测单条链路并返回探测结果详情

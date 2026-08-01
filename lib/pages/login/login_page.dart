@@ -1,11 +1,15 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../app/services/feiniu/access_code_service.dart';
 import '../../app/services/feiniu/auth_service.dart';
 import '../../app/services/feiniu/fn_connection_probe_service.dart';
+import '../../app/services/feiniu/fn_models.dart';
 import '../../app/state/settings_fn_state.dart';
 import '../../app/router/app_router.dart';
 import '../../components/feedback/probe_overlay.dart';
+import '../../components/dialog/access_code_dialog.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -65,8 +69,16 @@ class _LoginPageState extends State<LoginPage> {
 
   bool _autoProbeStarted = false;
 
+  /// 最近一次静默探测的结果（FNID → 结果），供登录时复用
+  ConnectionProbeResult? _silentProbeResult;
+  String? _silentProbeFnId;
+  DateTime _silentProbeAt = DateTime.fromMillisecondsSinceEpoch(0);
+
   /// 静默探测（只探测不登录，更新连接信息显示）
   Future<void> _silentProbe(String fnId) async {
+    // 已有同 FNID 探测在途（如 main() 启动预热）时直接复用，
+    // 探测结果由发起方写入，避免重复探测与重复保存。
+    if (FnConnectionProbeService.instance.isProbing.value) return;
     try {
       final cache = AppFnConnectionSettings.cachedConnection;
 
@@ -76,6 +88,10 @@ class _LoginPageState extends State<LoginPage> {
         fnId: fnId,
       );
 
+      // 无论页面是否仍在显示，都缓存结果供登录复用
+      _silentProbeResult = result;
+      _silentProbeFnId = fnId;
+      _silentProbeAt = DateTime.now();
       if (!mounted) return;
       // 保存连接信息，显示在设置页
       AppFnConnectionSettings.saveProbeResult(
@@ -127,19 +143,32 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  /// FNID 登录流程：探测 → 连接 → 认证
+  /// FNID 登录流程：探测 → 连接 → 安全码 → 认证
   Future<void> _fnLogin(String fnId, String username, String password) async {
-    // 展示探测浮层
-    _probeOverlay = ProbeOverlay.show(context);
-
     try {
       final cache = AppFnConnectionSettings.cachedConnection;
 
-      final result = await FnConnectionProbeService.instance.probeSmart(
-        cachedUrl: cache?.url,
-        cachedIsRelay: cache?.isRelay ?? false,
-        fnId: fnId,
-      );
+      // 复用自动静默探测的「新鲜」结果（同一 FNID 且 30 秒内），
+      // 避免点登录后又探测一遍。
+      final silent = _silentProbeResult;
+      final useSilent = silent != null &&
+          _silentProbeFnId == fnId &&
+          DateTime.now().difference(_silentProbeAt) <= const Duration(
+            seconds: 30,
+          );
+
+      // 复用静默结果时无需再展示探测浮层（探测已完成，仅走认证）
+      if (!useSilent) {
+        _probeOverlay = ProbeOverlay.show(context);
+      }
+
+      final result = useSilent
+          ? silent
+          : await FnConnectionProbeService.instance.probeSmart(
+              cachedUrl: cache?.url,
+              cachedIsRelay: cache?.isRelay ?? false,
+              fnId: fnId,
+            );
 
       // 探测成功，用成功 URL 继续登录（中继模式的 relayMode 标记一并传递）
       // 同时保存连接信息供设置页显示
@@ -149,6 +178,31 @@ class _LoginPageState extends State<LoginPage> {
         method: result.probeMethod,
         isRelay: result.isRelay,
       );
+
+      // 收起探测浮层再弹安全码框（浮层期间无法交互输入框）
+      ProbeOverlay.hide(_probeOverlay);
+      _probeOverlay = null;
+
+      // 安全码检查：尚未存过安全码才询问。验证端点网络异常按「不需要」处理。
+      if (AppFnConnectionSettings.accessCode == null) {
+        try {
+          final requires = await AccessCodeService.instance.requiresAccessCode(
+            result.serverUrl,
+            isRelay: result.isRelay,
+          );
+          if (requires && mounted) {
+            final code = await AccessCodeDialog.show(
+              context,
+              baseUrl: result.serverUrl,
+              isRelay: result.isRelay,
+            );
+            if (code == null) return; // 用户取消 → 中止登录
+          }
+        } on DioException {
+          // 验证端点不可达（服务器未开启该端点 / 网络异常）→ 继续登录
+        }
+      }
+
       await _performLogin(
         result.serverUrl,
         username,
