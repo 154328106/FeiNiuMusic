@@ -1,10 +1,8 @@
-import 'dart:io';
+import 'dart:convert';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/services/app_update_service.dart';
 import '../../app/services/debug_log_service.dart';
@@ -85,59 +83,25 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
 
   Future<void> _exportLogs() async {
     await _debugLogs.ensureLoaded();
+    final text = _debugLogs.exportText();
+    if (!mounted) return;
+    if (text.trim().isEmpty) {
+      AppToast.show(context, '暂无日志');
+      return;
+    }
     final now = DateTime.now();
     final filename =
         'feiniu-music-debug-${now.year}${_two(now.month)}${_two(now.day)}-${_two(now.hour)}${_two(now.minute)}${_two(now.second)}.txt';
-    final dir = await getApplicationDocumentsDirectory();
-    final file = File(p.join(dir.path, filename));
-    await file.writeAsString(_debugLogs.exportText(), flush: true);
-    if (!mounted) return;
-    await _showLogExportDialog(file.path);
-  }
-
-  Future<void> _showLogExportDialog(String path) async {
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('日志已导出'),
-          content: SelectableText(path),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('关闭'),
-            ),
-            TextButton(
-              onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: path));
-                if (!context.mounted) return;
-                Navigator.pop(context);
-                AppToast.show(context, '文件路径已复制');
-              },
-              child: const Text('复制路径'),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _openFile(path);
-              },
-              child: const Text('打开文件'),
-            ),
-          ],
-        );
-      },
+    // 让用户选保存位置（Android 走系统"另存为"对话框，写入外部存储用户可访问）
+    final path = await FilePicker.platform.saveFile(
+      dialogTitle: '导出日志',
+      fileName: filename,
+      type: FileType.any,
+      bytes: Uint8List.fromList(utf8.encode(text)),
     );
-  }
-
-  Future<void> _openFile(String path) async {
-    final uri = Uri.file(path);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else if (mounted) {
-      await Clipboard.setData(ClipboardData(text: path));
-      if (!mounted) return;
-      AppToast.show(context, '无法打开文件，路径已复制');
-    }
+    if (path == null) return; // 用户取消
+    if (!mounted) return;
+    AppToast.show(context, '日志已导出');
   }
 
   @override
