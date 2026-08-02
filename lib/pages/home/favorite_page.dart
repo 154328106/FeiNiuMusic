@@ -21,25 +21,37 @@ class FavoritePage extends StatefulWidget {
   State<FavoritePage> createState() => _FavoritePageState();
 }
 
-class _FavoritePageState extends State<FavoritePage> with SignalsMixin {
+class _FavoritePageState extends State<FavoritePage>
+    with SignalsMixin, SongMultiSelectMixin {
   final FeiNiuApiClient _api = FeiNiuApiClient.instance;
   final FeiNiuTrackService _trackService = FeiNiuTrackService.instance;
   final PlayerService _player = PlayerService.instance;
   final GlobalKey<AppPageScaffoldState> _scaffoldKey =
       GlobalKey<AppPageScaffoldState>();
 
+  @override
+  List<SongEntity> get multiSelectSongs => _songs.value;
+
   late final _allSongs = createSignal<List<SongEntity>>([]);
   late final _songs = createSignal<List<SongEntity>>([]);
   late final _loading = createSignal(true);
   late final _isRefreshing = createSignal(false);
+  late final _loadingMore = createSignal(false);
   late final _sortKey = createSignal('favoriteAt');
   late final _ascending = createSignal(false);
+  final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   bool _searchVisible = false;
 
+  static const int _pageSize = 100;
+  int _currentPage = 1;
+  int _total = 0;
+  bool _hasMore = true;
+
   @override
   void dispose() {
+    _scrollController.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -47,18 +59,58 @@ class _FavoritePageState extends State<FavoritePage> with SignalsMixin {
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_handleScroll);
     _load();
   }
 
+  void _handleScroll() {
+    if (!_scrollController.hasClients || !_hasMore || _loadingMore.value) return;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final offset = _scrollController.offset;
+    if (maxScroll - offset < 400) {
+      _loadMore();
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore.value || !_hasMore) return;
+    _loadingMore.value = true;
+    _currentPage++;
+    try {
+      final pageData = await _api.getFavoriteList(
+        page: _currentPage,
+        size: _pageSize,
+        sort: '${_sortKey.value},${_ascending.value ? 'asc' : 'desc'}',
+      );
+      if (!mounted) return;
+      final songs = pageData.list
+          .map((t) => _trackService.trackToSongEntity(t.toJson()))
+          .toList();
+      _total = pageData.total;
+      _allSongs.value = [..._allSongs.value, ...songs];
+      _hasMore = _allSongs.value.length < _total;
+      _applyFilter();
+    } catch (_) {
+      _currentPage--;
+    } finally {
+      if (mounted) _loadingMore.value = false;
+    }
+  }
+
   Future<void> _load({bool forceRefresh = false}) async {
+    // 分页后首屏只拿第 1 页。缓存 key 保持不变，新的分页数据会直接覆盖旧缓存。
     const cacheKey = 'all';
 
     Future<List<SongEntity>> fetch() async {
       final pageData = await _api.getFavoriteList(
         page: 1,
-        size: -1,
+        size: _pageSize,
         sort: '${_sortKey.value},${_ascending.value ? 'asc' : 'desc'}',
       );
+      if (mounted) {
+        _total = pageData.total;
+        _hasMore = pageData.list.length < _total;
+      }
       return pageData.list
           .map((t) => _trackService.trackToSongEntity(t.toJson()))
           .toList();
@@ -69,6 +121,7 @@ class _FavoritePageState extends State<FavoritePage> with SignalsMixin {
       try {
         final songs = await fetch();
         if (mounted) {
+          _currentPage = 1;
           _allSongs.value = songs;
           _applyFilter();
           _loading.value = false;
@@ -89,6 +142,7 @@ class _FavoritePageState extends State<FavoritePage> with SignalsMixin {
       void onData(List<SongEntity>? data) {
         if (mounted) {
           if (data != null) {
+            _currentPage = 1;
             _allSongs.value = data;
             _applyFilter();
             _loading.value = false;
@@ -111,6 +165,7 @@ class _FavoritePageState extends State<FavoritePage> with SignalsMixin {
       if (cached != null) {
         // 缓存命中 → 全屏转圈消失，右上角转圈保持直到后台刷新结束
         if (mounted) {
+          _currentPage = 1;
           _allSongs.value = cached;
           _applyFilter();
           _loading.value = false;
@@ -248,6 +303,7 @@ class _FavoritePageState extends State<FavoritePage> with SignalsMixin {
       builder: (context, useBottomNavigation) => AppPageScaffold(
         key: _scaffoldKey,
         extendBodyBehindAppBar: true,
+        showMiniPlayer: !isMultiSelecting,
         drawer: useBottomNavigation
             ? null
             : SideMenu(
@@ -258,33 +314,55 @@ class _FavoritePageState extends State<FavoritePage> with SignalsMixin {
             ? (index) => navigateToPrimaryDestination(context, index)
             : null,
         appBar: AppTopBar(
-          title: '收藏',
+          title: isMultiSelecting ? '已选 $selectedCount 首' : '收藏',
           showBackButton: false,
-          isRefreshing: _isRefreshing.value,
+          isRefreshing: _isRefreshing.value && !isMultiSelecting,
           backgroundColor: Colors.transparent,
           elevation: 0,
           leading: useBottomNavigation
               ? null
-              : IconButton(
-                  icon: const Icon(Icons.menu_rounded),
-                  onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-                ),
-          actions: [
-            IconButton(
-              icon: Icon(_searchVisible ? Icons.search_off : Icons.search),
-              onPressed: () {
-                setState(() {
-                  _searchVisible = !_searchVisible;
-                  if (!_searchVisible) {
-                    _searchController.clear();
-                    _searchQuery = '';
-                    _applyFilter();
-                  }
-                });
-              },
-            ),
-            SortActionButton(onTap: _showSortSheet),
-          ],
+              : (isMultiSelecting
+                  ? IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: exitMultiSelect,
+                    )
+                  : IconButton(
+                      icon: const Icon(Icons.menu_rounded),
+                      onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                    )),
+          actions: isMultiSelecting
+              ? [
+                  SelectAllButton(
+                    isAllSelected: selectedCount == multiSelectSongs.length,
+                    selectedCount: selectedCount,
+                    totalCount: multiSelectSongs.length,
+                    onTap: toggleSelectAll,
+                  ),
+                  MultiSelectToggleButton(
+                    enabled: true,
+                    onTap: exitMultiSelect,
+                  ),
+                ]
+              : [
+                  IconButton(
+                    icon: Icon(_searchVisible ? Icons.search_off : Icons.search),
+                    onPressed: () {
+                      setState(() {
+                        _searchVisible = !_searchVisible;
+                        if (!_searchVisible) {
+                          _searchController.clear();
+                          _searchQuery = '';
+                          _applyFilter();
+                        }
+                      });
+                    },
+                  ),
+                  SortActionButton(onTap: _showSortSheet),
+                  MultiSelectToggleButton(
+                    enabled: false,
+                    onTap: toggleMultiSelect,
+                  ),
+                ],
         ),
         body: Column(
           children: [
@@ -374,19 +452,52 @@ class _FavoritePageState extends State<FavoritePage> with SignalsMixin {
                         ),
                         Expanded(
                           child: ListView.builder(
+                            controller: _scrollController,
                             padding: const EdgeInsets.fromLTRB(16, 0, 16, 160),
-                            itemCount: songs.length,
+                            itemCount:
+                                songs.length + (_loadingMore.value ? 1 : 0),
                             itemBuilder: (context, index) {
+                              if (index >= songs.length) {
+                                return const Center(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(8),
+                                    child: SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }
                               final song = songs[index];
+                              final selected = isSongSelected(song.id);
                               return InkWell(
-                                onTap: () => _playSong(index),
-                                onLongPress: () => _showSongDetail(song),
+                                onTap: () => isMultiSelecting
+                                    ? toggleSongSelection(song.id)
+                                    : _playSong(index),
+                                onLongPress: isMultiSelecting
+                                    ? null
+                                    : () => _showSongDetail(song),
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(
                                     vertical: 6,
                                   ),
                                   child: Row(
                                     children: [
+                                      if (isMultiSelecting) ...[
+                                        Icon(
+                                          selected
+                                              ? Icons.check_circle
+                                              : Icons.circle_outlined,
+                                          size: 20,
+                                          color: selected
+                                              ? scheme.primary
+                                              : theme.disabledColor,
+                                        ),
+                                        const SizedBox(width: 12),
+                                      ],
                                       ArtworkWidget(
                                         song: song,
                                         size: 48,
@@ -427,6 +538,8 @@ class _FavoritePageState extends State<FavoritePage> with SignalsMixin {
                             },
                           ),
                         ),
+                        if (isMultiSelecting)
+                          buildMultiSelectBar(includeFavorite: false),
                       ],
                     ),
                   );

@@ -26,8 +26,8 @@ class ArtistsPage extends StatefulWidget {
 const String artistsPrefsSortKey = 'artists_sort_key_v1';
 const String artistsPrefsSortAscending = 'artists_sort_ascending_v1';
 const String artistsPrefsFilterUnknown = 'artists_filter_unknown_v1';
-const String artistsDefaultSortKey = 'name';
-const bool artistsDefaultAscending = true;
+const String artistsDefaultSortKey = 'songCount';
+const bool artistsDefaultAscending = false;
 const bool artistsDefaultFilterUnknown = false;
 
 class ArtistGroup {
@@ -71,8 +71,8 @@ class _ArtistsPageState extends State<ArtistsPage>
   late final _loadingMore = createSignal(false);
   late final _isRefreshing = createSignal(false);
   late final _groups = createSignal<List<ArtistGroup>>([]);
-  late final _sortKey = createSignal('name');
-  late final _ascending = createSignal(true);
+  late final _sortKey = createSignal(artistsDefaultSortKey);
+  late final _ascending = createSignal(artistsDefaultAscending);
   late final _filterUnknown = createSignal(false);
 
   int _currentPage = 1;
@@ -133,9 +133,10 @@ class _ArtistsPageState extends State<ArtistsPage>
 
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    var key = (prefs.getString(_prefsSortKey) ?? 'name').trim();
-    if (key.isEmpty) key = 'name';
-    final asc = prefs.getBool(_prefsSortAscending) ?? true;
+    var key = (prefs.getString(_prefsSortKey) ?? artistsDefaultSortKey).trim();
+    if (key.isEmpty) key = artistsDefaultSortKey;
+    final asc =
+        prefs.getBool(_prefsSortAscending) ?? artistsDefaultAscending;
     final filterUnknown = prefs.getBool(_prefsFilterUnknown) ?? false;
     _sortKey.value = key;
     _ascending.value = asc;
@@ -346,7 +347,9 @@ class _ArtistsPageState extends State<ArtistsPage>
         controller: _controller,
         itemCount: groups.length + (_loadingMore.value ? 1 : 0),
         itemExtent: _itemExtent,
-        isLoading: _loadingMore.value,
+        // 加载更多时不替换整个列表（避免重建 ListView 丢失滚动位置导致跳回顶部），
+        // 加载指示器由 itemBuilder 末尾的“转圈条目”承载。
+        isLoading: false,
         emptyText: '暂无歌手',
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 160),
         indexLabelBuilder: (index) {

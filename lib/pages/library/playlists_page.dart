@@ -3,12 +3,15 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:image_cropper/image_cropper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
 import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/feiniu/api_models.dart';
+import '../../app/services/feiniu/favorite_service.dart';
 import '../../app/services/feiniu/playlist_service.dart';
 import '../../app/services/feiniu/track_service.dart';
 import '../../app/services/player_service.dart';
@@ -42,11 +45,17 @@ class _PlaylistsPageState extends State<PlaylistsPage>
   late final _sortMode = createSignal('name');
   late final _ascending = createSignal(true);
   late final _isRefreshing = createSignal(false);
+  late final _loadingMore = createSignal(false);
   late final _filteredPlaylists = createSignal<List<FeiNiuPlaylist>>([]);
   List<FeiNiuPlaylist> _allPlaylists = [];
+  final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   bool _searchVisible = false;
+
+  static const int _pageSize = 100;
+  int _currentPage = 1;
+  bool _hasMore = true;
 
   void _preloadCovers(List<FeiNiuPlaylist> items, {int count = 20}) {
     if (items.isEmpty || !mounted) return;
@@ -66,12 +75,49 @@ class _PlaylistsPageState extends State<PlaylistsPage>
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_handleScroll);
     scheduleDeferredInit();
   }
 
   @override
   Future<void> runDeferredInit() async {
     await _init();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _handleScroll() {
+    if (!_scrollController.hasClients || !_hasMore || _loadingMore.value) return;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final offset = _scrollController.offset;
+    if (maxScroll - offset < 400) {
+      _loadMore();
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore.value || !_hasMore) return;
+    _loadingMore.value = true;
+    _currentPage++;
+    try {
+      final playlists = await _service.getPlaylistList(
+        page: _currentPage,
+        size: _pageSize,
+      );
+      if (!mounted) return;
+      _allPlaylists = [..._allPlaylists, ...playlists];
+      _hasMore = playlists.length >= _pageSize;
+      _applySortFromBase();
+    } catch (_) {
+      _currentPage--;
+    } finally {
+      if (mounted) _loadingMore.value = false;
+    }
   }
 
   Future<void> _init() async {
@@ -95,10 +141,19 @@ class _PlaylistsPageState extends State<PlaylistsPage>
   }
 
   Future<void> _load({bool forceRefresh = false}) async {
+    // 分页后首屏只拿第 1 页。缓存 key 保持不变，新的分页数据会直接覆盖旧缓存。
     const cacheKey = 'all';
 
     Future<List<FeiNiuPlaylist>> fetch() async {
-      return await _service.getPlaylistList();
+      final playlists = await _service.getPlaylistList(
+        page: 1,
+        size: _pageSize,
+      );
+      if (mounted) {
+        _currentPage = 1;
+        _hasMore = playlists.length >= _pageSize;
+      }
+      return playlists;
     }
 
     if (forceRefresh) {
@@ -126,6 +181,7 @@ class _PlaylistsPageState extends State<PlaylistsPage>
       void onData(List<FeiNiuPlaylist>? data) {
         if (mounted) {
           if (data != null) {
+            _currentPage = 1;
             _allPlaylists = data;
             _applySortFromBase();
             _preloadCovers(data);
@@ -149,6 +205,7 @@ class _PlaylistsPageState extends State<PlaylistsPage>
       if (cached != null) {
         // 缓存命中 → 全屏转圈消失，右上角转圈保持直到后台刷新结束
         if (mounted) {
+          _currentPage = 1;
           _allPlaylists = cached;
           _applySortFromBase();
           _preloadCovers(cached);
@@ -162,12 +219,6 @@ class _PlaylistsPageState extends State<PlaylistsPage>
         _loading.value = false;
       }
     }
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
   }
 
   void _applySortFromBase() {
@@ -212,14 +263,16 @@ class _PlaylistsPageState extends State<PlaylistsPage>
   }
 
   Future<void> _createPlaylist() async {
+    String? coverId;
     await _showPlaylistNameDialog(
       context,
       title: '新建歌单',
       initial: '',
       confirmText: '创建',
       fallbackName: '新建歌单',
+      onCoverUploaded: (id) => coverId = id,
       onSubmit: (name) async {
-        await _service.createPlaylist(name);
+        await _service.createPlaylist(name, coverId: coverId);
         if (!mounted) return;
         AppToast.show(context, '已创建歌单');
         await _load();
@@ -228,16 +281,23 @@ class _PlaylistsPageState extends State<PlaylistsPage>
   }
 
   Future<void> _renamePlaylist(FeiNiuPlaylist playlist) async {
+    String? coverId;
     await _showPlaylistNameDialog(
       context,
       title: '重命名歌单',
       initial: playlist.name,
       confirmText: '保存',
       fallbackName: null,
+      initialCoverId: playlist.coverId,
+      onCoverUploaded: (id) => coverId = id,
       onSubmit: (name) async {
-        await _service.editPlaylist(guid: playlist.guid, name: name);
+        await _service.editPlaylist(
+          guid: playlist.guid,
+          name: name,
+          coverId: coverId,
+        );
         if (!mounted) return;
-        AppToast.show(context, '已重命名');
+        AppToast.show(context, '已保存');
         await _load();
       },
     );
@@ -260,6 +320,30 @@ class _PlaylistsPageState extends State<PlaylistsPage>
     await _load();
   }
 
+  Future<void> _purgeInvalidTracks(FeiNiuPlaylist playlist) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AppDialog(
+        title: '清除无效歌曲',
+        contentText: '确定清除「${playlist.name}」中已失效的歌曲吗？',
+        isDestructive: true,
+        confirmText: '清除',
+        onConfirm: () {},
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      final count = await _service.purgeInvalidTracks(playlist.guid);
+      if (!mounted) return;
+      AppToast.show(context, count > 0 ? '已清除 $count 首无效歌曲' : '未发现无效歌曲');
+      await _load();
+    } catch (e) {
+      debugPrint('[PlaylistsPage] purge invalid tracks error: $e');
+      if (!mounted) return;
+      AppToast.show(context, '清除失败', type: ToastType.error);
+    }
+  }
+
   void _showPlaylistSheet(FeiNiuPlaylist playlist) {
     showModalBottomSheet(
       context: context,
@@ -277,6 +361,14 @@ class _PlaylistsPageState extends State<PlaylistsPage>
                 onTap: () {
                   Navigator.of(context).pop();
                   _renamePlaylist(playlist);
+                },
+              ),
+              AppListTile(
+                leading: const Icon(Icons.cleaning_services_rounded),
+                title: '清除无效歌曲',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _purgeInvalidTracks(playlist);
                 },
               ),
               AppListTile(
@@ -440,9 +532,25 @@ class _PlaylistsPageState extends State<PlaylistsPage>
                       : _filteredPlaylists.value.isEmpty
                       ? const Center(child: Text('暂无歌单'))
                       : ListView.builder(
+                          controller: _scrollController,
                           padding: const EdgeInsets.fromLTRB(12, 12, 12, 160),
-                          itemCount: _filteredPlaylists.value.length,
+                          itemCount: _filteredPlaylists.value.length +
+                              (_loadingMore.value ? 1 : 0),
                           itemBuilder: (context, index) {
+                            if (index >= _filteredPlaylists.value.length) {
+                              return const Center(
+                                child: Padding(
+                                  padding: EdgeInsets.all(8),
+                                  child: SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }
                             final p = _filteredPlaylists.value[index];
                       final scheme = Theme.of(context).colorScheme;
                       return Column(
@@ -516,10 +624,12 @@ class PlaylistDetailPage extends StatefulWidget {
 
 class _PlaylistDetailPageState extends State<PlaylistDetailPage>
     with SignalsMixin {
+  final FeiNiuApiClient _api = FeiNiuApiClient.instance;
   final FeiNiuPlaylistService _service = FeiNiuPlaylistService.instance;
   final FeiNiuTrackService _trackService = FeiNiuTrackService.instance;
 
   late final _loading = createSignal(true);
+  late final _loadingMore = createSignal(false);
   late final _songs = createSignal<List<SongEntity>>([]);
   late final _originalSongs = createSignal<List<SongEntity>>([]);
   late final _showCovers = createSignal(true);
@@ -528,21 +638,77 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
   late final _selectedIds = createSignal<Set<String>>({});
   late final _sortKey = createSignal('default');
   late final _sortAscending = createSignal(true);
+  final ScrollController _scrollController = ScrollController();
+
+  static const int _pageSize = 100;
+  int _currentPage = 1;
+  int _total = 0;
+  bool _hasMore = true;
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_handleScroll);
     _load();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _handleScroll() {
+    if (!_scrollController.hasClients || !_hasMore || _loadingMore.value) return;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final offset = _scrollController.offset;
+    if (maxScroll - offset < 400) {
+      _loadMore();
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore.value || !_hasMore) return;
+    _loadingMore.value = true;
+    _currentPage++;
+    try {
+      final pageData = await _api.getPlaylistTracks(
+        playlistGUID: widget.playlistId,
+        page: _currentPage,
+        size: _pageSize,
+      );
+      if (!mounted) return;
+      final songs = pageData.list
+          .map((t) => _trackService.trackToSongEntity(t))
+          .toList();
+      _total = pageData.total;
+      _songs.value = [..._songs.value, ...songs];
+      _originalSongs.value = [..._originalSongs.value, ...songs];
+      _hasMore = _songs.value.length < _total;
+    } catch (_) {
+      _currentPage--;
+    } finally {
+      if (mounted) _loadingMore.value = false;
+    }
   }
 
   Future<void> _load() async {
     _loading.value = true;
     try {
-      final tracks = await _service.getPlaylistTracks(widget.playlistId);
-      final songs = tracks
+      final pageData = await _api.getPlaylistTracks(
+        playlistGUID: widget.playlistId,
+        page: 1,
+        size: _pageSize,
+      );
+      final songs = pageData.list
           .map((t) => _trackService.trackToSongEntity(t))
           .toList();
       if (!mounted) return;
+      _currentPage = 1;
+      _total = pageData.total;
+      // total 未知（服务端未返回）时退化为「首屏取满一页即认为还有更多」
+      final totalKnown = _total > 0;
+      _hasMore = totalKnown ? songs.length < _total : songs.length >= _pageSize;
       _songs.value = songs;
       _originalSongs.value = List<SongEntity>.from(songs);
       _loading.value = false;
@@ -704,9 +870,25 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
                       ),
                       Expanded(
                         child: ListView.builder(
+                          controller: _scrollController,
                           padding: EdgeInsets.only(bottom: bottomInset),
-                          itemCount: _songs.value.length,
+                          itemCount:
+                              _songs.value.length + (_loadingMore.value ? 1 : 0),
                           itemBuilder: (context, index) {
+                            if (index >= _songs.value.length) {
+                              return const Center(
+                                child: Padding(
+                                  padding: EdgeInsets.all(8),
+                                  child: SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }
                             final song = _songs.value[index];
                             return _buildSongTile(
                               context,
@@ -757,6 +939,30 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
                                           );
                                       if (!mounted) return;
                                       if (added) _toggleMultiSelect();
+                                    },
+                            ),
+                            MultiSelectAction(
+                              icon: Icons.favorite_border_rounded,
+                              label: '添加到收藏',
+                              onTap: _selectedIds.value.isEmpty
+                                  ? null
+                                  : () async {
+                                      final ids = _selectedIds.value.toList();
+                                      final failed = await FeiNiuFavoriteService
+                                          .instance
+                                          .favoriteAll(ids);
+                                      if (!context.mounted) return;
+                                      final ok = ids.length - failed;
+                                      AppToast.show(
+                                        context,
+                                        failed == 0
+                                            ? '已收藏 $ok 首歌曲'
+                                            : '已收藏 $ok 首，$failed 首失败',
+                                        type: failed == 0
+                                            ? ToastType.success
+                                            : ToastType.error,
+                                      );
+                                      _toggleMultiSelect();
                                     },
                             ),
                             MultiSelectAction(
@@ -1025,9 +1231,7 @@ class _PlaylistPickerSheetState extends State<PlaylistPickerSheet>
       fallbackName: '新建歌单',
       onSubmit: (name) async {
         final created = await _service.createPlaylist(name);
-        for (final id in widget.songIds) {
-          await _service.addTrack(created.guid, id);
-        }
+        await _service.addTracks(created.guid, widget.songIds);
         if (!mounted) return;
         AppToast.show(context, '已收藏到歌单');
         Future.delayed(const Duration(milliseconds: 80), () {
@@ -1039,9 +1243,7 @@ class _PlaylistPickerSheetState extends State<PlaylistPickerSheet>
   }
 
   Future<void> _addToPlaylist(FeiNiuPlaylist playlist) async {
-    for (final id in widget.songIds) {
-      await _service.addTrack(playlist.guid, id);
-    }
+    await _service.addTracks(playlist.guid, widget.songIds);
     if (!mounted) return;
     AppToast.show(context, '已收藏到歌单');
     Navigator.of(context).pop(true);
@@ -1117,9 +1319,7 @@ Future<bool> showAddToPlaylistDialog(
               fallbackName: '新建歌单',
               onSubmit: (name) async {
                 final created = await service.createPlaylist(name);
-                for (final id in ids) {
-                  await service.addTrack(created.guid, id);
-                }
+                await service.addTracks(created.guid, ids);
                 if (!context.mounted) return;
                 AppToast.show(context, '已添加到歌单: ${created.name}');
               },
@@ -1142,9 +1342,7 @@ Future<bool> showAddToPlaylistDialog(
                       title: playlist.name,
                       subtitle: null,
                       onTap: () async {
-                        for (final id in ids) {
-                          await service.addTrack(playlist.guid, id);
-                        }
+                        await service.addTracks(playlist.guid, ids);
                         if (!context.mounted) return;
                         Navigator.pop(dialogContext, true);
                         AppToast.show(context, '已添加到歌单: ${playlist.name}');
@@ -1166,6 +1364,8 @@ Future<void> _showPlaylistNameDialog(
   required String confirmText,
   required String? fallbackName,
   required Future<void> Function(String name) onSubmit,
+  String? initialCoverId,
+  void Function(String coverId)? onCoverUploaded,
 }) async {
   await showModalBottomSheet<void>(
     context: context,
@@ -1182,6 +1382,8 @@ Future<void> _showPlaylistNameDialog(
           confirmText: confirmText,
           fallbackName: fallbackName,
           onSubmit: onSubmit,
+          initialCoverId: initialCoverId,
+          onCoverUploaded: onCoverUploaded,
         ),
       );
     },
@@ -1194,6 +1396,8 @@ class _PlaylistNameDialog extends StatefulWidget {
   final String confirmText;
   final String? fallbackName;
   final Future<void> Function(String name) onSubmit;
+  final String? initialCoverId;
+  final void Function(String coverId)? onCoverUploaded;
 
   const _PlaylistNameDialog({
     required this.title,
@@ -1201,6 +1405,8 @@ class _PlaylistNameDialog extends StatefulWidget {
     required this.confirmText,
     required this.fallbackName,
     required this.onSubmit,
+    this.initialCoverId,
+    this.onCoverUploaded,
   });
 
   @override
@@ -1209,17 +1415,70 @@ class _PlaylistNameDialog extends StatefulWidget {
 
 class _PlaylistNameDialogState extends State<_PlaylistNameDialog> {
   late final TextEditingController _controller;
+  String? _coverId;
 
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.initial);
+    _coverId = widget.initialCoverId;
   }
 
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  /// 从本地相册/文件选择图片，裁剪为正方形后上传，得到 coverId。
+  Future<void> _pickCover() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: false,
+    );
+    final file = result?.files.first;
+    if (file?.path == null) return;
+
+    // 正方形裁剪，与歌单封面展示比例一致
+    final cropped = await ImageCropper().cropImage(
+      sourcePath: file!.path!,
+      compressFormat: ImageCompressFormat.png,
+      compressQuality: 95,
+      aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
+      uiSettings: [
+        AndroidUiSettings(
+          toolbarTitle: '裁剪封面',
+          hideBottomControls: true,
+          lockAspectRatio: true,
+          toolbarColor: const Color(0xFF212121),
+          statusBarLight: false,
+          toolbarWidgetColor: Colors.white,
+          activeControlsWidgetColor: Colors.white,
+          backgroundColor: Colors.black,
+        ),
+        IOSUiSettings(
+          title: '裁剪封面',
+          aspectRatioLockEnabled: true,
+          resetAspectRatioEnabled: false,
+        ),
+      ],
+    );
+    if (cropped == null || !mounted) return;
+
+    setState(() {}); // 关闭加载态
+    try {
+      final coverId = await FeiNiuPlaylistService.instance
+          .uploadCoverFromFile(cropped.path);
+      if (!mounted) return;
+      setState(() => _coverId = coverId);
+      widget.onCoverUploaded?.call(coverId);
+      if (mounted) AppToast.show(context, '封面上传成功');
+    } catch (e) {
+      debugPrint('[PlaylistNameDialog] upload cover error: $e');
+      if (mounted) {
+        AppToast.show(context, '封面上传失败', type: ToastType.error);
+      }
+    }
   }
 
   Future<void> _submit() async {
@@ -1235,9 +1494,34 @@ class _PlaylistNameDialogState extends State<_PlaylistNameDialog> {
     Navigator.of(context).pop(true);
   }
 
+  /// 封面占位图（未选择时显示"随机封面"提示）
+  Widget _coverPlaceholder() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.image_outlined,
+            size: 28,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '随机封面',
+            style: TextStyle(
+              fontSize: 11,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     return AppSheetPanel(
       title: widget.title,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -1245,6 +1529,56 @@ class _PlaylistNameDialogState extends State<_PlaylistNameDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 封面选择：默认随机封面（占位图），点击从本地相册选择并裁剪上传
+          Center(
+            child: GestureDetector(
+              onTap: _pickCover,
+              child: Container(
+                width: 96,
+                height: 96,
+                decoration: BoxDecoration(
+                  color: theme.appPanelColor,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: theme.colorScheme.outlineVariant,
+                    width: 1,
+                  ),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: _coverId != null && _coverId!.isNotEmpty
+                    ? Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          CachedNetworkImage(
+                            imageUrl: FeiNiuApiClient.instance.coverUrl(
+                              _coverId!,
+                              size: 200,
+                            ),
+                            httpHeaders:
+                                FeiNiuApiClient.imageAuthHeaders(),
+                            fit: BoxFit.cover,
+                            errorWidget: (_, _, _) => _coverPlaceholder(),
+                          ),
+                          const Positioned(
+                            right: 6,
+                            bottom: 6,
+                            child: CircleAvatar(
+                              radius: 14,
+                              backgroundColor: Colors.black54,
+                              child: Icon(
+                                Icons.edit_rounded,
+                                size: 16,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    : _coverPlaceholder(),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
           TextField(
             controller: _controller,
             autofocus: true,

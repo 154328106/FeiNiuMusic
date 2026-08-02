@@ -13,6 +13,7 @@ export 'list/multi_select_toggle_button.dart';
 export 'list/playback_mode_button.dart';
 export 'list/select_all_button.dart';
 export 'list/sort_action_button.dart';
+export 'list/song_multi_select_mixin.dart';
 export 'common/sheet_panels.dart';
 export 'list/sort_sheet.dart';
 export 'layout/base/app_bottom_bar.dart';

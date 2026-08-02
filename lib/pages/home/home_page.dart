@@ -282,7 +282,7 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
 
   Future<void> _loadPlaylists() async {
     try {
-      final pageData = await _api.getPlaylistList();
+      final pageData = await _api.getPlaylistList(page: 1, size: 10);
       if (mounted) _playlists.value = pageData.list;
     } catch (e, stack) {
       debugPrint('[HomePage] playlists error: $e\n$stack');

@@ -18,22 +18,33 @@ class RecentPlaybackPage extends StatefulWidget {
 }
 
 class _RecentPlaybackPageState extends State<RecentPlaybackPage>
-    with SignalsMixin {
+    with SignalsMixin, SongMultiSelectMixin {
   final FeiNiuApiClient _api = FeiNiuApiClient.instance;
   final FeiNiuTrackService _trackService = FeiNiuTrackService.instance;
   final PlayerService _player = PlayerService.instance;
   final GlobalKey<AppPageScaffoldState> _scaffoldKey =
       GlobalKey<AppPageScaffoldState>();
 
+  @override
+  List<SongEntity> get multiSelectSongs => _songs.value;
+
   late final _allSongs = createSignal<List<SongEntity>>([]);
   late final _songs = createSignal<List<SongEntity>>([]);
   late final _loading = createSignal(true);
+  late final _loadingMore = createSignal(false);
+  final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   bool _searchVisible = false;
 
+  static const int _pageSize = 100;
+  int _currentPage = 1;
+  int _total = 0;
+  bool _hasMore = true;
+
   @override
   void dispose() {
+    _scrollController.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -41,7 +52,41 @@ class _RecentPlaybackPageState extends State<RecentPlaybackPage>
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_handleScroll);
     _loadHistory();
+  }
+
+  void _handleScroll() {
+    if (!_scrollController.hasClients || !_hasMore || _loadingMore.value) return;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final offset = _scrollController.offset;
+    if (maxScroll - offset < 400) {
+      _loadMore();
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore.value || !_hasMore) return;
+    _loadingMore.value = true;
+    _currentPage++;
+    try {
+      final pageData = await _api.getPlayHistory(
+        page: _currentPage,
+        size: _pageSize,
+      );
+      if (!mounted) return;
+      final songs = pageData.list
+          .map((t) => _trackService.trackToSongEntity(t.toJson()))
+          .toList();
+      _total = pageData.total;
+      _allSongs.value = [..._allSongs.value, ...songs];
+      _hasMore = _allSongs.value.length < _total;
+      _applyFilter();
+    } catch (_) {
+      _currentPage--;
+    } finally {
+      if (mounted) _loadingMore.value = false;
+    }
   }
 
   void _applyFilter() {
@@ -60,11 +105,14 @@ class _RecentPlaybackPageState extends State<RecentPlaybackPage>
   Future<void> _loadHistory() async {
     _loading.value = true;
     try {
-      final pageData = await _api.getPlayHistory(page: 1, size: 100);
+      final pageData = await _api.getPlayHistory(page: 1, size: _pageSize);
       final songs = pageData.list
           .map((t) => _trackService.trackToSongEntity(t.toJson()))
           .toList();
       if (mounted) {
+        _currentPage = 1;
+        _total = pageData.total;
+        _hasMore = songs.length < _total;
         _allSongs.value = songs;
         _applyFilter();
       }
@@ -150,6 +198,7 @@ class _RecentPlaybackPageState extends State<RecentPlaybackPage>
       builder: (context, useBottomNavigation) => AppPageScaffold(
         key: _scaffoldKey,
         extendBodyBehindAppBar: true,
+        showMiniPlayer: !isMultiSelecting,
         drawer: useBottomNavigation
             ? null
             : SideMenu(
@@ -160,31 +209,53 @@ class _RecentPlaybackPageState extends State<RecentPlaybackPage>
             ? (index) => navigateToPrimaryDestination(context, index)
             : null,
         appBar: AppTopBar(
-          title: '最近播放',
+          title: isMultiSelecting ? '已选 $selectedCount 首' : '最近播放',
           showBackButton: false,
           leading: useBottomNavigation
               ? null
-              : IconButton(
-                  icon: const Icon(Icons.menu_rounded),
-                  onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-                ),
+              : (isMultiSelecting
+                  ? IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: exitMultiSelect,
+                    )
+                  : IconButton(
+                      icon: const Icon(Icons.menu_rounded),
+                      onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                    )),
           backgroundColor: Colors.transparent,
           elevation: 0,
-          actions: [
-            IconButton(
-              icon: Icon(_searchVisible ? Icons.search_off : Icons.search),
-              onPressed: () {
-                setState(() {
-                  _searchVisible = !_searchVisible;
-                  if (!_searchVisible) {
-                    _searchController.clear();
-                    _searchQuery = '';
-                    _applyFilter();
-                  }
-                });
-              },
-            ),
-          ],
+          actions: isMultiSelecting
+              ? [
+                  SelectAllButton(
+                    isAllSelected: selectedCount == multiSelectSongs.length,
+                    selectedCount: selectedCount,
+                    totalCount: multiSelectSongs.length,
+                    onTap: toggleSelectAll,
+                  ),
+                  MultiSelectToggleButton(
+                    enabled: true,
+                    onTap: exitMultiSelect,
+                  ),
+                ]
+              : [
+                  IconButton(
+                    icon: Icon(_searchVisible ? Icons.search_off : Icons.search),
+                    onPressed: () {
+                      setState(() {
+                        _searchVisible = !_searchVisible;
+                        if (!_searchVisible) {
+                          _searchController.clear();
+                          _searchQuery = '';
+                          _applyFilter();
+                        }
+                      });
+                    },
+                  ),
+                  MultiSelectToggleButton(
+                    enabled: false,
+                    onTap: toggleMultiSelect,
+                  ),
+                ],
         ),
         body: Column(
           children: [
@@ -285,19 +356,52 @@ class _RecentPlaybackPageState extends State<RecentPlaybackPage>
                         ),
                         Expanded(
                           child: ListView.builder(
+                            controller: _scrollController,
                             padding: EdgeInsets.fromLTRB(16, 0, 16, 160),
-                            itemCount: songs.length,
+                            itemCount:
+                                songs.length + (_loadingMore.value ? 1 : 0),
                             itemBuilder: (context, index) {
+                              if (index >= songs.length) {
+                                return const Center(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(8),
+                                    child: SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }
                               final song = songs[index];
+                              final selected = isSongSelected(song.id);
                               return InkWell(
-                                onTap: () => _playSong(index),
-                                onLongPress: () => _showSongDetail(song),
+                                onTap: () => isMultiSelecting
+                                    ? toggleSongSelection(song.id)
+                                    : _playSong(index),
+                                onLongPress: isMultiSelecting
+                                    ? null
+                                    : () => _showSongDetail(song),
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(
                                     vertical: 6,
                                   ),
                                   child: Row(
                                     children: [
+                                      if (isMultiSelecting) ...[
+                                        Icon(
+                                          selected
+                                              ? Icons.check_circle
+                                              : Icons.circle_outlined,
+                                          size: 20,
+                                          color: selected
+                                              ? scheme.primary
+                                              : theme.disabledColor,
+                                        ),
+                                        const SizedBox(width: 12),
+                                      ],
                                       ArtworkWidget(
                                         song: song,
                                         size: 48,
@@ -338,6 +442,7 @@ class _RecentPlaybackPageState extends State<RecentPlaybackPage>
                             },
                           ),
                         ),
+                        if (isMultiSelecting) buildMultiSelectBar(),
                       ],
                     ),
                   );

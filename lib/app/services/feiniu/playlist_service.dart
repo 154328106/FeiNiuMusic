@@ -9,9 +9,15 @@ class FeiNiuPlaylistService {
 
   final FeiNiuApiClient _api = FeiNiuApiClient.instance;
 
-  /// 获取所有歌单
-  Future<List<FeiNiuPlaylist>> getPlaylistList() async {
-    final pageData = await _api.getPlaylistList();
+  /// 获取歌单列表（分页）。
+  ///
+  /// 默认 `size: -1`（一次返回全部），供歌单选择器等需要完整列表的场景使用；
+  /// 歌单页传入 `page`/`size` 做滚动加载更多。
+  Future<List<FeiNiuPlaylist>> getPlaylistList({
+    int page = 1,
+    int size = -1,
+  }) async {
+    final pageData = await _api.getPlaylistList(page: page, size: size);
     return pageData.list;
   }
 
@@ -29,17 +35,29 @@ class FeiNiuPlaylistService {
     return pageData.list;
   }
 
-  /// 创建歌单（自动随机封面）
-  Future<FeiNiuPlaylist> createPlaylist(String name) async {
-    // 先上传随机封面获取 coverId
-    final coverId = await _api.uploadCover();
-    final playlist = await _api.createPlaylist(name, coverId: coverId);
+  /// 创建歌单。
+  ///
+  /// 未传 [coverId] 时上传随机封面；传入用户自选封面的 coverId 时直接使用。
+  Future<FeiNiuPlaylist> createPlaylist(String name, {String? coverId}) async {
+    // 没有自定义封面时上传随机封面
+    final finalCoverId = coverId ?? await _api.uploadCover();
+    final playlist = await _api.createPlaylist(name, coverId: finalCoverId);
     return playlist;
+  }
+
+  /// 上传本地图片作为歌单封面，返回 coverId。失败时抛异常。
+  Future<String> uploadCoverFromFile(String imagePath) async {
+    return _api.uploadCoverFromFile(imagePath);
   }
 
   /// 删除歌单
   Future<void> deletePlaylist(String guid) async {
     await _api.deletePlaylist(guid);
+  }
+
+  /// 清除歌单内无效歌曲，返回清除数量
+  Future<int> purgeInvalidTracks(String playlistGuid) async {
+    return _api.purgeInvalidTracks(playlistGuid);
   }
 
   /// 编辑歌单（名称/封面）

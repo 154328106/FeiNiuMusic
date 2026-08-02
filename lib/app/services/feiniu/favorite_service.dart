@@ -25,6 +25,21 @@ class FeiNiuFavoriteService {
     await _api.favoriteTrack(trackGuid);
   }
 
+  /// 批量收藏（接口无批量，逐首调用）。返回失败数量。
+  ///
+  /// 收藏页多选等场景使用；单首失败不中断其余。
+  Future<int> favoriteAll(List<String> trackGuids) async {
+    var failed = 0;
+    for (final id in trackGuids) {
+      try {
+        await _api.favoriteTrack(id);
+      } catch (_) {
+        failed++;
+      }
+    }
+    return failed;
+  }
+
   /// 取消收藏
   Future<void> unfavorite(String trackGuid) async {
     await _api.unfavoriteTrack(trackGuid);

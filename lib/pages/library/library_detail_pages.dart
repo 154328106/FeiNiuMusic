@@ -112,9 +112,13 @@ class ArtistDetailPage extends StatefulWidget {
   State<ArtistDetailPage> createState() => _ArtistDetailPageState();
 }
 
-class _ArtistDetailPageState extends State<ArtistDetailPage> with SignalsMixin {
+class _ArtistDetailPageState extends State<ArtistDetailPage>
+    with SignalsMixin, SongMultiSelectMixin {
   final FeiNiuApiClient _apiClient = FeiNiuApiClient.instance;
   final FeiNiuTrackService _trackService = FeiNiuTrackService.instance;
+
+  @override
+  List<SongEntity> get multiSelectSongs => _songs.value;
 
   late final _loading = createSignal(true);
   late final _songs = createSignal<List<SongEntity>>([]);
@@ -185,10 +189,33 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> with SignalsMixin {
       builder: (context, useBottomNavigation) => AppPageScaffold(
         extendBodyBehindAppBar: false,
         useSafeArea: false,
+        showMiniPlayer: !isMultiSelecting,
         appBar: AppTopBar(
-          title: widget.artistName,
+          title: isMultiSelecting ? '已选 $selectedCount 首' : widget.artistName,
+          leading: isMultiSelecting
+              ? IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: exitMultiSelect,
+                )
+              : null,
           backgroundColor: Colors.transparent,
           elevation: 0,
+          actions: isMultiSelecting
+              ? [
+                  SelectAllButton(
+                    isAllSelected: selectedCount == multiSelectSongs.length,
+                    selectedCount: selectedCount,
+                    totalCount: multiSelectSongs.length,
+                    onTap: toggleSelectAll,
+                  ),
+                  MultiSelectToggleButton(enabled: true, onTap: exitMultiSelect),
+                ]
+              : [
+                  MultiSelectToggleButton(
+                    enabled: false,
+                    onTap: toggleMultiSelect,
+                  ),
+                ],
         ),
         body: Watch.builder(
           builder: (context) {
@@ -200,7 +227,10 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> with SignalsMixin {
             final albums = _albumGroups.value;
             final representative = _representative.value;
 
-            return ListView(
+            return Column(
+              children: [
+                Expanded(
+                  child: ListView(
               padding: const EdgeInsets.only(top: 0, bottom: 160),
               children: [
                 Padding(
@@ -320,30 +350,41 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> with SignalsMixin {
                           : (isDark
                                 ? Colors.white70
                                 : const Color.fromARGB(255, 100, 100, 100));
+                      final selected = isSongSelected(song.id);
                       return AppListTile(
-                        leading: ArtworkWidget(
-                          song: song,
-                          size: 44,
-                          borderRadius: 8,
-                          placeholder: Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: theme.cardColor,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              song.title.isEmpty
-                                  ? '?'
-                                  : song.title.substring(0, 1).toUpperCase(),
-                              style: TextStyle(
-                                color: theme.colorScheme.primary,
-                                fontWeight: FontWeight.w600,
+                        leading: isMultiSelecting
+                            ? Icon(
+                                selected
+                                    ? Icons.check_circle
+                                    : Icons.circle_outlined,
+                                size: 20,
+                                color: selected
+                                    ? theme.colorScheme.primary
+                                    : theme.disabledColor,
+                              )
+                            : ArtworkWidget(
+                                song: song,
+                                size: 44,
+                                borderRadius: 8,
+                                placeholder: Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    color: theme.cardColor,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  alignment: Alignment.center,
+                                  child: Text(
+                                    song.title.isEmpty
+                                        ? '?'
+                                        : song.title.substring(0, 1).toUpperCase(),
+                                    style: TextStyle(
+                                      color: theme.colorScheme.primary,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                        ),
                         title: song.title,
                         subtitle: song.albumDisplayName,
                         titleColor: titleColor,
@@ -353,10 +394,16 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> with SignalsMixin {
                           right: 16,
                         ),
                         onTap: () async {
+                          if (isMultiSelecting) {
+                            toggleSongSelection(song.id);
+                            return;
+                          }
                           await player.playQueue(songs, index);
                         },
-                        onLongPress: () {
-                          showModalBottomSheet(
+                        onLongPress: isMultiSelecting
+                            ? null
+                            : () {
+                                showModalBottomSheet(
                             context: context,
                             backgroundColor: Colors.transparent,
                             isScrollControlled: true,
@@ -452,6 +499,10 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> with SignalsMixin {
                 ],
                 const SizedBox(height: 24),
               ],
+                  ),
+                ),
+                if (isMultiSelecting) buildMultiSelectBar(),
+              ],
             );
           },
         ),
@@ -478,9 +529,13 @@ class AlbumDetailPage extends StatefulWidget {
   State<AlbumDetailPage> createState() => _AlbumDetailPageState();
 }
 
-class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
+class _AlbumDetailPageState extends State<AlbumDetailPage>
+    with SignalsMixin, SongMultiSelectMixin {
   final FeiNiuApiClient _apiClient = FeiNiuApiClient.instance;
   final FeiNiuTrackService _trackService = FeiNiuTrackService.instance;
+
+  @override
+  List<SongEntity> get multiSelectSongs => _songs.value;
 
   late final _loading = createSignal(true);
   late final _songs = createSignal<List<SongEntity>>([]);
@@ -589,18 +644,39 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
       builder: (context, useBottomNavigation) => AppPageScaffold(
         extendBodyBehindAppBar: false,
         useSafeArea: false,
+        showMiniPlayer: !isMultiSelecting,
         appBar: AppTopBar(
-          title: widget.albumName,
+          title: isMultiSelecting ? '已选 $selectedCount 首' : widget.albumName,
+          leading: isMultiSelecting
+              ? IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: exitMultiSelect,
+                )
+              : null,
           backgroundColor: Colors.transparent,
           elevation: 0,
-          actions: [
-            IconButton(
-              tooltip: '更多',
-              icon: const Icon(Icons.more_vert_rounded),
-              onPressed: _showMoreSheet,
-            ),
-            const SizedBox(width: 8),
-          ],
+          actions: isMultiSelecting
+              ? [
+                  SelectAllButton(
+                    isAllSelected: selectedCount == multiSelectSongs.length,
+                    selectedCount: selectedCount,
+                    totalCount: multiSelectSongs.length,
+                    onTap: toggleSelectAll,
+                  ),
+                  MultiSelectToggleButton(enabled: true, onTap: exitMultiSelect),
+                ]
+              : [
+                  IconButton(
+                    tooltip: '更多',
+                    icon: const Icon(Icons.more_vert_rounded),
+                    onPressed: _showMoreSheet,
+                  ),
+                  MultiSelectToggleButton(
+                    enabled: false,
+                    onTap: toggleMultiSelect,
+                  ),
+                  const SizedBox(width: 8),
+                ],
         ),
         body: Watch.builder(
           builder: (context) {
@@ -625,7 +701,10 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
             final sortedArtists = participatingArtists.toList()
               ..sort((a, b) => pinyinKey(a).compareTo(pinyinKey(b)));
 
-            return ListView(
+            return Column(
+              children: [
+                Expanded(
+                  child: ListView(
               padding: const EdgeInsets.only(top: 12, bottom: 160),
               children: [
                 Padding(
@@ -754,35 +833,46 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
                           : (isDark
                                 ? Colors.white70
                                 : const Color.fromARGB(255, 100, 100, 100));
+                      final selected = isSongSelected(song.id);
                       return AppListTile(
-                        leading: _showCovers.value
-                            ? ArtworkWidget(
-                                song: song,
-                                size: 48,
-                                borderRadius: 6,
-                                placeholder: Container(
-                                  width: 48,
-                                  height: 48,
-                                  decoration: BoxDecoration(
-                                    color: theme.cardColor,
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                ),
+                        leading: isMultiSelecting
+                            ? Icon(
+                                selected
+                                    ? Icons.check_circle
+                                    : Icons.circle_outlined,
+                                size: 20,
+                                color: selected
+                                    ? theme.colorScheme.primary
+                                    : theme.disabledColor,
                               )
-                            : SizedBox(
-                                width: 48,
-                                height: 48,
-                                child: Center(
-                                  child: Text(
-                                    '${index + 1}',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: subtitleColor,
-                                      fontWeight: FontWeight.w500,
+                            : (_showCovers.value
+                                ? ArtworkWidget(
+                                    song: song,
+                                    size: 48,
+                                    borderRadius: 6,
+                                    placeholder: Container(
+                                      width: 48,
+                                      height: 48,
+                                      decoration: BoxDecoration(
+                                        color: theme.cardColor,
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
                                     ),
-                                  ),
-                                ),
-                              ),
+                                  )
+                                : SizedBox(
+                                    width: 48,
+                                    height: 48,
+                                    child: Center(
+                                      child: Text(
+                                        '${index + 1}',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          color: subtitleColor,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  )),
                         title: song.title,
                         subtitle: song.artistDisplayName,
                         titleColor: titleColor,
@@ -792,10 +882,16 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
                           right: 16,
                         ),
                         onTap: () async {
+                          if (isMultiSelecting) {
+                            toggleSongSelection(song.id);
+                            return;
+                          }
                           await player.playQueue(songs, index);
                         },
-                        onLongPress: () {
-                          showModalBottomSheet(
+                        onLongPress: isMultiSelecting
+                            ? null
+                            : () {
+                                showModalBottomSheet(
                             context: context,
                             backgroundColor: Colors.transparent,
                             isScrollControlled: true,
@@ -872,6 +968,10 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> with SignalsMixin {
                   }),
                 ],
                 const SizedBox(height: 24),
+              ],
+                  ),
+                ),
+                if (isMultiSelecting) buildMultiSelectBar(),
               ],
             );
           },

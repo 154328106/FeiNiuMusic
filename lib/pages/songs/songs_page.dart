@@ -28,11 +28,14 @@ class SongsPage extends StatefulWidget {
 }
 
 class _SongsPageState extends State<SongsPage>
-    with SignalsMixin, DeferredPageInitMixin {
+    with SignalsMixin, DeferredPageInitMixin, SongMultiSelectMixin {
   static const String _prefsSortKey = 'songs_sort_key';
   static const String _prefsSortAsc = 'songs_sort_asc';
   static const double _itemExtent = 64;
   static const int _pageSize = 80;
+
+  @override
+  List<SongEntity> get multiSelectSongs => _songs.value;
 
   final ScrollController _listController = ScrollController();
   final GlobalKey<AppPageScaffoldState> _scaffoldKey =
@@ -348,36 +351,59 @@ class _SongsPageState extends State<SongsPage>
           key: _scaffoldKey,
           extendBodyBehindAppBar: true,
           appBar: AppTopBar(
-            title: '歌曲',
+            title: isMultiSelecting ? '已选 $selectedCount 首' : '歌曲',
             showBackButton: false,
             centerTitle: false,
             leading: useBottomNavigation
                 ? null
-                : IconButton(
-                    icon: const Icon(Icons.menu_rounded),
-                    onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-                  ),
-            actions: [
-              if (_isRefreshing.value)
-                Padding(
-                  padding: const EdgeInsets.only(right: 4),
-                  child: SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: scheme.onSurface,
+                : (isMultiSelecting
+                    ? IconButton(
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: exitMultiSelect,
+                      )
+                    : IconButton(
+                        icon: const Icon(Icons.menu_rounded),
+                        onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                      )),
+            actions: isMultiSelecting
+                ? [
+                    SelectAllButton(
+                      isAllSelected: selectedCount == multiSelectSongs.length,
+                      selectedCount: selectedCount,
+                      totalCount: multiSelectSongs.length,
+                      onTap: toggleSelectAll,
                     ),
-                  ),
-                ),
-              IconButton(
-                tooltip: '搜索',
-                icon: const Icon(Icons.search_rounded),
-                onPressed: _openSearch,
-              ),
-              SortActionButton(onTap: _showSortSheet),
-              const SizedBox(width: 4),
-            ],
+                    MultiSelectToggleButton(
+                      enabled: true,
+                      onTap: exitMultiSelect,
+                    ),
+                    const SizedBox(width: 4),
+                  ]
+                : [
+                    if (_isRefreshing.value)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: scheme.onSurface,
+                          ),
+                        ),
+                      ),
+                    IconButton(
+                      tooltip: '搜索',
+                      icon: const Icon(Icons.search_rounded),
+                      onPressed: _openSearch,
+                    ),
+                    SortActionButton(onTap: _showSortSheet),
+                    MultiSelectToggleButton(
+                      enabled: false,
+                      onTap: toggleMultiSelect,
+                    ),
+                    const SizedBox(width: 4),
+                  ],
             backgroundColor: Colors.transparent,
             elevation: 0,
           ),
@@ -390,6 +416,7 @@ class _SongsPageState extends State<SongsPage>
           onBottomNavTap: useBottomNavigation
               ? (index) => navigateToPrimaryDestination(context, index)
               : null,
+          showMiniPlayer: !isMultiSelecting,
           body: Watch.builder(
             builder: (context) {
               if (_isLoading.value) {
@@ -474,17 +501,25 @@ class _SongsPageState extends State<SongsPage>
                           final isCurrent = _currentId.value == song.id;
                           final isPlaying =
                               isCurrent && _player.isPlaying.value;
+                          final selected = isSongSelected(song.id);
 
                           return _SongListTile(
                             song: song,
                             isCurrent: isCurrent,
                             isPlaying: isPlaying,
-                            onTap: () => _playSong(index),
-                            onLongPress: () => _showSongDetail(song),
+                            multiSelect: isMultiSelecting,
+                            selected: selected,
+                            onTap: () => isMultiSelecting
+                                ? toggleSongSelection(song.id)
+                                : _playSong(index),
+                            onLongPress: isMultiSelecting
+                                ? null
+                                : () => _showSongDetail(song),
                           );
                         },
                       ),
                     ),
+                    if (isMultiSelecting) buildMultiSelectBar(),
                   ],
                 ),
               );
@@ -537,20 +572,29 @@ class _SongListTile extends StatelessWidget {
   final SongEntity song;
   final bool isCurrent;
   final bool isPlaying;
+  final bool multiSelect;
+  final bool selected;
   final VoidCallback onTap;
-  final VoidCallback onLongPress;
+  final VoidCallback? onLongPress;
 
   const _SongListTile({
     required this.song,
     required this.isCurrent,
     required this.isPlaying,
+    this.multiSelect = false,
+    this.selected = false,
     required this.onTap,
-    required this.onLongPress,
+    this.onLongPress,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final leading = ArtworkWidget(
+      song: song,
+      size: 48,
+      borderRadius: 8,
+    );
     return InkWell(
       onTap: onTap,
       onLongPress: onLongPress,
@@ -558,11 +602,17 @@ class _SongListTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(
           children: [
-            ArtworkWidget(
-              song: song,
-              size: 48,
-              borderRadius: 8,
-            ),
+            if (multiSelect) ...[
+              Icon(
+                selected ? Icons.check_circle : Icons.circle_outlined,
+                size: 20,
+                color: selected
+                    ? theme.colorScheme.primary
+                    : theme.disabledColor,
+              ),
+              const SizedBox(width: 12),
+            ],
+            leading,
             const SizedBox(width: 12),
             Expanded(
               child: Column(

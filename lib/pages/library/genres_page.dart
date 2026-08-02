@@ -27,16 +27,61 @@ class _GenresPageState extends State<GenresPage> with SignalsMixin {
   final FeiNiuApiClient _api = FeiNiuApiClient.instance;
   final GlobalKey<AppPageScaffoldState> _scaffoldKey =
       GlobalKey<AppPageScaffoldState>();
+  final ScrollController _scrollController = ScrollController();
 
   late final _loading = createSignal(true);
+  late final _loadingMore = createSignal(false);
   late final _genres = createSignal<List<FeiNiuGenre>>([]);
   late final _sortKey = createSignal(genresDefaultSortKey);
   late final _ascending = createSignal(genresDefaultAscending);
 
+  static const int _pageSize = 100;
+  int _currentPage = 1;
+  int _total = 0;
+  bool _hasMore = true;
+
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_handleScroll);
     _init();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _handleScroll() {
+    if (!_scrollController.hasClients || !_hasMore || _loadingMore.value) return;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final offset = _scrollController.offset;
+    if (maxScroll - offset < 400) {
+      _loadMore();
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore.value || !_hasMore) return;
+    _loadingMore.value = true;
+    _currentPage++;
+    try {
+      final sort = '${_sortKey.value},${_ascending.value ? 'asc' : 'desc'}';
+      final pageData = await _api.getGenreList(
+        page: _currentPage,
+        size: _pageSize,
+        sort: sort,
+      );
+      if (!mounted) return;
+      _total = pageData.total;
+      _genres.value = [..._genres.value, ...pageData.list];
+      _hasMore = _genres.value.length < _total;
+    } catch (_) {
+      _currentPage--;
+    } finally {
+      if (mounted) _loadingMore.value = false;
+    }
   }
 
   Future<void> _init() async {
@@ -62,8 +107,17 @@ class _GenresPageState extends State<GenresPage> with SignalsMixin {
     _loading.value = true;
     try {
       final sort = '${_sortKey.value},${_ascending.value ? 'asc' : 'desc'}';
-      final pageData = await _api.getGenreList(page: 1, size: 200, sort: sort);
-      if (mounted) _genres.value = pageData.list;
+      final pageData = await _api.getGenreList(
+        page: 1,
+        size: _pageSize,
+        sort: sort,
+      );
+      if (mounted) {
+        _currentPage = 1;
+        _total = pageData.total;
+        _hasMore = pageData.list.length < _total;
+        _genres.value = pageData.list;
+      }
     } catch (e) {
       debugPrint('[GenresPage] load error: $e');
     }
@@ -150,9 +204,22 @@ class _GenresPageState extends State<GenresPage> with SignalsMixin {
             return RefreshIndicator(
               onRefresh: _load,
               child: ListView.builder(
+                controller: _scrollController,
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 160),
-                itemCount: genres.length,
+                itemCount: genres.length + (_loadingMore.value ? 1 : 0),
                 itemBuilder: (context, index) {
+                  if (index >= genres.length) {
+                    return const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(8),
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    );
+                  }
                   final g = genres[index];
                   final initial = g.name.isNotEmpty ? g.name.characters.first.toUpperCase() : '?';
                   return ListTile(
@@ -190,20 +257,72 @@ class GenreDetailPage extends StatefulWidget {
   State<GenreDetailPage> createState() => _GenreDetailPageState();
 }
 
-class _GenreDetailPageState extends State<GenreDetailPage> with SignalsMixin {
+class _GenreDetailPageState extends State<GenreDetailPage>
+    with SignalsMixin, SongMultiSelectMixin {
   final FeiNiuApiClient _api = FeiNiuApiClient.instance;
   final FeiNiuTrackService _trackService = FeiNiuTrackService.instance;
   final PlayerService _player = PlayerService.instance;
 
+  @override
+  List<SongEntity> get multiSelectSongs => _songs.value;
+
   late final _loading = createSignal(true);
+  late final _loadingMore = createSignal(false);
   late final _songs = createSignal<List<SongEntity>>([]);
   late final _sortKey = createSignal('createdAt');
   late final _ascending = createSignal(false);
+  final ScrollController _scrollController = ScrollController();
+
+  static const int _pageSize = 100;
+  int _currentPage = 1;
+  int _total = 0;
+  bool _hasMore = true;
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_handleScroll);
     _load();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _handleScroll() {
+    if (!_scrollController.hasClients || !_hasMore || _loadingMore.value) return;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final offset = _scrollController.offset;
+    if (maxScroll - offset < 400) {
+      _loadMore();
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore.value || !_hasMore) return;
+    _loadingMore.value = true;
+    _currentPage++;
+    try {
+      final pageData = await _api.getGenreTracks(
+        genreGUID: widget.genre.guid,
+        page: _currentPage,
+        size: _pageSize,
+        sort: _apiSortParam(),
+      );
+      if (!mounted) return;
+      final songs = pageData.list
+          .map((t) => _trackService.trackToSongEntity(t))
+          .toList();
+      _total = pageData.total;
+      _songs.value = [..._songs.value, ...songs];
+      _hasMore = _songs.value.length < _total;
+    } catch (_) {
+      _currentPage--;
+    } finally {
+      if (mounted) _loadingMore.value = false;
+    }
   }
 
   String _apiSortParam() {
@@ -216,13 +335,16 @@ class _GenreDetailPageState extends State<GenreDetailPage> with SignalsMixin {
       final pageData = await _api.getGenreTracks(
         genreGUID: widget.genre.guid,
         page: 1,
-        size: 300,
+        size: _pageSize,
         sort: _apiSortParam(),
       );
       if (!mounted) return;
       final songs = pageData.list
           .map((t) => _trackService.trackToSongEntity(t))
           .toList();
+      _currentPage = 1;
+      _total = pageData.total;
+      _hasMore = songs.length < _total;
       _songs.value = songs;
     } catch (e) {
       debugPrint('[GenreDetailPage] load error: $e');
@@ -262,13 +384,37 @@ class _GenreDetailPageState extends State<GenreDetailPage> with SignalsMixin {
 
     return AppPageScaffold(
       extendBodyBehindAppBar: true,
+      showMiniPlayer: !isMultiSelecting,
       appBar: AppTopBar(
-        title: widget.genre.name,
+        title: isMultiSelecting ? '已选 $selectedCount 首' : widget.genre.name,
+        leading: isMultiSelecting
+            ? IconButton(
+                icon: const Icon(Icons.close_rounded),
+                onPressed: exitMultiSelect,
+              )
+            : null,
         backgroundColor: Colors.transparent,
         elevation: 0,
-        actions: [
-          SortActionButton(onTap: _showSortSheet),
-        ],
+        actions: isMultiSelecting
+            ? [
+                SelectAllButton(
+                  isAllSelected: selectedCount == multiSelectSongs.length,
+                  selectedCount: selectedCount,
+                  totalCount: multiSelectSongs.length,
+                  onTap: toggleSelectAll,
+                ),
+                MultiSelectToggleButton(
+                  enabled: true,
+                  onTap: exitMultiSelect,
+                ),
+              ]
+            : [
+                SortActionButton(onTap: _showSortSheet),
+                MultiSelectToggleButton(
+                  enabled: false,
+                  onTap: toggleMultiSelect,
+                ),
+              ],
       ),
       body: Watch.builder(
         builder: (context) {
@@ -285,25 +431,56 @@ class _GenreDetailPageState extends State<GenreDetailPage> with SignalsMixin {
 
           return RefreshIndicator(
             onRefresh: () => _load(forceRefresh: true),
-            child: ListView.builder(
+            child: Column(
+              children: [
+                Expanded(
+                  child: ListView.builder(
+              controller: _scrollController,
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 160),
-              itemCount: songs.length,
+              itemCount: songs.length + (_loadingMore.value ? 1 : 0),
               itemBuilder: (context, index) {
+                if (index >= songs.length) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(8),
+                      child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                  );
+                }
                 final song = songs[index];
+                final selected = isSongSelected(song.id);
                 return InkWell(
-                  onTap: () => _player.playQueue(songs, index),
-                  onLongPress: () {
-                    showModalBottomSheet<void>(
-                      context: context,
-                      backgroundColor: Colors.transparent,
-                      isScrollControlled: true,
-                      builder: (_) => SongDetailSheet(song: song),
-                    );
-                  },
+                  onTap: () => isMultiSelecting
+                      ? toggleSongSelection(song.id)
+                      : _player.playQueue(songs, index),
+                  onLongPress: isMultiSelecting
+                      ? null
+                      : () {
+                          showModalBottomSheet<void>(
+                            context: context,
+                            backgroundColor: Colors.transparent,
+                            isScrollControlled: true,
+                            builder: (_) => SongDetailSheet(song: song),
+                          );
+                        },
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 6),
                     child: Row(
                       children: [
+                        if (isMultiSelecting) ...[
+                          Icon(
+                            selected ? Icons.check_circle : Icons.circle_outlined,
+                            size: 20,
+                            color: selected
+                                ? scheme.primary
+                                : Theme.of(context).disabledColor,
+                          ),
+                          const SizedBox(width: 12),
+                        ],
                         ArtworkWidget(song: song, size: 48, borderRadius: 8),
                         const SizedBox(width: 12),
                         Expanded(
@@ -323,6 +500,10 @@ class _GenreDetailPageState extends State<GenreDetailPage> with SignalsMixin {
                   ),
                 );
               },
+                  ),
+                ),
+                if (isMultiSelecting) buildMultiSelectBar(),
+              ],
             ),
           );
         },

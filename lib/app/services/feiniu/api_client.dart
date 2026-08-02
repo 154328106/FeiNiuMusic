@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart' as crypto;
@@ -836,8 +837,14 @@ class FeiNiuApiClient {
 
   // region 21. 歌单列表
 
-  Future<FeiNiuPageData<FeiNiuPlaylist>> getPlaylistList() async {
-    final data = await _get('/playlist/list');
+  Future<FeiNiuPageData<FeiNiuPlaylist>> getPlaylistList({
+    int page = 1,
+    int size = 50,
+  }) async {
+    final data = await _get(
+      '/playlist/list',
+      queryParameters: {'page': page, 'size': size},
+    );
     final response = FeiNiuResponse.fromJson(
       data,
       (d) => _parsePage(d as Map<String, dynamic>, FeiNiuPlaylist.fromJson),
@@ -879,7 +886,48 @@ class FeiNiuApiClient {
     return '/music/static/assets/img/playlist-covers/$index.png';
   }
 
-  /// 上传封面图片，返回 coverId
+  /// 上传歌单封面图片字节，返回 coverId。上传失败时抛异常。
+  Future<String> _uploadPlaylistCoverBytes(List<int> imageBytes) async {
+    final formData = FormData.fromMap({
+      'file': MultipartFile.fromBytes(
+        imageBytes,
+        filename: 'cover.png',
+        contentType: DioMediaType('image', 'png'),
+      ),
+    });
+    final uploadResponse = await _dio.post(
+      _url('/static/cover/playlist'),
+      data: formData,
+      options: Options(
+        headers: {...authHeaders(), 'Content-Type': 'multipart/form-data'},
+      ),
+    );
+    final rawData = uploadResponse.data;
+    final data = rawData is Map<String, dynamic>
+        ? rawData
+        : <String, dynamic>{};
+    final parsed = FeiNiuResponse.fromJson(
+      data,
+      (d) => (d as Map<String, dynamic>)['coverId'] as String?,
+    );
+    if (!parsed.isSuccess || parsed.data == null) {
+      throw Exception(parsed.msg.isNotEmpty ? parsed.msg : '上传封面失败');
+    }
+    return parsed.data!;
+  }
+
+  /// 上传本地图片文件作为歌单封面，返回 coverId。失败时抛异常。
+  ///
+  /// [imagePath] 为本地文件路径，读取其字节后走与随机封面相同的上传流程。
+  Future<String> uploadCoverFromFile(String imagePath) async {
+    final bytes = await File(imagePath).readAsBytes();
+    return _uploadPlaylistCoverBytes(bytes);
+  }
+
+  /// 上传随机歌单封面，返回 coverId。
+  ///
+  /// 随机封面为服务端内置资源，先从封面服务器下载再上传（原逻辑保留）。
+  /// 上传失败返回空字符串，创建歌单时不带 coverId（保持原有容错）。
   Future<String> uploadCover() async {
     // 使用随机封面图片 URL 下载后上传
     final coverUrl = _randomPlaylistCoverUrl();
@@ -891,33 +939,7 @@ class FeiNiuApiClient {
         options: Options(responseType: ResponseType.bytes),
       );
       final imageBytes = imageResponse.data as List<int>;
-      // 上传前先设置 content-type
-      final formData = FormData.fromMap({
-        'file': MultipartFile.fromBytes(
-          imageBytes,
-          filename: 'cover.png',
-          contentType: DioMediaType('image', 'png'),
-        ),
-      });
-      final uploadResponse = await _dio.post(
-        _url('/static/cover/playlist'),
-        data: formData,
-        options: Options(
-          headers: {...authHeaders(), 'Content-Type': 'multipart/form-data'},
-        ),
-      );
-      final rawData = uploadResponse.data;
-      final data = rawData is Map<String, dynamic>
-          ? rawData
-          : <String, dynamic>{};
-      final parsed = FeiNiuResponse.fromJson(
-        data,
-        (d) => (d as Map<String, dynamic>)['coverId'] as String?,
-      );
-      if (!parsed.isSuccess || parsed.data == null) {
-        throw Exception(parsed.msg.isNotEmpty ? parsed.msg : '上传封面失败');
-      }
-      return parsed.data!;
+      return await _uploadPlaylistCoverBytes(imageBytes);
     } catch (e) {
       // 如果上传失败，返回空字符串，创建歌单时不带 coverId
       if (kDebugMode) debugPrint('[ApiClient] uploadCover failed: $e');
@@ -947,6 +969,25 @@ class FeiNiuApiClient {
     if (!response.isSuccess) {
       throw Exception(response.msg.isNotEmpty ? response.msg : '删除歌单失败');
     }
+  }
+
+  /// 清除歌单内无效歌曲（曲目已被删除/失效）。
+  ///
+  /// `GET /playlist/purge-track-count?guid=...`，返回 `data.total` 表示清除的
+  /// 无效歌曲数。接口失败时抛异常。
+  Future<int> purgeInvalidTracks(String playlistGuid) async {
+    final data = await _get(
+      '/playlist/purge-track-count',
+      queryParameters: {'guid': playlistGuid},
+    );
+    final response = FeiNiuResponse.fromJson(
+      data,
+      (d) => (d as Map<String, dynamic>)['total'] as int? ?? 0,
+    );
+    if (!response.isSuccess) {
+      throw Exception(response.msg.isNotEmpty ? response.msg : '清除无效歌曲失败');
+    }
+    return response.data ?? 0;
   }
 
   Future<void> editPlaylist({

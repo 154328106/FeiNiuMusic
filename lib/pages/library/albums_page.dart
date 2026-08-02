@@ -28,8 +28,9 @@ class AlbumsPage extends StatefulWidget {
 const String albumsCacheScope = 'albums_groups';
 const String albumsPrefsSortMode = 'albums_sort_mode_v1';
 const String albumsPrefsSortAscending = 'albums_sort_ascending_v1';
-const String albumsDefaultSortMode = 'name';
-const bool albumsDefaultAscending = true;
+// 默认按歌曲数降序（用户要求）。API 排序参数走 _apiSortParam()，客户端不再重排。
+const String albumsDefaultSortMode = 'trackCount';
+const bool albumsDefaultAscending = false;
 
 class AlbumGroup {
   final String name;
@@ -71,8 +72,8 @@ class _AlbumsPageState extends State<AlbumsPage>
   late final _loadingMore = createSignal(false);
   late final _isRefreshing = createSignal(false);
   late final _groups = createSignal<List<AlbumGroup>>([]);
-  late final _sortMode = createSignal('name');
-  late final _ascending = createSignal(true);
+  late final _sortMode = createSignal(albumsDefaultSortMode);
+  late final _ascending = createSignal(albumsDefaultAscending);
   late final _gridColumns = createSignal(2);
 
   int _currentPage = 1;
@@ -171,9 +172,10 @@ class _AlbumsPageState extends State<AlbumsPage>
 
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    var mode = (prefs.getString(_prefsSortMode) ?? 'name').trim();
-    if (mode.isEmpty) mode = 'name';
-    var asc = prefs.getBool(_prefsSortAscending) ?? true;
+    var mode =
+        (prefs.getString(_prefsSortMode) ?? albumsDefaultSortMode).trim();
+    if (mode.isEmpty) mode = albumsDefaultSortMode;
+    var asc = prefs.getBool(_prefsSortAscending) ?? albumsDefaultAscending;
     var cols = prefs.getInt(_prefsGridColumns) ?? 2;
     if (cols < 2) cols = 2;
     if (cols > 4) cols = 4;
@@ -235,7 +237,7 @@ class _AlbumsPageState extends State<AlbumsPage>
       _hasMore = pageData.list.length >= _pageSize;
       final groups =
           pageData.list.map((a) => AlbumGroup.fromFeiNiuAlbum(a)).toList();
-      _sortGroups(groups);
+      _ensureUnknownAlbum(groups);
       return groups;
     }
 
@@ -301,18 +303,9 @@ class _AlbumsPageState extends State<AlbumsPage>
     }
   }
 
-  void _sortGroups(List<AlbumGroup> groups) {
-    int compare(AlbumGroup a, AlbumGroup b) {
-      if (_sortMode.value == 'songCount') {
-        return a.songCount.compareTo(b.songCount);
-      }
-      return pinyinKey(a.name).compareTo(pinyinKey(b.name));
-    }
-
-    groups.sort(compare);
-    if (!_ascending.value) {
-      groups.replaceRange(0, groups.length, groups.reversed);
-    }
+  /// 分页数据已按服务端 sort 参数排好序（trackCount 等），客户端不再重排，
+  /// 只把「未知专辑」固定置顶，保持原有体验。
+  void _ensureUnknownAlbum(List<AlbumGroup> groups) {
     final idx = groups.indexWhere((g) => g.name == '未知专辑');
     if (idx >= 0) {
       final unknown = groups.removeAt(idx);
