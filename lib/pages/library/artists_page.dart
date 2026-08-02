@@ -77,6 +77,7 @@ class _ArtistsPageState extends State<ArtistsPage>
 
   int _currentPage = 1;
   bool _hasMore = true;
+  int _total = 0;
   static const int _pageSize = 100;
 
   @override
@@ -110,7 +111,11 @@ class _ArtistsPageState extends State<ArtistsPage>
         size: _pageSize,
       );
       if (!mounted) return;
-      _hasMore = pageData.list.length >= _pageSize;
+      _total = pageData.total;
+      final totalKnown = _total > 0;
+      _hasMore = totalKnown
+          ? _groups.value.length + pageData.list.length < _total
+          : pageData.list.length >= _pageSize;
       final groups = pageData.list
           .map((a) => ArtistGroup.fromFeiNiuArtist(a))
           .toList();
@@ -175,7 +180,10 @@ class _ArtistsPageState extends State<ArtistsPage>
         page: 1,
         size: _pageSize,
       );
-      _hasMore = pageData.list.length >= _pageSize;
+      _total = pageData.total;
+      _hasMore = _total > 0
+          ? pageData.list.length < _total
+          : pageData.list.length >= _pageSize;
       final groups = pageData.list
           .map((a) => ArtistGroup.fromFeiNiuArtist(a))
           .toList();

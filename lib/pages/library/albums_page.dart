@@ -78,6 +78,7 @@ class _AlbumsPageState extends State<AlbumsPage>
 
   int _currentPage = 1;
   bool _hasMore = true;
+  int _total = 0;
   static const int _pageSize = 50;
 
   late final _indexPreviewLetter = createSignal<String?>(null);
@@ -134,7 +135,12 @@ class _AlbumsPageState extends State<AlbumsPage>
         sort: _apiSortParam(),
       );
       if (!mounted) return;
-      _hasMore = pageData.list.length >= _pageSize;
+      _total = pageData.total;
+      // 优先用服务端 total 判定；total 未知时退化为「取满一页认为还有更多」
+      final totalKnown = _total > 0;
+      _hasMore = totalKnown
+          ? _groups.value.length + pageData.list.length < _total
+          : pageData.list.length >= _pageSize;
       final groups =
           pageData.list.map((a) => AlbumGroup.fromFeiNiuAlbum(a)).toList();
       _groups.value = [..._groups.value, ...groups];
@@ -234,7 +240,10 @@ class _AlbumsPageState extends State<AlbumsPage>
         size: _pageSize,
         sort: _apiSortParam(),
       );
-      _hasMore = pageData.list.length >= _pageSize;
+      _total = pageData.total;
+      _hasMore = _total > 0
+          ? pageData.list.length < _total
+          : pageData.list.length >= _pageSize;
       final groups =
           pageData.list.map((a) => AlbumGroup.fromFeiNiuAlbum(a)).toList();
       _ensureUnknownAlbum(groups);
@@ -411,6 +420,18 @@ class _AlbumsPageState extends State<AlbumsPage>
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 160),
               sliver: SliverGrid(
                 delegate: SliverChildBuilderDelegate((context, index) {
+                  if (index >= _groups.value.length) {
+                    return const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(8),
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    );
+                  }
                   final g = _groups.value[index];
                   return InkWell(
                     borderRadius: BorderRadius.circular(16),
@@ -491,7 +512,7 @@ class _AlbumsPageState extends State<AlbumsPage>
                       ),
                     ),
                   );
-                }, childCount: _groups.value.length),
+                }, childCount: _groups.value.length + (_loadingMore.value ? 1 : 0)),
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: _gridColumns.value,
                   crossAxisSpacing: 14,
