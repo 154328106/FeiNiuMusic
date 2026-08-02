@@ -2,7 +2,6 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_lyric/core/lyric_model.dart';
 
 import '../../../app/services/lyrics/lyrics_service.dart';
 import '../../../app/services/player_service.dart';
@@ -10,7 +9,7 @@ import '../../../app/router/app_router.dart';
 import '../../../app/state/settings_state.dart';
 import '../../../app/state/song_state.dart';
 import '../../common/artwork_widget.dart';
-import '../../player/karaoke_lyric_text.dart';
+import '../../player/lyric_preview.dart';
 import '../../../pages/player/player_page.dart';
 import '../../../pages/player/widgets/player_bottom_panel.dart';
 
@@ -145,32 +144,36 @@ class MiniPlayerBar extends StatelessWidget {
                     final playSize = compact ? 34.0 : 38.0;
                     return Row(
                       children: [
-                        Container(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(
-                              resolvedArtworkRadius,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.12),
-                                blurRadius: 6,
-                                offset: const Offset(0, 1),
-                              ),
-                            ],
-                          ),
-                          child: MiniPlayerArtwork(
-                            song: song,
-                            size: resolvedArtworkSize,
-                            borderRadius: resolvedArtworkRadius,
-                          ),
-                        ),
-                        SizedBox(width: tight ? 8 : 11),
                         Expanded(
                           child: MiniPlayerInfo(
                             song: song,
                             enableSwipe: enableSwipe,
                             player: player,
                             onOpenPlayer: openPlayer,
+                            // 封面一并放入滑动区域：左右滑动切歌时封面随标题/歌词
+                            // 一起位移，而不是只有文字滑动。
+                            artwork: Container(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(
+                                  resolvedArtworkRadius,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(
+                                      alpha: 0.12,
+                                    ),
+                                    blurRadius: 6,
+                                    offset: const Offset(0, 1),
+                                  ),
+                                ],
+                              ),
+                              child: MiniPlayerArtwork(
+                                song: song,
+                                size: resolvedArtworkSize,
+                                borderRadius: resolvedArtworkRadius,
+                              ),
+                            ),
+                            artworkGap: tight ? 8 : 11,
                           ),
                         ),
                         SizedBox(width: tight ? 4 : 6),
@@ -206,15 +209,26 @@ class MiniPlayerBar extends StatelessWidget {
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(borderRadius),
+              // 毛玻璃与内容分层：BackdropFilter 只负责把底下的页面背景模糊，
+              // 内容（含逐字歌词）作为锐利层叠在毛玻璃之上。若把内容放进
+              // BackdropFilter 内部，逐字歌词每帧动画都会触发整页重新模糊，
+              // 底栏就会卡顿；分层后动画重绘只重绘内容层，不碰模糊层。
               child: isBlurred
-                  ? RepaintBoundary(
-                      child: BackdropFilter(
-                        filter: ImageFilter.blur(
-                          sigmaX: blurStrength,
-                          sigmaY: blurStrength,
+                  ? Stack(
+                      children: [
+                        Positioned.fill(
+                          child: RepaintBoundary(
+                            child: BackdropFilter(
+                              filter: ImageFilter.blur(
+                                sigmaX: blurStrength,
+                                sigmaY: blurStrength,
+                              ),
+                              child: const SizedBox.expand(),
+                            ),
+                          ),
                         ),
-                        child: content,
-                      ),
+                        content,
+                      ],
                     )
                   : content,
             ),
@@ -335,12 +349,21 @@ class MiniPlayerInfo extends StatelessWidget {
   final PlayerService player;
   final VoidCallback onOpenPlayer;
 
+  /// 封面 widget（可空）。非空时随滑动区域一起位移，使左右滑切歌时封面与
+  /// 标题/歌词同步滑动。
+  final Widget? artwork;
+
+  /// 封面与标题/歌词之间的间距。
+  final double artworkGap;
+
   const MiniPlayerInfo({
     super.key,
     required this.song,
     required this.enableSwipe,
     required this.player,
     required this.onOpenPlayer,
+    this.artwork,
+    this.artworkGap = 11,
   });
 
   @override
@@ -351,12 +374,16 @@ class MiniPlayerInfo extends StatelessWidget {
         song: song,
         player: player,
         onOpenPlayer: onOpenPlayer,
+        artwork: artwork,
+        artworkGap: artworkGap,
       );
     }
     return _SwipeableInfo(
       song: song,
       player: player,
       onOpenPlayer: onOpenPlayer,
+      artwork: artwork,
+      artworkGap: artworkGap,
     );
   }
 }
@@ -365,18 +392,22 @@ class _InfoContent extends StatelessWidget {
   final SongEntity? song;
   final PlayerService player;
   final VoidCallback onOpenPlayer;
+  final Widget? artwork;
+  final double artworkGap;
 
   const _InfoContent({
     required this.song,
     required this.player,
     required this.onOpenPlayer,
+    this.artwork,
+    this.artworkGap = 11,
   });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     if (song == null) {
-      return Align(
+      final noSongText = Align(
         alignment: Alignment.centerLeft,
         child: Text(
           '未选择歌曲',
@@ -385,8 +416,20 @@ class _InfoContent extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
         ),
       );
+      final artwork = this.artwork;
+      if (artwork == null) {
+        return noSongText;
+      }
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          artwork,
+          SizedBox(width: artworkGap),
+          Expanded(child: noSongText),
+        ],
+      );
     }
-    return Column(
+    final info = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -418,6 +461,18 @@ class _InfoContent extends StatelessWidget {
         ),
       ],
     );
+    final artwork = this.artwork;
+    if (artwork == null) {
+      return info;
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        artwork,
+        SizedBox(width: artworkGap),
+        Expanded(child: info),
+      ],
+    );
   }
 }
 
@@ -425,11 +480,15 @@ class _SwipeableInfo extends StatefulWidget {
   final SongEntity? song;
   final PlayerService player;
   final VoidCallback onOpenPlayer;
+  final Widget? artwork;
+  final double artworkGap;
 
   const _SwipeableInfo({
     required this.song,
     required this.player,
     required this.onOpenPlayer,
+    this.artwork,
+    this.artworkGap = 11,
   });
 
   @override
@@ -551,6 +610,8 @@ class _SwipeableInfoState extends State<_SwipeableInfo>
               song: widget.song,
               player: widget.player,
               onOpenPlayer: widget.onOpenPlayer,
+              artwork: widget.artwork,
+              artworkGap: widget.artworkGap,
             ),
           ),
         ),
@@ -602,23 +663,20 @@ class _MiniPlayerSubtitleText extends StatelessWidget {
       );
     }
 
-    return KaraokeLyricText(
-      line: line,
-      position: lyrics.controller.progressNotifier,
-      offset: Duration(milliseconds: lyrics.controller.lyricOffset),
-      lineEnd: _subtitleLineEnd(model, index),
-      style: style,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
+    // 与播放页/歌词页完全相同的逐字渲染管线（LyricView + LyricLineHightlightMixin）。
+    // activeLineOnly 只绘制当前播放行，单行高度即成为迷你单行逐字歌词，
+    // 逐字动画与播放页逐帧一致。
+    final fontSize = style.fontSize ?? 11.5;
+    return LyricPreview(
+      height: fontSize * 1.3,
+      textAlign: TextAlign.start,
+      contentAlignment: CrossAxisAlignment.start,
+      showTranslation: false,
+      fontSize: fontSize,
+      activeFontSize: fontSize,
+      contentPadding: EdgeInsets.zero,
+      activeLineOnly: true,
     );
-  }
-
-  Duration _subtitleLineEnd(LyricModel model, int index) {
-    if (index + 1 < model.lines.length) {
-      return model.lines[index + 1].start;
-    }
-    final line = model.lines[index];
-    return line.end ?? line.start + const Duration(seconds: 8);
   }
 }
 

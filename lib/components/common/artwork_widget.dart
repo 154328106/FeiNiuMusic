@@ -13,6 +13,12 @@ class ArtworkWidget extends StatefulWidget {
   final bool preferOriginal;
   final bool keepPreviousUntilLoaded;
 
+  /// 封面显示状态回调：true = 正在显示真实封面图；
+  /// false = 无封面 / 加载中 / 加载失败（占位文字图或骨架）。
+  ///
+  /// 用于播放页封面旋转：只有真实封面才旋转，占位文字图保持静止。
+  final ValueChanged<bool>? onCoverAvailableChanged;
+
   const ArtworkWidget({
     super.key,
     required this.song,
@@ -21,6 +27,7 @@ class ArtworkWidget extends StatefulWidget {
     this.placeholder,
     this.preferOriginal = false,
     this.keepPreviousUntilLoaded = false,
+    this.onCoverAvailableChanged,
   });
 
   @override
@@ -28,7 +35,43 @@ class ArtworkWidget extends StatefulWidget {
 }
 
 class _ArtworkWidgetState extends State<ArtworkWidget> with SignalsMixin {
+  /// 上一次上报的封面显示状态（避免重复触发回调）
+  bool? _lastReportedAvailable;
+
   Map<String, String> _authHeaders() => FeiNiuApiClient.imageAuthHeaders();
+
+  /// 封面来源变化时重置上报状态。
+  ///
+  /// 切歌后新歌 coverId / updatedAt 变了，但 State 复用、_lastReportedAvailable
+  /// 仍是旧歌的值：若旧歌上报过 true，新封面加载完成时 imageBuilder 再上报
+  /// true 会被去重吞掉，导致播放页认为始终无封面而不再旋转。
+  /// 因此在封面来源变化时清空去重标记，让新封面的上报能重新生效。
+  @override
+  void didUpdateWidget(ArtworkWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.song.id != widget.song.id ||
+        oldWidget.song.coverId != widget.song.coverId ||
+        oldWidget.song.updatedAt != widget.song.updatedAt) {
+      _lastReportedAvailable = null;
+    }
+  }
+
+  /// 上报封面显示状态：true = 正在显示真实封面图；
+  /// false = 无封面 / 加载失败（文字占位图 / 骨架）。
+  ///
+  /// 此方法可能在 build 期间被调用（imageBuilder / errorWidget / 无封面
+  /// 分支），父组件收到回调后会 setState，因此延迟到帧后执行，避免
+  /// 「markNeedsBuild called during build」断言。
+  void _report(bool available) {
+    final cb = widget.onCoverAvailableChanged;
+    if (cb == null) return;
+    if (_lastReportedAvailable == available) return;
+    _lastReportedAvailable = available;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      cb(available);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -65,6 +108,16 @@ class _ArtworkWidgetState extends State<ArtworkWidget> with SignalsMixin {
           width: size,
           height: size,
           fit: BoxFit.cover,
+          // 真实封面解码成功 → 上报可用（供播放页判断是否旋转）
+          imageBuilder: (context, imageProvider) {
+            _report(true);
+            return Image(
+              image: imageProvider,
+              width: size,
+              height: size,
+              fit: BoxFit.cover,
+            );
+          },
           placeholder: (context, url) => SizedBox(
             width: size,
             height: size,
@@ -76,10 +129,14 @@ class _ArtworkWidgetState extends State<ArtworkWidget> with SignalsMixin {
               ),
             ),
           ),
-          errorWidget: (context, url, error) => placeholder,
+          errorWidget: (context, url, error) {
+            _report(false);
+            return placeholder;
+          },
         ),
       );
     } else {
+      _report(false);
       child = placeholder;
     }
 

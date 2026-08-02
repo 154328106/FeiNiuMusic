@@ -3,6 +3,7 @@ import 'package:flutter_lyric/core/lyric_model.dart';
 import 'package:skeletonizer/skeletonizer.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
+import '../../app/router/app_page_route.dart';
 import '../../app/router/app_router.dart';
 import '../../app/services/feiniu/favorite_service.dart';
 import '../../app/services/lyrics/lyrics_service.dart';
@@ -13,6 +14,8 @@ import '../../app/utils/route_visibility.dart';
 import '../../components/common/artwork_widget.dart';
 import '../../components/feedback/app_toast.dart';
 import '../../components/player/lyric_preview.dart';
+import '../library/library_detail_pages.dart';
+import '../songs/song_detail_sheet.dart';
 import 'lyrics/lyric_view.dart';
 import 'widgets/player_background.dart';
 import 'widgets/player_bottom_panel.dart';
@@ -160,10 +163,9 @@ class _PlayerPageState extends State<PlayerPage>
                   valueListenable: PlayerStyleSettings.stylePreset,
                   builder: (context, stylePreset, _) {
                     final isPoster = stylePreset == PlayerStylePreset.poster;
-                    // Poster disables top/bottom SafeArea so the artwork panel
-                    // can reach the screen edges; re-apply the insets to the
-                    // lyrics page so its lines don't slide under the status bar
-                    // or the system navigation bar.
+                    // Poster 关闭顶部/底部 SafeArea 让封面延伸到屏幕边缘
+                    // （覆盖状态栏/导航栏），歌词页再手动补回 inset 避免文字
+                    // 滑入系统栏下方。
                     final topInset = MediaQuery.paddingOf(context).top;
                     final bottomInset = MediaQuery.paddingOf(context).bottom;
                     return SafeArea(
@@ -201,6 +203,8 @@ class _PlayerPageState extends State<PlayerPage>
                                 ),
                                 isPoster
                                     ? Padding(
+                                        // SafeArea 已关闭，歌词页手动补回顶部/底部 inset，
+                                        // 防止歌词行滑入状态栏或系统导航栏下方。
                                         padding: EdgeInsets.only(
                                           top: topInset,
                                           bottom: bottomInset,
@@ -371,51 +375,6 @@ class _TabletLandscapePlayerLayout extends StatelessWidget {
   }
 }
 
-class _PosterLayoutHeights {
-  /// 海报大封面高度。
-  final double hero;
-  /// 底部容器上内边距。
-  final double headerPad;
-  /// 底部容器下内边距（含底部安全区）。
-  final double bottomPad;
-  /// 歌词预览区高度（矮屏机型会小于 118 而不是溢出）。
-  final double lyricsPreview;
-
-  const _PosterLayoutHeights({
-    required this.hero,
-    required this.headerPad,
-    required this.bottomPad,
-    required this.lyricsPreview,
-  });
-}
-
-/// 海报布局高度分配：保证封面 + 底部内容恰好拼满屏幕。
-/// 原实现固定封面高度（46% 屏高），矮屏/大字体机型下底部内容溢出，导致
-/// 封面贴顶、标题/歌手上移、居中失效、底栏消失。
-_PosterLayoutHeights _posterLayoutHeights({
-  required double screenHeight,
-  required double bottomInset,
-}) {
-  final headerPad = screenHeight < 760 ? 12.0 : 18.0;
-  final bottomPad = bottomInset > 20 ? bottomInset + 8.0 : 18.0;
-  // 底部固定内容固有高度：标题/歌手块 + meta 行 + 进度条 + 按钮 + 上下内边距。
-  final fixedBottomContent = 71.0 + 142.0 + headerPad + bottomPad;
-  // 歌词预览最小高度（一行歌词）。
-  const minLyricsPreview = 60.0;
-  // 封面高度：默认 46% 屏高，但必须给底部固定内容 + 最小歌词预览留出空间。
-  final heroIdeal = (screenHeight * 0.46).clamp(270.0, 430.0);
-  final heroMax = screenHeight - fixedBottomContent - minLyricsPreview;
-  final hero = heroIdeal > heroMax ? heroMax : heroIdeal;
-  final lyricsPreview =
-      (screenHeight - hero - fixedBottomContent).clamp(minLyricsPreview, 118.0);
-  return _PosterLayoutHeights(
-    hero: hero,
-    headerPad: headerPad,
-    bottomPad: bottomPad,
-    lyricsPreview: lyricsPreview,
-  );
-}
-
 class _PosterPlayerLayout extends StatelessWidget {
   final PlayerService player;
 
@@ -426,10 +385,13 @@ class _PosterPlayerLayout extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final mq = MediaQuery.of(context);
     final bottomInset = MediaQuery.paddingOf(context).bottom;
-    final heights = _posterLayoutHeights(
-      screenHeight: mq.size.height,
-      bottomInset: bottomInset,
-    );
+    // 海报大封面高度：默认取屏幕 46%（与 1.4.1 一致），但矮屏/大字体机型
+    // 下必须给底部控制区留足空间，否则底部内容溢出被裁掉。
+    final heroIdeal = (mq.size.height * 0.46).clamp(270.0, 430.0);
+    final heroMax = mq.size.height - 356.0;
+    final hero = heroIdeal > heroMax ? heroMax : heroIdeal;
+    final headerPad = mq.size.height < 760 ? 12.0 : 18.0;
+    final bottomPad = bottomInset > 20 ? bottomInset + 8.0 : 18.0;
     return Watch.builder(
       builder: (context) {
         final song = player.currentSongSignal.value;
@@ -444,22 +406,22 @@ class _PosterPlayerLayout extends StatelessWidget {
             _PosterArtwork(
               songSignal: player.currentSongSignal,
               player: player,
+              heroHeight: hero,
             ),
             Expanded(
               child: Container(
                 width: double.infinity,
                 padding: EdgeInsets.fromLTRB(
                   24,
-                  heights.headerPad,
+                  headerPad,
                   24,
-                  heights.bottomPad,
+                  bottomPad,
                 ),
                 // Transparent so the cover-color + 流光 background shows through,
                 // matching the lyrics page (no solid white panel).
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Spacer(flex: 3),
                     Skeletonizer(
                       enabled: song == null,
                       child: Column(
@@ -487,17 +449,27 @@ class _PosterPlayerLayout extends StatelessWidget {
                               fontWeight: FontWeight.w700,
                             ),
                           ),
-                          const SizedBox(height: 18),
-                          _PosterLyricsPreview(height: heights.lyricsPreview),
                         ],
                       ),
                     ),
-                    const Spacer(flex: 2),
+                    // 歌词预览：弹性占满「标题之下、控制区之上」的剩余空间，
+                    // 空间不足时收缩（含收缩到 0），底栏永不溢出。
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: Skeletonizer(
+                        enabled: song == null,
+                        child: _PosterLyricsPreview(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    // 收藏 / 队列按钮（与 1.4.1 一致，位于进度条上方）
                     _PosterMetaRow(player: player, song: song),
                     const SizedBox(height: 2),
                     _PosterSeekBar(player: player),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 20),
                     _PosterControls(player: player),
+                    // 底部留白：让控制栏整体抬离屏幕底部
+                    SizedBox(height: bottomInset > 20 ? 16 : 28),
                   ],
                 ),
               ),
@@ -513,20 +485,22 @@ class _PosterArtwork extends StatelessWidget {
   final Signal<SongEntity?> songSignal;
   final PlayerService player;
 
-  const _PosterArtwork({required this.songSignal, required this.player});
+  /// 封面高度（由 [PosterPlayerLayout] 按屏幕高度与底部预留计算）。
+  final double heroHeight;
+
+  const _PosterArtwork({
+    required this.songSignal,
+    required this.player,
+    required this.heroHeight,
+  });
 
   @override
   Widget build(BuildContext context) {
-    // 与 _PosterPlayerLayout 共用同一套高度计算，保证封面与底部内容恰好拼满屏幕。
-    final heights = _posterLayoutHeights(
-      screenHeight: MediaQuery.sizeOf(context).height,
-      bottomInset: MediaQuery.paddingOf(context).bottom,
-    );
     return Watch.builder(
       builder: (context) {
         final song = songSignal.value;
         return SizedBox(
-          height: heights.hero,
+          height: heroHeight,
           width: double.infinity,
           // Fade the cover's bottom to transparent so it dissolves into the
           // cover-color + 流光 background below (instead of a hard edge / white).
@@ -543,9 +517,16 @@ class _PosterArtwork extends StatelessWidget {
               children: [
                 LayoutBuilder(
                   builder: (context, constraints) {
-                    final boxSize = constraints.maxWidth > constraints.maxHeight
+                    // 防御：尺寸钳制为正的有限值，避免横竖屏切换/首帧瞬态时
+                    // boxSize 为 0 或 NaN，连锁导致 ShaderMask/RotationTransition
+                    // 产生 Matrix4 非有限值 / RRect NaN 崩溃。
+                    final maxW = constraints.maxWidth.isFinite
                         ? constraints.maxWidth
-                        : constraints.maxHeight;
+                        : 0.0;
+                    final maxH = constraints.maxHeight.isFinite
+                        ? constraints.maxHeight
+                        : 0.0;
+                    final boxSize = (maxW > maxH ? maxW : maxH).clamp(1.0, 2000.0);
                     final child = song == null
                         ? Skeletonizer(
                             enabled: true,
@@ -554,33 +535,33 @@ class _PosterArtwork extends StatelessWidget {
                               label: '',
                             ),
                           )
-                        : ArtworkWidget(
+                        : _RotatingArtwork(
                             song: song,
-                            size: boxSize,
-                            borderRadius:
-                                PlayerBackgroundSettings.roundCover.value
-                                ? boxSize / 2
-                                : 0,
-                            preferOriginal: true,
-                            keepPreviousUntilLoaded: true,
-                            placeholder: Skeletonizer(
-                              enabled: true,
-                              child: _ArtworkPlaceholder(
-                                border: BorderRadius.zero,
-                                label: song.title,
-                              ),
-                            ),
+                            buildArtwork: (context, onCoverAvailable) =>
+                                ArtworkWidget(
+                                  song: song,
+                                  size: boxSize,
+                                  borderRadius:
+                                      PlayerBackgroundSettings.roundCover.value
+                                      ? boxSize / 2
+                                      : 0,
+                                  preferOriginal: true,
+                                  keepPreviousUntilLoaded: true,
+                                  onCoverAvailableChanged: onCoverAvailable,
+                                  placeholder: Skeletonizer(
+                                    enabled: true,
+                                    child: _ArtworkPlaceholder(
+                                      border: BorderRadius.zero,
+                                      label: song.title,
+                                    ),
+                                  ),
+                                ),
                           );
                     return ClipRect(
                       child: OverflowBox(
                         maxWidth: boxSize,
                         maxHeight: boxSize,
-                        child: PlayerBackgroundSettings.rotateCover.value
-                            ? _RotatingCover(
-                                playing: player.isPlaying.value,
-                                child: child,
-                              )
-                            : child,
+                        child: child,
                       ),
                     );
                   },
@@ -606,10 +587,7 @@ class _PosterArtwork extends StatelessWidget {
 }
 
 class _PosterLyricsPreview extends StatelessWidget {
-  /// 预览区高度；由外层按可用空间计算，矮屏机型会小于 118，防止底部溢出。
-  final double height;
-
-  const _PosterLyricsPreview({this.height = 118});
+  const _PosterLyricsPreview();
 
   @override
   Widget build(BuildContext context) {
@@ -627,27 +605,44 @@ class _PosterLyricsPreview extends StatelessWidget {
         if (lines.isEmpty) {
           // Don't echo the song title/artist here — they already show in the
           // header above; use neutral placeholders to avoid duplication.
-          return const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _PosterLyricLine(text: '暂无歌词', active: true),
-              SizedBox(height: 8),
-              _PosterLyricLine(text: '纯音乐或未匹配到歌词', active: false),
-              SizedBox(height: 8),
-              _PosterLyricLine(text: ' ', active: false),
-            ],
+          return const Align(
+            alignment: Alignment.topLeft,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _PosterLyricLine(text: '暂无歌词', active: true),
+                SizedBox(height: 8),
+                _PosterLyricLine(text: '纯音乐或未匹配到歌词', active: false),
+                SizedBox(height: 8),
+                _PosterLyricLine(text: ' ', active: false),
+              ],
+            ),
           );
         }
 
         // 复用歌词页的 LyricView 渲染管线（AnimationController 驱动 +
         // CustomPainter 高亮），保证与歌词页一致的流畅逐字动画。
-        return LyricPreview(
-          height: height,
-          textAlign: TextAlign.start,
-          contentAlignment: CrossAxisAlignment.start,
-          showTranslation: true,
-          fontSize: 15,
-          activeFontSize: 18,
+        // 外层用 LayoutBuilder 读取实际可用高度：海报布局中该预览区是弹性
+        // 空间（Expanded），矮屏/大字体机型下会收缩而不是溢出。
+        // contentPadding: EdgeInsets.zero —— 外层 Container 已带 24 水平内边距，
+        // 避免歌词再右移 24 与标题错位（左对齐、左侧不留空白）。
+        // 高度防御：LayoutBuilder 在某瞬态可能拿到 Infinity，若直接传给 LyricView
+        // 会连锁出 Matrix4/NaN 崩溃，这里钳制为「有界上限」。
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final h = constraints.hasBoundedHeight
+                ? constraints.maxHeight
+                : 118.0;
+            return LyricPreview(
+              height: h.clamp(0.0, 1000.0),
+              textAlign: TextAlign.start,
+              contentAlignment: CrossAxisAlignment.start,
+              showTranslation: true,
+              fontSize: 15,
+              activeFontSize: 18,
+              contentPadding: EdgeInsets.zero,
+            );
+          },
         );
       },
     );
@@ -841,103 +836,94 @@ class _PosterSeekBarState extends State<_PosterSeekBar> with SignalsMixin {
             : 0.0;
         return Column(
           children: [
-            Row(
-              children: [
-                SizedBox(
-                  width: 48,
-                  child: Text(
+            // 进度条
+            // Slider 轨道两端默认按 overlayRadius 内缩。这里把 overlayRadius 设为 0，
+            // 轨道占满全宽，两端恰好与上方收藏/队列图标外缘对齐。
+            // （不用负 padding / OverflowBox 扩展，避免布局异常。）
+            SizedBox(
+              height: 24,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Positioned.fill(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: LinearProgressIndicator(
+                          value: bufferedRatio,
+                          backgroundColor: Colors.transparent,
+                          valueColor: AlwaysStoppedAnimation(
+                            scheme.onSurface.withValues(alpha: 0.22),
+                          ),
+                          minHeight: 3,
+                        ),
+                      ),
+                    ),
+                  ),
+                  // 播放进度滑块
+                  SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      trackHeight: 3,
+                      trackShape: const RoundedRectSliderTrackShape(),
+                      thumbShape: const RoundSliderThumbShape(
+                        enabledThumbRadius: 6,
+                      ),
+                      overlayShape: const RoundSliderOverlayShape(
+                        overlayRadius: 0,
+                      ),
+                      activeTrackColor: scheme.onSurface.withValues(
+                        alpha: 0.64,
+                      ),
+                      inactiveTrackColor: scheme.onSurface.withValues(
+                        alpha: 0.13,
+                      ),
+                      thumbColor: scheme.onSurface,
+                    ),
+                    child: Slider(
+                      value: value.toDouble(),
+                      min: 0,
+                      max: max,
+                      onChanged: totalMs <= 0
+                          ? null
+                          : (next) => _dragValue.value = next,
+                      onChangeEnd: totalMs <= 0
+                          ? null
+                          : (next) {
+                              _dragValue.value = null;
+                              widget.player.seek(
+                                Duration(milliseconds: next.round()),
+                              );
+                            },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // 时间标签：位于进度条下方，两端对齐
+            Padding(
+              padding: EdgeInsets.zero,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
                     _format(Duration(milliseconds: currentMs)),
                     style: TextStyle(
                       color: scheme.onSurfaceVariant.withValues(alpha: 0.78),
-                      fontSize: 14,
+                      fontSize: 12,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                ),
-                Expanded(
-                  child: SizedBox(
-                    height: 24,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        Positioned.fill(
-                          child: Padding(
-                            // horizontal: 12 与 Slider 轨道两端内缩（overlayRadius=12）对齐
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(2),
-                              child: LinearProgressIndicator(
-                                value: bufferedRatio,
-                                backgroundColor: Colors.transparent,
-                                valueColor: AlwaysStoppedAnimation(
-                                  scheme.onSurface.withValues(alpha: 0.22),
-                                ),
-                                minHeight: 3,
-                              ),
-                            ),
-                          ),
-                        ),
-                        // 播放进度滑块
-                        SliderTheme(
-                          data: SliderTheme.of(context).copyWith(
-                            trackHeight: 3,
-                            trackShape: const RoundedRectSliderTrackShape(),
-                            thumbShape: const RoundSliderThumbShape(
-                              enabledThumbRadius: 6,
-                            ),
-                            overlayShape: const RoundSliderOverlayShape(
-                              overlayRadius: 12,
-                            ),
-                            activeTrackColor: scheme.onSurface.withValues(
-                              alpha: 0.64,
-                            ),
-                            inactiveTrackColor: scheme.onSurface.withValues(
-                              alpha: 0.13,
-                            ),
-                            thumbColor: scheme.onSurface,
-                          ),
-                          child: Slider(
-                            value: value.toDouble(),
-                            min: 0,
-                            max: max,
-                            onChanged: totalMs <= 0
-                                ? null
-                                : (next) => _dragValue.value = next,
-                            onChangeEnd: totalMs <= 0
-                                ? null
-                                : (next) {
-                                    _dragValue.value = null;
-                                    widget.player.seek(
-                                      Duration(milliseconds: next.round()),
-                                    );
-                                  },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 48,
-                  child: Text(
+                  Text(
                     _format(duration),
-                    textAlign: TextAlign.right,
                     style: TextStyle(
                       color: scheme.onSurfaceVariant.withValues(alpha: 0.78),
-                      fontSize: 14,
+                      fontSize: 12,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                ),
-              ],
-            ),
-            Container(
-              height: 1,
-              margin: const EdgeInsets.only(top: 2),
-              color: scheme.onSurface.withValues(alpha: 0.04),
+                ],
+              ),
             ),
           ],
         );
@@ -1001,12 +987,57 @@ class _PosterControls extends StatelessWidget {
               icon: const Icon(Icons.skip_next_rounded),
               onPressed: player.next,
             ),
-            const Spacer(),
+            IconButton(
+              iconSize: 30,
+              color: iconColor,
+              icon: const Icon(Icons.more_vert_rounded),
+              onPressed: () => _showPosterSongDetailSheet(context, player),
+            ),
           ],
         );
       },
     );
   }
+}
+
+/// 海报模式底部「更多」按钮：弹出歌曲详情面板
+void _showPosterSongDetailSheet(BuildContext context, PlayerService player) {
+  final song = player.currentSong.value;
+  if (song == null) {
+    AppToast.show(context, '暂无歌曲');
+    return;
+  }
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (_) => SongDetailSheet(
+      song: song,
+      onOpenPlayerAppearanceSettings: () {
+        Navigator.of(context).pushNamed(AppRoutes.playerAppearanceSettings);
+      },
+      onOpenArtist: (artistName) {
+        Navigator.of(context).push(
+          buildAppPageRoute(
+            (_) => ArtistDetailPage(
+              artistName: artistName,
+              artistGuid: song.firstArtistGuid,
+            ),
+          ),
+        );
+      },
+      onOpenAlbum: (albumName) {
+        Navigator.of(context).push(
+          buildAppPageRoute(
+            (_) => AlbumDetailPage(
+              albumName: albumName,
+              albumGuid: song.albumGuid,
+            ),
+          ),
+        );
+      },
+    ),
+  );
 }
 
 class _PlayerArtwork extends StatelessWidget {
@@ -1070,32 +1101,22 @@ class _PlayerArtwork extends StatelessWidget {
                       height: size,
                       child: _ArtworkShadowContainer(
                         border: border,
-                        child: PlayerBackgroundSettings.rotateCover.value
-                            ? _RotatingCover(
-                                playing: PlayerService.instance.isPlaying.value,
-                                child: ArtworkWidget(
-                                  song: song,
-                                  size: size,
-                                  borderRadius: borderRadius,
-                                  preferOriginal: true,
-                                  keepPreviousUntilLoaded: true,
-                                  placeholder: _ArtworkPlaceholder(
-                                    border: border,
-                                    label: song.title,
-                                  ),
-                                ),
-                              )
-                            : ArtworkWidget(
+                        child: _RotatingArtwork(
+                          song: song,
+                          buildArtwork: (context, onCoverAvailable) =>
+                              ArtworkWidget(
                                 song: song,
                                 size: size,
                                 borderRadius: borderRadius,
                                 preferOriginal: true,
                                 keepPreviousUntilLoaded: true,
+                                onCoverAvailableChanged: onCoverAvailable,
                                 placeholder: _ArtworkPlaceholder(
                                   border: border,
                                   label: song.title,
                                 ),
                               ),
+                        ),
                       ),
                     ),
                   );
@@ -1147,6 +1168,64 @@ class _ArtworkShadowContainer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ClipRRect(borderRadius: border, child: child);
+  }
+}
+
+/// 封面旋转门控：仅当显示真实封面图时才旋转。
+///
+/// 通过 [ArtworkWidget.onCoverAvailableChanged] 获知当前是否显示真实封面：
+/// 加载中 / 加载失败（文字占位图 / 骨架）时保持静止，只有真实封面在
+/// 播放中才旋转。播放状态与「旋转封面」开关变化时自动启停旋转。
+class _RotatingArtwork extends StatefulWidget {
+  /// 当前歌曲（null 表示无歌曲，显示占位图，不旋转）。
+  final SongEntity? song;
+
+  /// 构建封面内容（真实封面或占位图）。
+  ///
+  /// [onCoverAvailableChanged] 由 [ArtworkWidget] 在真实封面解码成功时回调
+  /// true，占位 / 加载失败时回调 false。
+  final Widget Function(BuildContext, ValueChanged<bool>) buildArtwork;
+
+  const _RotatingArtwork({required this.song, required this.buildArtwork});
+
+  @override
+  State<_RotatingArtwork> createState() => _RotatingArtworkState();
+}
+
+class _RotatingArtworkState extends State<_RotatingArtwork> {
+  bool _hasRealCover = false;
+
+  void _setCoverAvailable(bool ok) {
+    if (_hasRealCover == ok) return;
+    setState(() => _hasRealCover = ok);
+  }
+
+  @override
+  void didUpdateWidget(_RotatingArtwork oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.song?.id == oldWidget.song?.id) return;
+    // 切歌：重置封面可用状态。新封面加载期间显示占位（不旋转），
+    // 解码成功后 imageBuilder 上报 true 才恢复旋转。
+    if (_hasRealCover) _setCoverAvailable(false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        PlayerService.instance.isPlaying,
+        PlayerBackgroundSettings.rotateCover,
+      ]),
+      builder: (context, _) {
+        final playing = PlayerService.instance.isPlaying.value;
+        final rotateEnabled = PlayerBackgroundSettings.rotateCover.value;
+        final artwork = widget.buildArtwork(context, _setCoverAvailable);
+        if (rotateEnabled && _hasRealCover) {
+          return _RotatingCover(playing: playing, child: artwork);
+        }
+        return artwork;
+      },
+    );
   }
 }
 

@@ -14,16 +14,15 @@ import 'feiniu/fn_models.dart';
 
 /// 自动重连探测服务（单例）
 ///
-/// 触发条件：
+/// 只在「连接不上」时才探测，不维持后台探测：
 /// 1. 网络状态变更（WiFi / 移动数据断开后重连、IP 变更）
 /// 2. 连续 API 请求失败（连接超时、连接拒绝、网络错误）
-/// 3. App 从后台回到前台（网络环境可能已变化，静默校验当前连接）
-/// 4. 连接断开期间的周期重试（服务器持续不可达时每隔一段时间自动再探测）
-/// 5. 连接健康检查（处于"已连接"状态时周期验证当前连接 URL 仍可达，
-///    一旦失效立即触发完整重连）——覆盖「内网 → 公网」这类无网络断开
-///    事件、API 又无请求的静默失效场景
+/// 3. 连接断开期间的周期重试（服务器持续不可达时每隔一段时间自动再探测，
+///    直到恢复）
+/// 4. App 从后台回到前台（网络环境可能已变化，做一次性轻量校验，只有
+///    当前连接不可达才触发完整重连）
 ///
-/// 触发后执行全链路 FN 探测，成功后更新连接信息。
+/// 触发后执行全链路 FN 探测，成功后更新连接信息并停止重试。
 class FnAutoReconnectService with WidgetsBindingObserver {
   FnAutoReconnectService._();
 
@@ -53,20 +52,14 @@ class FnAutoReconnectService with WidgetsBindingObserver {
   /// 断开重试间隔
   static const Duration _retryInterval = Duration(seconds: 5);
 
-  /// 连接健康检查定时器（"已连接"时周期验证当前连接仍可用）
-  Timer? _healthCheckTimer;
-
-  /// 健康检查间隔
-  static const Duration _healthCheckInterval = Duration(minutes: 1);
-
-  /// 健康检查是否在途（防止与前一次检查重叠）
-  bool _verifyInFlight = false;
-
   /// 是否有被推迟的重连（触发时探测正好在进行中）。
   ///
   /// 置位后在探测结束（isProbing 变 false）时由监听器补发一次，
   /// 避免「探测进行中 → 重连被跳过」的重连请求被静默吞掉。
   bool _pendingReconnect = false;
+
+  /// 回前台校验是否在途（防止与另一次校验重叠）
+  bool _verifyInFlight = false;
 
   /// 初始化：监听网络变化 + App 生命周期 + 注入 Dio 拦截器
   void init() {
@@ -77,7 +70,7 @@ class FnAutoReconnectService with WidgetsBindingObserver {
       debugPrint('[AutoReconnect] Initializing...');
     }
 
-    // 0. 注册 App 生命周期监听（后台 → 前台时静默校验当前连接）
+    // 0. 注册 App 生命周期监听（后台 → 前台时做一次性校验）
     WidgetsBinding.instance.addObserver(this);
 
     // 1. 监听网络变化
@@ -94,9 +87,6 @@ class FnAutoReconnectService with WidgetsBindingObserver {
     // 4. 探测结束补发被推迟的重连
     FnConnectionProbeService.instance.isProbing.addListener(_onProbeStateChanged);
 
-    // 5. 启动连接健康检查（"已连接"时周期验证当前连接）
-    _scheduleHealthCheck();
-
     if (kDebugMode) {
       debugPrint('[AutoReconnect] Initialized');
     }
@@ -110,21 +100,44 @@ class FnAutoReconnectService with WidgetsBindingObserver {
     _triggerReconnect(reason: '补发：上次重连被探测进行中推迟');
   }
 
-  /// App 生命周期回调：从后台回到前台时静默校验当前连接。
+  /// App 生命周期回调：从后台回到前台时做一次性轻量校验。
   ///
   /// 后台期间 Dart isolate 被挂起，网络变化事件可能丢失（如内网 → 公网
-  /// 切换恰好发生在后台），恢复时重新探测能覆盖这一盲区。走轻量健康
-  /// 检查（只探当前 URL），失败再完整重连，避免每次回前台都全量探测。
+  /// 切换恰好发生在后台），恢复时用 200ms 快探验证当前连接；只有不可达
+  /// 才触发完整重连，可达时不打扰用户。不做周期探测。
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
+    if (_verifyInFlight) return;
     if (FnConnectionProbeService.instance.isProbing.value) return;
     final fnId = AppFnConnectionSettings.lastFnId;
     if (fnId == null || fnId.isEmpty) return;
-    _debounceTimer?.cancel();
-    _debounceTimer = Timer(_debounceDelay, () {
-      _verifyCurrentConnection(reason: 'App 回到前台，重新校验连接');
-    });
+    final current = FeiNiuApiClient.instance.baseUrl;
+    if (current.isEmpty) return;
+
+    _verifyInFlight = true;
+    unawaited(() async {
+      try {
+        final reachable = await FnConnectionProbeService.instance
+            .isAddressReachable(
+              current,
+              isRelay: FeiNiuApiClient.instance.relayMode,
+            );
+        // 被并发占用（null）或可达 → 连接正常，不打扰用户
+        if (reachable != false) return;
+
+        if (kDebugMode) {
+          debugPrint(
+            '[AutoReconnect] Resume verify failed: $current, reconnecting...',
+          );
+        }
+        AppFnConnectionSettings.serverConnected.value = false;
+        _triggerReconnect(reason: '回到前台，连接不可达，重新连接');
+        _scheduleRetryIfDisconnected();
+      } finally {
+        _verifyInFlight = false;
+      }
+    }());
   }
 
   /// 网络状态变化回调
@@ -289,73 +302,6 @@ class FnAutoReconnectService with WidgetsBindingObserver {
     _retryTimer = null;
   }
 
-  /// 启动连接健康检查。
-  ///
-  /// "已连接"时周期验证当前连接 URL 仍可达，失效即触发完整重连——
-  /// 覆盖「内网 → 公网」这类没有网络断开事件、API 又无请求的静默失效。
-  /// [serverConnected] 复位为 true（恢复连接 / 登录成功）时会再次调度。
-  void _scheduleHealthCheck() {
-    _healthCheckTimer?.cancel();
-    _healthCheckTimer = Timer(_healthCheckInterval, _onHealthCheckTick);
-  }
-
-  Future<void> _onHealthCheckTick() async {
-    _healthCheckTimer = null;
-    // 未连接状态由断开重试负责，这里只检查"已连接"是否已悄悄失效
-    if (!AppFnConnectionSettings.serverConnected.value) {
-      _scheduleHealthCheck();
-      return;
-    }
-    _verifyCurrentConnection(reason: '健康检查');
-  }
-
-  /// 轻量校验当前连接：用 200ms 快探探测当前 baseUrl。
-  ///
-  /// 可达 → 连接正常；不可达 → 标记断开并触发完整重连（成功后保持
-  /// 周期检查 / 断开重试）。被完整探测占用（isProbing）或并发重叠时
-  /// 跳过本次，避免相互干扰。
-  void _verifyCurrentConnection({required String reason}) {
-    if (FnConnectionProbeService.instance.isProbing.value) return;
-    if (_verifyInFlight) return;
-    if (AppFnConnectionSettings.lastFnId == null ||
-        AppFnConnectionSettings.lastFnId!.isEmpty) {
-      return;
-    }
-    final current = FeiNiuApiClient.instance.baseUrl;
-    if (current.isEmpty) return;
-
-    _verifyInFlight = true;
-    unawaited(() async {
-      try {
-        final reachable = await FnConnectionProbeService.instance
-            .isAddressReachable(
-              current,
-              isRelay: FeiNiuApiClient.instance.relayMode,
-            );
-        // 探测被并发占用（返回 null）或确认可达 → 连接仍有效
-        if (reachable != false) {
-          if (kDebugMode) {
-            debugPrint('[AutoReconnect] $reason OK: $current');
-          }
-          return;
-        }
-
-        // 当前连接失效 → 标记断开并触发完整重连
-        if (kDebugMode) {
-          debugPrint(
-            '[AutoReconnect] $reason failed: $current, reconnecting...',
-          );
-        }
-        AppFnConnectionSettings.serverConnected.value = false;
-        _triggerReconnect(reason: '$reason发现连接失效');
-        _scheduleRetryIfDisconnected();
-      } finally {
-        _verifyInFlight = false;
-        _scheduleHealthCheck();
-      }
-    }());
-  }
-
   /// 释放资源
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -364,7 +310,6 @@ class FnAutoReconnectService with WidgetsBindingObserver {
     _connectivitySub?.cancel();
     _debounceTimer?.cancel();
     _retryTimer?.cancel();
-    _healthCheckTimer?.cancel();
     _initialized = false;
   }
 }

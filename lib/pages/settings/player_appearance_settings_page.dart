@@ -132,7 +132,18 @@ class _PlayerAppearanceSettingsPageState
                 child: _PlayerStyleCard(
                   preset: preset,
                   selected: preset == selected,
-                  onTap: () => PlayerStyleSettings.setStylePreset(preset),
+                  onTap: () {
+                    PlayerStyleSettings.setStylePreset(preset);
+                    // 海报歌词为整幅大封面，与圆形封面互斥；
+                    // 切到海报时自动关闭圆形封面（连带关闭旋转封面）。
+                    if (preset == PlayerStylePreset.poster) {
+                      PlayerBackgroundSettings.setRoundCover(false);
+                    } else {
+                      // 切回默认布局时自动恢复圆形封面 + 旋转封面（默认值）
+                      PlayerBackgroundSettings.setRoundCover(true);
+                      PlayerBackgroundSettings.setRotateCover(true);
+                    }
+                  },
                 ),
               );
             }).toList(),

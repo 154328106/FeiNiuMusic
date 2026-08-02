@@ -308,10 +308,9 @@ class FnConnectionProbeService {
 
   /// 快速验证某个地址是否可达（200ms 快探）。
   ///
-  /// 供自动重连的健康检查 / App 恢复检查使用：不触发完整探测，不发
-  /// FN API，只探测当前连接 URL 的连通性。复用 [probeAllCandidates] 的
-  /// 探测锁（isProbing）与 cancel token，避免与正在进行的全量探测并发
-  /// 相互干扰。探测进行中返回 null（调用方按"可达"处理，跳过本次检查）。
+  /// 供自动重连的「App 回到前台」一次性校验使用：不触发完整探测，不发
+  /// FN API，只探测指定 URL 的连通性。被其他探测占用（isProbing）时返回
+  /// null，调用方按"可达"处理跳过本次；不可达返回 false。
   Future<bool?> isAddressReachable(String url, {bool isRelay = false}) async {
     if (isProbing.value) return null;
     isProbing.value = true;

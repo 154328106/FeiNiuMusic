@@ -38,6 +38,18 @@ class LyricPreview extends StatelessWidget {
   /// 当前播放行字号。
   final double activeFontSize;
 
+  /// 歌词内容内边距。
+  ///
+  /// 默认 `horizontal: 24`（与歌词详情页一致）。海报预览外层已自带水平 padding，
+  /// 传入 `EdgeInsets.zero` 可让歌词与标题左对齐、左侧不留空白。
+  final EdgeInsets contentPadding;
+
+  /// 是否只绘制当前播放行。
+  ///
+  /// 开启后仅渲染播放行（`activeLineOnly`），配合单行高度即成为迷你单行逐字
+  /// 歌词——底栏副标题用它，逐字动画与歌词页/播放页走完全相同的渲染管线。
+  final bool activeLineOnly;
+
   const LyricPreview({
     super.key,
     required this.height,
@@ -46,6 +58,11 @@ class LyricPreview extends StatelessWidget {
     this.showTranslation = true,
     this.fontSize = 16,
     this.activeFontSize = 20,
+    this.contentPadding = const EdgeInsets.symmetric(
+      horizontal: 24,
+      vertical: 12,
+    ),
+    this.activeLineOnly = false,
   });
 
   @override
@@ -113,10 +130,7 @@ class LyricPreview extends StatelessWidget {
               : Colors.transparent,
           lineTextAlign: textAlign,
           contentAlignment: contentAlignment,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 24,
-            vertical: 12,
-          ),
+          contentPadding: contentPadding,
           lineGap: 14,
           translationLineGap: showTranslation ? 8 : 0,
           selectionAnchorPosition: 0.5,
@@ -131,6 +145,8 @@ class LyricPreview extends StatelessWidget {
           // 只读预览：长时间停留在当前行，不自动切走
           activeAutoResumeDuration: const Duration(days: 365),
           disableTouchEvent: true,
+          // 仅当前播放行：迷你单行逐字歌词
+          activeLineOnly: activeLineOnly,
           // 关闭行切换动画：避免多个 LyricView 实例共同响应全局 switch 事件
           enableSwitchAnimation: false,
           activeHighlightGradient: LinearGradient(
