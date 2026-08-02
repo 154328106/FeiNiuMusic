@@ -223,6 +223,38 @@ class MiniPlayerInfoSettings {
   }
 }
 
+/// 播放队列长度上限：所有队列写入点（新队列、追加、插播）都会把队列
+/// 截断到该上限以内，全局生效。10–1000，默认 200。
+class AppPlaybackQueueSettings {
+  static const String _prefsMaxQueueLength = 'player_queue_max_length';
+
+  static const int defaultMaxQueueLength = 200;
+  static const int minQueueLimit = 10;
+  static const int maxQueueLimit = 1000;
+
+  static final ValueNotifier<int> maxQueueLength = ValueNotifier(
+    defaultMaxQueueLength,
+  );
+
+  static Future<void>? _loading;
+
+  static Future<void> ensureLoaded() => _loading ??= _doLoad();
+
+  static Future<void> _doLoad() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getInt(_prefsMaxQueueLength);
+    maxQueueLength.value = (stored ?? defaultMaxQueueLength)
+        .clamp(minQueueLimit, maxQueueLimit);
+  }
+
+  static Future<void> setMaxQueueLength(int value) async {
+    final prefs = await SharedPreferences.getInstance();
+    final normalized = value.clamp(minQueueLimit, maxQueueLimit);
+    await prefs.setInt(_prefsMaxQueueLength, normalized);
+    maxQueueLength.value = normalized;
+  }
+}
+
 /// 启动后是否自动打开播放界面
 class AppLaunchNavigationSettings {
   static const String _prefsAutoOpenPlayerOnLaunch =

@@ -80,7 +80,7 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
       final song = songMap[stat.songId];
       if (song == null) continue;
       topSongs.add(_SongStatRow(song: song, stat: stat));
-      final artist = song.artistDisplayName.trim().isEmpty ? '未知艺术家' : song.artistDisplayName.trim();
+      final artist = song.artistDisplayName.trim().isEmpty ? '未知歌手' : song.artistDisplayName.trim();
       (artistAcc[artist] ??= _AggAccum(artist, song)).add(stat);
       final albumName = song.albumDisplayName.trim();
       final album = albumName.isEmpty ? '未知专辑' : albumName;
@@ -273,7 +273,7 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
           child: _SegmentedToggle(
-            options: const ['歌曲', '艺术家', '专辑'],
+            options: const ['歌曲', '歌手', '专辑'],
             selectedIndex: _leaderTab.index,
             onChanged: (i) =>
                 setState(() => _leaderTab = _LeaderTab.values[i]),

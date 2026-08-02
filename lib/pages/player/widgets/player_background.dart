@@ -96,7 +96,12 @@ class PlayerBackgroundSettings {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefsRoundCover, value);
     roundCover.value = value;
-    if (!value && rotateCover.value) {
+    // 打开圆形封面时联动开启旋转封面；关闭圆形封面时同时关闭旋转封面
+    // （旋转封面仅对圆形封面有意义）。
+    if (value && !rotateCover.value) {
+      await prefs.setBool(_prefsRotateCover, true);
+      rotateCover.value = true;
+    } else if (!value && rotateCover.value) {
       await prefs.setBool(_prefsRotateCover, false);
       rotateCover.value = false;
     }

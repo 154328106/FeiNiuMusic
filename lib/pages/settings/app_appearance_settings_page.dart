@@ -548,19 +548,43 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                   );
                 },
               ),
-              ValueListenableBuilder<double>(
-                valueListenable: AppBackgroundSettings.panelBlurStrength,
-                builder: (context, value, _) {
-                  return AppSettingSlider(
-                    title: '高斯模糊强度',
-                    description: '调节面板、底部音乐条等毛玻璃模糊程度（0 = 无模糊，32 = 最强模糊）',
-                    value: value,
-                    min: 0,
-                    max: 32,
-                    divisions: 32,
-                    valueText: value == 0 ? '关闭' : value.toStringAsFixed(0),
-                    onChanged: (next) {
-                      AppBackgroundSettings.setPanelBlur(next);
+              ValueListenableBuilder<bool>(
+                valueListenable: AppBackgroundSettings.panelBlurEnabled,
+                builder: (context, blurEnabled, _) {
+                  return AppSettingSwitchTile(
+                    title: '高斯模糊',
+                    subtitle: blurEnabled
+                        ? '面板、底部音乐条等使用毛玻璃效果'
+                        : '关闭后所有高斯模糊渲染',
+                    value: blurEnabled,
+                    onChanged: (value) {
+                      AppBackgroundSettings.setPanelBlurEnabled(value);
+                    },
+                  );
+                },
+              ),
+              ValueListenableBuilder<bool>(
+                valueListenable: AppBackgroundSettings.panelBlurEnabled,
+                builder: (context, blurEnabled, _) {
+                  return ValueListenableBuilder<double>(
+                    valueListenable: AppBackgroundSettings.panelBlurStrength,
+                    builder: (context, value, _) {
+                      final effective =
+                          blurEnabled ? value : 0.0;
+                      return AppSettingSlider(
+                        title: '模糊强度',
+                        description: '0 = 无模糊，32 = 最强模糊',
+                        value: effective,
+                        min: 0,
+                        max: 32,
+                        divisions: 32,
+                        valueText: !blurEnabled
+                            ? '已关闭'
+                            : (value == 0 ? '关闭' : value.toStringAsFixed(0)),
+                        onChanged: (next) {
+                          AppBackgroundSettings.setPanelBlur(next);
+                        },
+                      );
                     },
                   );
                 },

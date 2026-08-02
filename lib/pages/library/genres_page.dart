@@ -270,7 +270,7 @@ class _GenresPageState extends State<GenresPage> with SignalsMixin {
         drawer: useBottomNavigation
             ? null
             : SideMenu(
-                onCloseDrawer: () => _scaffoldKey.currentState?.openDrawer(),
+                onCloseDrawer: () => _scaffoldKey.currentState?.closeDrawer(),
               ),
         bottomNavIndex: useBottomNavigation ? 0 : null,
         onBottomNavTap: useBottomNavigation
@@ -428,8 +428,8 @@ class _GenreCover extends StatelessWidget {
           fit: BoxFit.cover,
         );
 
-        // 圆心专辑封面直径取底图的 45%，比底图内圆形区域略小，视觉更协调
-        final coverSize = size * 0.45;
+        // 圆心专辑封面直径取底图的 60%，比底图内圆形区域略小，视觉更协调
+        final coverSize = size * 0.6;
         Widget? centerCover;
         if (coverId != null && coverId!.isNotEmpty) {
           final coverUrl = FeiNiuApiClient.instance.coverUrl(coverId!, size: 300);

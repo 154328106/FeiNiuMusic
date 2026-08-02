@@ -68,18 +68,55 @@ class AppPageScaffoldState extends State<AppPageScaffold>
   /// every animation frame.
   final ValueNotifier<bool> _drawerAnimating = ValueNotifier(false);
 
+  /// 抽屉当前是否处于展开态（>0 视为展开）。驱动 PopScope 的 canPop，
+  /// 只在开/关边界变化，不随动画每帧重建。
+  bool _drawerOpen = false;
+
   bool get _hasDrawer => widget.drawer != null;
+
+  void _setDrawerOpen(bool open) {
+    if (_drawerOpen == open) return;
+    _drawerOpen = open;
+    // 立即重建 PopScope，让系统返回键行为随抽屉状态切换
+    if (mounted) setState(() {});
+  }
 
   void openDrawer() {
     if (!_hasDrawer) return;
     if (AppLayoutSettings.tabletMode.value) return;
     _drawerController.forward();
+    _setDrawerOpen(true);
   }
 
   void closeDrawer() {
     if (!_hasDrawer) return;
     if (AppLayoutSettings.tabletMode.value) return;
     _drawerController.reverse();
+  }
+
+  /// 导航前同步收起抽屉：直接把抽屉控制器跳到关闭态。
+  ///
+  /// 侧边栏点菜单项跳转时，若只启动 [closeDrawer] 的 240ms 反向动画后立即
+  /// push 新路由，抽屉动画会被路由转场（TickerMode 静音）打断停在中途；
+  /// 返回当前页时侧边栏就会卡在展开/半展开状态。这里同步归零，保证导航
+  /// 后抽屉必然处于关闭态。
+  void closeDrawerImmediately() {
+    if (!_hasDrawer) return;
+    if (AppLayoutSettings.tabletMode.value) return;
+    _drawerController.value = 0;
+    _setDrawerOpen(false);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // 关闭动画播完（反向到底）时，把展开态同步为关闭。
+    // 这样 closeDrawer() 的动画收尾后 PopScope 也能正确放行返回键。
+    _drawerController.addStatusListener((status) {
+      if (status == AnimationStatus.dismissed && _drawerOpen) {
+        _setDrawerOpen(false);
+      }
+    });
   }
 
   @override
@@ -121,19 +158,22 @@ class AppPageScaffoldState extends State<AppPageScaffold>
         : null;
 
     final bottomInset = MediaQuery.paddingOf(context).bottom;
+    // 底部控制栏相对底部的额外抬升量：离开屏幕大圆角/手势条区域，
+    // 让底栏悬浮更透气，不被大圆角边缘裁切。
+    const miniPlayerLift = 8.0;
     final miniPlayerBottom = hasBottomNav
         ? (AppPageScaffold.modernNavHeight + bottomInset)
         : bottomInset;
     final keyboardInset = widget.resizeToAvoidBottomInset
         ? MediaQuery.viewInsetsOf(context).bottom
         : 0.0;
-    final effectiveMiniPlayerBottom = widget.keepBottomOverlayFixed
+    final effectiveMiniPlayerBottom = (widget.keepBottomOverlayFixed
         ? miniPlayerBottom - keyboardInset
-        : miniPlayerBottom;
+        : miniPlayerBottom) + miniPlayerLift;
 
-    final drawerWidth = (MediaQuery.sizeOf(context).width * 0.62).clamp(
-      220.0,
-      300.0,
+    final drawerWidth = (MediaQuery.sizeOf(context).width * 0.56).clamp(
+      200.0,
+      260.0,
     );
 
     return ValueListenableBuilder<bool>(
@@ -184,6 +224,7 @@ class AppPageScaffoldState extends State<AppPageScaffold>
           );
         }
         final stack = AppBackground(
+          blurPaused: _drawerAnimating,
           child: Stack(
             clipBehavior: Clip.none,
             children: [
@@ -251,11 +292,18 @@ class AppPageScaffoldState extends State<AppPageScaffold>
                     if (animating != _drawerAnimating.value) {
                       _drawerAnimating.value = animating;
                     }
+                    // 用 Transform.translate 移动 mini player 而非 Positioned.left：
+                    // Positioned.left 每帧变化会触发整个 Stack 重新 layout（真实重排 +
+                    // 重绘），Transform 只是合成图层平移，配合 RepaintBoundary 缓存
+                    // 后抽屉动画不逐帧重排 mini player 子树。
                     return Positioned(
-                      left: drawerWidth * value,
+                      left: 0,
                       right: 0,
                       bottom: effectiveMiniPlayerBottom,
-                      child: child!,
+                      child: Transform.translate(
+                        offset: Offset(drawerWidth * value, 0),
+                        child: child!,
+                      ),
                     );
                   },
                   child: miniPlayer,
@@ -296,7 +344,18 @@ class AppPageScaffoldState extends State<AppPageScaffold>
             ],
           ),
         );
-        return stack;
+        // 抽屉展开时系统返回键应先收起抽屉，而不是直接退出当前页。
+        // _drawerOpen 只在开/关边界变化，避免 PopScope 随动画每帧重建。
+        return PopScope(
+          canPop: !_drawerOpen,
+          onPopInvokedWithResult: (didPop, _) {
+            if (didPop) return;
+            if (_drawerOpen) {
+              closeDrawerImmediately();
+            }
+          },
+          child: stack,
+        );
       },
     );
   }

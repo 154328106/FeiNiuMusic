@@ -319,9 +319,9 @@ class _FavoritePageState extends State<FavoritePage>
         drawer: useBottomNavigation
             ? null
             : SideMenu(
-                onCloseDrawer: () => _scaffoldKey.currentState?.openDrawer(),
+                onCloseDrawer: () => _scaffoldKey.currentState?.closeDrawer(),
               ),
-        bottomNavIndex: useBottomNavigation ? 3 : null,
+        bottomNavIndex: useBottomNavigation ? 2 : null,
         onBottomNavTap: useBottomNavigation
             ? (index) => navigateToPrimaryDestination(context, index)
             : null,

@@ -10,6 +10,7 @@ class AppBackgroundSettings {
       'setting_background_blur_sigma';
   static const String _prefsPageGlowEnabled = 'setting_page_glow_enabled';
   static const String _prefsPanelBlur = 'setting_panel_blur';
+  static const String _prefsPanelBlurEnabled = 'setting_panel_blur_enabled';
 
   static final ValueNotifier<String?> backgroundImagePath = ValueNotifier(null);
   static final ValueNotifier<double> backgroundMaskOpacity = ValueNotifier(
@@ -21,6 +22,13 @@ class AppBackgroundSettings {
   static final ValueNotifier<bool> pageGlowEnabled = ValueNotifier(false);
   /// 面板高斯模糊强度（0 = 无模糊，32 = 最大模糊）
   static final ValueNotifier<double> panelBlurStrength = ValueNotifier(20);
+  /// 高斯模糊总开关。关闭后 [panelBlurStrength] 视为 0，各处不渲染模糊。
+  static final ValueNotifier<bool> panelBlurEnabled = ValueNotifier(true);
+
+  /// 生效的高斯模糊强度：总开关关闭时恒为 0。
+  static double get effectivePanelBlur {
+    return panelBlurEnabled.value ? panelBlurStrength.value : 0.0;
+  }
 
   static Future<void>? _loading;
 
@@ -35,6 +43,7 @@ class AppBackgroundSettings {
         (prefs.getDouble(_prefsBackgroundBlurSigma) ?? 16).clamp(0.0, 32.0);
     pageGlowEnabled.value = prefs.getBool(_prefsPageGlowEnabled) ?? false;
     panelBlurStrength.value = (prefs.getDouble(_prefsPanelBlur) ?? 20).clamp(0.0, 32.0);
+    panelBlurEnabled.value = prefs.getBool(_prefsPanelBlurEnabled) ?? true;
   }
 
   static Future<void> setBackgroundImagePath(String? path) async {
@@ -73,5 +82,11 @@ class AppBackgroundSettings {
     final next = value.clamp(0.0, 32.0);
     await prefs.setDouble(_prefsPanelBlur, next);
     panelBlurStrength.value = next;
+  }
+
+  static Future<void> setPanelBlurEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsPanelBlurEnabled, enabled);
+    panelBlurEnabled.value = enabled;
   }
 }

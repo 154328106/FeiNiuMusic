@@ -432,7 +432,7 @@ class _ArtistsPageState extends State<ArtistsPage>
         drawer: useBottomNavigation
             ? null
             : SideMenu(
-                onCloseDrawer: () => _scaffoldKey.currentState?.openDrawer(),
+                onCloseDrawer: () => _scaffoldKey.currentState?.closeDrawer(),
               ),
         body: _buildGrid(context),
         bottomNavIndex: useBottomNavigation ? 0 : null,

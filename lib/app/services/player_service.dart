@@ -188,6 +188,7 @@ class PlayerService with WidgetsBindingObserver {
     await WebDavPlaybackSettings.ensureLoaded();
     await AppCacheSettings.ensureLoaded();
     await AppLaunchPlaybackSettings.ensureLoaded();
+    await AppPlaybackQueueSettings.ensureLoaded();
     final session = await AudioSession.instance;
     _audioSession = session;
     await session.configure(const AudioSessionConfiguration.music());
@@ -396,6 +397,14 @@ class PlayerService with WidgetsBindingObserver {
         ? 0
         : playable.indexWhere((s) => s.id == targetId);
     if (actualIndex < 0) actualIndex = 0;
+    // 队列长度上限：新建队列即截断到设置上限以内
+    final capped = _capQueue(playable, actualIndex);
+    if (capped != null) {
+      playable
+        ..clear()
+        ..addAll(capped.$1);
+      actualIndex = capped.$2;
+    }
     _debugLog(
       'playQueue size=${playable.length} startIndex=$startIndex actualIndex=$actualIndex song=${playable[actualIndex].title}',
     );
@@ -967,8 +976,19 @@ class PlayerService with WidgetsBindingObserver {
     }
 
     final insertAt = (idx + 1).clamp(0, oldQueue.length);
-    final nextQueue = List<SongEntity>.from(oldQueue);
+    var nextQueue = List<SongEntity>.from(oldQueue);
     nextQueue.insert(insertAt, song);
+
+    // 队列长度上限：插入后超长则裁掉尾部，走全量重建（原地 insertAudioSource
+    // 无法同步裁剪已被裁掉的尾部源）
+    final capped = _capQueue(nextQueue, idx);
+    if (capped != null) {
+      nextQueue = capped.$1;
+      final wasPlaying = isPlaying.value;
+      final pos = position.value;
+      await _reloadQueue(nextQueue, idx, play: wasPlaying, initialPosition: pos);
+      return;
+    }
 
     // 用 insertAudioSource 原地插入，避免 _reloadQueue 全量重建导致当前播放卡顿
     final source = await _sourceForSong(song);
@@ -1006,8 +1026,18 @@ class PlayerService with WidgetsBindingObserver {
     }
 
     final insertAt = (idx + 1).clamp(0, oldQueue.length);
-    final nextQueue = List<SongEntity>.from(oldQueue);
+    var nextQueue = List<SongEntity>.from(oldQueue);
     nextQueue.insertAll(insertAt, toInsert);
+
+    // 队列长度上限：插入后超长则裁掉尾部，走全量重建
+    final capped = _capQueue(nextQueue, idx);
+    if (capped != null) {
+      nextQueue = capped.$1;
+      final wasPlaying = isPlaying.value;
+      final pos = position.value;
+      await _reloadQueue(nextQueue, idx, play: wasPlaying, initialPosition: pos);
+      return;
+    }
 
     // 用 insertAudioSources 原地插入，避免 _reloadQueue 全量重建导致当前播放卡顿
     final sources = await Future.wait(
@@ -1791,7 +1821,14 @@ class PlayerService with WidgetsBindingObserver {
     final pos = position.value;
     final wasPlaying = isPlaying.value;
 
-    final allSongs = [...oldQueue, ...newSongs];
+    var allSongs = [...oldQueue, ...newSongs];
+    // 追加后可能超长：按上限截断（保留当前歌曲，裁掉最旧的前部）
+    final capped = _capQueue(allSongs, currentIdx);
+    var newCurrentIdx = currentIdx;
+    if (capped != null) {
+      allSongs = capped.$1;
+      newCurrentIdx = capped.$2;
+    }
     queue.value = allSongs;
 
     final allSources = await Future.wait(
@@ -1801,7 +1838,7 @@ class PlayerService with WidgetsBindingObserver {
     try {
       await _player.setAudioSources(
         allSources,
-        initialIndex: currentIdx,
+        initialIndex: newCurrentIdx,
         initialPosition: pos,
         preload: true,
       );
@@ -1818,6 +1855,30 @@ class PlayerService with WidgetsBindingObserver {
         debugPrint('PlayerService appendToQueue error: $e');
       }
     }
+  }
+
+  /// 全局队列长度上限（设置项），用于截断新队列/追加/插播。
+  int get _queueCap {
+    final limit = AppPlaybackQueueSettings.maxQueueLength.value;
+    return limit.clamp(1, 10000);
+  }
+
+  /// 把 [songs] 截断到上限以内，返回 (截断后列表, 新的当前索引)；
+  /// 无需截断时返回 null。
+  ///
+  /// 保证当前歌曲（index 处）永不被裁掉：
+  /// - 当前歌曲已处于末尾 cap 个区间 → 保留尾部（新追加的歌不丢），丢掉最旧的前部
+  /// - 否则 → 保留当前歌曲及之后的 cap 首，丢掉更早的
+  (List<SongEntity>, int)? _capQueue(List<SongEntity> songs, int index) {
+    final cap = _queueCap;
+    if (songs.length <= cap) return null;
+    final idx = index < 0 ? 0 : index;
+    final tailStart = songs.length - cap;
+    if (idx >= tailStart) {
+      return (songs.sublist(tailStart), idx - tailStart);
+    }
+    final end = (idx + cap).clamp(0, songs.length);
+    return (songs.sublist(idx, end), 0);
   }
 
   void _applyLogicalQueue(List<SongEntity> songs, int currentQueueIndex) {

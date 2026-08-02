@@ -50,11 +50,21 @@ class GlassPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Listen to panelBlurStrength so dragging the "高斯模糊强度" slider updates
-    // every panel instantly, without needing to leave and re-enter the page.
+    // Listen to panelBlurStrength + panelBlurEnabled so dragging the
+    // "高斯模糊强度" slider or toggling the master switch updates every panel
+    // instantly, without needing to leave and re-enter the page.
     return ValueListenableBuilder<double>(
       valueListenable: AppBackgroundSettings.panelBlurStrength,
-      builder: (context, blurStrength, _) => _buildPanel(context, blurStrength),
+      builder: (context, blurStrength, _) {
+        return ValueListenableBuilder<bool>(
+          valueListenable: AppBackgroundSettings.panelBlurEnabled,
+          builder: (context, blurEnabled, _) {
+            final effective =
+                blurEnabled ? blurStrength : 0.0;
+            return _buildPanel(context, effective);
+          },
+        );
+      },
     );
   }
 

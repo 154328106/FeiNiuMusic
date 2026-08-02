@@ -21,7 +21,16 @@ import 'song_detail_sheet.dart';
 
 /// 音乐库（原歌曲页面）- 从飞牛 API 分页加载并展示所有歌曲
 class SongsPage extends StatefulWidget {
-  const SongsPage({super.key});
+  /// 一次性排序覆盖（如首页「最新歌曲」入口传入的"创建时间降序"）。
+  /// 优先级高于持久化偏好，但**不会**回写 SharedPreferences，仅本次进入有效。
+  final String? initialSortKey;
+  final bool? initialAscending;
+
+  const SongsPage({
+    super.key,
+    this.initialSortKey,
+    this.initialAscending,
+  });
 
   @override
   State<SongsPage> createState() => _SongsPageState();
@@ -281,6 +290,14 @@ class _SongsPageState extends State<SongsPage>
     if (sortAsc != null) {
       _ascending.value = sortAsc;
     }
+    // 一次性排序覆盖：仅本次进入生效，不改写持久化偏好。
+    // 首页「最新歌曲」入口要求默认按创建时间降序。
+    if (widget.initialSortKey != null) {
+      _sortKey.value = widget.initialSortKey!;
+    }
+    if (widget.initialAscending != null) {
+      _ascending.value = widget.initialAscending!;
+    }
   }
 
   Future<void> _saveSortPrefs() async {
@@ -410,7 +427,7 @@ class _SongsPageState extends State<SongsPage>
           drawer: useBottomNavigation
               ? null
               : SideMenu(
-                  onCloseDrawer: () => _scaffoldKey.currentState?.openDrawer(),
+                  onCloseDrawer: () => _scaffoldKey.currentState?.closeDrawer(),
                 ),
           bottomNavIndex: useBottomNavigation ? 1 : null,
           onBottomNavTap: useBottomNavigation

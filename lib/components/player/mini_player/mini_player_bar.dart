@@ -52,19 +52,22 @@ class MiniPlayerBar extends StatelessWidget {
     // bottom music bar (which the setting description explicitly names) reacts
     // to the "高斯模糊强度" slider instead of a hardcoded blur.
     final blurPaused = this.blurPaused;
-    if (blurPaused == null) {
-      return ValueListenableBuilder<double>(
-        valueListenable: AppBackgroundSettings.panelBlurStrength,
-        builder: (context, blurStrength, _) => _buildBar(context, blurStrength),
-      );
-    }
     return ValueListenableBuilder<bool>(
-      valueListenable: blurPaused,
-      builder: (context, paused, _) => ValueListenableBuilder<double>(
-        valueListenable: AppBackgroundSettings.panelBlurStrength,
-        builder: (context, blurStrength, _) =>
-            _buildBar(context, paused ? 0.0 : blurStrength),
-      ),
+      valueListenable: AppBackgroundSettings.panelBlurEnabled,
+      builder: (context, blurEnabled, _) {
+        final baseStrength =
+            blurEnabled
+                ? AppBackgroundSettings.panelBlurStrength.value
+                : 0.0;
+        if (blurPaused == null) {
+          return _buildBar(context, baseStrength);
+        }
+        return ValueListenableBuilder<bool>(
+          valueListenable: blurPaused,
+          builder: (context, paused, _) =>
+              _buildBar(context, paused ? 0.0 : baseStrength),
+        );
+      },
     );
   }
 
@@ -666,17 +669,67 @@ class _MiniPlayerSubtitleText extends StatelessWidget {
     // 与播放页/歌词页完全相同的逐字渲染管线（LyricView + LyricLineHightlightMixin）。
     // activeLineOnly 只绘制当前播放行，单行高度即成为迷你单行逐字歌词，
     // 逐字动画与播放页逐帧一致。
-    final fontSize = style.fontSize ?? 11.5;
-    return LyricPreview(
-      height: fontSize * 1.3,
-      textAlign: TextAlign.start,
-      contentAlignment: CrossAxisAlignment.start,
-      showTranslation: false,
-      fontSize: fontSize,
-      activeFontSize: fontSize,
-      contentPadding: EdgeInsets.zero,
-      activeLineOnly: true,
+    final baseFontSize = style.fontSize ?? 11.5;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final available = constraints.maxWidth;
+        // 超长歌词：LyricView 的行 TextPainter 无 maxLines:1，会在容器宽度内
+        // 自动换行成两行，而这里裁剪到单行高度会把第二行中间截断。检测到
+        // 超宽时按比例缩小字号，保证歌词单行放下，保留逐字动画与完整内容。
+        // 若缩小到下限仍放不下（极端超长），回退单行省略号避免"两行裁中间"。
+        final (fontSize, fits) = _measureFit(
+          text: text,
+          baseFontSize: baseFontSize,
+          maxWidth: available,
+        );
+        if (!fits) {
+          return Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: style,
+          );
+        }
+        return LyricPreview(
+          height: fontSize * 1.3,
+          textAlign: TextAlign.start,
+          contentAlignment: CrossAxisAlignment.start,
+          showTranslation: false,
+          fontSize: fontSize,
+          activeFontSize: fontSize,
+          contentPadding: EdgeInsets.zero,
+          activeLineOnly: true,
+        );
+      },
     );
+  }
+
+  /// 测量歌词单行宽度，超出 [maxWidth] 时按比例缩小字号。
+  /// 返回 (目标字号, 是否单行放得下)。
+  (double, bool) _measureFit({
+    required String text,
+    required double baseFontSize,
+    required double maxWidth,
+  }) {
+    double widthAt(double size) {
+      final painter = TextPainter(
+        text: TextSpan(text: text, style: style.copyWith(fontSize: size)),
+        textDirection: TextDirection.ltr,
+        maxLines: 1,
+      )..layout();
+      return painter.width;
+    }
+
+    if (widthAt(baseFontSize) <= maxWidth || maxWidth <= 0) {
+      return (baseFontSize, true);
+    }
+    final ratio = maxWidth / widthAt(baseFontSize);
+    final shrunk = (baseFontSize * ratio).clamp(baseFontSize * 0.6, baseFontSize);
+    // 缩小到下限后仍超宽 → 放不下，回退省略号
+    if (widthAt(shrunk) > maxWidth) {
+      return (baseFontSize, false);
+    }
+    return (shrunk, true);
   }
 }
 

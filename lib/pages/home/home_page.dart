@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
 import '../../app/router/app_page_route.dart';
+import '../../app/router/app_router.dart';
 import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/feiniu/api_models.dart';
 import '../../app/services/feiniu/auth_service.dart';
@@ -17,6 +18,12 @@ import '../../components/index.dart';
 import '../library/library_detail_pages.dart';
 import '../library/playlists_page.dart';
 import '../songs/song_detail_sheet.dart';
+import '../songs/songs_page.dart';
+import 'widgets/home_cover_carousel.dart';
+import 'widgets/home_hero_banner.dart';
+import 'widgets/home_quick_actions.dart';
+import 'widgets/home_section_header.dart';
+import 'widgets/home_shortcut_menu.dart';
 
 /// 首页缓存
 class _HomeCacheData {
@@ -187,6 +194,11 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
     final headers = FeiNiuApiClient.imageAuthHeaders();
     // 预加载首页所有可见封面（最多 40 张）
     final coverUrls = <String>[
+      // Hero Banner 主视觉 — 大尺寸首帧
+      if (_heroSong != null &&
+          _heroSong!.coverId != null &&
+          _heroSong!.coverId!.isNotEmpty)
+        api.coverUrl(_heroSong!.coverId!, size: 800, updatedAt: _heroSong!.updatedAt),
       // 收藏歌曲封面
       for (final s in _favoriteSongs.value.take(9))
         if (s.coverId != null && s.coverId!.isNotEmpty)
@@ -240,6 +252,53 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
       }
     } catch (e, stack) {
       debugPrint('[HomePage] roam error: $e\n$stack');
+    }
+  }
+
+  /// 漫游刷新：换一首漫游歌曲（不打断播放）。
+  ///
+  /// 用 roam-next 拉取下一首，更新 Banner 显示与 _roamId 供队列扩展器使用。
+  /// 若当前正在漫游播放，则把新歌插入「下一首」，播完当前后自然接上。
+  Future<void> _refreshRoam() async {
+    final currentRoamId = _roamId.value;
+    try {
+      final deviceId = await AuthService.instance.ensureDeviceId();
+      final song = await _fetchNextRoamSong(deviceId, currentRoamId);
+      if (song == null || !mounted) return;
+      _roamSong.value = song;
+      // 正在漫游播放时，把新歌插到当前之后，播完自然接上
+      if (_player.isPlaying.value && _player.queueExtender != null) {
+        await _player.insertNext([song]);
+        _roamQueue.value = [..._roamQueue.value, song];
+      } else {
+        _roamQueue.value = [song];
+      }
+    } catch (e, stack) {
+      debugPrint('[HomePage] refresh roam error: $e\n$stack');
+    }
+  }
+
+  /// 拉取下一首漫游歌曲并推进 roamId。
+  /// 无 roamId 时用 roam-start 取起始曲（fallback），否则 roam-next。
+  Future<SongEntity?> _fetchNextRoamSong(
+    String deviceId,
+    String? currentRoamId,
+  ) async {
+    try {
+      if (currentRoamId == null || currentRoamId.isEmpty) {
+        final start = await _api.getRoamStart(deviceId);
+        _roamId.value = start.current.roamId;
+        return _trackService.trackToSongEntity(
+          start.current.track.toJson(),
+        );
+      }
+      final next = await _api.getRoamNext(deviceId, currentRoamId);
+      if (next.next == null) return null;
+      _roamId.value = next.next!.roamId;
+      return _trackService.trackToSongEntity(next.next!.track.toJson());
+    } catch (e) {
+      debugPrint('[HomePage] fetch next roam error: $e');
+      return null;
     }
   }
 
@@ -397,6 +456,61 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
     );
   }
 
+  /// 漫游歌曲为空时，用第一首收藏/最近歌曲兜底，保证 Hero 始终有内容
+  SongEntity? get _heroSong {
+    final roam = _roamSong.value;
+    if (roam != null) return roam;
+    if (_favoriteSongs.value.isNotEmpty) return _favoriteSongs.value.first;
+    if (_recentSongs.value.isNotEmpty) return _recentSongs.value.first;
+    if (_recentTracks.value.isNotEmpty) return _recentTracks.value.first;
+    return null;
+  }
+
+  void _openPlaylistsPage() {
+    Navigator.of(context).pushNamed(AppRoutes.playlists);
+  }
+
+  void _openSongsPage() {
+    // 从首页「最新歌曲」进入：一次性按创建时间降序（不回写偏好，仅本次有效）
+    Navigator.of(context).push(
+      buildAppPageRoute<void>(
+        (_) => const SongsPage(
+          initialSortKey: 'duration',
+          initialAscending: false,
+        ),
+      ),
+    );
+  }
+
+  void _openArtistsPage() {
+    Navigator.of(context).pushNamed(AppRoutes.artists);
+  }
+
+  void _openAlbumsPage() {
+    Navigator.of(context).pushNamed(AppRoutes.albums);
+  }
+
+  void _openGenresPage() {
+    Navigator.of(context).pushNamed(AppRoutes.genres);
+  }
+
+  void _openRecentPage() {
+    Navigator.of(context).pushNamed(AppRoutes.recent);
+  }
+
+  void _openFavoritePage() {
+    Navigator.of(context).pushNamed(AppRoutes.favorites);
+  }
+
+  /// 直接播放一个列表（收藏/最近播放）。列表为空时退回漫游随机播放。
+  void _playFromList(List<SongEntity> songs) {
+    if (songs.isEmpty) {
+      _playRoam();
+      return;
+    }
+    unawaited(_player.playQueue(songs, 0));
+  }
+
   @override
   Widget build(BuildContext context) {
     return AppNavigationModeBuilder(
@@ -431,79 +545,142 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
             if (_loading.value) {
               return const Center(child: CircularProgressIndicator());
             }
+            final heroSong = _heroSong;
             return RefreshIndicator(
               onRefresh: _loadAll,
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 160),
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 160),
                 children: [
-                  // 1. 漫游卡片
-                  if (_roamSong.value != null)
-                    _HomeSectionCard(
-                      title: '漫游',
-                      child: _RoamCard(
-                        song: _roamSong.value!,
-                        onPlay: _playRoam,
-                      ),
+                  // 1. Hero Banner — 漫游/今日推荐，封面是绝对主角
+                  if (heroSong != null)
+                    HomeHeroBanner(
+                      song: heroSong,
+                      onPlay: _playRoam,
+                      onRefresh: _refreshRoam,
                     ),
+
+                  if (heroSong != null) const SizedBox(height: 16),
+
+                  // 1.5 快捷菜单 — 歌曲 / 歌手 / 专辑 / 风格（4×1）
+                  HomeShortcutMenu(
+                    items: [
+                      HomeShortcutItem(
+                        icon: Icons.music_note_rounded,
+                        label: '歌曲',
+                        accent: const Color(0xFF3B82F6),
+                        onTap: _openSongsPage,
+                      ),
+                      HomeShortcutItem(
+                        icon: Icons.people_rounded,
+                        label: '歌手',
+                        accent: const Color(0xFF14B8A6),
+                        onTap: _openArtistsPage,
+                      ),
+                      HomeShortcutItem(
+                        icon: Icons.album_rounded,
+                        label: '专辑',
+                        accent: const Color(0xFFA855F7),
+                        onTap: _openAlbumsPage,
+                      ),
+                      HomeShortcutItem(
+                        icon: Icons.music_video_rounded,
+                        label: '风格',
+                        accent: const Color(0xFFF97316),
+                        onTap: _openGenresPage,
+                      ),
+                    ],
+                  ),
+
                   const SizedBox(height: 16),
 
-                  // 2. 收藏
-                  if (_favoriteSongs.value.isNotEmpty)
-                    _HomeSectionCard(
-                      title: '收藏',
-                      child: _SongGridList(
-                        songs: _favoriteSongs.value,
-                        onTap: (song) => _playSong(song, _favoriteSongs.value),
-                        onLongPress: _showSongDetail,
+                  // 2. 功能入口 — 收藏 / 最近播放，各带直接播放按钮
+                  HomeQuickActions(
+                    actions: [
+                      HomeQuickAction(
+                        icon: Icons.history_rounded,
+                        title: '最近播放',
+                        subtitle: '接着上次听',
+                        accent: const Color(0xFF14B8A6),
+                        onTap: _openRecentPage,
+                        onPlay: () => _playFromList(_recentSongs.value),
                       ),
-                    ),
-                  const SizedBox(height: 16),
+                      HomeQuickAction(
+                        icon: Icons.favorite_rounded,
+                        title: '收藏',
+                        subtitle: '我的最爱',
+                        accent: const Color(0xFFEC4899),
+                        onTap: _openFavoritePage,
+                        onPlay: () => _playFromList(_favoriteSongs.value),
+                      ),
+                    ],
+                  ),
 
-                  // 3. 最近播放
-                  if (_recentSongs.value.isNotEmpty)
-                    _HomeSectionCard(
-                      title: '最近播放',
-                      child: _SongGridList(
-                        songs: _recentSongs.value,
-                        onTap: (song) => _playSong(song, _recentSongs.value),
-                        onLongPress: _showSongDetail,
-                      ),
-                    ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 20),
 
-                  // 4. 最近添加歌曲
-                  if (_recentTracks.value.isNotEmpty)
-                    _HomeSectionCard(
-                      title: '最近添加歌曲',
-                      child: _SongGridList(
-                        songs: _recentTracks.value,
-                        onTap: (song) => _playSong(song, _recentTracks.value),
-                        onLongPress: _showSongDetail,
-                      ),
+                  // 3. 我的歌单 — 横向封面轮播（尺寸小于专辑）
+                  if (_playlists.value.isNotEmpty) ...[
+                    HomeSectionHeader(
+                      title: '我的歌单',
+                      onViewAll: _openPlaylistsPage,
                     ),
-                  const SizedBox(height: 16),
+                    HomeCoverCarousel(
+                      coverSize: 100,
+                      borderRadius: 14,
+                      centerText: true,
+                      items: [
+                        for (final p in _playlists.value)
+                          HomeCoverItem(
+                            coverId: p.coverId,
+                            updatedAt: p.updatedAt,
+                            title: p.name,
+                            // 歌单没有数量副标题，空串不占行，避免卡片下方留白
+                            subtitle: '',
+                            onTap: () => _openPlaylistDetail(p),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                  ],
 
-                  // 5. 最近添加专辑
-                  if (_recentAlbums.value.isNotEmpty)
-                    _HomeSectionCard(
-                      title: '最近添加专辑',
-                      child: _AlbumHorizontalList(
-                        albums: _recentAlbums.value,
-                        onTap: _openAlbumDetail,
-                      ),
+                  // 4. 最新歌曲 — 紧凑竖排行列表
+                  if (_recentTracks.value.isNotEmpty) ...[
+                    HomeSectionHeader(
+                      title: '最新歌曲',
+                      onViewAll: _openSongsPage,
                     ),
-                  const SizedBox(height: 16),
+                    _CompactSongList(
+                      songs: _recentTracks.value,
+                      onTap: (song) => _playSong(song, _recentTracks.value),
+                      onLongPress: _showSongDetail,
+                    ),
+                    const SizedBox(height: 16),
+                  ],
 
-                  // 6. 歌单
-                  if (_playlists.value.isNotEmpty)
-                    _HomeSectionCard(
-                      title: '歌单',
-                      child: _PlaylistHorizontalList(
-                        playlists: _playlists.value,
-                        onTap: _openPlaylistDetail,
-                      ),
+                  // 5. 最新专辑 — 横向大封面轮播
+                  if (_recentAlbums.value.isNotEmpty) ...[
+                    HomeSectionHeader(
+                      title: '最新专辑',
+                      onViewAll: () {
+                        Navigator.of(context).pushNamed(AppRoutes.albums);
+                      },
                     ),
-                  const SizedBox(height: 24),
+                    HomeCoverCarousel(
+                      coverSize: 128,
+                      borderRadius: 16,
+                      items: [
+                        for (final a in _recentAlbums.value)
+                          HomeCoverItem(
+                            coverId: a.coverId,
+                            title: a.name,
+                            subtitle: a.trackCount != null
+                                ? '${a.trackCount} 首'
+                                : '',
+                            onTap: () => _openAlbumDetail(a),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                  ],
 
                   // 空状态
                   if (_favoriteSongs.value.isEmpty &&
@@ -520,50 +697,15 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
   }
 }
 
-// MARK: - Helper Widgets
+// MARK: - 紧凑歌曲列表
 
-class _HomeSectionCard extends StatelessWidget {
-  final String title;
-  final Widget child;
-
-  const _HomeSectionCard({required this.title, required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 6, right: 2, bottom: 10),
-          child: Text(
-            title,
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerLow,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: child,
-        ),
-      ],
-    );
-  }
-}
-
-class _SongGridList extends StatelessWidget {
+/// 最新歌曲 — 紧凑竖排行列表（封面 44 + 两行文字 + 播放按钮）
+class _CompactSongList extends StatelessWidget {
   final List<SongEntity> songs;
   final ValueChanged<SongEntity> onTap;
   final ValueChanged<SongEntity>? onLongPress;
 
-  const _SongGridList({
+  const _CompactSongList({
     required this.songs,
     required this.onTap,
     this.onLongPress,
@@ -571,362 +713,68 @@ class _SongGridList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    // 竖排3列：第1列 1,4,7... 第2列 2,5,8... 第3列 3,6,9...
-    final cols = 3;
-    final rows = ((songs.length - 1) ~/ cols) + 1;
-    final displayRows = rows > 3 ? 3 : rows;
-    return SizedBox(
-      height: 62.0 * displayRows + 6.0 * (displayRows - 1),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: List.generate(displayRows, (row) {
-            return Padding(
-              padding: EdgeInsets.only(top: row > 0 ? 6 : 0),
-              child: Row(
-                children: List.generate(cols, (col) {
-                  final index = col * displayRows + row;
-                  if (index >= songs.length) return const SizedBox(width: 180);
-                  final song = songs[index];
-                  return Padding(
-                    padding: EdgeInsets.only(right: col < cols - 1 ? 10 : 0),
-                    child: SizedBox(
-                      width: 170,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(12),
-                        onTap: () => onTap(song),
-                        onLongPress: onLongPress == null
-                            ? null
-                            : () => onLongPress!(song),
-                        child: Row(
-                          children: [
-                            Stack(
-                              children: [
-                                ArtworkWidget(
-                                  song: song,
-                                  size: 56,
-                                  borderRadius: 10,
-                                ),
-                                Positioned(
-                                  right: 2,
-                                  bottom: 2,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(3),
-                                    decoration: const BoxDecoration(
-                                      color: Colors.black54,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: const Icon(
-                                      Icons.play_arrow_rounded,
-                                      color: Colors.white,
-                                      size: 14,
-                                    ),
-                                  ),
-                                ),
-                              ],
+    final scheme = Theme.of(context).colorScheme;
+    final displaySongs = songs.take(5).toList();
+    return Column(
+      children: List.generate(displaySongs.length, (i) {
+        final song = displaySongs[i];
+        return Padding(
+          padding: EdgeInsets.only(bottom: i < displaySongs.length - 1 ? 6 : 0),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => onTap(song),
+              onLongPress: onLongPress == null ? null : () => onLongPress!(song),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+                child: Row(
+                  children: [
+                    ArtworkWidget(
+                      song: song,
+                      size: 44,
+                      borderRadius: 10,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            song.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
                             ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    song.title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  Text(
-                                    song.artistDisplayName,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: theme.colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                          ),
+                          const SizedBox(height: 1),
+                          Text(
+                            song.artistDisplayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: scheme.onSurfaceVariant,
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
-                  );
-                }),
-              ),
-            );
-          }),
-        ),
-      ),
-    );
-  }
-}
-
-class _AlbumHorizontalList extends StatelessWidget {
-  final List<FeiNiuAlbum> albums;
-  final ValueChanged<FeiNiuAlbum> onTap;
-
-  const _AlbumHorizontalList({required this.albums, required this.onTap});
-
-  Map<String, String> _authHeaders() => FeiNiuApiClient.imageAuthHeaders();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return SizedBox(
-      height: 145,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        itemCount: albums.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 10),
-        itemBuilder: (context, i) {
-          final album = albums[i];
-          final coverUrl = album.coverId != null
-              ? FeiNiuApiClient.instance.coverUrl(album.coverId!, size: 300)
-              : null;
-          return SizedBox(
-            width: 100,
-            child: GestureDetector(
-              onTap: () => onTap(album),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 100,
-                    height: 100,
-                    decoration: BoxDecoration(
-                      color: theme.cardColor,
-                      borderRadius: BorderRadius.circular(10),
+                    Icon(
+                      Icons.play_circle_outline_rounded,
+                      size: 28,
+                      color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
                     ),
-                    child: coverUrl != null
-                        ? ClipRRect(
-                            borderRadius: BorderRadius.circular(10),
-                            child: CachedNetworkImage(
-                              imageUrl: coverUrl,
-                              httpHeaders: _authHeaders(),
-                              width: 100,
-                              height: 100,
-                              fit: BoxFit.cover,
-                              placeholder: (_, _) =>
-                                  _albumPlaceholder(theme, album.name),
-                              errorWidget: (_, _, _) =>
-                                  _albumPlaceholder(theme, album.name),
-                            ),
-                          )
-                        : _albumPlaceholder(theme, album.name),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    album.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (album.trackCount != null)
-                    Text(
-                      '${album.trackCount} 首',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _albumPlaceholder(ThemeData theme, String name) {
-    return Center(
-      child: Text(
-        name.isNotEmpty ? name.characters.first.toUpperCase() : '?',
-        style: TextStyle(
-          fontSize: 32,
-          fontWeight: FontWeight.bold,
-          color: theme.colorScheme.primary.withValues(alpha: 0.6),
-        ),
-      ),
-    );
-  }
-}
-
-class _PlaylistHorizontalList extends StatelessWidget {
-  final List<FeiNiuPlaylist> playlists;
-  final ValueChanged<FeiNiuPlaylist> onTap;
-
-  const _PlaylistHorizontalList({required this.playlists, required this.onTap});
-
-  Map<String, String> _authHeaders() => FeiNiuApiClient.imageAuthHeaders();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return SizedBox(
-      height: 145,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        itemCount: playlists.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 10),
-        itemBuilder: (context, i) {
-          final playlist = playlists[i];
-          final coverUrl = playlist.coverId != null
-              ? FeiNiuApiClient.instance.coverUrl(
-                  playlist.coverId!,
-                  size: 300,
-                  updatedAt: playlist.updatedAt,
-                )
-              : null;
-          return SizedBox(
-            width: 100,
-            child: GestureDetector(
-              onTap: () => onTap(playlist),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 100,
-                    height: 100,
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: coverUrl != null
-                        ? ClipRRect(
-                            borderRadius: BorderRadius.circular(10),
-                            child: CachedNetworkImage(
-                              imageUrl: coverUrl,
-                              httpHeaders: _authHeaders(),
-                              width: 100,
-                              height: 100,
-                              fit: BoxFit.cover,
-                              placeholder: (_, _) =>
-                                  _playlistPlaceholder(theme),
-                              errorWidget: (_, _, _) =>
-                                  _playlistPlaceholder(theme),
-                            ),
-                          )
-                        : _playlistPlaceholder(theme),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    playlist.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (playlist.trackCount > 0)
-                    Text(
-                      '${playlist.trackCount} 首',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _playlistPlaceholder(ThemeData theme) {
-    return Center(
-      child: Icon(
-        Icons.queue_music_rounded,
-        color: theme.colorScheme.primary,
-        size: 40,
-      ),
-    );
-  }
-}
-
-class _RoamCard extends StatelessWidget {
-  final SongEntity song;
-  final VoidCallback onPlay;
-
-  const _RoamCard({required this.song, required this.onPlay});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final accent = const Color(0xFF38A3A5);
-    return InkWell(
-      borderRadius: BorderRadius.circular(16),
-      onTap: onPlay,
-      child: Row(
-        children: [
-          Stack(
-            children: [
-              ArtworkWidget(song: song, size: 64, borderRadius: 12),
-              Positioned(
-                right: 2,
-                bottom: 2,
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.play_arrow_rounded,
-                    color: accent,
-                    size: 18,
-                  ),
+                  ],
                 ),
               ),
-            ],
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  song.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                Text(
-                  song.artistDisplayName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
             ),
           ),
-        ],
-      ),
+        );
+      }),
     );
   }
 }

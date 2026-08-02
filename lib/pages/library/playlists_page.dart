@@ -298,10 +298,12 @@ class _PlaylistsPageState extends State<PlaylistsPage>
   }
 
   Future<void> _renamePlaylist(FeiNiuPlaylist playlist) async {
-    String? coverId;
+    // 初始化为现有封面：若用户未重新上传，保存时沿用原封面，
+    // 避免 coverId 为空导致服务端清空图片。
+    String? coverId = playlist.coverId;
     await _showPlaylistNameDialog(
       context,
-      title: '重命名歌单',
+      title: '编辑歌单',
       initial: playlist.name,
       confirmText: '保存',
       fallbackName: null,
@@ -373,19 +375,19 @@ class _PlaylistsPageState extends State<PlaylistsPage>
             mainAxisSize: MainAxisSize.min,
             children: [
               AppListTile(
-                leading: const Icon(Icons.edit_rounded),
-                title: '重命名',
-                onTap: () {
-                  Navigator.of(context).pop();
-                  _renamePlaylist(playlist);
-                },
-              ),
-              AppListTile(
                 leading: const Icon(Icons.cleaning_services_rounded),
                 title: '清除无效歌曲',
                 onTap: () {
                   Navigator.of(context).pop();
                   _purgeInvalidTracks(playlist);
+                },
+              ),
+              AppListTile(
+                leading: const Icon(Icons.edit_rounded),
+                title: '编辑',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _renamePlaylist(playlist);
                 },
               ),
               AppListTile(
@@ -497,7 +499,7 @@ class _PlaylistsPageState extends State<PlaylistsPage>
         key: _scaffoldKey,
         extendBodyBehindAppBar: true,
         appBar: AppTopBar(
-          title: '歌单',
+          title: '我的歌单',
           isRefreshing: _isRefreshing.value,
           showBackButton: !useBottomNavigation,
           leading: useBottomNavigation
@@ -536,7 +538,7 @@ class _PlaylistsPageState extends State<PlaylistsPage>
             : SideMenu(
                 onCloseDrawer: () => _scaffoldKey.currentState?.closeDrawer(),
               ),
-        bottomNavIndex: useBottomNavigation ? 2 : null,
+        bottomNavIndex: useBottomNavigation ? 1 : null,
         onBottomNavTap: useBottomNavigation
             ? (index) => navigateToPrimaryDestination(context, index)
             : null,
@@ -1009,6 +1011,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
         showMiniPlayer: !_multiSelect.value,
         appBar: AppTopBar(
           title: widget.playlistName,
+          centerTitle: true,
           backgroundColor: Colors.transparent,
           elevation: 0,
         ),
@@ -1196,7 +1199,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
                   );
           },
         ),
-        bottomNavIndex: useBottomNavigation ? 2 : null,
+        bottomNavIndex: useBottomNavigation ? 1 : null,
         onBottomNavTap: useBottomNavigation
             ? (index) => navigateToPrimaryDestination(context, index)
             : null,

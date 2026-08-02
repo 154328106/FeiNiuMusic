@@ -625,19 +625,25 @@ class _PlayerSheetView extends StatelessWidget {
               child: PlayerBackground(songSignal: player.currentSongSignal),
             ),
             RepaintBoundary(
-              child: ValueListenableBuilder<double>(
-                valueListenable: AppBackgroundSettings.panelBlurStrength,
-                builder: (context, blurStrength, _) {
-                  final mask = Container(color: maskColor);
-                  if (blurStrength <= 0) return mask;
-                  return RepaintBoundary(
-                    child: BackdropFilter(
-                      filter: ui.ImageFilter.blur(
-                        sigmaX: blurStrength,
-                        sigmaY: blurStrength,
-                      ),
-                      child: mask,
-                    ),
+              child: ValueListenableBuilder<bool>(
+                valueListenable: AppBackgroundSettings.panelBlurEnabled,
+                builder: (context, blurEnabled, _) {
+                  return ValueListenableBuilder<double>(
+                    valueListenable: AppBackgroundSettings.panelBlurStrength,
+                    builder: (context, blurStrength, _) {
+                      final effective = blurEnabled ? blurStrength : 0.0;
+                      final mask = Container(color: maskColor);
+                      if (effective <= 0) return mask;
+                      return RepaintBoundary(
+                        child: BackdropFilter(
+                          filter: ui.ImageFilter.blur(
+                            sigmaX: effective,
+                            sigmaY: effective,
+                          ),
+                          child: mask,
+                        ),
+                      );
+                    },
                   );
                 },
               ),
@@ -876,6 +882,14 @@ class _PlaylistSheetState extends State<_PlaylistSheet> {
     super.dispose();
   }
 
+  /// 快速调整播放队列长度上限：弹出滑块对话框，改完立即全局生效。
+  void _showQueueLimitDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => _QueueLimitDialog(player: widget.player),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -924,6 +938,7 @@ class _PlaylistSheetState extends State<_PlaylistSheet> {
               secondaryTextColor: secondaryTextColor,
               onClear: widget.player.clearQueue,
               onCycleMode: widget.player.cyclePlaybackMode,
+              onAdjustLimit: () => _showQueueLimitDialog(context),
             ),
             body: Expanded(
               child: total == 0
@@ -1052,6 +1067,7 @@ class _PlaylistHeader extends StatelessWidget {
   final Color accent;
   final VoidCallback onClear;
   final VoidCallback onCycleMode;
+  final VoidCallback onAdjustLimit;
 
   const _PlaylistHeader({
     required this.total,
@@ -1062,6 +1078,7 @@ class _PlaylistHeader extends StatelessWidget {
     required this.accent,
     required this.onClear,
     required this.onCycleMode,
+    required this.onAdjustLimit,
   });
 
   @override
@@ -1118,6 +1135,24 @@ class _PlaylistHeader extends StatelessWidget {
                       ),
                     ),
                   ],
+                ),
+              ),
+              TextButton.icon(
+                onPressed: onAdjustLimit,
+                style: TextButton.styleFrom(
+                  foregroundColor: secondaryTextColor,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                icon: Icon(
+                  Icons.tune_rounded,
+                  size: 18,
+                  color: secondaryTextColor,
+                ),
+                label: Text(
+                  '上限',
+                  style: TextStyle(fontSize: 13, color: secondaryTextColor),
                 ),
               ),
               TextButton.icon(
@@ -1279,6 +1314,72 @@ class _QueueItem extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// 播放队列长度上限快速调整对话框：拖动滑块即改即存，全局生效。
+class _QueueLimitDialog extends StatelessWidget {
+  final PlayerService player;
+
+  const _QueueLimitDialog({required this.player});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AlertDialog(
+      title: const Text('播放队列上限'),
+      content: ValueListenableBuilder<int>(
+        valueListenable: AppPlaybackQueueSettings.maxQueueLength,
+        builder: (context, limit, _) {
+          return SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '当前队列 ${player.queue.value.length} 首 · 上限 $limit 首',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Slider(
+                  value: limit.toDouble().clamp(
+                        AppPlaybackQueueSettings.minQueueLimit.toDouble(),
+                        AppPlaybackQueueSettings.maxQueueLimit.toDouble(),
+                      ),
+                  min: AppPlaybackQueueSettings.minQueueLimit.toDouble(),
+                  max: AppPlaybackQueueSettings.maxQueueLimit.toDouble(),
+                  divisions:
+                      (AppPlaybackQueueSettings.maxQueueLimit -
+                              AppPlaybackQueueSettings.minQueueLimit) ~/
+                          10,
+                  label: '$limit 首',
+                  onChanged: (value) {
+                    AppPlaybackQueueSettings.setMaxQueueLength(value.round());
+                  },
+                ),
+                Text(
+                  '队列超出上限时自动裁剪，对后续播放全局生效',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('完成'),
+        ),
+      ],
     );
   }
 }

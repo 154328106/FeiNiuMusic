@@ -111,16 +111,22 @@ class _PrimaryNavigationShell extends StatefulWidget {
 
 class _PrimaryNavigationShellState extends State<_PrimaryNavigationShell> {
   int _currentIndex = 0;
-  final List<Widget?> _pages = <Widget?>[const HomePage(), null, null, null, null];
+  final List<Widget?> _pages = <Widget?>[
+    const HomePage(),
+    null,
+    null,
+    null,
+    null,
+  ];
   bool _warmupScheduled = false;
 
   Widget _buildPage(int index) {
     return switch (index) {
       0 => const HomePage(),
       1 => const SongsPage(),
-      2 => const RecentPlaybackPage(),
+      2 => const PlaylistsPage(),
       3 => const FavoritePage(),
-      4 => const SettingsPage(),
+      4 => const ProfilePage(),
       _ => const SizedBox.shrink(),
     };
   }

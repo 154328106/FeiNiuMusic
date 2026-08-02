@@ -202,26 +202,20 @@ class _RecentPlaybackPageState extends State<RecentPlaybackPage>
         drawer: useBottomNavigation
             ? null
             : SideMenu(
-                onCloseDrawer: () => _scaffoldKey.currentState?.openDrawer(),
+                onCloseDrawer: () => _scaffoldKey.currentState?.closeDrawer(),
               ),
-        bottomNavIndex: useBottomNavigation ? 2 : null,
-        onBottomNavTap: useBottomNavigation
-            ? (index) => navigateToPrimaryDestination(context, index)
-            : null,
         appBar: AppTopBar(
           title: isMultiSelecting ? '已选 $selectedCount 首' : '最近播放',
-          showBackButton: false,
-          leading: useBottomNavigation
-              ? null
-              : (isMultiSelecting
-                  ? IconButton(
-                      icon: const Icon(Icons.close_rounded),
-                      onPressed: exitMultiSelect,
-                    )
-                  : IconButton(
-                      icon: const Icon(Icons.menu_rounded),
-                      onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-                    )),
+          showBackButton: true,
+          leading: isMultiSelecting
+              ? IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: exitMultiSelect,
+                )
+              : IconButton(
+                  icon: const Icon(Icons.menu_rounded),
+                  onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                ),
           backgroundColor: Colors.transparent,
           elevation: 0,
           actions: isMultiSelecting

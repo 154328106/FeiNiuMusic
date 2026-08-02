@@ -8,7 +8,7 @@ import '../../app/state/settings_state.dart';
 const _primaryNavigationRoutes = <String>[
   AppRoutes.home,
   AppRoutes.songs,
-  AppRoutes.recent,
+  AppRoutes.playlists,
   AppRoutes.favorites,
   AppRoutes.profile,
 ];
@@ -31,20 +31,12 @@ void navigateToPrimaryDestination(BuildContext context, int index) {
     );
     return;
   }
+  // 抽屉/无底部栏模式：作为普通页面压栈，返回键可回到来源页。
+  // 不要用 pushAndRemoveUntil —— 那会清空整个路由栈（包括首页），
+  // 导致从首页点进来后无法按返回回到首页。
   final routeName = _primaryNavigationRoutes[index];
   if (ModalRoute.of(context)?.settings.name == routeName) return;
-  final pageBuilder = AppRouter.routes[routeName];
-  if (pageBuilder == null) return;
-  Navigator.of(context).pushAndRemoveUntil(
-    PageRouteBuilder<void>(
-      settings: RouteSettings(name: routeName),
-      pageBuilder: (context, animation, secondaryAnimation) =>
-          pageBuilder(context),
-      transitionDuration: Duration.zero,
-      reverseTransitionDuration: Duration.zero,
-    ),
-    (route) => false,
-  );
+  Navigator.of(context).pushNamed(routeName);
 }
 
 class PrimaryNavigationScope extends InheritedWidget {
@@ -103,7 +95,7 @@ class ModernNavigationBar extends StatelessWidget {
     required this.onTap,
   });
 
-  static const List<String> _labels = ['首页', '歌曲', '最近', '收藏', '设置'];
+  static const List<String> _labels = ['首页', '歌曲', '歌单', '收藏', '我的'];
 
   @override
   Widget build(BuildContext context) {
@@ -112,11 +104,16 @@ class ModernNavigationBar extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     // Follow the same panel blur slider used by cards/setting panels so
     // the bottom bar visually belongs to the same surface family.
-    return ValueListenableBuilder<double>(
-      valueListenable: AppBackgroundSettings.panelBlurStrength,
-      builder: (context, _, _) {
-        final blurStrength = AppBackgroundSettings.panelBlurStrength.value;
-        final isBlurred = blurStrength > 0;
+    return ValueListenableBuilder<bool>(
+      valueListenable: AppBackgroundSettings.panelBlurEnabled,
+      builder: (context, blurEnabled, _) {
+        return ValueListenableBuilder<double>(
+          valueListenable: AppBackgroundSettings.panelBlurStrength,
+          builder: (context, _, _) {
+            final blurStrength = blurEnabled
+                ? AppBackgroundSettings.panelBlurStrength.value
+                : 0.0;
+            final isBlurred = blurStrength > 0;
         final barColor = isBlurred
             ? (isDark
                 ? Colors.black.withValues(alpha: 0.06)
@@ -158,6 +155,8 @@ class ModernNavigationBar extends StatelessWidget {
           );
         }
         return navBar;
+          },
+        );
       },
     );
   }

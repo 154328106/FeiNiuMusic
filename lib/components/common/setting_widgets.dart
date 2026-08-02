@@ -84,14 +84,20 @@ class AppSettingTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final miuix = context.usesMiuix;
-    return ListTile(
-      dense: !miuix,
-      contentPadding: EdgeInsets.symmetric(horizontal: miuix ? 20 : 16),
-      leading: leading,
-      title: Text(title),
-      subtitle: subtitle == null ? null : Text(subtitle!),
-      trailing: trailing,
-      onTap: onTap,
+    // 用透明 Material 包住 ListTile，让它的背景/涟漪画在自己的 Material
+    // 上，避免中间的带色面板容器（GlassPanel）触发 SDK 的
+    // "ListTile background color or ink splashes may be invisible" 断言。
+    return Material(
+      color: Colors.transparent,
+      child: ListTile(
+        dense: !miuix,
+        contentPadding: EdgeInsets.symmetric(horizontal: miuix ? 20 : 16),
+        leading: leading,
+        title: Text(title),
+        subtitle: subtitle == null ? null : Text(subtitle!),
+        trailing: trailing,
+        onTap: onTap,
+      ),
     );
   }
 }

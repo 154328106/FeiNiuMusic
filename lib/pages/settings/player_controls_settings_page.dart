@@ -18,6 +18,7 @@ class _PlayerControlsSettingsPageState
     super.initState();
     PlayerBottomActionSettings.ensureLoaded();
     MiniPlayerInfoSettings.ensureLoaded();
+    AppPlaybackQueueSettings.ensureLoaded();
   }
 
   _BottomActionConfig _actionConfigByKey(String key) {
@@ -85,6 +86,26 @@ class _PlayerControlsSettingsPageState
                         MiniPlayerInfoSettings.setShowLyricsInSubtitle(value);
                       },
                     ),
+                  );
+                },
+              ),
+              ValueListenableBuilder<int>(
+                valueListenable: AppPlaybackQueueSettings.maxQueueLength,
+                builder: (context, limit, _) {
+                  return AppSettingSlider(
+                    title: '播放队列上限',
+                    description: '播放队列最多保留的歌曲数，超出后自动裁剪（10–1000）',
+                    value: limit.toDouble(),
+                    min: AppPlaybackQueueSettings.minQueueLimit.toDouble(),
+                    max: AppPlaybackQueueSettings.maxQueueLimit.toDouble(),
+                    divisions:
+                        (AppPlaybackQueueSettings.maxQueueLimit -
+                                AppPlaybackQueueSettings.minQueueLimit) ~/
+                            10,
+                    valueText: '$limit 首',
+                    onChanged: (value) {
+                      AppPlaybackQueueSettings.setMaxQueueLength(value.round());
+                    },
                   );
                 },
               ),

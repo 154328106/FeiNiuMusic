@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/state/settings_state.dart';
+import '../../pages/player/widgets/player_background.dart';
 
 /// Mini preview of the player UI for a given [PlayerStylePreset].
 ///
@@ -90,10 +91,25 @@ class PlayerStylePreview extends StatelessWidget {
   }
 
   Widget _classicPreview(BuildContext context, Color accent) {
+    // 订阅「圆形封面」开关：切换时预览封面立即在圆形/圆角间切换
+    return ValueListenableBuilder<bool>(
+      valueListenable: PlayerBackgroundSettings.roundCover,
+      builder: (context, roundCover, _) {
+        return _classicPreviewBody(context, accent, roundCover);
+      },
+    );
+  }
+
+  Widget _classicPreviewBody(
+    BuildContext context,
+    Color accent,
+    bool roundCover,
+  ) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(9, 8, 9, 9),
+      padding: const EdgeInsets.fromLTRB(9, 6, 9, 8),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -111,18 +127,53 @@ class PlayerStylePreview extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 4),
-          _titleText(context, _sampleTitle, size: 9),
-          const SizedBox(height: 2),
+          _titleText(context, _sampleTitle, size: 11),
+          const SizedBox(height: 1),
           _titleText(context, _sampleArtist, size: 7, secondary: true),
-          const Spacer(),
-          _cover(accent, size: 62, radius: 8),
-          const Spacer(),
-          _lyricLine(context, '是什么痛得刺眼', active: true, size: 8),
-          const Spacer(),
+          // 封面占满可用宽度并保持正方形（对应实际播放页 Expanded+Center），
+          // 圆角跟随「圆形封面」开关
+          Expanded(
+            flex: 7,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Center(
+                child: AspectRatio(
+                  aspectRatio: 1,
+                  child: _cover(
+                    accent,
+                    circle: roundCover,
+                    radius: 12,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          // 迷你歌词预览：封面与控制栏之间上下居中（对应 _MiniLyricsPreview）
+          Expanded(
+            flex: 3,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _lyricLine(context, '有一束光 那瞬间', size: 7, centered: true, stretch: true),
+                const SizedBox(height: 3),
+                _lyricLine(
+                  context,
+                  '是什么痛得刺眼',
+                  active: true,
+                  size: 8,
+                  centered: true,
+                  stretch: true,
+                ),
+                const SizedBox(height: 3),
+                _lyricLine(context, '你的视线 是谅解', size: 7, centered: true, stretch: true),
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
           _progress(context, times: true),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           _controls(context, accent),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           _bottomActions(context),
         ],
       ),
@@ -177,20 +228,28 @@ class PlayerStylePreview extends StatelessWidget {
         Expanded(
           flex: 6,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(9, 4, 9, 9),
+            padding: const EdgeInsets.fromLTRB(9, 4, 9, 8),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _titleText(context, _sampleTitle, size: 11),
-                const SizedBox(height: 2),
-                _titleText(context, _sampleArtist, size: 7, secondary: true),
-                const SizedBox(height: 8),
-                _lyricLine(context, '有一束光 那瞬间', size: 7),
-                const SizedBox(height: 5),
-                _lyricLine(context, '是什么痛得刺眼', active: true, size: 9),
-                const SizedBox(height: 5),
-                _lyricLine(context, '你的视线 是谅解', size: 7),
-                const Spacer(),
+                // 标题/歌手 + 歌词：在海报封面与控制栏之间垂直居中，水平左对齐
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _titleText(context, _sampleTitle, size: 11),
+                      const SizedBox(height: 2),
+                      _titleText(context, _sampleArtist, size: 7, secondary: true),
+                      const SizedBox(height: 8),
+                      _lyricLine(context, '有一束光 那瞬间', size: 7),
+                      const SizedBox(height: 5),
+                      _lyricLine(context, '是什么痛得刺眼', active: true, size: 9),
+                      const SizedBox(height: 5),
+                      _lyricLine(context, '你的视线 是谅解', size: 7),
+                    ],
+                  ),
+                ),
                 Row(
                   children: [
                     Icon(
@@ -208,7 +267,7 @@ class PlayerStylePreview extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 _progress(context, times: true, accentTrack: false),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 _posterControls(context),
               ],
             ),
@@ -218,36 +277,50 @@ class PlayerStylePreview extends StatelessWidget {
     );
   }
 
-  Widget _cover(Color color, {required double size, required double radius}) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
-      child: Image.asset(
-        _coverAsset,
-        width: size,
-        height: size,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => Container(
-          width: size,
-          height: size,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                color.withValues(alpha: 0.92),
-                color.withValues(alpha: 0.48),
-              ],
+  Widget _cover(Color color, {double? size, double? radius, bool circle = false}) {
+    final clip = circle
+        ? ClipOval(
+            child: Image.asset(
+              _coverAsset,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) => Container(
+                alignment: Alignment.center,
+                decoration: BoxDecoration(color: color),
+                child: Icon(
+                  Icons.music_note_rounded,
+                  size: (size ?? 62) * 0.4,
+                  color: Colors.white.withValues(alpha: 0.9),
+                ),
+              ),
             ),
-          ),
-          child: Icon(
-            Icons.music_note_rounded,
-            size: size * 0.4,
-            color: Colors.white.withValues(alpha: 0.9),
-          ),
-        ),
-      ),
-    );
+          )
+        : ClipRRect(
+            borderRadius: BorderRadius.circular(radius ?? 0),
+            child: Image.asset(
+              _coverAsset,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) => Container(
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      color.withValues(alpha: 0.92),
+                      color.withValues(alpha: 0.48),
+                    ],
+                  ),
+                ),
+                child: Icon(
+                  Icons.music_note_rounded,
+                  size: (size ?? 62) * 0.4,
+                  color: Colors.white.withValues(alpha: 0.9),
+                ),
+              ),
+            ),
+          );
+    if (size == null) return SizedBox.expand(child: clip);
+    return SizedBox(width: size, height: size, child: clip);
   }
 
   Widget _titleText(
@@ -278,13 +351,16 @@ class PlayerStylePreview extends StatelessWidget {
     BuildContext context,
     String text, {
     bool active = false,
+    bool centered = false,
+    bool stretch = false,
     required double size,
   }) {
     final scheme = Theme.of(context).colorScheme;
-    return Text(
+    final line = Text(
       text,
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
+      textAlign: centered ? TextAlign.center : TextAlign.left,
       style: TextStyle(
         fontSize: size,
         height: 1.1,
@@ -294,6 +370,8 @@ class PlayerStylePreview extends StatelessWidget {
             : scheme.onSurfaceVariant.withValues(alpha: 0.55),
       ),
     );
+    if (!stretch) return line;
+    return SizedBox(width: double.infinity, child: line);
   }
 
   Widget _progress(
