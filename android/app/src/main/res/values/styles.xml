@@ -17,8 +17,12 @@
     </style>
     <!-- uCrop screen. Without an explicit non-fullscreen theme, the toolbar
          sits under the status bar / camera cutout on modern phones so the
-         confirm / cancel icons become nearly untappable. -->
-    <style name="AppTheme.UCrop" parent="Theme.AppCompat.Light.DarkActionBar">
+         confirm / cancel icons become nearly untappable.
+         Must be a *NoActionBar* variant: uCrop's UCropActivity calls
+         setSupportActionBar(toolbar), and a DarkActionBar parent already
+         supplies a window action bar, which makes AppCompatActivity throw
+         "This Activity already has an action bar supplied by the window decor". -->
+    <style name="AppTheme.UCrop" parent="Theme.AppCompat.Light.NoActionBar">
         <item name="android:windowFullscreen">false</item>
         <item name="android:fitsSystemWindows">true</item>
         <item name="android:statusBarColor">#212121</item>

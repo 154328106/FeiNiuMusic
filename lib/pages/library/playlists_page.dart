@@ -802,20 +802,24 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
   }
 
   Future<void> _removeSongsByIds(List<String> ids) async {
-    for (final id in ids) {
-      if (!mounted) break;
-      try {
-        await _service.removeTrack(widget.playlistId, id);
-        if (!mounted) break;
-        _songs.value = _songs.value.where((s) => s.id != id).toList();
-        _originalSongs.value =
-            _originalSongs.value.where((s) => s.id != id).toList();
-        _selectedIds.value = Set<String>.from(_selectedIds.value)
-          ..remove(id);
-      } catch (_) {}
+    if (ids.isEmpty) return;
+    try {
+      // 批量移除：一次请求提交全部，避免多选几十首时逐首发请求
+      await _service.removeTracks(widget.playlistId, ids);
+      if (!mounted) return;
+      final idSet = ids.toSet();
+      _songs.value = _songs.value.where((s) => !idSet.contains(s.id)).toList();
+      _originalSongs.value =
+          _originalSongs.value.where((s) => !idSet.contains(s.id)).toList();
+      _selectedIds.value = Set<String>.from(_selectedIds.value)
+        ..removeAll(idSet);
+      AppToast.show(context, '已移除 ${ids.length} 首');
+    } catch (e) {
+      debugPrint('[PlaylistDetailPage] remove tracks error: $e');
+      if (!mounted) return;
+      AppToast.show(context, '移除失败', type: ToastType.error);
     }
     if (!mounted) return;
-    AppToast.show(context, '已移除 $ids.length 首');
     await _load();
   }
 
@@ -835,9 +839,12 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
           builder: (context) {
             final canReorder =
                 _multiSelect.value && _sortKey.value == 'default';
+            // 全选按已加载歌曲数判断（未加载的无法选中）；
+            // 头部播放计数用歌单真实总数（服务端 total），分页时仍显示完整数量。
             final totalCount = _songs.value.length;
             final selectedCount = _selectedIds.value.length;
             final isAllSelected = totalCount > 0 && selectedCount == totalCount;
+            final playbackTotal = _total > totalCount ? _total : totalCount;
             final bottomInset =
                 MediaQuery.of(context).padding.bottom +
                 (_multiSelect.value ? 160 : 80);
@@ -852,7 +859,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
                         isAllSelected: isAllSelected,
                         selectedCount: selectedCount,
                         totalCount: totalCount,
-                        playbackCount: totalCount,
+                        playbackCount: playbackTotal,
                         isSequentialPlay: _isSequentialPlay.value,
                         onToggleSelectAll: _toggleSelectAll,
                         onPlay: () async {
@@ -1274,7 +1281,23 @@ class _PlaylistPickerSheetState extends State<PlaylistPickerSheet>
                   else
                     ..._playlists.value.map(
                       (p) => ListTile(
-                        leading: const Icon(Icons.queue_music_rounded),
+                        leading: p.coverId != null && p.coverId!.isNotEmpty
+                            ? ClipRRect(
+                                borderRadius: BorderRadius.circular(6),
+                                child: CachedNetworkImage(
+                                  imageUrl: FeiNiuApiClient.instance
+                                      .coverUrl(p.coverId!, size: 48, updatedAt: p.updatedAt),
+                                  httpHeaders: FeiNiuApiClient.imageAuthHeaders(),
+                                  width: 40,
+                                  height: 40,
+                                  memCacheWidth: 40,
+                                  memCacheHeight: 40,
+                                  fit: BoxFit.cover,
+                                  errorWidget: (_, _, _) =>
+                                      Icon(Icons.queue_music_rounded, color: Theme.of(context).colorScheme.primary),
+                                ),
+                              )
+                            : Icon(Icons.queue_music_rounded, color: Theme.of(context).colorScheme.primary),
                         title: Text(
                           p.name,
                           maxLines: 1,
@@ -1338,7 +1361,32 @@ Future<bool> showAddToPlaylistDialog(
                   itemBuilder: (context, index) {
                     final playlist = playlists[index];
                     return AppListTile(
-                      leading: const Icon(Icons.queue_music),
+                      leading: playlist.coverId != null &&
+                              playlist.coverId!.isNotEmpty
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: CachedNetworkImage(
+                                imageUrl: FeiNiuApiClient.instance.coverUrl(
+                                  playlist.coverId!,
+                                  size: 48,
+                                  updatedAt: playlist.updatedAt,
+                                ),
+                                httpHeaders: FeiNiuApiClient.imageAuthHeaders(),
+                                width: 40,
+                                height: 40,
+                                memCacheWidth: 40,
+                                memCacheHeight: 40,
+                                fit: BoxFit.cover,
+                                errorWidget: (_, _, _) => Icon(
+                                  Icons.queue_music,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                              ),
+                            )
+                          : Icon(
+                              Icons.queue_music,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
                       title: playlist.name,
                       subtitle: null,
                       onTap: () async {

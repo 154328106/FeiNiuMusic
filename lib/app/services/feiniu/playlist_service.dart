@@ -84,4 +84,12 @@ class FeiNiuPlaylistService {
   Future<void> removeTrack(String playlistGuid, String trackGuid) async {
     await _api.removeTrackFromPlaylist(playlistGuid, trackGuid);
   }
+
+  /// 从歌单批量移除歌曲（一次请求提交全部）
+  Future<void> removeTracks(
+    String playlistGuid,
+    List<String> trackGuids,
+  ) async {
+    await _api.removeTracksFromPlaylist(playlistGuid, trackGuids);
+  }
 }

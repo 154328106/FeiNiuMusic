@@ -32,6 +32,18 @@ class _FavoritePageState extends State<FavoritePage>
   @override
   List<SongEntity> get multiSelectSongs => _songs.value;
 
+  @override
+  void Function(List<String> removedIds)? get onSongsRemovedFromFavorite =>
+      _handleSongsRemovedFromFavorite;
+
+  void _handleSongsRemovedFromFavorite(List<String> removedIds) {
+    if (removedIds.isEmpty) return;
+    final idSet = removedIds.toSet();
+    _allSongs.value =
+        _allSongs.value.where((s) => !idSet.contains(s.id)).toList();
+    _applyFilter();
+  }
+
   late final _allSongs = createSignal<List<SongEntity>>([]);
   late final _songs = createSignal<List<SongEntity>>([]);
   late final _loading = createSignal(true);
@@ -539,7 +551,10 @@ class _FavoritePageState extends State<FavoritePage>
                           ),
                         ),
                         if (isMultiSelecting)
-                          buildMultiSelectBar(includeFavorite: false),
+                          buildMultiSelectBar(
+                            includeFavorite: false,
+                            includeRemoveFavorite: true,
+                          ),
                       ],
                     ),
                   );

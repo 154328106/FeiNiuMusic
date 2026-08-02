@@ -23,9 +23,18 @@ mixin SongMultiSelectMixin<T extends StatefulWidget>
   /// 页面提供：当前可见歌曲列表（收藏/最近页为过滤后的 `_songs`）。
   List<SongEntity> get multiSelectSongs;
 
-  /// 页面提供：操作成功后的收尾（默认仅退出多选；歌单详情页移出后需 reload）。
-  Future<void> Function()? get onMultiSelectDone => null;
+  /// 页面提供：操作成功后的收尾（默认退出多选并清空选中）。
+  ///
+  /// 各页面按需 override，如歌单详情页「移出」需先 reload 再退出。
+  Future<void> Function()? get onMultiSelectDone => _defaultMultiSelectDone;
 
+  Future<void> _defaultMultiSelectDone() async {
+    if (!mounted) return;
+    exitMultiSelect();
+  }
+
+  /// 页面提供：移除收藏成功后收到被移除的 id 列表（收藏页据此清理本地列表）。
+  void Function(List<String> removedIds)? get onSongsRemovedFromFavorite => null;
   late final _multiSelect = createSignal(false);
   late final _selectedIds = createSignal<Set<String>>({});
 
@@ -117,8 +126,33 @@ mixin SongMultiSelectMixin<T extends StatefulWidget>
     await onMultiSelectDone?.call();
   }
 
-  /// 构建多选底部操作栏；[includeFavorite] 为 false 时隐藏「添加到收藏」（收藏页）。
-  Widget buildMultiSelectBar({bool includeFavorite = true}) {
+  /// 移除收藏（收藏页多选用）：逐首取消收藏（接口无批量）。部分失败时提示失败数量。
+  Future<void> removeSelectedFromFavorite() async {
+    final ids = _selectedIds.value.toList();
+    if (ids.isEmpty) return;
+    final failed =
+        await FeiNiuFavoriteService.instance.unfavoriteAll(ids);
+    if (!mounted) return;
+    final removed = ids.length - failed;
+    onSongsRemovedFromFavorite?.call(ids);
+    AppToast.show(
+      context,
+      failed == 0
+          ? '已移除收藏 $removed 首歌曲'
+          : '已移除收藏 $removed 首，$failed 首失败',
+      type: failed == 0 ? ToastType.success : ToastType.error,
+    );
+    await onMultiSelectDone?.call();
+  }
+
+  /// 构建多选底部操作栏。
+  ///
+  /// [includeFavorite] 为 false 时隐藏「添加到收藏」（收藏页已收藏）；
+  /// [includeRemoveFavorite] 为 true 时增加「移除收藏」（仅收藏页）。
+  Widget buildMultiSelectBar({
+    bool includeFavorite = true,
+    bool includeRemoveFavorite = false,
+  }) {
     final empty = _selectedIds.value.isEmpty;
     final actions = <MultiSelectAction>[
       MultiSelectAction(
@@ -136,6 +170,13 @@ mixin SongMultiSelectMixin<T extends StatefulWidget>
           icon: Icons.favorite_border_rounded,
           label: '添加到收藏',
           onTap: empty ? null : () => addSelectedToFavorite(),
+        ),
+      if (includeRemoveFavorite)
+        MultiSelectAction(
+          icon: Icons.favorite_rounded,
+          label: '移除收藏',
+          isDestructive: true,
+          onTap: empty ? null : () => removeSelectedFromFavorite(),
         ),
     ];
     return MultiSelectBottomBar(actions: actions);

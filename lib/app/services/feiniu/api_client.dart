@@ -1033,6 +1033,23 @@ class FeiNiuApiClient {
     }
   }
 
+  /// 从歌单批量移除歌曲。
+  ///
+  /// `POST /playlist/remove-track`，body `{"guid":..., "trackGUIDs":[...]}`。
+  Future<void> removeTracksFromPlaylist(
+    String playlistGuid,
+    List<String> trackGUIDs,
+  ) async {
+    final data = await _post(
+      '/playlist/remove-track',
+      data: {'guid': playlistGuid, 'trackGUIDs': trackGUIDs},
+    );
+    final response = FeiNiuResponse.fromJson(data, null);
+    if (!response.isSuccess) {
+      throw Exception(response.msg.isNotEmpty ? response.msg : '移除歌曲失败');
+    }
+  }
+
   // endregion
 
   // region 19. 事件上报
