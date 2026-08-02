@@ -35,6 +35,7 @@ class _PlaylistsPageState extends State<PlaylistsPage>
     with SignalsMixin, DeferredPageInitMixin {
   static const String _prefsSortMode = 'playlists_sort_mode_v1';
   static const String _prefsSortAscending = 'playlists_sort_ascending_v1';
+  static const String _prefsGridColumns = 'playlists_grid_columns_v1';
 
   final FeiNiuPlaylistService _service = FeiNiuPlaylistService.instance;
   final GlobalKey<AppPageScaffoldState> _scaffoldKey =
@@ -47,6 +48,7 @@ class _PlaylistsPageState extends State<PlaylistsPage>
   late final _isRefreshing = createSignal(false);
   late final _loadingMore = createSignal(false);
   late final _filteredPlaylists = createSignal<List<FeiNiuPlaylist>>([]);
+  late final _gridColumns = createSignal(2);
   List<FeiNiuPlaylist> _allPlaylists = [];
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
@@ -57,13 +59,23 @@ class _PlaylistsPageState extends State<PlaylistsPage>
   int _currentPage = 1;
   bool _hasMore = true;
 
+  double _gridAspectRatioForColumns(int cols) {
+    if (cols == 2) return 0.76;
+    if (cols == 3) return 0.65;
+    return 0.57;
+  }
+
+  double _gridMainAxisSpacingForColumns(int cols) {
+    return 12.0;
+  }
+
   void _preloadCovers(List<FeiNiuPlaylist> items, {int count = 20}) {
     if (items.isEmpty || !mounted) return;
     final api = FeiNiuApiClient.instance;
     final headers = FeiNiuApiClient.imageAuthHeaders();
     for (final p in items.take(count)) {
       if (p.coverId != null && p.coverId!.isNotEmpty) {
-        final url = api.coverUrl(p.coverId!, size: 120, updatedAt: p.updatedAt);
+        final url = api.coverUrl(p.coverId!, size: 300, updatedAt: p.updatedAt);
         unawaited(precacheImage(
           CachedNetworkImageProvider(url, headers: headers),
           context,
@@ -130,14 +142,19 @@ class _PlaylistsPageState extends State<PlaylistsPage>
     var mode = (prefs.getString(_prefsSortMode) ?? 'name').trim();
     if (mode.isEmpty) mode = 'name';
     final asc = prefs.getBool(_prefsSortAscending) ?? true;
+    var cols = prefs.getInt(_prefsGridColumns) ?? 2;
+    if (cols < 2) cols = 2;
+    if (cols > 4) cols = 4;
     _sortMode.value = mode;
     _ascending.value = asc;
+    _gridColumns.value = cols;
   }
 
   Future<void> _savePrefs() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefsSortMode, _sortMode.value);
     await prefs.setBool(_prefsSortAscending, _ascending.value);
+    await prefs.setInt(_prefsGridColumns, _gridColumns.value);
   }
 
   Future<void> _load({bool forceRefresh = false}) async {
@@ -432,6 +449,42 @@ class _PlaylistsPageState extends State<PlaylistsPage>
             _applySortFromBase();
             _savePrefs();
           },
+          extra: Watch.builder(
+            builder: (context) {
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: SegmentedButton<int>(
+                    segments: const [
+                      ButtonSegment(
+                        value: 2,
+                        label: Text('二列'),
+                        icon: Icon(Icons.grid_view_rounded),
+                      ),
+                      ButtonSegment(
+                        value: 3,
+                        label: Text('三列'),
+                        icon: Icon(Icons.grid_view_rounded),
+                      ),
+                      ButtonSegment(
+                        value: 4,
+                        label: Text('四列'),
+                        icon: Icon(Icons.grid_view_rounded),
+                      ),
+                    ],
+                    selected: {_gridColumns.value},
+                    onSelectionChanged: (selection) {
+                      final v = selection.first;
+                      _gridColumns.value = v;
+                      _savePrefs();
+                    },
+                    showSelectedIcon: false,
+                  ),
+                ),
+              );
+            },
+          ),
         );
       },
     );
@@ -531,78 +584,202 @@ class _PlaylistsPageState extends State<PlaylistsPage>
                       ? const Center(child: CircularProgressIndicator())
                       : _filteredPlaylists.value.isEmpty
                       ? const Center(child: Text('暂无歌单'))
-                      : ListView.builder(
+                      : CustomScrollView(
                           controller: _scrollController,
-                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 160),
-                          itemCount: _filteredPlaylists.value.length +
-                              (_loadingMore.value ? 1 : 0),
-                          itemBuilder: (context, index) {
-                            if (index >= _filteredPlaylists.value.length) {
-                              return const Center(
-                                child: Padding(
-                                  padding: EdgeInsets.all(8),
-                                  child: SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
+                          slivers: [
+                            const SliverToBoxAdapter(child: SizedBox(height: 8)),
+                            SliverPadding(
+                              padding: const EdgeInsets.fromLTRB(12, 0, 12, 160),
+                              sliver: SliverGrid(
+                                delegate: SliverChildBuilderDelegate(
+                                  (context, index) {
+                                    if (index >=
+                                        _filteredPlaylists.value.length) {
+                                      return const Center(
+                                        child: Padding(
+                                          padding: EdgeInsets.all(8),
+                                          child: SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                    final p =
+                                        _filteredPlaylists.value[index];
+                                    return InkWell(
+                                      key: ValueKey(p.guid),
+                                      borderRadius: BorderRadius.circular(16),
+                                      onTap: () async {
+                                        await Navigator.of(context).push(
+                                          buildAppPageRoute(
+                                            (_) => PlaylistDetailPage(
+                                              playlistId: p.guid,
+                                              playlistName: p.name,
+                                            ),
+                                          ),
+                                        );
+                                        if (!mounted) return;
+                                        await _load();
+                                      },
+                                      onLongPress: () => _showPlaylistSheet(p),
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(4),
+                                        child: LayoutBuilder(
+                                          builder: (context, constraints) {
+                                            const gapAfterArtwork = 8.0;
+                                            const titleStyle = TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w700,
+                                              height: 1.1,
+                                            );
+
+                                            return Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Expanded(
+                                                  child: LayoutBuilder(
+                                                    builder: (context, box) {
+                                                      final size = box.maxWidth
+                                                          .clamp(
+                                                            0.0,
+                                                            box.maxHeight
+                                                                .clamp(
+                                                                  0.0,
+                                                                  double
+                                                                      .infinity,
+                                                                ),
+                                                          );
+                                                      if (size <= 0) {
+                                                        return const SizedBox
+                                                            .shrink();
+                                                      }
+                                                      return Align(
+                                                        alignment:
+                                                            Alignment.topLeft,
+                                                        child: _PlaylistCover(
+                                                          coverId: p.coverId,
+                                                          updatedAt: p.updatedAt,
+                                                          size: size,
+                                                          borderRadius: 16,
+                                                          playlistName: p.name,
+                                                          placeholder:
+                                                              const SizedBox
+                                                                  .shrink(),
+                                                        ),
+                                                      );
+                                                    },
+                                                  ),
+                                                ),
+                                                const SizedBox(
+                                                  height: gapAfterArtwork,
+                                                ),
+                                                Text(
+                                                  p.name,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: titleStyle,
+                                                ),
+                                              ],
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  childCount: _filteredPlaylists.value.length +
+                                      (_loadingMore.value ? 1 : 0),
+                                ),
+                                gridDelegate:
+                                    SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: _gridColumns.value,
+                                  crossAxisSpacing: 14,
+                                  mainAxisSpacing:
+                                      _gridMainAxisSpacingForColumns(
+                                    _gridColumns.value,
+                                  ),
+                                  childAspectRatio:
+                                      _gridAspectRatioForColumns(
+                                    _gridColumns.value,
                                   ),
                                 ),
-                              );
-                            }
-                            final p = _filteredPlaylists.value[index];
-                      final scheme = Theme.of(context).colorScheme;
-                      return Column(
-                        key: ValueKey(p.guid),
-                        children: [
-                          ListTile(
-                            leading: p.coverId != null && p.coverId!.isNotEmpty
-                                ? ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: CachedNetworkImage(
-                                      imageUrl: FeiNiuApiClient.instance.coverUrl(p.coverId!, size: 48, updatedAt: p.updatedAt),
-                                      httpHeaders: FeiNiuApiClient.imageAuthHeaders(),
-                                      width: 48,
-                                      height: 48,
-                                      memCacheWidth: 48,
-                                      memCacheHeight: 48,
-                                      fit: BoxFit.cover,
-                                      errorWidget: (_, _, _) => Icon(Icons.queue_music_rounded, color: scheme.primary),
-                                    ),
-                                  )
-                                : Icon(Icons.queue_music_rounded, color: scheme.primary),
-                            title: Text(
-                              p.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                              ),
                             ),
-                            subtitle: null,
-                            onTap: () async {
-                              await Navigator.of(context).push(
-                                buildAppPageRoute(
-                                  (_) => PlaylistDetailPage(
-                                    playlistId: p.guid,
-                                    playlistName: p.name,
-                                  ),
-                                ),
-                              );
-                              if (!mounted) return;
-                              await _load();
-                            },
-                            onLongPress: () => _showPlaylistSheet(p),
-                          ),
-                          if (index != _playlists.value.length - 1)
-                            const Divider(height: 1),
-                        ],
-                      );
-                    },
-                  ),
+                          ],
+                        ),
                 ),
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 歌单封面（大图标网格用）。有封面显示图片，无封面显示首字母占位。
+class _PlaylistCover extends StatelessWidget {
+  final String? coverId;
+  final int? updatedAt;
+  final double size;
+  final double borderRadius;
+  final String playlistName;
+  final Widget placeholder;
+
+  const _PlaylistCover({
+    required this.coverId,
+    this.updatedAt,
+    required this.size,
+    required this.borderRadius,
+    required this.playlistName,
+    required this.placeholder,
+  });
+
+  Map<String, String> _authHeaders() => FeiNiuApiClient.imageAuthHeaders();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    if (coverId == null || coverId!.isEmpty) {
+      return SizedBox(
+        width: size,
+        height: size,
+        child: Container(
+          decoration: BoxDecoration(
+            color: theme.cardColor,
+            borderRadius: BorderRadius.circular(borderRadius),
+          ),
+          alignment: Alignment.center,
+          child: Icon(
+            Icons.queue_music_rounded,
+            size: size * 0.35,
+            color: theme.colorScheme.primary.withValues(alpha: 0.6),
+          ),
+        ),
+      );
+    }
+    final coverUrl = FeiNiuApiClient.instance.coverUrl(
+      coverId!,
+      size: 300,
+      updatedAt: updatedAt,
+    );
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(borderRadius),
+      child: CachedNetworkImage(
+        imageUrl: coverUrl,
+        httpHeaders: _authHeaders(),
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        placeholder: (context, url) =>
+            SizedBox(width: size, height: size, child: placeholder),
+        errorWidget: (context, url, error) =>
+            SizedBox(width: size, height: size, child: placeholder),
       ),
     );
   }
