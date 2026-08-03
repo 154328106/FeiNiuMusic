@@ -41,6 +41,9 @@ Future<void> main() async {
   await AccountStore.instance.init();
   await PlayerStyleSettings.ensureLoaded();
   await AppLaunchNavigationSettings.ensureLoaded();
+  // 首次启动引导标记：必须在 runApp 前预加载，否则已完成引导的用户
+  // 每次启动都会先闪一下引导页再进登录/主界面（completed 初始为 false）。
+  await AppOnboardingSettings.ensureLoaded();
   // 初始化自动重连服务（监听网络变化 + API 失败）
   FnAutoReconnectService.instance.init();
   runApp(const FeiNiuMusicApp());

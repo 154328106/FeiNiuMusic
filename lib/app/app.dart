@@ -6,6 +6,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart' as shad;
 import '../components/dialog/app_update_dialog.dart';
 import '../components/layout/tablet_layout_host.dart';
 import '../pages/login/login_page.dart';
+import '../pages/onboarding/onboarding_page.dart';
 import 'router/app_page_route.dart';
 import 'router/app_router.dart';
 import 'services/app_update_service.dart';
@@ -246,40 +247,50 @@ class _AppStartupGateState extends State<_AppStartupGate> {
 
   @override
   Widget build(BuildContext context) {
+    // 首次启动引导门控：未完成引导一律全屏显示，与登录态无关；
+    // 完成后（completed=true）才进入下方登录/外壳逻辑。
     return ValueListenableBuilder<bool>(
-      valueListenable: AuthService.instance.isLoggedIn,
-      builder: (context, isLoggedIn, _) {
-        if (!isLoggedIn) {
-          return const LoginPage();
+      valueListenable: AppOnboardingSettings.completed,
+      builder: (context, onboardingCompleted, _) {
+        if (!onboardingCompleted) {
+          return const OnboardingPage();
         }
-        // 已登录进入主界面：首帧后自动检查更新（仅一次/会话，开关开启且有
-        // 新版本才弹窗，不阻塞渲染）。登录后才触发，避免登录页被更新弹窗遮挡。
-        if (!_scheduledAutoCheck) {
-          _scheduledAutoCheck = true;
-          _scheduleAutoCheckUpdate();
-        }
-        // 切换账号时 isLoggedIn 保持 true（门控不重建），但整个外壳需按当前
-        // 账号重建：给外壳换 key → 所有存活页面卸载重建 → initState 重跑 →
-        // 用新 token/服务器地址拉取数据；导航栈同时重置回首页。
-        // 注意：嵌套 Navigator 的 GlobalKey 必须随账号变化（GlobalObjectKey 值相等性）。
-        // 若沿用固定的 baseNavigatorKey，Flutter 会把旧 Navigator 连同整个页面树
-        // reparent 到新子树（GlobalKey 重挂），页面不会重挂载、数据不会刷新。
-        return ValueListenableBuilder<String?>(
-          valueListenable: AccountStore.instance.currentAccountId,
-          builder: (context, accountId, _) {
-            final navKey = GlobalObjectKey<NavigatorState>(
-              'base-nav-${accountId ?? 'none'}',
-            );
-            return KeyedSubtree(
-              key: ValueKey('shell-${accountId ?? 'none'}'),
-              child: TabletLayoutHost(
-                navigatorKey: navKey,
-                child: Navigator(
-                  key: navKey,
-                  initialRoute: AppRouter.initialRoute,
-                  onGenerateRoute: widget.onGenerateRoute,
-                ),
-              ),
+        return ValueListenableBuilder<bool>(
+          valueListenable: AuthService.instance.isLoggedIn,
+          builder: (context, isLoggedIn, _) {
+            if (!isLoggedIn) {
+              return const LoginPage();
+            }
+            // 已登录进入主界面：首帧后自动检查更新（仅一次/会话，开关开启且有
+            // 新版本才弹窗，不阻塞渲染）。登录后才触发，避免登录页被更新弹窗遮挡。
+            if (!_scheduledAutoCheck) {
+              _scheduledAutoCheck = true;
+              _scheduleAutoCheckUpdate();
+            }
+            // 切换账号时 isLoggedIn 保持 true（门控不重建），但整个外壳需按当前
+            // 账号重建：给外壳换 key → 所有存活页面卸载重建 → initState 重跑 →
+            // 用新 token/服务器地址拉取数据；导航栈同时重置回首页。
+            // 注意：嵌套 Navigator 的 GlobalKey 必须随账号变化（GlobalObjectKey 值相等性）。
+            // 若沿用固定的 baseNavigatorKey，Flutter 会把旧 Navigator 连同整个页面树
+            // reparent 到新子树（GlobalKey 重挂），页面不会重挂载、数据不会刷新。
+            return ValueListenableBuilder<String?>(
+              valueListenable: AccountStore.instance.currentAccountId,
+              builder: (context, accountId, _) {
+                final navKey = GlobalObjectKey<NavigatorState>(
+                  'base-nav-${accountId ?? 'none'}',
+                );
+                return KeyedSubtree(
+                  key: ValueKey('shell-${accountId ?? 'none'}'),
+                  child: TabletLayoutHost(
+                    navigatorKey: navKey,
+                    child: Navigator(
+                      key: navKey,
+                      initialRoute: AppRouter.initialRoute,
+                      onGenerateRoute: widget.onGenerateRoute,
+                    ),
+                  ),
+                );
+              },
             );
           },
         );

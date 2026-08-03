@@ -131,11 +131,11 @@ class PlayerStylePreview extends StatelessWidget {
           const SizedBox(height: 1),
           _titleText(context, _sampleArtist, size: 7, secondary: true),
           // 封面占满可用宽度并保持正方形（对应实际播放页 Expanded+Center），
-          // 圆角跟随「圆形封面」开关
+          // 圆角跟随「圆形封面」开关。内边距收窄 + flex 占比提高 → 封面更大
           Expanded(
-            flex: 7,
+            flex: 8,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
               child: Center(
                 child: AspectRatio(
                   aspectRatio: 1,
@@ -150,7 +150,7 @@ class PlayerStylePreview extends StatelessWidget {
           ),
           // 迷你歌词预览：封面与控制栏之间上下居中（对应 _MiniLyricsPreview）
           Expanded(
-            flex: 3,
+            flex: 2,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
