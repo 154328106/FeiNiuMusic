@@ -131,18 +131,26 @@ class PlayerStylePreview extends StatelessWidget {
           const SizedBox(height: 1),
           _titleText(context, _sampleArtist, size: 7, secondary: true),
           // 封面占满可用宽度并保持正方形（对应实际播放页 Expanded+Center），
-          // 圆角跟随「圆形封面」开关。内边距收窄 + flex 占比提高 → 封面更大
+          // 圆角跟随「圆形封面」开关。水平内边距收窄 → 封面更大
           Expanded(
             flex: 8,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Center(
                 child: AspectRatio(
                   aspectRatio: 1,
-                  child: _cover(
-                    accent,
-                    circle: roundCover,
-                    radius: 12,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      // 预览封面远小于真机封面：圆角按封面尺寸等比缩放，与真实
+                      // 播放页观感一致（真机约 12px @ ~320px 封面 ≈ 4%）。
+                      final coverSize = constraints.maxWidth;
+                      final radius = (coverSize * 0.04).clamp(4.0, 12.0);
+                      return _cover(
+                        accent,
+                        circle: roundCover,
+                        radius: radius,
+                      );
+                    },
                   ),
                 ),
               ),

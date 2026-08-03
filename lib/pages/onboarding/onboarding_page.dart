@@ -217,14 +217,18 @@ class _WelcomePage extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 24),
       children: [
         const SizedBox(height: 64),
-        // 应用 LOGO（圆角裁切，与登录页一致）
-        ClipRRect(
-          borderRadius: BorderRadius.circular(24),
-          child: Image.asset(
-            'assets/icon/app_icon.png',
-            width: 96,
-            height: 96,
-            fit: BoxFit.cover,
+        // 应用 LOGO（强制 1:1 正方形 + 圆角裁切，避免容器约束变化导致变形）
+        Center(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(24),
+            child: SizedBox(
+              width: 96,
+              height: 96,
+              child: Image.asset(
+                'assets/icon/app_icon.png',
+                fit: BoxFit.cover,
+              ),
+            ),
           ),
         ),
         const SizedBox(height: 28),

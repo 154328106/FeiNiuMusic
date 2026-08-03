@@ -312,6 +312,7 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
       return _trackService.trackToSongEntity(next.next!.track.toJson());
     } catch (e) {
       debugPrint('[HomePage] fetch next roam error: $e');
+      AppToast.showGlobal('获取漫游歌曲失败', type: ToastType.error);
       return null;
     }
   }

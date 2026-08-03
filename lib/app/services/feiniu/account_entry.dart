@@ -72,10 +72,10 @@ class AccountEntry {
     return host;
   }
 
-  /// 展示名称：优先备注，否则默认「飞牛NAS」
+  /// 展示名称：优先备注，否则默认「飞牛音乐」
   String get displayName {
     if (name.isNotEmpty) return name;
-    return '飞牛NAS';
+    return '飞牛音乐';
   }
 
   bool get isLoggedIn => token.isNotEmpty;

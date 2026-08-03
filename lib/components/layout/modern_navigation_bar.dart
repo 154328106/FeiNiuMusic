@@ -96,6 +96,13 @@ class ModernNavigationBar extends StatelessWidget {
   });
 
   static const List<String> _labels = ['首页', '歌曲', '歌单', '收藏', '我的'];
+  static const List<IconData> _icons = [
+    Icons.home_rounded,
+    Icons.music_note_rounded,
+    Icons.queue_music_rounded,
+    Icons.favorite_rounded,
+    Icons.person_rounded,
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -125,12 +132,13 @@ class ModernNavigationBar extends StatelessWidget {
           child: SafeArea(
             top: false,
             child: SizedBox(
-              height: 52,
+              height: 60,
               child: Row(
                 children: List.generate(_labels.length, (index) {
                   final selected = currentIndex == index;
                   return Expanded(
                     child: _NavItem(
+                      icon: _icons[index],
                       label: _labels[index],
                       selected: selected,
                       onTap: () => onTap(index),
@@ -163,11 +171,13 @@ class ModernNavigationBar extends StatelessWidget {
 }
 
 class _NavItem extends StatelessWidget {
+  final IconData icon;
   final String label;
   final bool selected;
   final VoidCallback onTap;
 
   const _NavItem({
+    required this.icon,
     required this.label,
     required this.selected,
     required this.onTap,
@@ -176,7 +186,7 @@ class _NavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final activeColor = scheme.onSurface;
+    final activeColor = scheme.primary;
     final inactiveColor = scheme.onSurfaceVariant.withValues(alpha: 0.7);
 
     return InkWell(
@@ -187,18 +197,49 @@ class _NavItem extends StatelessWidget {
       splashColor: Colors.transparent,
       highlightColor: Colors.transparent,
       hoverColor: Colors.transparent,
-      child: Center(
-        child: AnimatedDefaultTextStyle(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          style: TextStyle(
-            color: selected ? activeColor : inactiveColor,
-            fontSize: selected ? 16 : 14,
-            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            letterSpacing: 0.2,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            padding: EdgeInsets.symmetric(
+              horizontal: selected ? 14 : 10,
+              vertical: 2,
+            ),
+            decoration: BoxDecoration(
+              color: selected
+                  ? scheme.primary.withValues(alpha: 0.12)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (child, animation) =>
+                  ScaleTransition(scale: animation, child: child),
+              child: Icon(
+                icon,
+                key: ValueKey(selected),
+                size: 22,
+                color: selected ? activeColor : inactiveColor,
+              ),
+            ),
           ),
-          child: Text(label, maxLines: 1),
-        ),
+          const SizedBox(height: 2),
+          AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            style: TextStyle(
+              color: selected ? activeColor : inactiveColor,
+              fontSize: 11,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              letterSpacing: 0.2,
+            ),
+            child: Text(label, maxLines: 1),
+          ),
+        ],
       ),
     );
   }

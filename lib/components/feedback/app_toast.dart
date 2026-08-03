@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../app/navigator_key.dart';
+
 enum ToastType { info, success, error }
 
 class AppToast {
@@ -33,6 +35,18 @@ class AppToast {
     _timer = Timer(duration + const Duration(milliseconds: 300), () {
       _removeCurrent();
     });
+  }
+
+  /// 无 BuildContext 时用的全局 toast：通过根 Navigator 的 context 弹。
+  /// 根 Navigator 尚未就绪时静默丢弃（不崩溃）。
+  static void showGlobal(
+    String message, {
+    ToastType type = ToastType.info,
+    Duration duration = const Duration(seconds: 2),
+  }) {
+    final context = appNavigatorKey.currentContext;
+    if (context == null) return;
+    show(context, message, type: type, duration: duration);
   }
 
   static void _removeCurrent() {

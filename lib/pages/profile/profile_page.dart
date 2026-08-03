@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/router/app_router.dart';
-import '../../components/account/account_header_card.dart';
+import '../../components/account/profile_account_card.dart';
 import '../../components/index.dart';
 
 /// 底部导航第 4 项「我的」入口页。
@@ -36,7 +36,7 @@ class ProfilePage extends StatelessWidget {
             padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
             children: [
               // 当前账号卡片（点击进入账号切换页）
-              const AccountHeaderCard(),
+              const ProfileAccountCard(),
               const SizedBox(height: 20),
               AppSettingSection(
                 title: '资源库',

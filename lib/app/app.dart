@@ -7,6 +7,7 @@ import '../components/dialog/app_update_dialog.dart';
 import '../components/layout/tablet_layout_host.dart';
 import '../pages/login/login_page.dart';
 import '../pages/onboarding/onboarding_page.dart';
+import 'navigator_key.dart';
 import 'router/app_page_route.dart';
 import 'router/app_router.dart';
 import 'services/app_update_service.dart';
@@ -18,9 +19,6 @@ import 'theme/app_visual_theme.dart';
 import 'utils/route_visibility.dart';
 
 class FeiNiuMusicApp extends StatelessWidget {
-  static final GlobalKey<NavigatorState> rootNavigatorKey =
-      GlobalKey<NavigatorState>();
-
   const FeiNiuMusicApp({super.key});
 
   ThemeData _applyDynamic(
@@ -161,7 +159,7 @@ class FeiNiuMusicApp extends StatelessWidget {
 
                         return MaterialApp(
                           title: '飞牛音乐',
-                          navigatorKey: rootNavigatorKey,
+                          navigatorKey: appNavigatorKey,
                           theme: lightTheme,
                           darkTheme: darkTheme,
                           themeMode: mode,

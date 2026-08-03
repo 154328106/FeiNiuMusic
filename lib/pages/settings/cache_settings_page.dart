@@ -16,6 +16,11 @@ import '../../components/index.dart';
 /// 位于 getTemporaryDirectory()/libCachedImageData/。
 const String kArtworkCacheDirName = 'libCachedImageData';
 
+/// 通知封面兜底下载目录（media_notification_service 的 fallback）。
+/// 通知封面正常路径也走 flutter_cache_manager（libCachedImageData），
+/// 仅当自签名证书导致缓存管理器下载失败时才写入此目录，因此并入封面缓存统一管理。
+const String kNotificationCoverDirName = 'notification_covers';
+
 class CacheSettingsPage extends StatefulWidget {
   const CacheSettingsPage({super.key});
 
@@ -27,7 +32,6 @@ class _CacheSettingsPageState extends State<CacheSettingsPage>
     with SignalsMixin {
   late final _artworkCacheSize = createSignal(0);
   late final _lyricsCacheSize = createSignal(0);
-  late final _notificationCacheSize = createSignal(0);
   late final _apiCacheCount = createSignal(0);
   late final _streamCacheSize = createSignal(0);
   late final _loading = createSignal(true);
@@ -43,24 +47,26 @@ class _CacheSettingsPageState extends State<CacheSettingsPage>
     _loading.value = true;
     final artworkSize = await _getArtworkCacheSize();
     final lyricsSize = await _getLyricsCacheSize();
-    final notificationSize = await _getNotificationCacheSize();
     final apiCount = await _getApiCacheCount();
     final streamSize = await StreamCacheService.instance.totalSize();
     if (!mounted) return;
     _artworkCacheSize.value = artworkSize;
     _lyricsCacheSize.value = lyricsSize;
-    _notificationCacheSize.value = notificationSize;
     _apiCacheCount.value = apiCount;
     _streamCacheSize.value = streamSize;
     _loading.value = false;
   }
 
-  /// 封面图缓存（flutter_cache_manager，目录 getTemporaryDirectory()/libCachedImageData/）
+  /// 封面图缓存（flutter_cache_manager，目录 getTemporaryDirectory()/libCachedImageData/），
+  /// 另含通知封面兜底目录 getTemporaryDirectory()/notification_covers/。
   Future<int> _getArtworkCacheSize() async {
     try {
       final tempDir = await getTemporaryDirectory();
       final cacheDir = Directory(p.join(tempDir.path, kArtworkCacheDirName));
-      return _dirSize(cacheDir);
+      final notifDir = Directory(
+        p.join(tempDir.path, kNotificationCoverDirName),
+      );
+      return await _dirSize(cacheDir) + await _dirSize(notifDir);
     } catch (_) {
       return 0;
     }
@@ -71,16 +77,6 @@ class _CacheSettingsPageState extends State<CacheSettingsPage>
     try {
       final dir = await getApplicationSupportDirectory();
       return _dirSize(Directory(p.join(dir.path, 'lyrics')));
-    } catch (_) {
-      return 0;
-    }
-  }
-
-  /// 通知栏封面缓存（getTemporaryDirectory()/notification_covers）
-  Future<int> _getNotificationCacheSize() async {
-    try {
-      final tempDir = await getTemporaryDirectory();
-      return _dirSize(Directory(p.join(tempDir.path, 'notification_covers')));
     } catch (_) {
       return 0;
     }
@@ -131,6 +127,11 @@ class _CacheSettingsPageState extends State<CacheSettingsPage>
       final tempDir = await getTemporaryDirectory();
       final cacheDir = Directory(p.join(tempDir.path, kArtworkCacheDirName));
       await _clearDirContents(cacheDir);
+      // 通知封面兜底目录并入封面缓存一并清理
+      final notifDir = Directory(
+        p.join(tempDir.path, kNotificationCoverDirName),
+      );
+      await _clearDirContents(notifDir);
     } catch (_) {}
     if (!mounted) return;
     await _loadCacheSizes();
@@ -156,26 +157,6 @@ class _CacheSettingsPageState extends State<CacheSettingsPage>
     await _loadCacheSizes();
     if (!mounted) return;
     AppToast.show(context, '歌词缓存已清除');
-  }
-
-  Future<void> _clearNotificationCache() async {
-    final confirmed = await AppDialog.showConfirm(
-      context,
-      title: '清除通知封面缓存',
-      content: '确定要清除通知栏封面缓存吗？通知栏封面会在需要时重新生成。',
-    );
-    if (confirmed != true) return;
-
-    _loading.value = true;
-    try {
-      final tempDir = await getTemporaryDirectory();
-      final cacheDir = Directory(p.join(tempDir.path, 'notification_covers'));
-      await _clearDirContents(cacheDir);
-    } catch (_) {}
-    if (!mounted) return;
-    await _loadCacheSizes();
-    if (!mounted) return;
-    AppToast.show(context, '通知封面缓存已清除');
   }
 
   Future<void> _clearApiCache() async {
@@ -262,14 +243,6 @@ class _CacheSettingsPageState extends State<CacheSettingsPage>
                       : '占用空间: ${_formatSize(_lyricsCacheSize.value)}',
                   trailing: const Icon(Icons.description_outlined),
                   onTap: _loading.value ? null : _clearLyricsCache,
-                ),
-                AppSettingTile(
-                  title: '通知封面缓存',
-                  subtitle: _loading.value
-                      ? '计算中...'
-                      : '占用空间: ${_formatSize(_notificationCacheSize.value)}',
-                  trailing: const Icon(Icons.notifications_outlined),
-                  onTap: _loading.value ? null : _clearNotificationCache,
                 ),
                 AppSettingTile(
                   title: '数据缓存',

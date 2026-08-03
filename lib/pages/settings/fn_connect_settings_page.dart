@@ -320,11 +320,46 @@ class _FnConnectSettingsPageState extends State<FnConnectSettingsPage> {
                 builder: (context, results, _) {
                   if (results == null || results.isEmpty) {
                     return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      child: Text(
-                        '尚未探测，点击下方按钮开始全量探测',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
+                      padding: const EdgeInsets.symmetric(vertical: 20),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // 柔和圆形底 + 雷达图标，与页面结构化的设置项呼应
+                            Container(
+                              width: 48,
+                              height: 48,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.primary.withValues(
+                                  alpha: 0.08,
+                                ),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.radar_rounded,
+                                size: 24,
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              '尚未开始探测',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '点击下方按钮开始全量探测',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant
+                                    .withValues(alpha: 0.75),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     );

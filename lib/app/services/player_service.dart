@@ -19,6 +19,7 @@ import 'feiniu/track_service.dart';
 import 'feiniu/transcode_service.dart';
 import 'stats_service.dart';
 import 'volume_schedule_service.dart';
+import '../../components/feedback/app_toast.dart';
 import '../state/settings_state.dart';
 import '../state/song_state.dart';
 export '../state/player_state.dart';
@@ -102,7 +103,6 @@ class PlayerService with WidgetsBindingObserver {
   DateTime? _lastSnapshotEmit;
   Timer? _snapshotTimer;
   int _prefetchTriggeredIndex = -1;
-  int _lastPositionExtendIndex = -1;
   bool _recoveringCurrentSource = false;
 
   /// _appendRoamAndPlay 正在运行时跳过 _indexSub 的冗余状态同步
@@ -231,7 +231,6 @@ class PlayerService with WidgetsBindingObserver {
       }
       position.value = value;
       _maybePrefetchByRemaining(value);
-      _maybeExtendByRemaining(value);
       _emitSnapshot();
     });
     _durationSub = _player.durationStream.listen((value) {
@@ -284,60 +283,27 @@ class PlayerService with WidgetsBindingObserver {
     });
     _indexSub = _player.currentIndexStream.listen((idx) {
       if (idx == null || _suppressIndexSync) return;
-      currentIndex.value = idx;
-      _prefetchTriggeredIndex = -1;
+      _activateSong(idx);
       final list = queue.value;
-      if (idx >= 0 && idx < list.length) {
-        final song = list[idx];
-        final previousSongId = currentSong.value?.id;
-        final songChanged = previousSongId != song.id;
-        currentSong.value = song;
-        StreamCacheService.instance.currentSongId = song.id;
-        if (songChanged) {
-          final restoredPosition = _restoreSessionForSong(song)?.position;
-          position.value = restoredPosition ?? Duration.zero;
-          bufferedPosition.value = Duration.zero;
-          duration.value = song.durationMs != null
-              ? Duration(milliseconds: song.durationMs!)
-              : null;
-        }
-        _maybeProbeSong(song);
-        _scheduleDeferredProbe(song);
-        _hydrateAndSetCurrentSong(song);
-        if (songChanged) {
-          unawaited(FeiNiuApiClient.instance.reportTrackPlay(song.id));
-        }
-        _warmupPlaybackSources(song, nextSong: _nextSongForIndex(list, idx));
-        if (songChanged && StreamCacheService.instance.isEnabled) {
-          unawaited(_precacheNextChained(song, list, idx));
-        }
-        if (songChanged && song.coverId != null && song.coverId!.isNotEmpty) {
-          unawaited(
-            precacheImage(
-              CachedNetworkImageProvider(
-                FeiNiuApiClient.instance.coverUrl(
-                  song.coverId!,
-                  size: 800,
-                  updatedAt: song.updatedAt,
-                ),
-                headers: FeiNiuApiClient.imageAuthHeaders(),
-              ),
-              WidgetsBinding.instance.rootElement!,
-            ),
-          );
-        }
-      } else {
-        position.value = Duration.zero;
-        bufferedPosition.value = Duration.zero;
-        duration.value = null;
-      }
-      _emitSnapshot(force: true);
-      // 队列快播完时自动扩展（仅顺序/单曲模式，随机模式由位置触发）
+      // 切歌时扩展队列（顺序/单曲模式）：每次切到新歌，若队列快播完就请求
+      // 下一首填充，保证切到队尾时已有新歌可播，没有「结束前预加载」概念。
       if (playbackMode.value != PlaybackMode.shuffle &&
           idx >= 0 &&
           list.isNotEmpty &&
           idx >= list.length - 2) {
         unawaited(_autoExtendQueue());
+      }
+      // 切歌时预填漫游队列（随机模式）：切到新歌时，如果它是队列最后一首
+      // （即队列没有可播的下一首了），就请求 roam-next 把下一首追加到队尾。
+      // 这样切到第二首时第三首已就位（队列实时增长），用户能一直看到下一首。
+      // 由 completed 播完事件负责推进播放，这里只负责填充，互不重复。
+      // （_indexSub 只在真实切歌/重建时触发，且 _prefillRoamQueue 有防重入+去重）
+      if (playbackMode.value == PlaybackMode.shuffle &&
+          idx >= 0 &&
+          list.isNotEmpty &&
+          idx == list.length - 1 &&
+          _roamAppendQueuedCount <= 0) {
+        unawaited(_prefillRoamQueue());
       }
     });
     _loopModeSub = _player.loopModeStream.listen((loopMode) {
@@ -356,7 +322,6 @@ class PlayerService with WidgetsBindingObserver {
       playbackMode.value = loopMode == LoopMode.one
           ? PlaybackMode.single
           : PlaybackMode.loop;
-      _debugLog('loopModeStream -> ${playbackMode.value.name}');
       _schedulePersistPlaybackState();
     });
     _shuffleSub = _player.shuffleModeEnabledStream.listen((enabled) {
@@ -378,7 +343,6 @@ class PlayerService with WidgetsBindingObserver {
             ? PlaybackMode.single
             : PlaybackMode.loop;
       }
-      _debugLog('shuffleStream -> ${playbackMode.value.name}');
       _schedulePersistPlaybackState();
     });
     AppPlaybackVolumeSettings.volume.addListener(_handleAppVolumeChanged);
@@ -579,21 +543,6 @@ class PlayerService with WidgetsBindingObserver {
     if (idx < 0 || idx == _prefetchTriggeredIndex) return;
     _prefetchTriggeredIndex = idx;
     _prefetchUpcoming();
-  }
-
-  void _maybeExtendByRemaining(Duration positionValue) {
-    if (queueExtender == null) return;
-    final total = duration.value;
-    if (total == null || total.inMilliseconds <= 0) return;
-    final remaining = total - positionValue;
-    if (remaining.inSeconds > 15) return;
-    final idx = currentIndex.value;
-    if (idx < 0 || idx == _lastPositionExtendIndex) return;
-    final list = queue.value;
-    if (idx >= list.length - 2) {
-      _lastPositionExtendIndex = idx;
-      unawaited(_autoExtendQueue());
-    }
   }
 
   Future<void> _prefetchUpcoming() async {
@@ -887,7 +836,7 @@ class PlayerService with WidgetsBindingObserver {
       // 保留旧队列，roam-next 返回 current+next，追加到队尾、定位到 current
       // 播放、并推进 roamId。这样切到下一首的同时就请求到再下一首填充，
       // 不会出现「队尾空转/切歌后没有下一首」。
-      await _appendRoamAndPlay();
+      await _appendRoamAndPlay(doActivate: true);
       return;
     }
     // 离开随机模式 → 清除过渡标记
@@ -899,11 +848,67 @@ class PlayerService with WidgetsBindingObserver {
     }
   }
 
+  /// 切歌时预填漫游队列（随机模式）：当前歌是队列最后一首时，请求 roam-next
+  /// 把下一首追加到队尾。只填充不跳转播放（保持当前歌继续播）。
+  Future<void> _prefillRoamQueue() async {
+    if (_roamAppendQueuedCount > 0) return;
+    final id = roamId;
+    if (id == null || id.isEmpty) return;
+    final gen = _queueGeneration;
+    _roamAppendQueuedCount = 1;
+    try {
+      final deviceId = await AuthService.instance.ensureDeviceId();
+      final response = await FeiNiuApiClient.instance.getRoamNext(deviceId, id);
+      if (response.current == null || response.next == null) return;
+      // 推进 roamId 到最新链
+      roamId = response.current!.roamId;
+      // 队列已被替换，丢弃本次预填
+      if (gen != _queueGeneration) return;
+      final nextTrack = FeiNiuTrackService.instance.trackToSongEntity(
+        response.next!.track.toJson(),
+      );
+      final baseQueue = queue.value;
+      final alreadyInQueue = baseQueue.any((s) => s.id == nextTrack.id);
+      if (alreadyInQueue) return;
+      final allSongs = [...baseQueue, nextTrack];
+      queue.value = allSongs;
+      // 追加后超长按上限截断（保留当前歌曲）
+      final curIdx = currentIndex.value;
+      final capped = _capQueue(allSongs, curIdx);
+      if (capped != null) {
+        queue.value = capped.$1;
+      }
+      _debugLog(
+        'prefillRoamQueue: appended=${nextTrack.id} queue=[${queue.value.map((s) => s.id).join(',')}]',
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('PlayerService prefillRoamQueue error: $e');
+      }
+    } finally {
+      _roamAppendQueuedCount--;
+    }
+  }
+
   /// 随机模式：调 roam-start 或 roam-next 获取随机曲目
   /// 首次清空旧队列，后续保留旧队列只追加
-  Future<void> _appendRoamAndPlay() async {
+  /// [doActivate]：手动切歌（点下一曲）时置 true，拿到新队列后立即暂停当前
+  /// 声音并同步 UI 到目标曲，避免旧歌继续播、封面/歌名延迟切换。
+  Future<void> _appendRoamAndPlay({bool doActivate = false}) async {
     if (_roamAppendQueuedCount > 0) {
       _roamAppendQueuedCount++;
+      return;
+    }
+    // 队列里当前 index 之后已有预填的歌（切歌时 _prefillRoamQueue 追加的），
+    // 直接重建定位到它，不重复请求。LoopMode.one 下 seekToNext 切不动，用
+    // setAudioSources 重建（同 previous() 的 shuffle 处理）。
+    final queueLen = queue.value.length;
+    final curIdx = currentIndex.value;
+    if (queueLen > 0 &&
+        curIdx >= 0 &&
+        curIdx + 1 < queueLen) {
+      _roamTransitionPending = false;
+      await _skipToIndexImmediate(curIdx + 1);
       return;
     }
     final gen = _queueGeneration;
@@ -980,45 +985,57 @@ class PlayerService with WidgetsBindingObserver {
         roamTrackData.track.toJson(),
       );
 
-      // 首次清空旧队列，后续保留旧队列只追加。
-      // roam-next 返回的 current 可能是上一轮的 next（已在队列里），也可能是
-      // 全新的歌。正确做法：
-      // - current 已在队列 → 复用其位置（避免重复），只追加 next；
-      // - current 不在队列 → 追加 current + next。
-      // 不能无条件把 current 从队尾去掉——那会在「播第一首切到第二首」时把
-      // 第二首删掉，导致跳过第二首直接播第三首。
+      // 漫游队列：roam-next 返回 previous(已播) + current(当前/下一首) +
+      // next(再下一首)。用户期望「每次获取一首追加到队列」——即把 next 追加
+      // 到队尾，然后顺序播放队列里的下一首。current 仅用于推进 roamId，
+      // 不作为播放跳转依据（服务端可能返回不同链的歌，跳转会打乱顺序）。
+      //
+      // 追加策略：
+      // - next 已在队列 → 不追加（避免重复）；
+      // - next 不在队列 → 追加到队尾。
+      // 播放位置：始终 = 当前 index + 1（顺序推进），不做任何跳转。
       final baseQueue = isFirst ? <SongEntity>[] : queue.value;
-      final currentIndexInBase = track.id.isEmpty
-          ? -1
-          : baseQueue.indexWhere((s) => s.id == track.id);
+      final nextAlreadyInQueue = nextTrack != null &&
+          baseQueue.any((s) => s.id == nextTrack!.id);
       final List<SongEntity> newQueue;
       final int appendedIndex;
-      if (currentIndexInBase >= 0) {
-        // current 已在队列：保留原位，追加 next（若有）。
+      if (isFirst) {
+        // 首次：用返回的 current + next 建队列
         newQueue = [
-          ...baseQueue,
-          if (nextTrack != null && nextTrack.id != track.id) nextTrack,
-        ];
-        appendedIndex = currentIndexInBase;
-      } else {
-        // current 不在队列：追加 current + next。
-        newQueue = [
-          ...baseQueue,
           track,
           if (nextTrack != null && nextTrack.id != track.id) nextTrack,
         ];
-        appendedIndex = baseQueue.length;
+        appendedIndex = 0;
+      } else {
+        // 后续：只把 next 追加到队尾，播放队列顺序下一首
+        newQueue = [
+          ...baseQueue,
+          if (nextTrack != null &&
+              nextTrack.id != track.id &&
+              !nextAlreadyInQueue)
+            nextTrack,
+        ];
+        // 顺序推进：当前 index + 1（播完当前曲，切到下一首）。不依赖 current。
+        final nextIndex = currentIndex.value + 1;
+        appendedIndex = (nextIndex >= 0 && nextIndex < newQueue.length)
+            ? nextIndex
+            : currentIndex.value;
       }
 
       // 用 _applyLogicalQueue 统一更新所有状态，只触发一次 UI 重建
       _suppressIndexSync = false;
       _debugLog(
         'appendRoamAndPlay build: baseQueue=[${baseQueue.map((s) => s.id).join(',')}] '
-        'track=${track.id} currentIdxInBase=$currentIndexInBase '
-        'nextTrack=${nextTrack?.id} newQueue=[${newQueue.map((s) => s.id).join(',')}] '
-        'appendedIndex=$appendedIndex',
+        'track=${track.id} nextTrack=${nextTrack?.id} '
+        'newQueue=[${newQueue.map((s) => s.id).join(',')}] appendedIndex=$appendedIndex',
       );
       _applyLogicalQueue(newQueue, appendedIndex);
+
+      if (doActivate) {
+        // 立即暂停当前声音并同步 UI 到目标曲，随后异步加载新源，
+        // 避免旧歌继续播、封面/歌名延迟切换。
+        await _activateSongForIndex(appendedIndex);
+      }
 
       final allSources = await Future.wait(
         newQueue.map((s) => _sourceForSong(s)),
@@ -1044,6 +1061,8 @@ class PlayerService with WidgetsBindingObserver {
       unawaited(FeiNiuApiClient.instance.reportTrackPlay(track.id));
     } catch (e) {
       if (kDebugMode) debugPrint('PlayerService appendRoamAndPlay error: $e');
+      // 漫游获取下一曲失败：前端提示，避免用户误以为卡住
+      AppToast.showGlobal('获取下一曲失败', type: ToastType.error);
       if (!_player.playing) {
         try {
           await _player.seekToNext();
@@ -1068,25 +1087,12 @@ class PlayerService with WidgetsBindingObserver {
     _roamTransitionPending = false;
     if (playbackMode.value == PlaybackMode.shuffle) {
       // 随机模式下 seekToPrevious 在物理 LoopMode.one 下切不动，同 next()，
-      // 用 setAudioSources 重建定位到上一首。
+      // 用 setAudioSources 重建定位到上一首。立即暂停当前声音并切 UI。
       final list = queue.value;
       final idx = currentIndex.value;
       if (list.isNotEmpty && idx > 0) {
         _debugLog('previous(): shuffle reload index ${idx - 1}');
-        final wasPlaying = _player.playing;
-        final allSources = await Future.wait(
-          list.map((s) => _sourceForSong(s)),
-        );
-        await _player.setAudioSources(
-          allSources,
-          initialIndex: idx - 1,
-          initialPosition: Duration.zero,
-          preload: true,
-        );
-        await _player.setLoopMode(LoopMode.one);
-        if (wasPlaying && !_player.playing) {
-          await _player.play();
-        }
+        await _skipToIndexImmediate(idx - 1);
         return;
       }
     }
@@ -1998,6 +2004,9 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   Future<void> _autoExtendQueue() async {
+    // 随机模式由 _appendRoamAndPlay 独占扩展，queueExtender 追加会让两套
+    // 逻辑并发重复追加，双保险拦截。
+    if (playbackMode.value == PlaybackMode.shuffle) return;
     if (_isExtendingQueue) return;
     final extender = queueExtender;
     if (extender == null) return;
@@ -2105,6 +2114,127 @@ class PlayerService with WidgetsBindingObserver {
     _maybeProbeSong(songs[safeIndex]);
     _hydrateAndSetCurrentSong(songs[safeIndex]);
     _emitSnapshot(force: true);
+  }
+
+  /// 歌曲激活：更新当前歌曲 UI 状态（封面/歌名/进度）、统计上报、预热与预缓存。
+  /// 由 _indexSub（真实切歌/重建）或 _activateSongForIndex（手动重建）调用。
+  void _activateSong(int idx) {
+    currentIndex.value = idx;
+    _prefetchTriggeredIndex = -1;
+    final list = queue.value;
+    if (idx >= 0 && idx < list.length) {
+      final song = list[idx];
+      final previousSongId = currentSong.value?.id;
+      final songChanged = previousSongId != song.id;
+      currentSong.value = song;
+      StreamCacheService.instance.currentSongId = song.id;
+      if (songChanged) {
+        final restoredPosition = _restoreSessionForSong(song)?.position;
+        position.value = restoredPosition ?? Duration.zero;
+        bufferedPosition.value = Duration.zero;
+        duration.value = song.durationMs != null
+            ? Duration(milliseconds: song.durationMs!)
+            : null;
+      }
+      _maybeProbeSong(song);
+      _scheduleDeferredProbe(song);
+      _hydrateAndSetCurrentSong(song);
+      if (songChanged) {
+        unawaited(FeiNiuApiClient.instance.reportTrackPlay(song.id));
+      }
+      _warmupPlaybackSources(song, nextSong: _nextSongForIndex(list, idx));
+      if (songChanged && StreamCacheService.instance.isEnabled) {
+        unawaited(_precacheNextChained(song, list, idx));
+      }
+      if (songChanged && song.coverId != null && song.coverId!.isNotEmpty) {
+        unawaited(
+          precacheImage(
+            CachedNetworkImageProvider(
+              FeiNiuApiClient.instance.coverUrl(
+                song.coverId!,
+                size: 800,
+                updatedAt: song.updatedAt,
+              ),
+              headers: FeiNiuApiClient.imageAuthHeaders(),
+            ),
+            WidgetsBinding.instance.rootElement!,
+          ),
+        );
+      }
+    } else {
+      position.value = Duration.zero;
+      bufferedPosition.value = Duration.zero;
+      duration.value = null;
+    }
+    _emitSnapshot(force: true);
+  }
+
+  /// 立即切换 UI 到 [targetIndex] 处的歌曲，并立即停止当前音频，
+  /// 随后再异步加载新源。用于解决切歌时（尤其随机/漫游模式下需先解析
+  /// 网络源）UI 仍停留在旧歌、旧歌继续出声的问题。
+  Future<void> _activateSongForIndex(int targetIndex) async {
+    final list = queue.value;
+    if (list.isEmpty) {
+      await stopAndClear();
+      return;
+    }
+    final safeIndex = targetIndex.clamp(0, list.length - 1);
+    // 立即停掉当前声音（避免构建新源期间旧歌继续播放）
+    try {
+      if (_player.playing) {
+        await _player.pause();
+      }
+    } catch (_) {}
+    // 立即把封面/歌名/进度切到目标曲。切歌场景统一从零进度开始，
+    // 显式归零以覆盖 _applyLogicalQueue 已先把 currentSong 设为目标曲、
+    // 导致 _activateSong 内 songChanged 判定为 false 的情况。
+    position.value = Duration.zero;
+    bufferedPosition.value = Duration.zero;
+    duration.value = list[safeIndex].durationMs != null
+        ? Duration(milliseconds: list[safeIndex].durationMs!)
+        : null;
+    _activateSong(safeIndex);
+  }
+
+  /// 跳转到队列中 [targetIndex] 处的歌曲并立即播放（用于随机模式下
+  /// 「队列里已有下一首」的切歌）。立即暂停当前声音、同步 UI，再用
+  /// setAudioSources 重建播放管线定位到目标曲，避免旧歌继续出声。
+  Future<void> _skipToIndexImmediate(int targetIndex) async {
+    final list = queue.value;
+    if (list.isEmpty) {
+      await stopAndClear();
+      return;
+    }
+    final safeIndex = targetIndex.clamp(0, list.length - 1);
+    // 在暂停前捕获播放状态，重建后据此决定是否恢复播放
+    final wasPlaying = _player.playing;
+    // 立即暂停当前声音并切 UI 到目标曲
+    await _activateSongForIndex(safeIndex);
+    try {
+      final allSources = await Future.wait(
+        list.map((s) => _sourceForSong(s)),
+      );
+      await _player.setAudioSources(
+        allSources,
+        initialIndex: safeIndex,
+        initialPosition: Duration.zero,
+        preload: true,
+      );
+      await _player.setLoopMode(LoopMode.one);
+      if (wasPlaying && !_player.playing) {
+        await _player.play();
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('PlayerService skipToIndexImmediate failed: $e');
+      }
+      // 重建失败：仍尝试恢复播放当前曲目，避免静音卡住
+      if (wasPlaying && !_player.playing) {
+        try {
+          await _player.play();
+        } catch (_) {}
+      }
+    }
   }
 
   Future<_PlaybackSourceQueue> _buildPlaybackSourceQueue(

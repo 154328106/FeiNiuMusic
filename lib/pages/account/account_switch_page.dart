@@ -316,7 +316,7 @@ class _AccountSwitchPageState extends State<AccountSwitchPage> {
 
   /// 跳转到登录页编辑账号
   void _editAccount(BuildContext context, AccountEntry account) {
-    Navigator.of(context, rootNavigator: true).push(
+    Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => LoginPage(editAccount: account),
       ),
@@ -331,8 +331,8 @@ class _AccountSwitchPageState extends State<AccountSwitchPage> {
       final ok = await AccountStore.instance.switchTo(id);
       if (!context.mounted) return;
       if (ok) {
-        // 切换成功：关闭账号切换页，回到主界面
-        Navigator.of(context, rootNavigator: true).pop();
+        // 切换成功：关闭账号切换页，回到设置页
+        Navigator.of(context).pop();
       } else {
         // 无 token 且无密码可自动登录：激活后门控会回退到登录页
         AppToast.show(
@@ -383,7 +383,6 @@ class _AccountSwitchPageState extends State<AccountSwitchPage> {
   void _addNewAccount() {
     Navigator.of(
       context,
-      rootNavigator: true,
     ).push(MaterialPageRoute(builder: (_) => const LoginPage(isAddMode: true)));
   }
 
@@ -402,9 +401,11 @@ class _AccountSwitchPageState extends State<AccountSwitchPage> {
       await PlayerService.instance.stopAndClear();
     } catch (_) {}
     await AuthService.instance.logout();
-    // 本页挂在 root 导航器上，门控切回登录页不会关闭它，需显式 pop
+    // 退出后 isLoggedIn 变化，门控自动把主外壳切回登录页。
+    // 若本页挂在外壳的嵌套导航器上（随外壳一并卸载），无需手动 pop；
+    // 若本页仍存活，则关闭它以免残留。
     if (context.mounted) {
-      Navigator.of(context, rootNavigator: true).pop();
+      Navigator.of(context).maybePop();
     }
   }
 }

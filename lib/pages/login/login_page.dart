@@ -294,7 +294,9 @@ class _LoginPageState extends State<LoginPage> {
     if (!mounted) return;
 
     // 添加新账号 / 编辑账号模式：返回上一页（账号切换页），外壳由
-    // currentAccountId 变化自动重建，无需手动跳转。
+    // currentAccountId 变化自动重建，无需手动跳转。登录后 currentAccountId
+    // 已改变，外壳可能已重建——但账号切换页若挂在嵌套导航器上则随外壳一并
+    // 重建（新栈里它仍是顶部路由），此时直接关掉登录页即可露出账号切换页。
     if (widget.isAddMode || widget.editAccount != null) {
       Navigator.of(context).pop();
       return;

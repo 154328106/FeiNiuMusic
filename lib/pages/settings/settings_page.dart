@@ -45,6 +45,21 @@ class _SettingsPageState extends State<SettingsPage> {
             padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
             children: [
               AppSettingSection(
+                title: '账号',
+                children: [
+                  AppSettingTile(
+                    title: '账号管理',
+                    subtitle: '切换、重命名或添加已保存的账号',
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => Navigator.pushNamed(
+                      context,
+                      AppRoutes.accounts,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              AppSettingSection(
                 title: '外观',
                 children: [
                   AppSettingTile(
@@ -155,15 +170,6 @@ class _SettingsPageState extends State<SettingsPage> {
               AppSettingSection(
                 title: '应用',
                 children: [
-                  AppSettingTile(
-                    title: '账号管理',
-                    subtitle: '切换、重命名或添加已保存的账号',
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => Navigator.of(
-                      context,
-                      rootNavigator: true,
-                    ).pushNamed(AppRoutes.accounts),
-                  ),
                   AppSettingTile(
                     title: '版本信息',
                     subtitle: '版本号、检查更新与调试日志',

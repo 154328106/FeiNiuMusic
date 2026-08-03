@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/router/app_router.dart';
-import '../../app/services/app_update_service.dart';
+import '../../app/services/feiniu/account_store.dart';
 import '../account/account_header_card.dart';
 import 'base/app_page_scaffold.dart';
 
@@ -136,7 +136,6 @@ class SideMenu extends StatelessWidget {
                   ],
                 ),
               ),
-              _buildVersionFooter(context),
             ],
           ),
         ),
@@ -145,90 +144,111 @@ class SideMenu extends StatelessWidget {
   }
 
   // ── 顶部头部 ──────────────────────────────────────────────
+  // 服务器信息：第一行服务器名称（备注名，无备注则「飞牛音乐」），
+  // 第二行 FNID 或服务器地址（FNID 只显示 id，否则显示主机名）。
+  // 点击进入账号切换页。无当前账号时退回纯 logo + 应用名。
 
   Widget _buildHeader(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Semantics(
-      button: true,
-      label: '返回首页',
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () => _navigateAndClose(context, AppRoutes.home),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
-          child: Row(
-            children: [
-              Container(
-                width: 46,
-                height: 46,
-                clipBehavior: Clip.antiAlias,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(
-                      color: scheme.primary.withValues(alpha: 0.22),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
+    return ValueListenableBuilder<String?>(
+      valueListenable: AccountStore.instance.currentAccountId,
+      builder: (context, accountId, _) {
+        final account = AccountStore.instance.currentAccount;
+        final hasAccount = account != null;
+        return Semantics(
+          button: true,
+          label: hasAccount ? '切换账号' : '返回首页',
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: () => hasAccount
+                ? _pushAndClose(context, AppRoutes.accounts)
+                : _navigateAndClose(context, AppRoutes.home),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 46,
+                    height: 46,
+                    clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: [
+                        BoxShadow(
+                          color: scheme.primary.withValues(alpha: 0.22),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                child: Image.asset('assets/icon/app_icon.png', fit: BoxFit.cover),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      '飞牛音乐',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.2,
-                        color: scheme.onSurface,
-                      ),
+                    child: Image.asset(
+                      'assets/icon/app_icon.png',
+                      fit: BoxFit.cover,
                     ),
-                    const SizedBox(height: 1),
-                    Text(
-                      '第三方客户端',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
-                      ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: hasAccount
+                          ? [
+                              Text(
+                                account.displayName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.2,
+                                  color: scheme.onSurface,
+                                ),
+                              ),
+                              const SizedBox(height: 1),
+                              Tooltip(
+                                message: account.serverUrl,
+                                child: Text(
+                                  account.serverLabel,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: scheme.onSurfaceVariant.withValues(
+                                      alpha: 0.8,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ]
+                          : [
+                              Text(
+                                '飞牛音乐',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.2,
+                                  color: scheme.onSurface,
+                                ),
+                              ),
+                              const SizedBox(height: 1),
+                              Text(
+                                '第三方客户端',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: scheme.onSurfaceVariant.withValues(
+                                    alpha: 0.8,
+                                  ),
+                                ),
+                              ),
+                            ],
                     ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ── 底部版本号 ──────────────────────────────────────────────
-
-  Widget _buildVersionFooter(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return FutureBuilder<String>(
-      future: AppUpdateService.instance.currentVersion(),
-      builder: (context, snapshot) {
-        final version = snapshot.data ?? '0.0.0';
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
-          child: Center(
-            child: Text(
-              '飞牛音乐 v$version',
-              style: TextStyle(
-                fontSize: 11,
-                letterSpacing: 0.3,
-                color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
+                  ),
+                ],
               ),
             ),
           ),
@@ -330,7 +350,7 @@ class _GroupCard extends StatelessWidget {
                 Text(
                   title,
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: 12,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 0.5,
                     color: accent.withValues(alpha: 0.9),
@@ -368,18 +388,18 @@ class _MenuItem extends StatelessWidget {
         hoverColor: scheme.primary.withValues(alpha: 0.05),
         highlightColor: scheme.primary.withValues(alpha: 0.05),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           child: Row(
             children: [
               Container(
-                width: 32,
-                height: 32,
+                width: 36,
+                height: 36,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: scheme.primary.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(11),
                 ),
-                child: Icon(icon, size: 17, color: scheme.primary),
+                child: Icon(icon, size: 20, color: scheme.primary),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -388,7 +408,7 @@ class _MenuItem extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 13.5,
+                    fontSize: 15.5,
                     fontWeight: FontWeight.w600,
                     color: scheme.onSurface,
                   ),
@@ -396,7 +416,7 @@ class _MenuItem extends StatelessWidget {
               ),
               Icon(
                 Icons.chevron_right_rounded,
-                size: 16,
+                size: 19,
                 color: scheme.onSurfaceVariant.withValues(alpha: 0.4),
               ),
             ],
