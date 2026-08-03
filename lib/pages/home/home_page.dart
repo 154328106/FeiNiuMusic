@@ -12,6 +12,7 @@ import '../../app/services/feiniu/api_models.dart';
 import '../../app/services/feiniu/auth_service.dart';
 import '../../app/services/feiniu/track_service.dart';
 import '../../app/services/player_service.dart';
+import '../../app/state/settings_state.dart';
 import '../../app/state/song_state.dart';
 import '../../app/utils/api_cache_manager.dart';
 import '../../components/index.dart';
@@ -75,6 +76,13 @@ class _HomeCacheData {
   );
 }
 
+/// 首页播放数据源：决定点播放时按队列上限请求哪个 API 填充完整队列。
+enum _HomePlaySource {
+  favorites,
+  recentHistory,
+  recentTracks,
+}
+
 /// 飞牛首页 — 云端音乐仪表板
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -107,45 +115,48 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
     _loadAll();
   }
 
-  Future<void> _loadAll() async {
+  Future<void> _loadAll({bool forceRefresh = false}) async {
     const homeCacheScope = 'home';
     const homeCacheKey = 'dashboard';
 
-    // 先尝试加载缓存
-    final cachedJson = await ApiCacheManager.instance.getPersisted(
-      homeCacheScope,
-      homeCacheKey,
-    );
-    if (cachedJson != null && mounted) {
-      try {
-        final cached = _HomeCacheData.fromJson(
-          jsonDecode(cachedJson) as Map<String, dynamic>,
-        );
-        if (!mounted) return;
-        if (cached.favorites != null) {
-          _favoriteSongs.value = cached.favorites!;
+    // 缓存永久保留（读取 ignoreTtl，TTL 不淘汰），但只用于快速渲染：
+    // 命中后立即展示，同时继续在后台异步刷新数据，完成后覆盖缓存。
+    if (!forceRefresh) {
+      final cachedJson = await ApiCacheManager.instance.getPersisted(
+        homeCacheScope,
+        homeCacheKey,
+      );
+      if (cachedJson != null && mounted) {
+        try {
+          final cached = _HomeCacheData.fromJson(
+            jsonDecode(cachedJson) as Map<String, dynamic>,
+          );
+          if (!mounted) return;
+          if (cached.favorites != null) {
+            _favoriteSongs.value = cached.favorites!;
+          }
+          if (cached.recentSongs != null) {
+            _recentSongs.value = cached.recentSongs!;
+          }
+          if (cached.recentAlbums != null) {
+            _recentAlbums.value = cached.recentAlbums!;
+          }
+          if (cached.playlists != null) {
+            _playlists.value = cached.playlists!;
+          }
+          if (cached.recentTracks != null) {
+            _recentTracks.value = cached.recentTracks!;
+          }
+          _loading.value = false;
+          _preloadHomeCovers();
+        } catch (e, stack) {
+          // 缓存解析失败则忽略，但记录到调试日志便于排查
+          debugPrint('[HomePage] cache parse error: $e\n$stack');
         }
-        if (cached.recentSongs != null) {
-          _recentSongs.value = cached.recentSongs!;
-        }
-        if (cached.recentAlbums != null) {
-          _recentAlbums.value = cached.recentAlbums!;
-        }
-        if (cached.playlists != null) {
-          _playlists.value = cached.playlists!;
-        }
-        if (cached.recentTracks != null) {
-          _recentTracks.value = cached.recentTracks!;
-        }
-        _loading.value = false;
-        _preloadHomeCovers();
-      } catch (e, stack) {
-        // 缓存解析失败则忽略，但记录到调试日志便于排查
-        debugPrint('[HomePage] cache parse error: $e\n$stack');
       }
     }
 
-    // 后台异步拉取最新数据
+    // 后台异步刷新最新数据（缓存渲染后继续执行），完成后写回缓存
     _isRefreshing.value = !_loading.value; // 非首次加载才显示右上角转圈
     await Future.wait([
       _loadRoam(),
@@ -167,7 +178,7 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
         'playlists=${_playlists.value.length} '
         'tracks=${_recentTracks.value.length}',
       );
-      // 写缓存
+      // 写回缓存（永久保留，下次启动仍用于渲染）
       try {
         final data = _HomeCacheData(
           favorites: _favoriteSongs.value,
@@ -180,7 +191,6 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
           scope: homeCacheScope,
           key: homeCacheKey,
           jsonData: jsonEncode(data.toJson()),
-          ttlMs: 300000,
         );
       } catch (e, stack) {
         debugPrint('[HomePage] cache write error: $e\n$stack');
@@ -304,6 +314,7 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
 
   Future<void> _loadFavorites() async {
     try {
+      // 首页只展示前几首，轻量加载 10 首；点播放时再按队列上限拉完整列表
       final pageData = await _api.getFavoriteList(size: 10);
       final songs = pageData.list
           .map((t) => _trackService.trackToSongEntity(t.toJson()))
@@ -362,12 +373,6 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
     } catch (e, stack) {
       debugPrint('[HomePage] recent tracks error: $e\n$stack');
     }
-  }
-
-  void _playSong(SongEntity song, [List<SongEntity>? queue]) {
-    final q = queue ?? [song];
-    final idx = q.indexWhere((s) => s.id == song.id);
-    _player.playQueue(q, idx >= 0 ? idx : 0);
   }
 
   /// 长按歌曲 → 弹出与歌曲页同款的长按面板
@@ -503,12 +508,76 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
   }
 
   /// 直接播放一个列表（收藏/最近播放）。列表为空时退回漫游随机播放。
-  void _playFromList(List<SongEntity> songs) {
+  ///
+  /// [source] 指定首页数据源：列表只是 10 首预览，播放时按队列上限
+  /// 请求完整列表填充队列，而不是只播预览的 10 首。
+  void _playFromList(List<SongEntity> songs, _HomePlaySource source) {
     if (songs.isEmpty) {
       _playRoam();
       return;
     }
-    unawaited(_player.playQueue(songs, 0));
+    unawaited(_playListWithFullFetch(songs, source, playIndex: 0));
+  }
+
+  /// 从首页歌曲行播放：队列用完整列表（若已拉过完整列表则直接复用）。
+  void _playHomeSong(SongEntity song, List<SongEntity> preview) {
+    unawaited(
+      _playListWithFullFetch(preview, _HomePlaySource.recentTracks, song: song),
+    );
+  }
+
+  /// 按队列长度上限请求完整列表填充队列后播放。
+  ///
+  /// 首页只展示前 10 首（轻量加载），点播放时才拉完整列表做队列：
+  /// - [source] 决定走哪个 API（收藏/最近/最新歌曲）
+  /// - 已有完整列表缓存（[fullCache]）时直接复用，避免重复请求
+  Future<void> _playListWithFullFetch(
+    List<SongEntity> preview,
+    _HomePlaySource source, {
+    SongEntity? song,
+    int playIndex = 0,
+    List<SongEntity>? fullCache,
+  }) async {
+    var queue = fullCache ?? preview;
+    if (fullCache == null) {
+      try {
+        final limit = AppPlaybackQueueSettings.maxQueueLength.value;
+        final full = await _fetchFullSource(source, limit);
+        if (full.isNotEmpty) queue = full;
+      } catch (e) {
+        debugPrint('[HomePage] fetch full queue error: $e');
+      }
+    }
+    if (!mounted) return;
+    if (song != null) {
+      final idx = queue.indexWhere((s) => s.id == song.id);
+      _player.playQueue(queue, idx >= 0 ? idx : 0);
+    } else {
+      final idx = playIndex.clamp(0, queue.length - 1);
+      _player.playQueue(queue, idx);
+    }
+  }
+
+  /// 请求某一数据源的完整列表（按队列上限）。
+  Future<List<SongEntity>> _fetchFullSource(
+    _HomePlaySource source,
+    int limit,
+  ) async {
+    final tracks = switch (source) {
+      _HomePlaySource.favorites => await _api.getFavoriteList(size: limit),
+      _HomePlaySource.recentHistory => await _api.getPlayHistory(
+        page: 1,
+        size: limit,
+      ),
+      _HomePlaySource.recentTracks => await _api.getTrackList(
+        page: 1,
+        size: limit,
+        sort: 'createdAt,desc',
+      ),
+    };
+    return tracks.list
+        .map((t) => _trackService.trackToSongEntity(t.toJson()))
+        .toList();
   }
 
   @override
@@ -547,7 +616,7 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
             }
             final heroSong = _heroSong;
             return RefreshIndicator(
-              onRefresh: _loadAll,
+              onRefresh: () => _loadAll(forceRefresh: true),
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 160),
                 children: [
@@ -602,7 +671,8 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
                         subtitle: '接着上次听',
                         accent: const Color(0xFF14B8A6),
                         onTap: _openRecentPage,
-                        onPlay: () => _playFromList(_recentSongs.value),
+                        onPlay: () =>
+                            _playFromList(_recentSongs.value, _HomePlaySource.recentHistory),
                       ),
                       HomeQuickAction(
                         icon: Icons.favorite_rounded,
@@ -610,7 +680,8 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
                         subtitle: '我的最爱',
                         accent: const Color(0xFFEC4899),
                         onTap: _openFavoritePage,
-                        onPlay: () => _playFromList(_favoriteSongs.value),
+                        onPlay: () =>
+                            _playFromList(_favoriteSongs.value, _HomePlaySource.favorites),
                       ),
                     ],
                   ),
@@ -650,7 +721,7 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
                     ),
                     _CompactSongList(
                       songs: _recentTracks.value,
-                      onTap: (song) => _playSong(song, _recentTracks.value),
+                      onTap: (song) => _playHomeSong(song, _recentTracks.value),
                       onLongPress: _showSongDetail,
                     ),
                     const SizedBox(height: 16),
