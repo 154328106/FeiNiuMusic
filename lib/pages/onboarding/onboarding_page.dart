@@ -564,14 +564,9 @@ class _PlayerAppearancePage extends StatelessWidget {
           builder: (context, preset, _) => _PlayerStyleSelector(
             selected: preset,
             onChanged: (value) {
+              // 仅切换样式，不触碰「圆形封面」设置：海报模式下该开关被隐藏，
+              // 切回默认时保留切换前的圆形/方形状态。
               PlayerStyleSettings.setStylePreset(value);
-              // 镜像设置页互斥逻辑：海报=整幅大封面，与圆形封面互斥
-              if (value == PlayerStylePreset.poster) {
-                PlayerBackgroundSettings.setRoundCover(false);
-              } else {
-                PlayerBackgroundSettings.setRoundCover(true);
-                PlayerBackgroundSettings.setRotateCover(true);
-              }
             },
           ),
         ),
