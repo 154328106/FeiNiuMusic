@@ -42,7 +42,7 @@ class TabletShellState extends State<TabletShell> {
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
-    final drawerWidth = (width * 0.32).clamp(200.0, 260.0);
+    final drawerWidth = (width * 0.32).clamp(200.0, 300.0);
     return Row(
       children: [
         SizedBox(

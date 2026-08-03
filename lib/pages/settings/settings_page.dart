@@ -1,12 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../app/router/app_router.dart';
-import '../../app/services/feiniu/auth_service.dart';
-import '../../app/services/player_service.dart';
 import '../../app/state/settings_state.dart';
 import '../../components/index.dart';
 import '../player/widgets/player_background.dart';
-import '../login/login_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -165,38 +162,13 @@ class _SettingsPageState extends State<SettingsPage> {
                         Navigator.pushNamed(context, AppRoutes.versionInfo),
                   ),
                   AppSettingTile(
-                    title: '退出登录',
-                    subtitle: '退出当前账号并返回登录页',
+                    title: '账号管理',
+                    subtitle: '切换、重命名或添加已保存的账号',
                     trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () async {
-                      final confirmed = await showDialog<bool>(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          title: const Text('退出登录'),
-                          content: const Text('确定退出当前账号吗？'),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(ctx, false),
-                              child: const Text('取消'),
-                            ),
-                            FilledButton(
-                              onPressed: () => Navigator.pop(ctx, true),
-                              child: const Text('确定'),
-                            ),
-                          ],
-                        ),
-                      );
-                      if (confirmed == true) {
-                        // 退出登录前先停止音乐播放
-                        await PlayerService.instance.stopAndClear();
-                        await AuthService.instance.logout();
-                        if (!context.mounted) return;
-                        Navigator.of(context).pushAndRemoveUntil(
-                          MaterialPageRoute(builder: (_) => const LoginPage()),
-                          (route) => false,
-                        );
-                      }
-                    },
+                    onTap: () => Navigator.of(
+                      context,
+                      rootNavigator: true,
+                    ).pushNamed(AppRoutes.accounts),
                   ),
                 ],
               ),

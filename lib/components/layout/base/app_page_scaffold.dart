@@ -63,11 +63,6 @@ class AppPageScaffoldState extends State<AppPageScaffold>
   );
   bool _draggingDrawer = false;
 
-  /// True while the drawer is mid-slide; the mini player's backdrop blur is
-  /// paused then so the moving page doesn't force an expensive re-blur on
-  /// every animation frame.
-  final ValueNotifier<bool> _drawerAnimating = ValueNotifier(false);
-
   /// 抽屉当前是否处于展开态（>0 视为展开）。驱动 PopScope 的 canPop，
   /// 只在开/关边界变化，不随动画每帧重建。
   bool _drawerOpen = false;
@@ -121,7 +116,6 @@ class AppPageScaffoldState extends State<AppPageScaffold>
 
   @override
   void dispose() {
-    _drawerAnimating.dispose();
     _drawerController.dispose();
     super.dispose();
   }
@@ -153,7 +147,6 @@ class AppPageScaffoldState extends State<AppPageScaffold>
             padding: hasBottomNav
                 ? const EdgeInsets.fromLTRB(16, 4, 16, 0)
                 : const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            blurPaused: _drawerAnimating,
           )
         : null;
 
@@ -173,7 +166,7 @@ class AppPageScaffoldState extends State<AppPageScaffold>
 
     final drawerWidth = (MediaQuery.sizeOf(context).width * 0.56).clamp(
       200.0,
-      260.0,
+      300.0,
     );
 
     return ValueListenableBuilder<bool>(
@@ -224,7 +217,6 @@ class AppPageScaffoldState extends State<AppPageScaffold>
           );
         }
         final stack = AppBackground(
-          blurPaused: _drawerAnimating,
           child: Stack(
             clipBehavior: Clip.none,
             children: [
@@ -288,10 +280,6 @@ class AppPageScaffoldState extends State<AppPageScaffold>
                   animation: _drawerController,
                   builder: (context, child) {
                     final value = _drawerController.value;
-                    final animating = value > 0.0 && value < 1.0;
-                    if (animating != _drawerAnimating.value) {
-                      _drawerAnimating.value = animating;
-                    }
                     // 用 Transform.translate 移动 mini player 而非 Positioned.left：
                     // Positioned.left 每帧变化会触发整个 Stack 重新 layout（真实重排 +
                     // 重绘），Transform 只是合成图层平移，配合 RepaintBoundary 缓存

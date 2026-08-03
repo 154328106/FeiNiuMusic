@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../pages/home/home_page.dart';
 import '../../pages/login/login_page.dart';
+import '../../pages/account/account_switch_page.dart';
 import '../../pages/songs/songs_page.dart';
 import '../../pages/home/recent_playback_page.dart';
 import '../../pages/home/favorite_page.dart';
@@ -33,6 +34,7 @@ import '../../components/layout/modern_navigation_bar.dart';
 
 class AppRoutes {
   static const login = '/login';
+  static const accounts = '/accounts';
   static const home = '/home';
   static const songs = '/songs';
   static const player = '/player';
@@ -69,6 +71,7 @@ class AppRouter {
 
   static Map<String, WidgetBuilder> get routes => {
     AppRoutes.login: (_) => const LoginPage(),
+    AppRoutes.accounts: (_) => const AccountSwitchPage(),
     AppRoutes.home: (_) => const _PrimaryNavigationShell(),
     AppRoutes.songs: (_) => const SongsPage(),
     AppRoutes.player: (_) => const PlayerPage(),

@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../app/services/feiniu/access_code_service.dart';
+import '../../app/services/feiniu/account_entry.dart';
+import '../../app/services/feiniu/account_store.dart';
+import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/feiniu/auth_service.dart';
 import '../../app/services/feiniu/fn_connection_probe_service.dart';
 import '../../app/services/feiniu/fn_models.dart';
@@ -12,7 +15,15 @@ import '../../components/feedback/probe_overlay.dart';
 import '../../components/dialog/access_code_dialog.dart';
 
 class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
+  /// 是否为「添加新账号」模式：从账号切换页进入，登录成功后返回上一页
+  /// （外壳由 currentAccountId 变化自动重建），并跳过账号凭据自动填充。
+  final bool isAddMode;
+
+  /// 是否为「编辑账号」模式：传入待编辑的账号，登录成功后写回该账号
+  /// （保留原 id 与备注），而非新增/去重。
+  final AccountEntry? editAccount;
+
+  const LoginPage({super.key, this.isAddMode = false, this.editAccount});
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -22,9 +33,13 @@ class _LoginPageState extends State<LoginPage> {
   final _serverUrlController = TextEditingController();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _nameController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _obscurePassword = true;
   String? _errorMessage;
+
+  /// 已保存账号下拉当前选中值（填充表单后复位，避免误以为仍是选中状态）
+  String? _selectedAccountId;
 
   OverlayEntry? _probeOverlay;
 
@@ -35,6 +50,19 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void initState() {
     super.initState();
+    // 编辑账号模式：预填该账号的字段
+    if (widget.editAccount != null) {
+      final acc = widget.editAccount!;
+      _serverUrlController.text = acc.fnId?.isNotEmpty == true
+          ? acc.fnId!
+          : acc.serverUrl;
+      _usernameController.text = acc.username;
+      _passwordController.text = acc.password ?? '';
+      _nameController.text = acc.name;
+      return;
+    }
+    // 添加新账号模式：不自动填充上一个账号的凭据
+    if (widget.isAddMode) return;
     // 加载上次保存的凭据
     SharedPreferences.getInstance().then((prefs) {
       final savedUrl = prefs.getString(_prefsServerUrl) ?? '';
@@ -110,6 +138,7 @@ class _LoginPageState extends State<LoginPage> {
     _serverUrlController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
+    _nameController.dispose();
     super.dispose();
   }
 
@@ -134,17 +163,23 @@ class _LoginPageState extends State<LoginPage> {
     final serverUrlInput = _serverUrlController.text.trim();
     final username = _usernameController.text.trim();
     final password = _passwordController.text;
+    final name = _nameController.text.trim();
 
     // 检测是否为 FNID
     if (_isFnId(serverUrlInput)) {
-      await _fnLogin(serverUrlInput, username, password);
+      await _fnLogin(serverUrlInput, username, password, name: name);
     } else {
-      await _performLogin(serverUrlInput, username, password);
+      await _performLogin(serverUrlInput, username, password, name: name);
     }
   }
 
   /// FNID 登录流程：探测 → 连接 → 安全码 → 认证
-  Future<void> _fnLogin(String fnId, String username, String password) async {
+  Future<void> _fnLogin(
+    String fnId,
+    String username,
+    String password, {
+    String name = '',
+  }) async {
     try {
       final cache = AppFnConnectionSettings.cachedConnection;
 
@@ -189,6 +224,8 @@ class _LoginPageState extends State<LoginPage> {
         username,
         password,
         relayMode: result.isRelay,
+        fnId: fnId,
+        name: name,
       );
     } catch (e) {
       if (!mounted) return;
@@ -207,6 +244,8 @@ class _LoginPageState extends State<LoginPage> {
     String username,
     String password, {
     bool relayMode = false,
+    String? fnId,
+    String name = '',
   }) async {
     try {
       // 安全码检查（仅未存过才询问）：域名/IP 直连与 FNID 登录共用
@@ -229,15 +268,51 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
+    // 登录成功：捕获账号入列表（含 token/服务器地址/中继/安全码/FNID/备注）
+    if (widget.editAccount != null) {
+      // 编辑账号：写回原账号（保留 id 与自定义备注），而非新增
+      await AccountStore.instance.persistLoginForEdit(
+        id: widget.editAccount!.id,
+        serverUrl: FeiNiuApiClient.instance.baseUrl,
+        username: AuthService.instance.username.value ?? username,
+        password: password,
+        relayMode: relayMode,
+        fnId: fnId,
+        name: name,
+      );
+    } else {
+      await AccountStore.instance.persistLogin(
+        serverUrl: FeiNiuApiClient.instance.baseUrl,
+        username: AuthService.instance.username.value ?? username,
+        password: password,
+        relayMode: relayMode,
+        fnId: fnId,
+        name: name,
+      );
+    }
+
     if (!mounted) return;
 
-    // 登录成功，保存凭据
+    // 添加新账号 / 编辑账号模式：返回上一页（账号切换页），外壳由
+    // currentAccountId 变化自动重建，无需手动跳转。
+    if (widget.isAddMode || widget.editAccount != null) {
+      Navigator.of(context).pop();
+      return;
+    }
+
+    // 保存凭据，供下次登录页自动填充
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefsServerUrl, serverUrl);
     await prefs.setString(_prefsUsername, username);
 
     if (!mounted) return;
-    Navigator.of(context).pushReplacementNamed(AppRoutes.home);
+    // 用 root 导航器回退到登录门控（_AppStartupGate）：门控监听 isLoggedIn /
+    // currentAccountId，会自动切换到主外壳。不要用 pushReplacementNamed(home)
+    // 替换门控 —— 那会让切换账号时的外壳重建失效。
+    Navigator.of(
+      context,
+      rootNavigator: true,
+    ).popUntil((r) => r.isFirst);
   }
 
   /// 若本地尚未存过安全码，探测服务器是否需要并（需要时）弹窗询问。
@@ -273,6 +348,146 @@ class _LoginPageState extends State<LoginPage> {
   bool _canLogin() {
     return !AuthService.instance.isLoggingIn.value &&
         !FnConnectionProbeService.instance.isProbing.value;
+  }
+
+  /// 预填某个已保存账号的凭据到输入框，供直接登录
+  void _fillAccount(AccountEntry account) {
+    // FNID 账号预填 FNID（触发探测流程），否则预填服务器地址
+    _serverUrlController.text = account.fnId?.isNotEmpty == true
+        ? account.fnId!
+        : account.serverUrl;
+    _usernameController.text = account.username;
+    _passwordController.text = account.password ?? '';
+    _nameController.text = account.name;
+    setState(() => _errorMessage = null);
+  }
+
+  /// 已保存账号：下拉选择即填充表单（无账号时不渲染）
+  Widget _buildSavedAccounts(BuildContext context) {
+    return ValueListenableBuilder<List<AccountEntry>>(
+      valueListenable: AccountStore.instance.accounts,
+      builder: (context, accounts, _) {
+        if (accounts.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '已保存账号',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => _openAccountManagement(context),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('管理账号'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // 下拉选择账号 → 填充表单
+            // 用 showMenu 自定义定位：菜单固定从输入框正下方弹出，
+            // 不受系统 Dropdown 自动上/下定位影响（下方空间不足会弹到上方）。
+            Builder(
+              builder: (btnContext) {
+                final scheme = Theme.of(btnContext).colorScheme;
+                final selectedId = _selectedAccountId;
+                final selected = selectedId != null
+                    ? AccountStore.instance.byId(selectedId)
+                    : null;
+                return InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () async {
+                    final box = btnContext.findRenderObject() as RenderBox?;
+                    if (box == null) return;
+                    final overlay = Overlay.of(
+                      btnContext,
+                      rootOverlay: true,
+                    );
+                    final overlayBox =
+                        overlay.context.findRenderObject() as RenderBox?;
+                    if (overlayBox == null) return;
+                    // 菜单锚点：输入框左下角（含边框内边距）
+                    final topLeft = box.localToGlobal(
+                      Offset.zero,
+                      ancestor: overlayBox,
+                    );
+                    final position = RelativeRect.fromLTRB(
+                      topLeft.dx,
+                      topLeft.dy + box.size.height,
+                      overlayBox.size.width -
+                          topLeft.dx -
+                          box.size.width,
+                      overlayBox.size.height - topLeft.dy,
+                    );
+                    final picked = await showMenu<String>(
+                      context: btnContext,
+                      position: position,
+                      color: scheme.surfaceContainerHigh,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      elevation: 8,
+                      items: [
+                        for (final account in accounts)
+                          PopupMenuItem<String>(
+                            value: account.id,
+                            height: 52,
+                            child: _AccountDropdownItem(account: account),
+                          ),
+                      ],
+                    );
+                    if (picked == null || !mounted) return;
+                    final account = AccountStore.instance.byId(picked);
+                    if (account == null) return;
+                    _fillAccount(account);
+                    // 复位下拉，避免误以为仍是选中状态
+                    setState(() => _selectedAccountId = null);
+                  },
+                  child: InputDecorator(
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(Icons.account_circle_outlined),
+                      hintText: '选择已保存的账号',
+                      suffixIcon: const Icon(Icons.arrow_drop_down_rounded),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    isEmpty: selected == null,
+                    child: selected == null
+                        ? null
+                        : Text(
+                            selected.displayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+          ],
+        );
+      },
+    );
+  }
+
+  void _openAccountManagement(BuildContext context) {
+    Navigator.of(
+      context,
+      rootNavigator: true,
+    ).pushNamed(AppRoutes.accounts);
   }
 
   @override
@@ -332,7 +547,11 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 48),
+                  const SizedBox(height: 24),
+
+                  // 已保存账号（可一键切换 / 管理）；添加/编辑账号时隐藏，避免干扰
+                  if (!widget.isAddMode && widget.editAccount == null)
+                    _buildSavedAccounts(context),
 
                   // 服务器地址 / FNID
                   TextFormField(
@@ -419,6 +638,21 @@ class _LoginPageState extends State<LoginPage> {
                     },
                     onFieldSubmitted: (_) => _canLogin() ? _login() : null,
                   ),
+                  const SizedBox(height: 16),
+
+                  // 备注名称（可选，仅用于已保存账号列表的展示）
+                  TextFormField(
+                    controller: _nameController,
+                    decoration: InputDecoration(
+                      labelText: '备注名称（可选）',
+                      hintText: '如：客厅 NAS、公司服务器',
+                      prefixIcon: const Icon(Icons.badge_outlined),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    onFieldSubmitted: (_) => _canLogin() ? _login() : null,
+                  ),
                   const SizedBox(height: 8),
 
                   // 错误信息
@@ -465,6 +699,65 @@ class _LoginPageState extends State<LoginPage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 已保存账号下拉选项：头像字母 + 备注名 + 用户名 · 服务器
+class _AccountDropdownItem extends StatelessWidget {
+  final AccountEntry account;
+
+  const _AccountDropdownItem({required this.account});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        CircleAvatar(
+          radius: 15,
+          backgroundColor: scheme.primary.withValues(alpha: 0.12),
+          child: Text(
+            account.username.isNotEmpty
+                ? account.username.characters.first
+                : '?',
+            style: TextStyle(
+              color: scheme.primary,
+              fontWeight: FontWeight.w700,
+              fontSize: 14,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                account.displayName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 1),
+              Text(
+                '${account.username} · ${account.serverLabel}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: scheme.onSurfaceVariant.withValues(alpha: 0.85),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

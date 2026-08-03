@@ -7,6 +7,7 @@ import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../state/settings_fn_state.dart';
+import 'feiniu/account_store.dart';
 import 'feiniu/api_client.dart';
 import 'feiniu/auth_service.dart';
 import 'feiniu/fn_connection_probe_service.dart';
@@ -300,6 +301,8 @@ class FnAutoReconnectService with WidgetsBindingObserver {
     _pendingReconnect = false;
     _retryTimer?.cancel();
     _retryTimer = null;
+    // 把探测得到的连接信息回写当前账号，保持账号列表与连接一致
+    await AccountStore.instance.syncActiveAccountConnection();
   }
 
   /// 释放资源

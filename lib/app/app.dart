@@ -9,6 +9,7 @@ import '../pages/login/login_page.dart';
 import 'router/app_page_route.dart';
 import 'router/app_router.dart';
 import 'services/app_update_service.dart';
+import 'services/feiniu/account_store.dart';
 import 'services/feiniu/auth_service.dart';
 import 'state/settings_state.dart';
 import 'theme/app_styles.dart';
@@ -17,8 +18,6 @@ import 'utils/route_visibility.dart';
 
 class FeiNiuMusicApp extends StatelessWidget {
   static final GlobalKey<NavigatorState> rootNavigatorKey =
-      GlobalKey<NavigatorState>();
-  static final GlobalKey<NavigatorState> baseNavigatorKey =
       GlobalKey<NavigatorState>();
 
   const FeiNiuMusicApp({super.key});
@@ -168,7 +167,6 @@ class FeiNiuMusicApp extends StatelessWidget {
                           scrollBehavior: const AppScrollBehavior(),
                           navigatorObservers: [appRouteObserver],
                           home: _AppStartupGate(
-                            baseNavigatorKey: baseNavigatorKey,
                             onGenerateRoute: onGenerateRoute,
                           ),
                           onGenerateRoute: onGenerateRoute,
@@ -235,13 +233,9 @@ class FeiNiuMusicApp extends StatelessWidget {
 /// - 未登录 → LoginPage
 /// - 已登录 → 直接进主页面（后台探测在 main() 中异步执行，不阻塞首页渲染）
 class _AppStartupGate extends StatefulWidget {
-  final GlobalKey<NavigatorState> baseNavigatorKey;
   final Route<dynamic> Function(RouteSettings) onGenerateRoute;
 
-  const _AppStartupGate({
-    required this.baseNavigatorKey,
-    required this.onGenerateRoute,
-  });
+  const _AppStartupGate({required this.onGenerateRoute});
 
   @override
   State<_AppStartupGate> createState() => _AppStartupGateState();
@@ -264,13 +258,30 @@ class _AppStartupGateState extends State<_AppStartupGate> {
           _scheduledAutoCheck = true;
           _scheduleAutoCheckUpdate();
         }
-        return TabletLayoutHost(
-          navigatorKey: widget.baseNavigatorKey,
-          child: Navigator(
-            key: widget.baseNavigatorKey,
-            initialRoute: AppRouter.initialRoute,
-            onGenerateRoute: widget.onGenerateRoute,
-          ),
+        // 切换账号时 isLoggedIn 保持 true（门控不重建），但整个外壳需按当前
+        // 账号重建：给外壳换 key → 所有存活页面卸载重建 → initState 重跑 →
+        // 用新 token/服务器地址拉取数据；导航栈同时重置回首页。
+        // 注意：嵌套 Navigator 的 GlobalKey 必须随账号变化（GlobalObjectKey 值相等性）。
+        // 若沿用固定的 baseNavigatorKey，Flutter 会把旧 Navigator 连同整个页面树
+        // reparent 到新子树（GlobalKey 重挂），页面不会重挂载、数据不会刷新。
+        return ValueListenableBuilder<String?>(
+          valueListenable: AccountStore.instance.currentAccountId,
+          builder: (context, accountId, _) {
+            final navKey = GlobalObjectKey<NavigatorState>(
+              'base-nav-${accountId ?? 'none'}',
+            );
+            return KeyedSubtree(
+              key: ValueKey('shell-${accountId ?? 'none'}'),
+              child: TabletLayoutHost(
+                navigatorKey: navKey,
+                child: Navigator(
+                  key: navKey,
+                  initialRoute: AppRouter.initialRoute,
+                  onGenerateRoute: widget.onGenerateRoute,
+                ),
+              ),
+            );
+          },
         );
       },
     );

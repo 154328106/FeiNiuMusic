@@ -9,14 +9,7 @@ import '../../../app/state/settings_state.dart';
 class AppBackground extends StatefulWidget {
   final Widget child;
 
-  /// 为 true 时暂停背景图的高斯模糊（退回普通渲染）。
-  ///
-  /// 用于抽屉/侧边栏滑动期间：模糊层 + 页面平移的组合会让模糊背景每帧
-  /// 全屏重采样，是抽屉动画掉帧的主因。暂停模糊后抽屉动画只做纯合成变换，
-  /// 动画结束后恢复模糊。与 MiniPlayerBar 的 blurPaused 同一策略。
-  final ValueListenable<bool>? blurPaused;
-
-  const AppBackground({super.key, required this.child, this.blurPaused});
+  const AppBackground({super.key, required this.child});
 
   @override
   State<AppBackground> createState() => _AppBackgroundState();
@@ -48,7 +41,7 @@ class _AppBackgroundState extends State<AppBackground> {
     final colorScheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
 
-    Widget buildBackground({bool isPaused = false}) {
+    Widget buildBackground() {
       return AnimatedBuilder(
         animation: Listenable.merge([
           AppBackgroundSettings.backgroundImagePath,
@@ -74,7 +67,7 @@ class _AppBackgroundState extends State<AppBackground> {
             (MediaQuery.sizeOf(context).width *
                     MediaQuery.devicePixelRatioOf(context))
                 .round();
-        final resolvedBlur = isPaused ? 0.0 : blurSigma;
+        final resolvedBlur = blurSigma;
         return Container(
           color: baseColor,
           child: Stack(
@@ -126,15 +119,7 @@ class _AppBackgroundState extends State<AppBackground> {
       );
     }
 
-    final paused = widget.blurPaused;
-    if (paused == null) return buildBackground();
-    // 抽屉/侧边栏滑动期间暂停背景模糊，避免每帧全屏重采样导致掉帧
-    return ValueListenableBuilder<bool>(
-      valueListenable: paused,
-      builder: (context, isPaused, _) {
-        return buildBackground(isPaused: isPaused);
-      },
-    );
+    return buildBackground();
   }
 
   /// Soft top→bottom wash tinted by the current theme's primary color.

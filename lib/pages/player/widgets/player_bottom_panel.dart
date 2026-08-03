@@ -899,6 +899,10 @@ class _PlaylistSheetState extends State<_PlaylistSheet> {
     final textColor = _primaryTextColor(useDarkText);
     final secondaryTextColor = _secondaryTextColor(useDarkText, 0.7);
     final maskColor = scheme.surface;
+    // Theme / MediaQuery 在 Watch.builder 外捕获：signals 的 computed 在元素
+    // 卸载后仍可能重算 builder，此时在 builder 内访问继承组件会抛
+    // "Looking up a deactivated widget's ancestor"，被包装成 SignalEffectException。
+    final sheetHeight = MediaQuery.sizeOf(context).height * 0.8;
 
     return Watch.builder(
       builder: (context) {
@@ -922,7 +926,6 @@ class _PlaylistSheetState extends State<_PlaylistSheet> {
           });
         }
 
-        final sheetHeight = MediaQuery.sizeOf(context).height * 0.8;
         return SafeArea(
           child: _PlayerSheetView(
             player: widget.player,
@@ -1010,15 +1013,17 @@ class _PlaylistSheetState extends State<_PlaylistSheet> {
                                   child: child,
                                 );
                               },
-                              // 随机（漫游）模式下队列顺序无意义，禁用拖拽排序
-                              onReorderItem: mode == PlaybackMode.shuffle
-                                  ? null
-                                  : (oldIndex, newIndex) {
-                                      widget.player.reorderQueue(
-                                        oldIndex,
-                                        newIndex,
-                                      );
-                                    },
+                              // 随机（漫游）模式下队列顺序无意义，禁用拖拽排序。
+                              // 注意不能传 null：ReorderableListView.builder 的构造
+                              // 断言要求 onReorderItem 非 null（否则断言失败，且因
+                              // 处于 Watch.builder 内会被包装成 SignalEffectException）。
+                              onReorderItem: (oldIndex, newIndex) {
+                                if (mode == PlaybackMode.shuffle) return;
+                                widget.player.reorderQueue(
+                                  oldIndex,
+                                  newIndex,
+                                );
+                              },
                               itemCount: total,
                               itemBuilder: (context, index) {
                                 if (index < 0 || index >= queue.length) {

@@ -26,12 +26,6 @@ class MiniPlayerBar extends StatelessWidget {
   final bool enableSwipe;
   final Widget? trailing;
 
-  /// When non-null and its value is true, the bar renders with a solid
-  /// background instead of a [BackdropFilter]. The drawer/sidebar animation
-  /// uses this so the moving page below doesn't force an expensive backdrop
-  /// re-blur on every frame while the drawer is sliding.
-  final ValueListenable<bool>? blurPaused;
-
   MiniPlayerBar({
     super.key,
     PlayerService? player,
@@ -43,7 +37,6 @@ class MiniPlayerBar extends StatelessWidget {
     this.boxShadow,
     this.enableSwipe = true,
     this.trailing,
-    this.blurPaused,
   }) : player = player ?? PlayerService.instance;
 
   @override
@@ -51,7 +44,6 @@ class MiniPlayerBar extends StatelessWidget {
     // Follow the same panel blur slider as cards/settings panels so the
     // bottom music bar (which the setting description explicitly names) reacts
     // to the "高斯模糊强度" slider instead of a hardcoded blur.
-    final blurPaused = this.blurPaused;
     return ValueListenableBuilder<bool>(
       valueListenable: AppBackgroundSettings.panelBlurEnabled,
       builder: (context, blurEnabled, _) {
@@ -59,14 +51,7 @@ class MiniPlayerBar extends StatelessWidget {
             blurEnabled
                 ? AppBackgroundSettings.panelBlurStrength.value
                 : 0.0;
-        if (blurPaused == null) {
-          return _buildBar(context, baseStrength);
-        }
-        return ValueListenableBuilder<bool>(
-          valueListenable: blurPaused,
-          builder: (context, paused, _) =>
-              _buildBar(context, paused ? 0.0 : baseStrength),
-        );
+        return _buildBar(context, baseStrength);
       },
     );
   }

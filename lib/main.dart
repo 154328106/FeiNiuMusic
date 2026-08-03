@@ -8,6 +8,7 @@ import 'app/app.dart';
 import 'app/services/debug_log_service.dart';
 import 'app/services/fn_auto_reconnect_service.dart';
 import 'app/services/media_notification_service.dart';
+import 'app/services/feiniu/account_store.dart';
 import 'app/services/feiniu/api_client.dart';
 import 'app/services/feiniu/auth_service.dart';
 import 'app/services/feiniu/fn_connection_probe_service.dart';
@@ -34,6 +35,10 @@ Future<void> main() async {
   await AppLayoutSettings.ensureLoaded();
   await AppBackgroundSettings.ensureLoaded();
   await AppFnConnectionSettings.ensureLoaded();
+  // 已保存账号列表初始化：迁移/校正当前账号，并注册 401 token 同步回调。
+  // 需在 AuthService.init（恢复激活槽位）与 AppFnConnectionSettings.ensureLoaded
+  // （读取安全码/FNID）之后执行。
+  await AccountStore.instance.init();
   await PlayerStyleSettings.ensureLoaded();
   await AppLaunchNavigationSettings.ensureLoaded();
   // 初始化自动重连服务（监听网络变化 + API 失败）
@@ -83,7 +88,7 @@ void _warmupConnection() {
         cachedIsRelay: cache.isRelay,
         fnId: fnId,
       )
-      .then((result) {
+      .then((result) async {
         // 缓存验证成功且 URL 没变，不做任何事
         if (result.serverUrl == cache.url) return;
 
@@ -99,6 +104,8 @@ void _warmupConnection() {
           FeiNiuApiClient.instance.setBaseUrl(result.serverUrl);
         }
         FeiNiuApiClient.instance.setRelayMode(result.isRelay);
+        // 把探测得到的连接信息回写当前账号，保持账号列表与连接一致
+        await AccountStore.instance.syncActiveAccountConnection();
       })
       .catchError((_) {
         // 后台预热失败不报错：标记服务器不可达让横幅显示，

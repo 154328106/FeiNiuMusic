@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/router/app_router.dart';
 import '../../app/services/app_update_service.dart';
+import '../account/account_header_card.dart';
 import 'base/app_page_scaffold.dart';
 
 class SideMenu extends StatelessWidget {
@@ -47,6 +48,9 @@ class SideMenu extends StatelessWidget {
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
                   children: [
+                    // 当前账号卡片（点击进入账号切换页）
+                    const AccountHeaderCard(),
+                    const SizedBox(height: 10),
                     _GroupCard(
                       title: '浏览',
                       color: cardColor,

@@ -99,6 +99,10 @@ class FeiNiuApiClient {
     _relayMode = value;
   }
 
+  /// 401 导致 token 被自动清除时的回调（供 AccountStore 同步已保存账号状态）。
+  /// 仅在 401 拦截器路径触发，登出（clearAuth）不会触发。
+  VoidCallback? onTokenCleared;
+
   /// 从 SharedPreferences 读取已存储的 token、serverUrl 和 relay 模式
   Future<bool> tryLoadAuth() async {
     final prefs = await SharedPreferences.getInstance();
@@ -150,6 +154,7 @@ class FeiNiuApiClient {
       prefs.remove('feiniu_server_url');
       prefs.remove('feiniu_relay_mode');
     });
+    onTokenCleared?.call();
   }
 
   Future<void> clearAuth() async {

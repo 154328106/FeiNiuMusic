@@ -211,6 +211,35 @@ class AppFnConnectionSettings {
     }
   }
 
+  /// 恢复某账号的连接信息（切换/激活账号时调用）。
+  ///
+  /// 写入 fn_last_fnid（[fnId] 为 null 时移除，避免启动预热用上一个账号残留的
+  /// FNID 去探测）、fn_connection_url / method / is_relay，并同步内存状态。
+  static Future<void> restoreConnection({
+    required String url,
+    required bool isRelay,
+    String? fnId,
+    String? method,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (fnId == null || fnId.isEmpty) {
+      await prefs.remove(_prefsLastFnId);
+    } else {
+      await prefs.setString(_prefsLastFnId, fnId);
+    }
+    await prefs.setString(_prefsConnectionUrl, url);
+    await prefs.setString(
+      _prefsConnectionMethod,
+      method?.isNotEmpty == true ? method! : '手动连接',
+    );
+    await prefs.setBool(_prefsIsRelay, isRelay);
+    lastFnId = (fnId == null || fnId.isEmpty) ? null : fnId;
+    lastIsRelay = isRelay;
+    currentConnectionUrl.value = url;
+    currentConnectionMethod.value =
+        (method?.isNotEmpty == true ? method : '手动连接');
+  }
+
   /// 获取上次成功探测的缓存连接信息（用于优先探测）
   ///
   /// 返回 (url, isRelay) 或 null（无缓存）

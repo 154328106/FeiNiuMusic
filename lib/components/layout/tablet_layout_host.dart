@@ -62,7 +62,7 @@ class _TabletLayoutHostState extends State<TabletLayoutHost>
       builder: (context, child) {
         final t = _controller.value;
         final width = MediaQuery.sizeOf(context).width;
-        final drawerWidth = (width * 0.32).clamp(200.0, 260.0);
+        final drawerWidth = (width * 0.32).clamp(200.0, 300.0);
         final pageOffset = drawerWidth * t;
         final scale = 1 - (0.02 * t);
         final contentWidth = (width - pageOffset).clamp(0.0, width);
