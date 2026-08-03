@@ -50,7 +50,7 @@ class MediaNotificationService {
       }
     }
     _audioHandler = await AudioService.init(
-      builder: () => _NagoAudioHandler(PlayerService.instance),
+      builder: () => _FeiNiuAudioHandler(PlayerService.instance),
       config: const AudioServiceConfig(
         androidNotificationChannelId: 'com.feiniu.music.playback',
         androidNotificationChannelName: '音乐播放',
@@ -68,7 +68,7 @@ class MediaNotificationService {
   }
 }
 
-class _NagoAudioHandler extends BaseAudioHandler
+class _FeiNiuAudioHandler extends BaseAudioHandler
     with QueueHandler, SeekHandler {
   final PlayerService player;
   static const String _actionCloseApp = 'close_app';
@@ -86,7 +86,7 @@ class _NagoAudioHandler extends BaseAudioHandler
   String? _lastCoverId;
   Uri? _cachedCoverUri;
 
-  _NagoAudioHandler(this.player) {
+  _FeiNiuAudioHandler(this.player) {
     player.snapshot.addListener(_syncFromPlayer);
     LyricsService.instance.currentLineText.addListener(_onLyricLineChanged);
     MediaNotificationSettings.showLyrics.addListener(
