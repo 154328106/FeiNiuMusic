@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' as io;
 import 'dart:math';
 
 import 'package:crypto/crypto.dart' as crypto;
@@ -526,8 +527,23 @@ class FnConnectionProbeService {
       }
     }
 
-    // 全部失败
-    throw Exception('所有链路均无法连接，请检查网络或稍后重试。');
+    // 全部失败：收集去重后的失败原因，帮助用户定位（如「端口不通」）。
+    // 设置页会逐条展示；这里的摘要让登录 / 自动重连的异常也能看到关键信息。
+    // error 形如「连接失败：连接被拒绝（端口不通或服务未启动）」，摘要里已说
+    // 「所有链路均无法连接」，再去掉「连接失败：」前缀避免语义重复。
+    final reasons = <String>[
+      for (final r in results)
+        if (!r.isReachable && r.error != null && r.error!.isNotEmpty)
+          r.error!.replaceFirst(RegExp(r'^连接失败：'), ''),
+    ];
+    final distinct = reasons.toSet().toList();
+    final detail = distinct.length <= 2
+        ? distinct.join('；')
+        : '${distinct.take(2).join('；')} 等 ${distinct.length} 种原因';
+    final summary = detail.isNotEmpty
+        ? '所有链路均无法连接：$detail。请检查网络、端口或稍后重试。'
+        : '所有链路均无法连接，请检查网络或稍后重试。';
+    throw Exception(summary);
   }
 
   /// 探测单条链路并返回探测结果详情
@@ -575,22 +591,94 @@ class FnConnectionProbeService {
     }
   }
 
-  String _dioErrorMessage(DioException e) {
+  /// 把 [DioException] 映射为可读的中文错误描述。
+  ///
+  /// [target] 可选：探测目标地址（如 `http://192.168.11.200:5666`）。仅在没有
+  /// 其它上下文展示地址时才传（如登录页全量失败摘要），设置页候选链路不传——
+  /// 该页的标题已含 IP 与端口，再附会重复。
+  String _dioErrorMessage(DioException e, {String? target}) {
+    final targetPart =
+        (target != null && target.isNotEmpty) ? '（$target）' : '';
+    // 底层已解析出具体原因（如「连接被拒绝（端口不通或服务未启动）」
+    // 「连接超时（端口无响应）」）时，直接作为完整文案返回，不再前置
+    // 「连接失败」「连接超时」等类型词，避免「连接失败：连接被拒绝…」这类重复。
+    // badResponse / badCertificate / cancel 属于 HTTP/协议层，走各自专属文案。
+    final detail = _extractConnectionDetail(e);
+    if (detail.isNotEmpty) {
+      switch (e.type) {
+        case DioExceptionType.badResponse:
+        case DioExceptionType.badCertificate:
+        case DioExceptionType.cancel:
+          break;
+        default:
+          return '$targetPart$detail';
+      }
+    }
     switch (e.type) {
       case DioExceptionType.connectionTimeout:
-        return '连接超时';
+        return '连接超时$targetPart';
       case DioExceptionType.receiveTimeout:
-        return '响应超时';
+        return '响应超时$targetPart';
       case DioExceptionType.sendTimeout:
-        return '发送超时';
+        return '发送超时$targetPart';
       case DioExceptionType.connectionError:
-        return '网络连接错误';
+        return '连接失败$targetPart';
       case DioExceptionType.badResponse:
-        return '服务器返回错误 (${e.response?.statusCode})';
+        return '服务器返回错误 (${e.response?.statusCode})$targetPart';
+      case DioExceptionType.badCertificate:
+        return '证书校验失败$targetPart';
       case DioExceptionType.cancel:
         return '请求已取消';
       default:
         return e.message ?? '未知网络错误';
     }
+  }
+
+  /// 从 [DioException] 提取底层连接错误的具体原因（端口/拒绝/超时/DNS/TLS）。
+  ///
+  /// 优先用 [DioException.error]（通常是 [io.SocketException]，其 toString 含
+  /// "Connection refused" / errno / address / port），否则回退解析 dio 封装的
+  /// [DioException.message]。无更具体信息时返回空串（调用方不追加）。
+  String _extractConnectionDetail(DioException e) {
+    if (e.error != null) {
+      final detail = _describeConnectionError(e.error!);
+      if (detail.isNotEmpty) return detail;
+    }
+    final msg = e.message ?? '';
+    if (msg.isNotEmpty) {
+      final detail = _describeConnectionError(msg);
+      if (detail.isNotEmpty) return detail;
+    }
+    return '';
+  }
+
+  /// 识别单个错误对象/文本描述的具体连接失败原因。
+  String _describeConnectionError(Object err) {
+    final text = err.toString();
+    final lower = text.toLowerCase();
+    if (lower.contains('connection refused') ||
+        lower.contains('econnrefused') ||
+        lower.contains('10061')) {
+      return '连接被拒绝（端口不通或服务未启动）';
+    }
+    if (lower.contains('timed out') || lower.contains('timeout')) {
+      return '连接超时（端口无响应）';
+    }
+    if (lower.contains('network is unreachable') ||
+        lower.contains('network unreachable') ||
+        lower.contains('ehostunreach') ||
+        lower.contains('enetunreach')) {
+      return '网络不可达（目标主机不在当前网络）';
+    }
+    if (lower.contains('host not found') ||
+        lower.contains('cannot resolve') ||
+        lower.contains('failed to resolve') ||
+        lower.contains('name or service not known')) {
+      return '无法解析主机（DNS）';
+    }
+    if (lower.contains('handshake') || lower.contains('certificate')) {
+      return 'TLS 握手失败（证书或 HTTPS 端口异常）';
+    }
+    return '';
   }
 }

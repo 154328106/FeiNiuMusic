@@ -140,16 +140,6 @@ class _PrimaryNavigationShellState extends State<_PrimaryNavigationShell> {
     primaryNavigationShellActive = true;
     primaryNavigationIndex.value = _currentIndex;
     primaryNavigationIndex.addListener(_handleExternalSelection);
-
-    // 启动时如果开启了自动打开播放界面，在下一帧跳转（仅本次 session 首次）
-    if (AppLaunchNavigationSettings.autoOpenPlayerOnLaunch.value &&
-        !AppLaunchNavigationSettings.hasHandledNavigationThisSession) {
-      AppLaunchNavigationSettings.hasHandledNavigationThisSession = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        Navigator.pushNamed(context, AppRoutes.player);
-      });
-    }
   }
 
   @override

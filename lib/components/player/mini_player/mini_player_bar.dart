@@ -691,6 +691,12 @@ class _MiniPlayerSubtitleText extends StatelessWidget {
 
   /// 测量歌词单行宽度，超出 [maxWidth] 时按比例缩小字号。
   /// 返回 (目标字号, 是否单行放得下)。
+  ///
+  /// 注意必须用「加粗字重」测量：LyricPreview 的当前播放行以
+  /// FontWeight.w700 渲染（见 lyric_preview.dart 的 activeStyle），加粗字比
+  /// 常规字更宽。若用常规字重测量，会误判「刚好放得下」而实际渲染溢出，
+  /// 触发 LyricLayout.compute 折行成两行，被单行窗口裁到两行中间（半截字）。
+  /// 额外留 2% 安全边距兜底字距/绘制舍入等微小偏差。
   (double, bool) _measureFit({
     required String text,
     required double baseFontSize,
@@ -698,20 +704,24 @@ class _MiniPlayerSubtitleText extends StatelessWidget {
   }) {
     double widthAt(double size) {
       final painter = TextPainter(
-        text: TextSpan(text: text, style: style.copyWith(fontSize: size)),
+        text: TextSpan(
+          text: text,
+          style: style.copyWith(fontSize: size, fontWeight: FontWeight.w700),
+        ),
         textDirection: TextDirection.ltr,
         maxLines: 1,
       )..layout();
       return painter.width;
     }
 
-    if (widthAt(baseFontSize) <= maxWidth || maxWidth <= 0) {
+    final fitWidth = maxWidth * 0.98;
+    if (widthAt(baseFontSize) <= fitWidth || maxWidth <= 0) {
       return (baseFontSize, true);
     }
-    final ratio = maxWidth / widthAt(baseFontSize);
+    final ratio = fitWidth / widthAt(baseFontSize);
     final shrunk = (baseFontSize * ratio).clamp(baseFontSize * 0.6, baseFontSize);
     // 缩小到下限后仍超宽 → 放不下，回退省略号
-    if (widthAt(shrunk) > maxWidth) {
+    if (widthAt(shrunk) > fitWidth) {
       return (baseFontSize, false);
     }
     return (shrunk, true);

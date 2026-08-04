@@ -8,12 +8,28 @@ import 'package:signals_flutter/signals_flutter.dart' hide computed;
 import '../../../app/services/lyrics/lyrics_service.dart';
 import '../../../app/services/lyrics/lyrics_view_colors.dart';
 import '../../../app/services/player_service.dart';
+import '../../../app/state/settings_state.dart';
 import '../../../components/index.dart';
+import '../widgets/player_bottom_panel.dart';
 import 'widgets/lyrics_actions_bar.dart';
 import 'widgets/lyrics_drag_to_seek.dart';
 
 class PlayerLyricsView extends StatefulWidget {
-  const PlayerLyricsView({super.key});
+  /// 是否在歌词页底部显示播放控件与操作栏（播放页内歌词页开启，
+  /// 平板横屏右栏、独立歌词页保持关闭）。
+  final bool showControls;
+
+  /// 上下边缘渐隐遮罩。
+  ///
+  /// 歌词在区域内上下滚动出界时会被硬截断，开启后上下边缘叠加线性渐隐，
+  /// 让歌词淡出而非被直接裁掉。
+  final bool fadeEdges;
+
+  const PlayerLyricsView({
+    super.key,
+    this.showControls = false,
+    this.fadeEdges = false,
+  });
 
   @override
   State<PlayerLyricsView> createState() => _PlayerLyricsViewState();
@@ -83,6 +99,11 @@ class _PlayerLyricsViewState extends State<PlayerLyricsView> with SignalsMixin {
     controller.isSelectingNotifier.removeListener(_onSelectingChange);
     _unregisterResumeSelectedLine?.call();
     _unregisterStopSelection?.call();
+    // 释放全局拖动选中状态：LyricController 是全局单例，若歌词页销毁时
+    // 仍处于拖动选中（isSelecting=true / selectedIndex 指向拖到的行），
+    // 残留状态会传染给其它共享 controller 的歌词预览（如封面页底栏迷你
+    // 歌词、海报预览），表现为「左滑回封面页时左边也被选中」。
+    controller.stopSelection();
     super.dispose();
   }
 
@@ -535,12 +556,32 @@ class _PlayerLyricsViewState extends State<PlayerLyricsView> with SignalsMixin {
             ) ??
             false;
 
-        return Stack(
+        return Column(
           children: [
-            Column(
-              children: [
-                Expanded(
-                  child: LyricsDragToSeek(
+            Expanded(
+              // 上下边缘渐隐遮罩：fadeEdges 关闭时全白（dstIn 无效果），
+              // 开启时上下各约 22% 高度淡出，歌词滑出边界不被硬截断。
+              child: ShaderMask(
+                blendMode: BlendMode.dstIn,
+                shaderCallback: (rect) => LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  stops: const [0.0, 0.22, 0.78, 1.0],
+                  colors: widget.fadeEdges
+                      ? const [
+                          Colors.transparent,
+                          Colors.white,
+                          Colors.white,
+                          Colors.transparent,
+                        ]
+                      : const [
+                          Colors.white,
+                          Colors.white,
+                          Colors.white,
+                          Colors.white,
+                        ],
+                ).createShader(rect),
+                child: LyricsDragToSeek(
                     enabled: dragLyrics,
                     player: player,
                     lyrics: lyrics,
@@ -744,12 +785,10 @@ class _PlayerLyricsViewState extends State<PlayerLyricsView> with SignalsMixin {
                     }(),
                   ),
                 ),
-              ],
-            ),
-            Positioned(
-              left: 24,
-              right: 24,
-              bottom: 24,
+              ),
+            // 词/译 切换栏
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 4),
               child: LyricsActionsBar(
                 hasTranslation: hasTranslation,
                 showTranslation: showTranslation,
@@ -761,10 +800,38 @@ class _PlayerLyricsViewState extends State<PlayerLyricsView> with SignalsMixin {
                 color: onSurface,
               ),
             ),
+            // 播放控件 + 底部操作栏（可选，播放页内歌词页开启）
+            if (widget.showControls) ..._buildControlsArea(context),
           ],
         );
       },
     );
+  }
+
+  List<Widget> _buildControlsArea(BuildContext context) {
+    final player = PlayerService.instance;
+    final stylePreset = PlayerStyleSettings.stylePreset.value;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final bottomSpacing = bottomInset > 20 ? bottomInset + 16.0 : 24.0;
+    final Widget controls;
+    if (stylePreset == PlayerStylePreset.poster) {
+      // 海报模式：与封面页海报布局一致（模式 + 上一首/播放/下一首 + 更多）
+      controls = PosterControls(player: player);
+    } else {
+      // 经典模式：播放控件 + 底部操作栏
+      controls = Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          PlayerControls(player: player, stylePreset: stylePreset),
+          const SizedBox(height: 20),
+          BottomActions(player: player, stylePreset: stylePreset),
+        ],
+      );
+    }
+    return [
+      controls,
+      SizedBox(height: bottomSpacing),
+    ];
   }
 }
 

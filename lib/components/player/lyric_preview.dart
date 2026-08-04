@@ -50,6 +50,13 @@ class LyricPreview extends StatelessWidget {
   /// 歌词——底栏副标题用它，逐字动画与歌词页/播放页走完全相同的渲染管线。
   final bool activeLineOnly;
 
+  /// 上下边缘渐隐遮罩。
+  ///
+  /// 固定高度的歌词预览（海报歌词预览、底栏迷你歌词）中，歌词行滑出区域边界
+  /// 会被硬截断。开启后上下边缘叠加线性渐隐，让歌词淡出而非被直接裁掉。
+  /// 单行迷你歌词（`activeLineOnly`）不需要，默认关闭。
+  final bool fadeEdges;
+
   const LyricPreview({
     super.key,
     required this.height,
@@ -63,6 +70,7 @@ class LyricPreview extends StatelessWidget {
       vertical: 12,
     ),
     this.activeLineOnly = false,
+    this.fadeEdges = false,
   });
 
   @override
@@ -158,7 +166,7 @@ class LyricPreview extends StatelessWidget {
           activeHighlightExtraFadeWidth: 0,
         );
 
-        return ClipRect(
+        final preview = ClipRect(
           child: SizedBox(
             height: height,
             child: LyricView(
@@ -166,6 +174,27 @@ class LyricPreview extends StatelessWidget {
               style: style,
             ),
           ),
+        );
+        if (!fadeEdges) {
+          return preview;
+        }
+        // 上下边缘渐隐：歌词行滑出预览区边界时淡出，而非被硬截断。
+        // 用 BlendMode.dstIn 让渐变作为透明度遮罩作用在歌词上（背景透明区域
+        // 不受影响），顶部/底部各约 25% 高度从透明过渡到不透明。
+        return ShaderMask(
+          blendMode: BlendMode.dstIn,
+          shaderCallback: (rect) => LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            stops: const [0.0, 0.25, 0.75, 1.0],
+            colors: [
+              Colors.transparent,
+              Colors.white,
+              Colors.white,
+              Colors.transparent,
+            ],
+          ).createShader(rect),
+          child: preview,
         );
       },
     );

@@ -127,16 +127,28 @@ class _ConnectionFailedAction extends StatefulWidget {
 class _ConnectionFailedActionState extends State<_ConnectionFailedAction>
     with SingleTickerProviderStateMixin {
   /// 重连中的 WiFi 信号格数递进循环：一格 → 两格 → 三格 → 满格 → 回到一格。
-  late final AnimationController _wifiController = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1600),
-  )..repeat();
+  ///
+  /// 在 [initState] 里急切创建（而非 `late final` 懒初始化）：连接正常时
+  /// build 直接返回 SizedBox.shrink()，从不触碰该控制器；若用懒初始化，
+  /// dispose() 时首次访问会触发 AnimationController(vsync: this) 在已失活的
+  /// 元素上查找 TickerMode 祖先 → 「Looking up a deactivated widget's
+  /// ancestor」崩溃。initState 里创建保证 vsync 查找安全。
+  late final AnimationController _wifiController;
 
   static const List<IconData> _wifiLevelIcons = [
     Icons.wifi_1_bar_rounded,
     Icons.wifi_2_bar_rounded,
     Icons.wifi_rounded,
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _wifiController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1600),
+    )..repeat();
+  }
 
   @override
   void dispose() {

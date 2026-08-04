@@ -511,13 +511,16 @@ class _PlaylistsPageState extends State<PlaylistsPage>
         appBar: AppTopBar(
           title: '我的歌单',
           isRefreshing: _isRefreshing.value,
-          showBackButton: !useBottomNavigation,
-          leading: useBottomNavigation
-              ? null
-              : IconButton(
-                  icon: const Icon(Icons.menu_rounded),
-                  onPressed: _openDrawer,
-                ),
+          leading: IconButton(
+            icon: Icon(
+              useBottomNavigation
+                  ? Icons.arrow_back_rounded
+                  : Icons.menu_rounded,
+            ),
+            onPressed: useBottomNavigation
+                ? () => Navigator.of(context).maybePop()
+                : _openDrawer,
+          ),
           backgroundColor: Colors.transparent,
           elevation: 0,
           actions: [

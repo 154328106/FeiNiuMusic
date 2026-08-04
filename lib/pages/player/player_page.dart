@@ -3,7 +3,6 @@ import 'package:flutter_lyric/core/lyric_model.dart';
 import 'package:skeletonizer/skeletonizer.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
-import '../../app/router/app_page_route.dart';
 import '../../app/router/app_router.dart';
 import '../../app/services/feiniu/favorite_service.dart';
 import '../../app/services/lyrics/lyrics_service.dart';
@@ -14,8 +13,6 @@ import '../../app/utils/route_visibility.dart';
 import '../../components/common/artwork_widget.dart';
 import '../../components/feedback/app_toast.dart';
 import '../../components/player/lyric_preview.dart';
-import '../library/library_detail_pages.dart';
-import '../songs/song_detail_sheet.dart';
 import 'lyrics/lyric_view.dart';
 import 'widgets/player_background.dart';
 import 'widgets/player_bottom_panel.dart';
@@ -189,6 +186,16 @@ class _PlayerPageState extends State<PlayerPage>
                           Expanded(
                             child: PageView(
                               controller: _pageController,
+                              onPageChanged: (page) {
+                                // 离开歌词页（切回封面页）时释放全局拖动选中状态：
+                                // LyricController 是全局单例，歌词页拖动选中后若直接
+                                // 横滑回封面页，残留状态会传染给共享 controller 的
+                                // 歌词预览（底栏迷你歌词/海报预览）。
+                                if (page != 1) {
+                                  LyricsService.instance.controller
+                                      .stopSelection();
+                                }
+                              },
                               children: [
                                 _PlayerView(
                                   player: _player,
@@ -209,9 +216,15 @@ class _PlayerPageState extends State<PlayerPage>
                                           top: topInset,
                                           bottom: bottomInset,
                                         ),
-                                        child: const PlayerLyricsView(),
+                                        child: const PlayerLyricsView(
+                                          showControls: true,
+                                          fadeEdges: true,
+                                        ),
                                       )
-                                    : const PlayerLyricsView(),
+                                    : const PlayerLyricsView(
+                                        showControls: true,
+                                        fadeEdges: true,
+                                      ),
                               ],
                             ),
                           ),
@@ -467,7 +480,7 @@ class _PosterPlayerLayout extends StatelessWidget {
                     const SizedBox(height: 2),
                     _PosterSeekBar(player: player),
                     const SizedBox(height: 20),
-                    _PosterControls(player: player),
+                    PosterControls(player: player),
                     // 底部留白：让控制栏整体抬离屏幕底部
                     SizedBox(height: bottomInset > 20 ? 16 : 28),
                   ],
@@ -635,6 +648,8 @@ class _PosterLyricsPreview extends StatelessWidget {
               fontSize: 15,
               activeFontSize: 18,
               contentPadding: EdgeInsets.zero,
+              // 上下边缘渐隐，歌词行滑出边界时淡出而非硬截断
+              fadeEdges: true,
             );
           },
         );
@@ -924,114 +939,6 @@ class _PosterSeekBarState extends State<_PosterSeekBar> with SignalsMixin {
       },
     );
   }
-}
-
-class _PosterControls extends StatelessWidget {
-  final PlayerService player;
-
-  const _PosterControls({required this.player});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final iconColor = scheme.onSurface.withValues(alpha: 0.72);
-    return Watch.builder(
-      builder: (context) {
-        final playing = player.isPlayingSignal.value;
-        final mode = player.playbackModeSignal.value;
-        final modeIcon = switch (mode) {
-          PlaybackMode.shuffle => Icons.shuffle_rounded,
-          PlaybackMode.loop => Icons.repeat_rounded,
-          PlaybackMode.single => Icons.repeat_one_rounded,
-        };
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            IconButton(
-              iconSize: 30,
-              color: iconColor,
-              icon: Icon(modeIcon),
-              onPressed: player.cyclePlaybackMode,
-            ),
-            IconButton(
-              iconSize: 40,
-              color: iconColor,
-              icon: const Icon(Icons.skip_previous_rounded),
-              onPressed: player.previous,
-            ),
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: scheme.onSurface,
-              ),
-              child: IconButton(
-                iconSize: 36,
-                color: scheme.surface,
-                icon: Icon(
-                  playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                ),
-                onPressed: player.togglePlayPause,
-              ),
-            ),
-            IconButton(
-              iconSize: 40,
-              color: iconColor,
-              icon: const Icon(Icons.skip_next_rounded),
-              onPressed: player.next,
-            ),
-            IconButton(
-              iconSize: 30,
-              color: iconColor,
-              icon: const Icon(Icons.more_vert_rounded),
-              onPressed: () => _showPosterSongDetailSheet(context, player),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-/// 海报模式底部「更多」按钮：弹出歌曲详情面板
-void _showPosterSongDetailSheet(BuildContext context, PlayerService player) {
-  final song = player.currentSong.value;
-  if (song == null) {
-    AppToast.show(context, '暂无歌曲');
-    return;
-  }
-  showModalBottomSheet(
-    context: context,
-    backgroundColor: Colors.transparent,
-    isScrollControlled: true,
-    builder: (_) => SongDetailSheet(
-      song: song,
-      onOpenPlayerAppearanceSettings: () {
-        Navigator.of(context).pushNamed(AppRoutes.playerAppearanceSettings);
-      },
-      onOpenArtist: (artistName) {
-        Navigator.of(context).push(
-          buildAppPageRoute(
-            (_) => ArtistDetailPage(
-              artistName: artistName,
-              artistGuid: song.firstArtistGuid,
-            ),
-          ),
-        );
-      },
-      onOpenAlbum: (albumName) {
-        Navigator.of(context).push(
-          buildAppPageRoute(
-            (_) => AlbumDetailPage(
-              albumName: albumName,
-              albumGuid: song.albumGuid,
-            ),
-          ),
-        );
-      },
-    ),
-  );
 }
 
 class _PlayerArtwork extends StatelessWidget {

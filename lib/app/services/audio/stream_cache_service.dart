@@ -38,6 +38,18 @@ class StreamCacheService {
   bool get isEnabled => AppCacheSettings.cacheLimitMb.value > 0;
 
   Future<Directory> _ensureDir() async {
+    await _resolveDir();
+    await _cleanupStaleParts(_dir!);
+    await evictIfNeeded();
+    return _dir!;
+  }
+
+  /// 仅解析缓存目录（含建目录），不做任何扫描/淘汰维护。
+  ///
+  /// `completeFileFor` 等「只想命中已有缓存文件」的路径用它：启动秒播
+  /// 关键路径避免每次构建源都全量 `evictIfNeeded` 拖慢首音；扫描/淘汰
+  /// 推迟到首次真实下载/写入（`sourceForSong` 走 [_ensureDir]）之前。
+  Future<Directory> _resolveDir() async {
     final existing = _dir;
     if (existing != null) return existing;
     final inFlight = _initFuture;
@@ -50,8 +62,6 @@ class StreamCacheService {
       final dir = Directory(p.join(support.path, dirName));
       if (!await dir.exists()) await dir.create(recursive: true);
       _dir = dir;
-      await _cleanupStaleParts(dir);
-      await evictIfNeeded();
     }();
     _initFuture = future;
     await future;
@@ -87,10 +97,14 @@ class StreamCacheService {
     return File(p.join(base, '${safeCacheName(songId)}.mp3'));
   }
 
-  /// 完整缓存文件（存在则返回，供播放走 `AudioSource.file` 秒播）
+  /// 完整缓存文件（存在则返回，供播放走 `AudioSource.file` 秒播）。
+  ///
+  /// 轻量路径：先解析目录（不扫描/不淘汰），直接查 `existsSync()`——
+  /// 缓存命中是启动秒播的关键路径，避免每次构建源都全量 `evictIfNeeded`
+  /// 拖慢首音。目录扫描/淘汰由 [_ensureDir] 在首次真实下载/写入前执行。
   Future<File?> completeFileFor(String songId) async {
     if (!isEnabled) return null;
-    await _ensureDir();
+    await _resolveDir();
     final file = _cacheFileFor(songId);
     if (await file.exists()) return file;
     return null;
@@ -169,6 +183,7 @@ class StreamCacheService {
   Future<void> evictIfNeeded({Set<String>? protectedSongIds}) async {
     if (!isEnabled) return;
     final dir = _dir;
+    // 目录未初始化（从未下载过）无需扫描/淘汰
     if (dir == null) return;
 
     final limitBytes = AppCacheSettings.cacheLimitMb.value * 1024 * 1024;

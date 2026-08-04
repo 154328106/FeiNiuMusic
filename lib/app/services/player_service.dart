@@ -106,6 +106,12 @@ class PlayerService with WidgetsBindingObserver {
   /// roam 追加请求串行化：>0 表示有请求进行中或待处理
   int _roamAppendQueuedCount = 0;
 
+  /// 在途的 roam 追加请求 Future：非 null 表示追加仍在进行。
+  /// 与 _roamAppendQueuedCount 不同，调用方可 await 它等待追加完成
+  /// （next 在队尾需等追加完成再前进，避免物理源未填满时 seekToNext
+  /// 越过队尾被 LoopMode.all 回卷到队首）。
+  Future<void>? _roamAppendInFlight;
+
   /// 切换到随机模式但当前队列还不是漫游队列（roamId 为空）时置 true，
   /// 表示当前歌曲播完/切到队尾后应启动漫游（roam-start 拉新链），
   /// 而不是继续顺序播放原列表。
@@ -124,6 +130,11 @@ class PlayerService with WidgetsBindingObserver {
 
   /// Current roam ID for shuffle mode (roam-next API chain)
   String? roamId;
+
+  /// 漫游模式：当前队列由 roam-next 服务器链驱动（roamId 非空）。
+  /// 区别于本地随机（playShuffle，roamId 为空）——漫游的队列是服务端随机链，
+  /// 手动增删会破坏链的连续性，因此漫游队列不允许删除歌曲。
+  bool get roamActive => roamId != null && roamId!.isNotEmpty;
 
   static const String _prefsQueueKey = 'playback_queue_v1';
   static const String _prefsIndexKey = 'playback_index_v1';
@@ -494,11 +505,11 @@ class PlayerService with WidgetsBindingObserver {
 
   /// 按队列上限自动填充后播放。
   ///
-  /// 已加载 [initialSongs]（可能只有一页）时，若队列未达上限且 [fetchMore]
-  /// 能取到更多数据，自动分页拉取直到填满上限或数据取尽。
+  /// **立即切歌**：先用已加载的 [initialSongs] 播放（`currentSong` 立刻更新、
+  /// 物理源立刻切换），**不等待**填满队列——消除「点歌后旧歌继续播、封面/歌名
+  /// 延迟切换」的问题。队列填充改为后台异步进行：
   /// [fetchMore] 返回「第 (已加载页数 + page) 页」的歌曲列表（空列表表示
-  /// 没有更多）。调用方把 [page] 理解为已加载页数之后的第几页，闭包内写
-  /// `已加载页数 + page` 即可，且不应修改页面自身的分页状态。
+  /// 没有更多），闭包内写 `已加载页数 + page` 即可，且不应修改页面自身的分页状态。
   /// 注意：填充拉取的数据只用于队列，不会回写页面列表。
   Future<void> playQueueFilledToLimit(
     List<SongEntity> initialSongs,
@@ -507,19 +518,42 @@ class PlayerService with WidgetsBindingObserver {
     String? roamChainId,
     Future<List<SongEntity>> Function(int page)? fetchMore,
   }) async {
-    var songs = List<SongEntity>.from(initialSongs);
+    final idx = startIndex >= 0 && startIndex < initialSongs.length
+        ? startIndex
+        : 0;
+    // 立即播放：点歌即切歌，currentSong 同步更新，不等后台填充。
+    await playQueue(initialSongs, idx, mode: mode, roamChainId: roamChainId);
+    // 后台异步填充队列到上限（不阻塞播放切换）。
+    if (fetchMore == null) return;
     final cap = _queueCap;
-    if (fetchMore != null && songs.length < cap) {
-      var page = 1;
-      while (songs.length < cap) {
+    if (initialSongs.length >= cap) return;
+    final gen = _queueGeneration;
+    unawaited(_fillQueueInBackground(initialSongs, fetchMore, cap, gen));
+  }
+
+  /// 后台分页填充队列到上限 [cap]。仅在队列代次未变（用户未切换播放）时
+  /// 才追加，避免把歌曲拼到用户新选的队列上。填充使用与正常队列增长相同的
+  /// [_appendToQueue]（逻辑 + 物理源同步、超长截断），只是从关键路径挪到后台。
+  Future<void> _fillQueueInBackground(
+    List<SongEntity> base,
+    Future<List<SongEntity>> Function(int page) fetchMore,
+    int cap,
+    int gen,
+  ) async {
+    final acc = <SongEntity>[];
+    var page = 1;
+    while (base.length + acc.length < cap) {
+      try {
         final next = await fetchMore(page++);
         if (next.isEmpty) break;
-        songs.addAll(next);
+        acc.addAll(next);
+      } catch (_) {
+        break; // 网络/分页失败即停止填充，不影响已开始的播放
       }
-      if (songs.length > cap) songs = songs.sublist(0, cap);
     }
-    final idx = startIndex >= 0 && startIndex < songs.length ? startIndex : 0;
-    await playQueue(songs, idx, mode: mode, roamChainId: roamChainId);
+    if (acc.isEmpty) return;
+    if (gen != _queueGeneration) return; // 用户已切换播放，丢弃本次填充
+    await _appendToQueue(acc);
   }
 
   void _maybePrefetchByRemaining(Duration positionValue) {
@@ -830,12 +864,27 @@ class PlayerService with WidgetsBindingObserver {
         await _startRoamFromPending();
         return;
       }
-      final list = queue.value;
-      final idx = currentIndex.value;
-      final atTail = list.isNotEmpty && idx >= 0 && idx == list.length - 1;
-      if (atTail && _roamAppendQueuedCount <= 0) {
-        // 队尾无下一首：先拉取追加（阻塞到拿到或失败），再 seekToNext。
+      // 基于物理播放队列判断队尾：currentIndex.value 可能尚未与播放器实际
+      // 位置同步（刚 seekToNext 就再点下一曲时逻辑索引滞后，会误判不在队尾
+      // 而直接 seekToNext，物理队尾无下一源时被 LoopMode.all 回卷到队首）。
+      final physicalLen = _player.sequence.length;
+      final physicalIdx = _player.currentIndex;
+      final atTail = physicalLen > 0 &&
+          physicalIdx != null &&
+          physicalIdx >= physicalLen - 1;
+      if (atTail) {
+        // 队尾无下一首：先拉取追加。等待追加完成（含在途请求）再前进，
+        // 避免物理源未填满时 seekToNext 越过队尾被 LoopMode.all 回卷到队首。
         await _extendRoamQueue();
+        // 追加失败（网络异常）且队列仍无可播下一首：停留在队尾，
+        // 不越界回卷到队首。
+        final afterLen = _player.sequence.length;
+        final afterIdx = _player.currentIndex;
+        if (afterLen <= 0 ||
+            afterIdx == null ||
+            afterIdx >= afterLen - 1) {
+          return;
+        }
       }
     }
     final wasPlaying = _player.playing;
@@ -851,9 +900,22 @@ class PlayerService with WidgetsBindingObserver {
   /// 重启后持久化的 roamId 可能在服务端已过期（roam-next 抛异常），此时
   /// 回退到 roam-start 重建新链再追加，避免「队列不增长 → 播完回卷 → 列表循环」。
   Future<void> _extendRoamQueue() async {
+    // 追加已在途：返回同一个 Future，调用方可 await 它等待本次追加完成。
+    final inflight = _roamAppendInFlight;
+    if (inflight != null) return inflight;
     if (_roamAppendQueuedCount > 0) return;
     final gen = _queueGeneration;
     _roamAppendQueuedCount = 1;
+    final future = _doExtendRoamQueue(gen);
+    _roamAppendInFlight = future;
+    try {
+      await future;
+    } finally {
+      _roamAppendInFlight = null;
+    }
+  }
+
+  Future<void> _doExtendRoamQueue(int gen) async {
     try {
       final deviceId = await AuthService.instance.ensureDeviceId();
 
@@ -1329,10 +1391,14 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   Future<void> clearQueue() async {
+    // 漫游模式队列由服务端随机链驱动，不允许手动清空。
+    if (roamActive) return;
     await stopAndClear();
   }
 
   Future<void> removeFromQueue(int index) async {
+    // 漫游模式队列由服务端随机链驱动，不允许手动删除歌曲。
+    if (roamActive) return;
     final list = queue.value;
     if (index < 0 || index >= list.length) return;
     await removeSongsById([list[index].id]);
@@ -1531,7 +1597,10 @@ class PlayerService with WidgetsBindingObserver {
     _PlaybackRestoreState session,
   ) async {
     try {
-      final sourceQueue = await _buildPlaybackSourceQueue(session.queue);
+      final sourceQueue = await _buildRestoredPlaybackSourceQueue(
+        session.queue,
+        session.index,
+      );
       // 构建源期间用户可能已开始新的播放：放弃 apply，避免 setAudioSources
       // 覆盖用户刚选的队列、触发 index 流把播放模式改回 loop/single。
       if (_queueGeneration != 0) {
@@ -2108,6 +2177,56 @@ class PlayerService with WidgetsBindingObserver {
     );
   }
 
+  /// 恢复播放专用源队列构建：当前曲走完整解析（可转码/可命中缓存），
+  /// 其余曲目走 quick 快速路径（格式探测延后，优先本地缓存命中）。
+  ///
+  /// 启动自动播放的关键路径优化：恢复的队列往往很长，逐首 `GET /metadata`
+  /// 确认格式会串行阻塞首音（本地缓存秒播被拖到数秒后）。这里只对
+  /// **当前曲 + 下一曲**做完整解析，其余快速构建；对本地已缓存歌曲，
+  /// 快速路径直接命中文件、零网络。
+  ///
+  /// 个别源构建失败（如某首网络异常）不阻断整队列：用直连流占位，那首歌
+  /// 真正播放时由 [_handlePlayerError] 重建重试。
+  Future<_PlaybackSourceQueue> _buildRestoredPlaybackSourceQueue(
+    List<SongEntity> queue,
+    int index,
+  ) async {
+    final fullRange = {index, index + 1};
+    final results = await Future.wait(
+      queue.map(
+        (song) => () async {
+          try {
+            return await _sourceForSong(
+              song,
+              quick: !fullRange.contains(queue.indexOf(song)),
+            );
+          } catch (_) {
+            return null;
+          }
+        }(),
+      ),
+    );
+    final sources = <AudioSource>[];
+    for (var i = 0; i < results.length; i++) {
+      var source = results[i];
+      if (source == null) {
+        try {
+          source = AudioSource.uri(
+            Uri.parse(FeiNiuApiClient.instance.streamUrl(queue[i].id)),
+            headers: FeiNiuApiClient.imageAuthHeaders(),
+          );
+        } catch (_) {
+          continue;
+        }
+      }
+      sources.add(source);
+    }
+    return _PlaybackSourceQueue(
+      songs: List<SongEntity>.from(queue),
+      sources: sources,
+    );
+  }
+
   Future<void> _loadPlaybackSourceQueue(
     _PlaybackSourceQueue sourceQueue, {
     required int initialIndex,
@@ -2246,6 +2365,7 @@ class PlayerService with WidgetsBindingObserver {
   Future<AudioSource> _sourceForSong(
     SongEntity song, {
     bool forceRefresh = false,
+    bool quick = false,
   }) async {
     final api = FeiNiuApiClient.instance;
     if (api.baseUrl.isNotEmpty) {
@@ -2253,6 +2373,25 @@ class PlayerService with WidgetsBindingObserver {
       if (forceRefresh) {
         await StreamCacheService.instance.invalidate(song.id);
         FeiNiuTranscodeService.instance.invalidate(song.id);
+      }
+
+      // 快速路径：跳过格式确认/转码探测，直接走缓存或直连流。仅用于恢复
+      // 播放时的后台队列构建——这些歌暂未播放，格式探测可延后；若构建时
+      // 格式确认刚好在途（不阻塞），把结果记录进会话内缓存，之后真正播放
+      // 时直接命中，避免重复请求。直连失败时快速路径不重建（等待真正播放
+      // 时由 _handlePlayerError 兜底），返回 null 让调用方用直连流占位。
+      if (quick) {
+        if (StreamCacheService.instance.isEnabled) {
+          final complete = await StreamCacheService.instance.completeFileFor(
+            song.id,
+          );
+          if (complete != null) {
+            return AudioSource.file(complete.path);
+          }
+        }
+        final streamUrl = api.streamUrl(song.id);
+        final headers = FeiNiuApiClient.imageAuthHeaders();
+        return AudioSource.uri(Uri.parse(streamUrl), headers: headers);
       }
 
       // 本地不支持的格式 → 走服务器转码 HLS（不缓存、不落盘）。

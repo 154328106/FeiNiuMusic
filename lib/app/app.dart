@@ -241,6 +241,12 @@ class _AppStartupGate extends StatefulWidget {
 
 class _AppStartupGateState extends State<_AppStartupGate> {
   bool _scheduledAutoCheck = false;
+  bool _scheduledAutoOpenPlayer = false;
+
+  /// 当前账号对应的嵌套基础 Navigator key（随账号变化重建）。
+  /// 自动打开播放页必须压到该嵌套导航器上（门控自身的 context 会解析到根
+  /// 导航器，压根导航器会盖住门控，破坏登录/登出回退到门控的规则）。
+  GlobalKey<NavigatorState>? _baseNavKey;
 
   @override
   Widget build(BuildContext context) {
@@ -264,6 +270,13 @@ class _AppStartupGateState extends State<_AppStartupGate> {
               _scheduledAutoCheck = true;
               _scheduleAutoCheckUpdate();
             }
+            // 启动后自动打开播放界面：在门控（非登录态）首帧后跳转，覆盖
+            // 抽屉/底部栏/平板所有导航模式。仅本次 session 首次生效；
+            // 切换账号重建外壳不会重复跳转。
+            if (!_scheduledAutoOpenPlayer) {
+              _scheduledAutoOpenPlayer = true;
+              _scheduleAutoOpenPlayer();
+            }
             // 切换账号时 isLoggedIn 保持 true（门控不重建），但整个外壳需按当前
             // 账号重建：给外壳换 key → 所有存活页面卸载重建 → initState 重跑 →
             // 用新 token/服务器地址拉取数据；导航栈同时重置回首页。
@@ -276,6 +289,7 @@ class _AppStartupGateState extends State<_AppStartupGate> {
                 final navKey = GlobalObjectKey<NavigatorState>(
                   'base-nav-${accountId ?? 'none'}',
                 );
+                _baseNavKey = navKey;
                 return KeyedSubtree(
                   key: ValueKey('shell-${accountId ?? 'none'}'),
                   child: TabletLayoutHost(
@@ -305,6 +319,22 @@ class _AppStartupGateState extends State<_AppStartupGate> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _autoCheckUpdate();
+    });
+  }
+
+  /// 启动后自动打开播放界面：用户开启该开关时，给首帧留出渲染空间后
+  /// 再压栈播放页（仅本次 session 首次）。放在门控而非各页面/外壳里，
+  /// 确保抽屉 / 底部栏 / 平板等所有导航模式都能生效。
+  ///
+  /// 必须压到当前账号的嵌套基础导航器上，不能压根导航器（根导航器会被
+  /// 门控盖住，破坏登录/登出回退到门控的规则）。
+  void _scheduleAutoOpenPlayer() {
+    if (!AppLaunchNavigationSettings.autoOpenPlayerOnLaunch.value) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final nav = _baseNavKey?.currentState;
+      if (nav == null) return;
+      nav.pushNamed(AppRoutes.player);
     });
   }
 

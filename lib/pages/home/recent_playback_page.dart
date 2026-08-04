@@ -251,15 +251,20 @@ class _RecentPlaybackPageState extends State<RecentPlaybackPage>
               ),
         appBar: AppTopBar(
           title: isMultiSelecting ? '已选 $selectedCount 首' : '最近播放',
-          showBackButton: true,
           leading: isMultiSelecting
               ? IconButton(
                   icon: const Icon(Icons.close_rounded),
                   onPressed: exitMultiSelect,
                 )
               : IconButton(
-                  icon: const Icon(Icons.menu_rounded),
-                  onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                  icon: Icon(
+                    useBottomNavigation
+                        ? Icons.arrow_back_rounded
+                        : Icons.menu_rounded,
+                  ),
+                  onPressed: useBottomNavigation
+                      ? () => Navigator.of(context).maybePop()
+                      : () => _scaffoldKey.currentState?.openDrawer(),
                 ),
           backgroundColor: Colors.transparent,
           elevation: 0,

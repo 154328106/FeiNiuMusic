@@ -153,6 +153,12 @@ class _LyricViewState extends State<LyricView>
                                 showSelectionShadow: showSelectionShadow,
                                 scrollY: scrollY,
                                 onAnchorIndexChange: (index) {
+                                  // 只读预览（disableTouchEvent，如迷你歌词/海报预览）
+                                  // 不写共享的 selectedIndex：多个 LyricView 共享同一
+                                  // LyricController 时，只有可交互的歌词页才驱动选中行，
+                                  // 避免其它实例的锚点行互相覆盖，导致左侧时间闪烁、
+                                  // 圈选阴影被反复清除。
+                                  if (style.disableTouchEvent) return;
                                   scheduleMicrotask(() {
                                     controller.selectedIndexNotifier.value = index;
                                   });

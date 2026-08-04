@@ -9,6 +9,9 @@ void main() {
   setUp(() {
     AppVolumeScheduleSettings.periods.value = const [];
     AppVolumeScheduleSettings.enabled.value = false;
+    AppVolumeScheduleSettings.manualVolume.value = 1;
+    AppVolumeScheduleSettings.hasPersistedManualVolume = false;
+    SharedPreferences.setMockInitialValues({});
   });
 
   test('defaults are off with no periods', () async {
@@ -168,6 +171,57 @@ void main() {
         AppVolumeScheduleSettings.activePeriodNow(at(21, 30))?.volume,
         0.5,
       );
+    });
+  });
+
+  group('persistManualVolume', () {
+    test('persists manual volume and reloads after restart', () async {
+      SharedPreferences.setMockInitialValues({});
+      await AppVolumeScheduleSettings.ensureLoaded();
+
+      await AppVolumeScheduleSettings.persistManualVolume(0.8);
+      expect(AppVolumeScheduleSettings.manualVolume.value, 0.8);
+      expect(AppVolumeScheduleSettings.hasPersistedManualVolume, true);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getDouble('volume_schedule_manual_volume'), 0.8);
+
+      // 模拟重启：重新 ensureLoaded → 手动音量恢复。
+      AppVolumeScheduleSettings.resetForTest();
+      SharedPreferences.setMockInitialValues({
+        'volume_schedule_manual_volume': 0.8,
+      });
+      await AppVolumeScheduleSettings.ensureLoaded();
+      expect(AppVolumeScheduleSettings.manualVolume.value, 0.8);
+      expect(AppVolumeScheduleSettings.hasPersistedManualVolume, true);
+    });
+
+    test('skips persisting while inside an active period', () async {
+      SharedPreferences.setMockInitialValues({});
+      await AppVolumeScheduleSettings.ensureLoaded();
+      await AppVolumeScheduleSettings.addPeriod(
+        startMin: 12 * 60,
+        endMin: 13 * 60,
+        volume: 0.3,
+      );
+      await AppVolumeScheduleSettings.setEnabled(true);
+
+      // 12:30 处于生效时段：此时音量是段内强制值 0.3，绝不能被记为手动音量。
+      await AppVolumeScheduleSettings.persistManualVolume(
+        0.3,
+        now: DateTime(2026, 8, 1, 12, 30),
+      );
+      expect(AppVolumeScheduleSettings.manualVolume.value, 1);
+      expect(AppVolumeScheduleSettings.hasPersistedManualVolume, false);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getDouble('volume_schedule_manual_volume'), isNull);
+
+      // 时段外手动调音量 → 正常持久化。
+      await AppVolumeScheduleSettings.persistManualVolume(
+        0.8,
+        now: DateTime(2026, 8, 1, 16, 30),
+      );
+      expect(AppVolumeScheduleSettings.manualVolume.value, 0.8);
+      expect(AppVolumeScheduleSettings.hasPersistedManualVolume, true);
     });
   });
 }

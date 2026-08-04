@@ -43,6 +43,7 @@ class VolumeSchedulePeriod {
 class AppVolumeScheduleSettings {
   static const String _prefsEnabled = 'volume_schedule_enabled';
   static const String _prefsPeriods = 'volume_schedule_periods';
+  static const String _prefsManualVolume = 'volume_schedule_manual_volume';
 
   /// 定时音量总开关。
   static final ValueNotifier<bool> enabled = ValueNotifier(false);
@@ -52,9 +53,15 @@ class AppVolumeScheduleSettings {
     const [],
   );
 
-  /// 手动音量快照：进入时间段时记录，离开时间段时恢复。
-  /// 不持久化（重启后从 `AppPlaybackVolumeSettings.volume` 现有值出发）。
+  /// 手动音量：离开时间段时恢复的目标音量。
+  ///
+  /// 在用户手动调节音量（且不在生效时段内）及首次进入时间段时记录并持久化。
+  /// 持久化保证「时段内 App 被关闭 → 重启/再打开后仍能恢复正确的手动音量」，
+  /// 而不是把上个时段遗留的段内强制音量误当成手动音量。
   static final ValueNotifier<double> manualVolume = ValueNotifier(1);
+
+  /// 是否已持久化过手动音量（区分首次使用与已记录，见 [persistManualVolume]）。
+  static bool hasPersistedManualVolume = false;
 
   /// 当前时刻是否正命中某个时间段（供 UI 展示生效指示）。
   static final ValueNotifier<bool> isActiveNow = ValueNotifier(false);
@@ -67,6 +74,43 @@ class AppVolumeScheduleSettings {
     final prefs = await SharedPreferences.getInstance();
     enabled.value = prefs.getBool(_prefsEnabled) ?? false;
     periods.value = _decodePeriods(prefs.getStringList(_prefsPeriods));
+    final stored = prefs.getDouble(_prefsManualVolume);
+    if (stored != null) {
+      manualVolume.value = stored.clamp(0, 1).toDouble();
+      hasPersistedManualVolume = true;
+    }
+  }
+
+  /// 记录并持久化手动音量（离开时间段时恢复的目标）。
+  ///
+  /// 只在用户手动调节音量且当前未处于生效时段内时调用。跨场景防抖：
+  /// - 时段内 App 重启：`manualVolume` 仍是上次持久化的手动值（persist 被跳过）；
+  /// - 重启后首次恢复：手动值已从 prefs 加载，直接恢复，不覆盖成遗留的段内值；
+  /// - 开关/时段变更触发的一次性校验：persist 跳过。
+  ///
+  /// [now] 仅在测试中注入固定时间，生产走 `DateTime.now()`。
+  static Future<void> persistManualVolume(
+    double value, {
+    DateTime? now,
+  }) async {
+    if (AppVolumeScheduleSettings.enabled.value &&
+        activePeriodNow(now ?? DateTime.now()) != null) {
+      // 生效时段内：任何进入/离开或音量变化都会重复触发此方法，
+      // 但此时音量可能处于段内强制值，绝不能当成手动音量持久化。
+      return;
+    }
+    if (hasPersistedManualVolume &&
+        (manualVolume.value - value).abs() < 0.001) {
+      // 已持久化过且值未变：避免反复写 prefs（开关/时段变更会触发）。
+      return;
+    }
+    manualVolume.value = value.clamp(0, 1).toDouble();
+    hasPersistedManualVolume = true;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(
+      _prefsManualVolume,
+      manualVolume.value,
+    );
   }
 
   static Future<void> setEnabled(bool value) async {
@@ -171,5 +215,10 @@ class AppVolumeScheduleSettings {
   static String _newId() {
     final r = Random();
     return '${DateTime.now().microsecondsSinceEpoch}${r.nextInt(0xFFFF).toRadixString(16)}';
+  }
+
+  /// 测试专用：重置内存状态（清空懒加载缓存），供测试模拟重启复用。
+  static void resetForTest() {
+    _loading = null;
   }
 }

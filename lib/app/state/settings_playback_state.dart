@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'settings_volume_schedule_state.dart';
+
 class AppPlaybackVolumeSettings {
   static const String _prefsVolume = 'player_app_volume';
 
@@ -20,6 +22,9 @@ class AppPlaybackVolumeSettings {
     final normalized = value.clamp(0, 1).toDouble();
     await prefs.setDouble(_prefsVolume, normalized);
     volume.value = normalized;
+    // 手动调节音量 → 记录恢复目标（仅未在生效时段内；内部自带防抖）。
+    // 定时音量时间段结束或开关关闭后，恢复到这个值。
+    await AppVolumeScheduleSettings.persistManualVolume(normalized);
   }
 }
 

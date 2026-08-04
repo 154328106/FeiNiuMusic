@@ -241,12 +241,20 @@ class _HomePageState extends State<HomePage>
           api.coverUrl(p.coverId!, size: 300, updatedAt: p.updatedAt),
     ];
     for (final url in coverUrls) {
-      unawaited(
-        precacheImage(
-          CachedNetworkImageProvider(url, headers: headers),
-          context,
-        ),
-      );
+      if (!mounted) break;
+      try {
+        unawaited(
+          precacheImage(
+            CachedNetworkImageProvider(url, headers: headers),
+            context,
+          ),
+        );
+      } catch (_) {
+        // 外壳可能正在卸载：deactivate 到 unmount 之间的窗口内 State.mounted
+        // 仍为 true（_element 尚未置空），但元素已失活，precacheImage 内部的
+        // DefaultAssetBundle.of(context) 会抛 "Looking up a deactivated
+        // widget's ancestor"。封面预加载是尽力而为的缓存预热，跳过即可。
+      }
     }
   }
 

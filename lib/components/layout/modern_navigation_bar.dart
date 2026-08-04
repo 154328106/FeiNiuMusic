@@ -205,7 +205,7 @@ class _NavItem extends StatelessWidget {
             curve: Curves.easeOutCubic,
             padding: EdgeInsets.symmetric(
               horizontal: selected ? 14 : 10,
-              vertical: 2,
+              vertical: 4,
             ),
             decoration: BoxDecoration(
               color: selected
@@ -213,31 +213,36 @@ class _NavItem extends StatelessWidget {
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(14),
             ),
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 180),
-              switchInCurve: Curves.easeOutCubic,
-              switchOutCurve: Curves.easeInCubic,
-              transitionBuilder: (child, animation) =>
-                  ScaleTransition(scale: animation, child: child),
-              child: Icon(
-                icon,
-                key: ValueKey(selected),
-                size: 22,
-                color: selected ? activeColor : inactiveColor,
-              ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeInCubic,
+                  transitionBuilder: (child, animation) =>
+                      ScaleTransition(scale: animation, child: child),
+                  child: Icon(
+                    icon,
+                    key: ValueKey(selected),
+                    size: 22,
+                    color: selected ? activeColor : inactiveColor,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                AnimatedDefaultTextStyle(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  style: TextStyle(
+                    color: selected ? activeColor : inactiveColor,
+                    fontSize: 11,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    letterSpacing: 0.2,
+                  ),
+                  child: Text(label, maxLines: 1),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 2),
-          AnimatedDefaultTextStyle(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOutCubic,
-            style: TextStyle(
-              color: selected ? activeColor : inactiveColor,
-              fontSize: 11,
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-              letterSpacing: 0.2,
-            ),
-            child: Text(label, maxLines: 1),
           ),
         ],
       ),

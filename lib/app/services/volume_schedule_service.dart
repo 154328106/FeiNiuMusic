@@ -62,9 +62,14 @@ class VolumeScheduleService {
     final p = AppVolumeScheduleSettings.activePeriodNow(DateTime.now());
     if (p != null) {
       if (p.id != _active?.id) {
-        // 进入新时间段 → 快照手动音量并强制段内音量。
-        AppVolumeScheduleSettings.manualVolume.value =
-            AppPlaybackVolumeSettings.volume.value;
+        // 进入新时间段：只取「已持久化的手动音量」用于离开时恢复，
+        // 不再现场快照当前音量——否则时段内重启/被杀会把上个时段遗留的
+        // 段内强制值当成手动音量，结束时恢复回错误值。
+        if (!AppVolumeScheduleSettings.hasPersistedManualVolume) {
+          await AppVolumeScheduleSettings.persistManualVolume(
+            AppPlaybackVolumeSettings.volume.value,
+          );
+        }
         _active = p;
         AppVolumeScheduleSettings.isActiveNow.value = true;
         await AppPlaybackVolumeSettings.setVolume(p.volume);
@@ -83,6 +88,16 @@ class VolumeScheduleService {
       );
     } else {
       AppVolumeScheduleSettings.isActiveNow.value = false;
+      // 不在任何时间段且本会话尚未进入过时段（_active == null）：
+      // 若音量仍是某时段遗留的强制值（如 App 在时段内被关、进程被杀后
+      // 重新启动/回到前台，persisted 音量仍是段内值），恢复为已记录的手动音量。
+      // 仅当已持久化过手动音量才恢复，避免覆盖用户首次使用前的现有音量。
+      final current = AppPlaybackVolumeSettings.volume.value;
+      final manual = AppVolumeScheduleSettings.manualVolume.value;
+      if (AppVolumeScheduleSettings.hasPersistedManualVolume &&
+          (current - manual).abs() > 0.001) {
+        await AppPlaybackVolumeSettings.setVolume(manual);
+      }
     }
     _restartTickerIfNeeded();
   }

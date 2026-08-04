@@ -45,9 +45,9 @@ class PlayerBottomPanel extends StatelessWidget {
           _MiniLyricsPreview(onTap: onTapLyrics, stylePreset: stylePreset),
         _PlayerSeekBar(player: player, stylePreset: stylePreset),
         const SizedBox(height: 20),
-        _PlayerControls(player: player, stylePreset: stylePreset),
+        PlayerControls(player: player, stylePreset: stylePreset),
         const SizedBox(height: 30),
-        _BottomActions(player: player, stylePreset: stylePreset),
+        BottomActions(player: player, stylePreset: stylePreset),
         SizedBox(height: bottomSpacing),
       ],
     );
@@ -189,6 +189,8 @@ class _MiniLyricsPreviewState extends State<_MiniLyricsPreview>
                         showTranslation: _showTranslation.value,
                         fontSize: 15,
                         activeFontSize: 18,
+                        // 上下边缘渐隐，歌词行滑出边界时淡出而非硬截断
+                        fadeEdges: true,
                       );
                     }(),
                   ),
@@ -342,11 +344,15 @@ class _PlayerSeekBarState extends State<_PlayerSeekBar> with SignalsMixin {
   }
 }
 
-class _PlayerControls extends StatelessWidget {
+class PlayerControls extends StatelessWidget {
   final PlayerService player;
   final PlayerStylePreset stylePreset;
 
-  const _PlayerControls({required this.player, required this.stylePreset});
+  const PlayerControls({
+    super.key,
+    required this.player,
+    required this.stylePreset,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -408,11 +414,15 @@ class _PlayerControls extends StatelessWidget {
   }
 }
 
-class _BottomActions extends StatelessWidget {
+class BottomActions extends StatelessWidget {
   final PlayerService player;
   final PlayerStylePreset stylePreset;
 
-  const _BottomActions({required this.player, required this.stylePreset});
+  const BottomActions({
+    super.key,
+    required this.player,
+    required this.stylePreset,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -910,6 +920,8 @@ class _PlaylistSheetState extends State<_PlaylistSheet> {
         final currentIndex = widget.player.currentIndexSignal.value;
         final mode = widget.player.playbackModeSignal.value;
         final playing = widget.player.isPlayingSignal.value;
+        // 漫游队列由服务端随机链驱动，不允许删除歌曲；本地随机仍可删除。
+        final roamActive = widget.player.roamActive;
         final total = queue.length;
         final current = currentIndex >= 0 ? currentIndex + 1 : 0;
         if (currentIndex != _lastIndex && currentIndex >= 0) {
@@ -936,6 +948,7 @@ class _PlaylistSheetState extends State<_PlaylistSheet> {
               total: total,
               current: current,
               mode: mode,
+              roamActive: roamActive,
               accent: scheme.primary,
               textColor: textColor,
               secondaryTextColor: secondaryTextColor,
@@ -1038,6 +1051,7 @@ class _PlaylistSheetState extends State<_PlaylistSheet> {
                                     index: index,
                                     isCurrent: isCurrent,
                                     playing: playing,
+                                    canDelete: !roamActive,
                                     canReorder: mode != PlaybackMode.shuffle,
                                     accent: scheme.primary,
                                     textColor: textColor,
@@ -1067,6 +1081,7 @@ class _PlaylistHeader extends StatelessWidget {
   final int total;
   final int current;
   final PlaybackMode mode;
+  final bool roamActive;
   final Color textColor;
   final Color secondaryTextColor;
   final Color accent;
@@ -1078,6 +1093,7 @@ class _PlaylistHeader extends StatelessWidget {
     required this.total,
     required this.current,
     required this.mode,
+    required this.roamActive,
     required this.textColor,
     required this.secondaryTextColor,
     required this.accent,
@@ -1160,24 +1176,26 @@ class _PlaylistHeader extends StatelessWidget {
                   style: TextStyle(fontSize: 13, color: secondaryTextColor),
                 ),
               ),
-              TextButton.icon(
-                onPressed: onClear,
-                style: TextButton.styleFrom(
-                  foregroundColor: secondaryTextColor,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              // 漫游模式队列由服务端随机链驱动，不允许手动清空，隐藏清空按钮。
+              if (!roamActive)
+                TextButton.icon(
+                  onPressed: onClear,
+                  style: TextButton.styleFrom(
+                    foregroundColor: secondaryTextColor,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  icon: Icon(
+                    Icons.delete_sweep_rounded,
+                    size: 19,
+                    color: secondaryTextColor,
+                  ),
+                  label: Text(
+                    '清空',
+                    style: TextStyle(fontSize: 13, color: secondaryTextColor),
+                  ),
                 ),
-                icon: Icon(
-                  Icons.delete_sweep_rounded,
-                  size: 19,
-                  color: secondaryTextColor,
-                ),
-                label: Text(
-                  '清空',
-                  style: TextStyle(fontSize: 13, color: secondaryTextColor),
-                ),
-              ),
             ],
           ),
         ),
@@ -1198,6 +1216,7 @@ class _QueueItem extends StatelessWidget {
   final int index;
   final bool isCurrent;
   final bool playing;
+  final bool canDelete;
   final bool canReorder;
   final Color accent;
   final Color textColor;
@@ -1210,6 +1229,7 @@ class _QueueItem extends StatelessWidget {
     required this.index,
     required this.isCurrent,
     required this.playing,
+    required this.canDelete,
     required this.canReorder,
     required this.accent,
     required this.textColor,
@@ -1269,15 +1289,16 @@ class _QueueItem extends StatelessWidget {
                     ],
                   ),
                 ),
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  icon: Icon(
-                    Icons.close_rounded,
-                    color: secondaryTextColor.withValues(alpha: 0.8),
-                    size: 20,
+                if (canDelete)
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(
+                      Icons.close_rounded,
+                      color: secondaryTextColor.withValues(alpha: 0.8),
+                      size: 20,
+                    ),
+                    onPressed: onRemove,
                   ),
-                  onPressed: onRemove,
-                ),
                 if (canReorder)
                   ReorderableDelayedDragStartListener(
                     index: index,
@@ -1387,4 +1408,113 @@ class _QueueLimitDialog extends StatelessWidget {
       ],
     );
   }
+}
+
+/// 海报模式播放控件：模式 + 上一首/播放/下一首 + 更多（含操作栏入口）。
+class PosterControls extends StatelessWidget {
+  final PlayerService player;
+
+  const PosterControls({super.key, required this.player});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final iconColor = scheme.onSurface.withValues(alpha: 0.72);
+    return Watch.builder(
+      builder: (context) {
+        final playing = player.isPlayingSignal.value;
+        final mode = player.playbackModeSignal.value;
+        final modeIcon = switch (mode) {
+          PlaybackMode.shuffle => Icons.shuffle_rounded,
+          PlaybackMode.loop => Icons.repeat_rounded,
+          PlaybackMode.single => Icons.repeat_one_rounded,
+        };
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            IconButton(
+              iconSize: 30,
+              color: iconColor,
+              icon: Icon(modeIcon),
+              onPressed: player.cyclePlaybackMode,
+            ),
+            IconButton(
+              iconSize: 40,
+              color: iconColor,
+              icon: const Icon(Icons.skip_previous_rounded),
+              onPressed: player.previous,
+            ),
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: scheme.onSurface,
+              ),
+              child: IconButton(
+                iconSize: 36,
+                color: scheme.surface,
+                icon: Icon(
+                  playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                ),
+                onPressed: player.togglePlayPause,
+              ),
+            ),
+            IconButton(
+              iconSize: 40,
+              color: iconColor,
+              icon: const Icon(Icons.skip_next_rounded),
+              onPressed: player.next,
+            ),
+            IconButton(
+              iconSize: 30,
+              color: iconColor,
+              icon: const Icon(Icons.more_vert_rounded),
+              onPressed: () => showPosterSongDetailSheet(context, player),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// 海报模式底部「更多」按钮：弹出歌曲详情面板
+void showPosterSongDetailSheet(BuildContext context, PlayerService player) {
+  final song = player.currentSong.value;
+  if (song == null) {
+    AppToast.show(context, '暂无歌曲');
+    return;
+  }
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (_) => SongDetailSheet(
+      song: song,
+      onOpenPlayerAppearanceSettings: () {
+        Navigator.of(context).pushNamed(AppRoutes.playerAppearanceSettings);
+      },
+      onOpenArtist: (artistName) {
+        Navigator.of(context).push(
+          buildAppPageRoute(
+            (_) => ArtistDetailPage(
+              artistName: artistName,
+              artistGuid: song.firstArtistGuid,
+            ),
+          ),
+        );
+      },
+      onOpenAlbum: (albumName) {
+        Navigator.of(context).push(
+          buildAppPageRoute(
+            (_) => AlbumDetailPage(
+              albumName: albumName,
+              albumGuid: song.albumGuid,
+            ),
+          ),
+        );
+      },
+    ),
+  );
 }

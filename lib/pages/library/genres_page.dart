@@ -254,13 +254,16 @@ class _GenresPageState extends State<GenresPage> with SignalsMixin {
         extendBodyBehindAppBar: true,
         appBar: AppTopBar(
           title: '风格',
-          showBackButton: !useBottomNavigation,
-          leading: useBottomNavigation
-              ? null
-              : IconButton(
-                  icon: const Icon(Icons.menu_rounded),
-                  onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-                ),
+          leading: IconButton(
+            icon: Icon(
+              useBottomNavigation
+                  ? Icons.arrow_back_rounded
+                  : Icons.menu_rounded,
+            ),
+            onPressed: useBottomNavigation
+                ? () => Navigator.of(context).maybePop()
+                : () => _scaffoldKey.currentState?.openDrawer(),
+          ),
           backgroundColor: Colors.transparent,
           elevation: 0,
           actions: [
