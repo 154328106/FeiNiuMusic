@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../app/router/app_router.dart';
+import '../../../app/services/feiniu/fn_connection_probe_service.dart';
 import '../../../app/state/settings_fn_state.dart';
 import '../../../app/state/settings_theme_state.dart';
 import '../../../app/theme/app_fonts.dart';
@@ -20,6 +21,10 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
   final PreferredSizeWidget? bottom;
   final bool? isRefreshing;
 
+  /// 隐藏连接失败（wifi_off）入口。用于 FN Connect 设置页自身：
+  /// 该页就是修复连接的地方，再显示入口会无限套娃压栈。
+  final bool hideConnectionFailedAction;
+
   const AppTopBar({
     super.key,
     this.title,
@@ -34,6 +39,7 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
     this.height,
     this.bottom,
     this.isRefreshing,
+    this.hideConnectionFailedAction = false,
   });
 
   @override
@@ -78,7 +84,9 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
         ),
       );
     }
-    resolvedActions.add(const _ConnectionFailedAction());
+    if (!hideConnectionFailedAction) {
+      resolvedActions.add(const _ConnectionFailedAction());
+    }
     return AppBar(
       title:
           titleWidget ??
@@ -99,12 +107,42 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
   }
 }
 
-/// 连接失败提示（AppBar 标题右侧的 actions 区域）
+/// 连接状态提示（AppBar 标题右侧的 actions 区域）
 ///
-/// 当 [AppFnConnectionSettings.serverConnected] 为 false 时显示，
-/// 点击跳转连接设置页处理。不占用额外布局空间。
-class _ConnectionFailedAction extends StatelessWidget {
+/// 三种状态：
+/// - 连接正常（[AppFnConnectionSettings.serverConnected] == true）：不显示；
+/// - 正在连接/重连探测中（serverConnected == false 且探测进行中）：显示 WiFi
+///   图标按信号格数递进循环（一格 → 两格 → 三格 → 满格，周而复始），
+///   点击仍可进连接设置页；
+/// - 连接失败（serverConnected == false 且探测结束）：显示红色断开图标，
+///   点击跳转连接设置页处理。不占用额外布局空间。
+class _ConnectionFailedAction extends StatefulWidget {
   const _ConnectionFailedAction();
+
+  @override
+  State<_ConnectionFailedAction> createState() =>
+      _ConnectionFailedActionState();
+}
+
+class _ConnectionFailedActionState extends State<_ConnectionFailedAction>
+    with SingleTickerProviderStateMixin {
+  /// 重连中的 WiFi 信号格数递进循环：一格 → 两格 → 三格 → 满格 → 回到一格。
+  late final AnimationController _wifiController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1600),
+  )..repeat();
+
+  static const List<IconData> _wifiLevelIcons = [
+    Icons.wifi_1_bar_rounded,
+    Icons.wifi_2_bar_rounded,
+    Icons.wifi_rounded,
+  ];
+
+  @override
+  void dispose() {
+    _wifiController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -114,22 +152,53 @@ class _ConnectionFailedAction extends StatelessWidget {
       valueListenable: AppFnConnectionSettings.serverConnected,
       builder: (context, connected, _) {
         if (connected) return const SizedBox.shrink();
-        return Padding(
-          padding: const EdgeInsets.only(right: 4),
-          child: IconButton(
-            tooltip: '服务器连接失败，点击处理',
-            onPressed: () {
+        return ValueListenableBuilder<bool>(
+          valueListenable: FnConnectionProbeService.instance.isProbing,
+          builder: (context, probing, _) {
+            void handleTap() {
               Navigator.pushNamed(
                 context,
                 isFnId ? AppRoutes.fnConnectSettings : AppRoutes.settings,
               );
-            },
-            icon: Icon(
-              Icons.wifi_off_rounded,
-              size: 18,
-              color: colorScheme.error,
-            ),
-          ),
+            }
+
+            final Widget icon;
+            final String tooltip;
+            if (probing) {
+              // 正在连接/重连探测：WiFi 信号格数递进循环动画
+              tooltip = '正在重连中...';
+              icon = AnimatedBuilder(
+                animation: _wifiController,
+                builder: (context, _) {
+                  final level = (_wifiController.value *
+                          _wifiLevelIcons.length)
+                      .floor()
+                      .clamp(0, _wifiLevelIcons.length - 1);
+                  return Icon(
+                    _wifiLevelIcons[level],
+                    size: 18,
+                    color: colorScheme.primary,
+                  );
+                },
+              );
+            } else {
+              // 连接失败：红色断开
+              tooltip = '服务器连接失败，点击处理';
+              icon = Icon(
+                Icons.wifi_off_rounded,
+                size: 18,
+                color: colorScheme.error,
+              );
+            }
+            return Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: IconButton(
+                tooltip: tooltip,
+                onPressed: handleTap,
+                icon: icon,
+              ),
+            );
+          },
         );
       },
     );

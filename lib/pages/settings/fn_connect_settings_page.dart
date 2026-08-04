@@ -140,6 +140,8 @@ class _FnConnectSettingsPageState extends State<FnConnectSettingsPage> {
         title: 'FN Connect',
         backgroundColor: Colors.transparent,
         elevation: 0,
+        // 本页即连接修复页：隐藏 wifi_off 入口，防止无限套娃压栈
+        hideConnectionFailedAction: true,
       ),
       showMiniPlayer: false,
       body: ListView(
