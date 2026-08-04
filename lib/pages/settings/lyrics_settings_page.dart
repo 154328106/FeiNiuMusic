@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
 import '../../app/services/lyrics/lyrics_service.dart';
+import '../../app/state/settings_state.dart';
 import '../../components/index.dart';
 
 class LyricsSettingsPage extends StatefulWidget {
@@ -24,6 +25,7 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
   late final _lyriconEnabled = createSignal(false);
   late final _lyriconForceKaraoke = createSignal(false);
   late final _lyriconHideTranslation = createSignal(false);
+  late final _carBluetoothLyrics = createSignal(false);
   late final _loading = createSignal(true);
 
   @override
@@ -34,6 +36,7 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
+    await MediaNotificationSettings.ensureLoaded();
     if (!mounted) return;
     _meizuLyrics.value = prefs.getBool(_prefsMeizuLyrics) ?? false;
     _lyriconEnabled.value = prefs.getBool(_prefsLyriconEnabled) ?? false;
@@ -41,6 +44,8 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
         prefs.getBool(_prefsLyriconForceKaraoke) ?? false;
     _lyriconHideTranslation.value =
         prefs.getBool(_prefsLyriconHideTranslation) ?? false;
+    _carBluetoothLyrics.value =
+        MediaNotificationSettings.carBluetoothLyrics.value;
     await LyricsService.instance.refreshSettings();
     _loading.value = false;
   }
@@ -69,6 +74,11 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
   void _setLyriconHideTranslation(bool value) {
     _lyriconHideTranslation.value = value;
     _updateBool(_prefsLyriconHideTranslation, value);
+  }
+
+  void _setCarBluetoothLyrics(bool value) {
+    _carBluetoothLyrics.value = value;
+    MediaNotificationSettings.setCarBluetoothLyrics(value);
   }
 
   @override
@@ -121,6 +131,17 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
                       value: _lyriconHideTranslation.value,
                       onChanged: _setLyriconHideTranslation,
                     ),
+                ],
+              ),
+              AppSettingSection(
+                title: '车载蓝牙歌词',
+                children: [
+                  AppSettingSwitchTile(
+                    title: '车载蓝牙歌词',
+                    subtitle: '通过媒体会话发送歌词，供车载蓝牙播放器显示',
+                    value: _carBluetoothLyrics.value,
+                    onChanged: _setCarBluetoothLyrics,
+                  ),
                 ],
               ),
             ],

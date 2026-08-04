@@ -101,6 +101,9 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
     MediaNotificationSettings.showFavoriteAction.addListener(
       _onNotificationSettingsChanged,
     );
+    MediaNotificationSettings.carBluetoothLyrics.addListener(
+      _onNotificationSettingsChanged,
+    );
     _currentLyricLine = LyricsService.instance.currentLineText.value;
     _loadPlatformCapabilities();
     _syncFromPlayer();
@@ -248,6 +251,19 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
     }
 
     final lyricOnTop = MediaNotificationSettings.lyricOnTop.value;
+    // 车载蓝牙歌词：独立于通知歌词（showLyrics/lyricOnTop），直接从
+    // LyricsService 当前行读取。开关关 → extras 为 null（不发歌词）；
+    // 开关开但无歌词 → 发空串，让车机清除之前显示的行。
+    final carLyricsEnabled = MediaNotificationSettings.carBluetoothLyrics.value;
+    final isCurrentSong = player.snapshot.value.song?.id == song.id;
+    final carLyricLine = carLyricsEnabled && isCurrentSong
+        ? LyricsService.instance.currentLineText.value
+        : null;
+    final carLyricsExtras = carLyricsEnabled
+        ? <String, dynamic>{
+            'android.media.metadata.LYRICS': carLyricLine ?? '',
+          }
+        : null;
     if (lyricOnTop && lyricLine != null) {
       return MediaItem(
         id: song.id,
@@ -260,6 +276,7 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
         displayTitle: lyricLine,
         displaySubtitle: songAndArtist,
         displayDescription: artistText.isEmpty ? null : artistText,
+        extras: carLyricsExtras,
       );
     }
     final effectiveArtist = lyricLine ?? song.artistDisplayName;
@@ -277,6 +294,7 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
       displayDescription: lyricLine != null ? song.artistDisplayName : null,
       // audio_service 加载 artUri 时使用这些 HTTP 请求头（用于服务器认证）
       artHeaders: FeiNiuApiClient.imageAuthHeaders(),
+      extras: carLyricsExtras,
     );
   }
 
@@ -405,6 +423,9 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
   void _syncMediaItem() {
     final current = player.snapshot.value.song;
     final item = current != null ? _itemFromSong(current) : null;
+    // itemKey 必须包含车载歌词行：当「通知显示歌词」关闭时，title/artist/
+    // displaySubtitle 不含歌词，连续歌词行会产生相同 itemKey 被去重吞掉，
+    // 导致车机收不到歌词更新。
     final itemKey = item == null
         ? 'none'
         : [
@@ -414,6 +435,7 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
             item.displayTitle ?? '',
             item.displaySubtitle ?? '',
             item.artUri?.toString() ?? '',
+            item.extras?['android.media.metadata.LYRICS'] ?? '',
           ].join('|');
     if (itemKey == _lastMediaItemKey) return;
     _lastMediaItemKey = itemKey;

@@ -7,11 +7,14 @@ class MediaNotificationSettings {
   static const String _prefsLyricOnTop = 'notification_lyric_on_top';
   static const String _prefsShowFavoriteAction =
       'notification_show_favorite_action';
+  static const String _prefsCarBluetoothLyrics =
+      'notification_car_bluetooth_lyrics';
 
   static final ValueNotifier<bool> showLyrics = ValueNotifier(true);
   static final ValueNotifier<bool> showCloseAction = ValueNotifier(true);
   static final ValueNotifier<bool> lyricOnTop = ValueNotifier(false);
   static final ValueNotifier<bool> showFavoriteAction = ValueNotifier(true);
+  static final ValueNotifier<bool> carBluetoothLyrics = ValueNotifier(false);
 
   static Future<void>? _loading;
 
@@ -23,6 +26,8 @@ class MediaNotificationSettings {
     showCloseAction.value = prefs.getBool(_prefsShowCloseAction) ?? true;
     lyricOnTop.value = prefs.getBool(_prefsLyricOnTop) ?? false;
     showFavoriteAction.value = prefs.getBool(_prefsShowFavoriteAction) ?? true;
+    carBluetoothLyrics.value =
+        prefs.getBool(_prefsCarBluetoothLyrics) ?? false;
   }
 
   static Future<void> setShowLyrics(bool enabled) async {
@@ -47,5 +52,11 @@ class MediaNotificationSettings {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefsShowFavoriteAction, enabled);
     showFavoriteAction.value = enabled;
+  }
+
+  static Future<void> setCarBluetoothLyrics(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsCarBluetoothLyrics, enabled);
+    carBluetoothLyrics.value = enabled;
   }
 }
