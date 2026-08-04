@@ -321,19 +321,31 @@ class _AppVolumeControl extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    // 与下方 AppListTile 的标题对齐：同用 ListTileTheme 的 contentPadding，
+    // leading（图标宽 24）与标题之间留 16（ListTile 默认 horizontalTitleGap）。
+    final tilePadding = ListTileTheme.of(context).contentPadding?.resolve(
+          Directionality.of(context),
+        ) ??
+        const EdgeInsets.symmetric(horizontal: 16);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
+      padding: EdgeInsets.only(
+        left: tilePadding.left,
+        right: tilePadding.right,
+        top: 8,
+        bottom: 2,
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           SizedBox(
-            width: 40,
+            width: 24,
             child: Icon(
               Icons.volume_down_rounded,
+              size: 24,
               color: colors.onSurfaceVariant,
             ),
           ),
-          const SizedBox(width: 20),
+          const SizedBox(width: 16),
           Expanded(
             child: ValueListenableBuilder<double>(
               valueListenable: AppPlaybackVolumeSettings.volume,

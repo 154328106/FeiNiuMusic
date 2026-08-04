@@ -270,12 +270,14 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
         title: lyricLine,
         artist: songAndArtist,
         album: albumName,
+        artUri: artUri,
         duration: song.durationMs != null
             ? Duration(milliseconds: song.durationMs!)
             : null,
         displayTitle: lyricLine,
         displaySubtitle: songAndArtist,
         displayDescription: artistText.isEmpty ? null : artistText,
+        artHeaders: FeiNiuApiClient.imageAuthHeaders(),
         extras: carLyricsExtras,
       );
     }

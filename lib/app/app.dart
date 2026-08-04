@@ -248,6 +248,23 @@ class _AppStartupGateState extends State<_AppStartupGate> {
   /// 导航器，压根导航器会盖住门控，破坏登录/登出回退到门控的规则）。
   GlobalKey<NavigatorState>? _baseNavKey;
 
+  /// 账号 → 嵌套基础 Navigator key。key 用 [GlobalObjectKey] 并依赖
+  /// `identical()` 判等（见 framework.dart GlobalObjectKey.==），因此必须
+  /// **复用同一个 key 实例**：若每次 build 都新建 `'base-nav-$accountId'`
+  /// 字符串，identical 恒为 false，任何触发门控重建的事件（如 dynamic_color
+  /// 动态取色异步到达、主题切换）都会让嵌套 Navigator 以新 key 重新挂载，
+  /// 导航栈被清零回 /home —— 启动自动打开的播放页就这样被冲掉。
+  /// 同一账号复用同一个 key 实例后，重建只是普通 rebuild，Navigator 连同
+  /// 已压栈的路由原样保留。
+  final Map<String, GlobalKey<NavigatorState>> _baseNavKeys = {};
+
+  /// 取账号对应的 key：首次为该账号创建并缓存，之后复用同一实例。
+  GlobalKey<NavigatorState> _navKeyFor(String accountId) {
+    return _baseNavKeys.putIfAbsent(accountId, () {
+      return GlobalObjectKey<NavigatorState>('base-nav-$accountId');
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     // 首次启动引导门控：未完成引导一律全屏显示，与登录态无关；
@@ -286,9 +303,9 @@ class _AppStartupGateState extends State<_AppStartupGate> {
             return ValueListenableBuilder<String?>(
               valueListenable: AccountStore.instance.currentAccountId,
               builder: (context, accountId, _) {
-                final navKey = GlobalObjectKey<NavigatorState>(
-                  'base-nav-${accountId ?? 'none'}',
-                );
+                // 同账号复用同一个 key 实例（GlobalObjectKey 用 identical 判等），
+                // 避免每次 build 新建 key 导致嵌套 Navigator 被整体重挂、导航栈清零。
+                final navKey = _navKeyFor(accountId ?? 'none');
                 _baseNavKey = navKey;
                 return KeyedSubtree(
                   key: ValueKey('shell-${accountId ?? 'none'}'),

@@ -545,6 +545,13 @@ class _GenreDetailPageState extends State<GenreDetailPage>
   Future<void> _loadMore() async {
     if (_loadingMore.value || !_hasMore) return;
     _loadingMore.value = true;
+    await _fetchAndAppendNextPage();
+    if (mounted) _loadingMore.value = false;
+  }
+
+  /// 拉取下一页并追加到列表。返回是否有新增数据。
+  /// 供滚动加载（_loadMore）与「按数量加载」（_loadMoreToTarget）共用。
+  Future<bool> _fetchAndAppendNextPage() async {
     _currentPage++;
     try {
       final pageData = await _api.getGenreTracks(
@@ -553,18 +560,45 @@ class _GenreDetailPageState extends State<GenreDetailPage>
         size: _pageSize,
         sort: _apiSortParam(),
       );
-      if (!mounted) return;
+      if (!mounted) return false;
       final songs = pageData.list
           .map((t) => _trackService.trackToSongEntity(t))
           .toList();
       _total = pageData.total;
       _songs.value = [..._songs.value, ...songs];
       _hasMore = _songs.value.length < _total;
+      return songs.isNotEmpty;
     } catch (_) {
       _currentPage--;
+      return false;
+    }
+  }
+
+  /// 按目标数量加载：循环整页 _pageSize 直到达到 target 或没有更多。
+  Future<void> _loadMoreToTarget(int target) async {
+    if (_loadingMore.value || target <= _songs.value.length) return;
+    _loadingMore.value = true;
+    try {
+      while (mounted && _songs.value.length < target && _hasMore) {
+        if (!await _fetchAndAppendNextPage()) break;
+      }
     } finally {
       if (mounted) _loadingMore.value = false;
     }
+  }
+
+  /// 点击数量显示 → 弹出输入对话框，按用户指定的数量加载。
+  Future<void> _showLoadMoreDialog() async {
+    final loaded = _songs.value.length;
+    if (_total <= loaded) return;
+    final target = await LoadMoreCountDialog.show(
+      context,
+      currentCount: loaded,
+      maxTotal: _total,
+      title: '风格歌曲加载更多',
+    );
+    if (target == null || !mounted || target <= loaded) return;
+    await _loadMoreToTarget(target);
   }
 
   String _apiSortParam() {
@@ -695,6 +729,20 @@ class _GenreDetailPageState extends State<GenreDetailPage>
             onRefresh: () => _load(forceRefresh: true),
             child: Column(
               children: [
+                Container(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  alignment: Alignment.centerLeft,
+                  child: LoadMoreCountText(
+                    text: '共 ${_songs.value.length} 首',
+                    style: TextStyle(
+                      color: scheme.onSurfaceVariant,
+                      fontSize: 13,
+                    ),
+                    onTap: (_hasMore && _total > 0)
+                        ? _showLoadMoreDialog
+                        : null,
+                  ),
+                ),
                 Expanded(
                   child: ListView.builder(
               controller: _scrollController,

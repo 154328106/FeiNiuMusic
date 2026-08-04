@@ -163,7 +163,9 @@ class _SongsPageState extends State<SongsPage>
             })
             .toList();
         _totalSongs = pageData.total;
-        _hasMoreSongs = songs.length >= _pageSize;
+        _hasMoreSongs = _totalSongs > 0
+            ? songs.length < _totalSongs
+            : songs.length >= _pageSize;
         return songs;
       } catch (e) {
         debugPrint('[SongsPage] fetch error: $e');
@@ -262,8 +264,14 @@ class _SongsPageState extends State<SongsPage>
   Future<void> _loadMoreSongs() async {
     if (_isLoadingMore.value || !_hasMoreSongs) return;
     _isLoadingMore.value = true;
+    await _fetchAndAppendNextPage();
+    if (mounted) _isLoadingMore.value = false;
+  }
+
+  /// 拉取下一页并追加到列表。返回是否有新增数据。
+  /// 供滚动加载（_loadMoreSongs）与「按数量加载」（_loadMoreToTarget）共用。
+  Future<bool> _fetchAndAppendNextPage() async {
     _currentPage++;
-    debugPrint('[SongsPage] _loadMoreSongs page=$_currentPage sort=${_apiSortParam()}');
     try {
       final sort = _apiSortParam();
       final pageData = await _api.getTrackList(
@@ -271,21 +279,57 @@ class _SongsPageState extends State<SongsPage>
         size: _pageSize,
         sort: sort,
       );
-      debugPrint('[SongsPage] loadMore ok total=${pageData.total} items=${pageData.list.length}');
+      debugPrint(
+        '[SongsPage] loadMore ok total=${pageData.total} items=${pageData.list.length}',
+      );
       final songs = pageData.list
           .map((t) => _trackService.trackToSongEntity(t.toJson()))
           .toList();
-      _hasMoreSongs = songs.length >= _pageSize;
-      debugPrint('[SongsPage] loadMore hasMore=$_hasMoreSongs currentTotal=${_songs.value.length}');
+      _totalSongs = pageData.total;
+      _hasMoreSongs = _totalSongs > 0
+          ? _songs.value.length + songs.length < _totalSongs
+          : songs.length >= _pageSize;
+      debugPrint(
+        '[SongsPage] loadMore hasMore=$_hasMoreSongs currentTotal=${_songs.value.length}',
+      );
       if (mounted) {
         _songs.value = [..._songs.value, ...songs];
-        _isLoadingMore.value = false;
       }
+      return songs.isNotEmpty;
     } catch (e) {
       _currentPage--;
       debugPrint('[SongsPage] loadMore error type=${e.runtimeType}: $e');
+      return false;
+    }
+  }
+
+  /// 按目标数量加载：循环整页 _pageSize 直到达到 target 或没有更多。
+  /// 已加载数始终保持 _pageSize 的整数倍（或等于 total），
+  /// 保证播放队列 fetchMore 的 `page: _currentPage + page` 偏移不错位。
+  Future<void> _loadMoreToTarget(int target) async {
+    if (_isLoadingMore.value || target <= _songs.value.length) return;
+    _isLoadingMore.value = true;
+    try {
+      while (mounted && _songs.value.length < target && _hasMoreSongs) {
+        if (!await _fetchAndAppendNextPage()) break;
+      }
+    } finally {
       if (mounted) _isLoadingMore.value = false;
     }
+  }
+
+  /// 点击数量显示 → 弹出输入对话框，按用户指定的数量加载。
+  Future<void> _showLoadMoreDialog() async {
+    final loaded = _songs.value.length;
+    if (_totalSongs <= loaded) return;
+    final target = await LoadMoreCountDialog.show(
+      context,
+      currentCount: loaded,
+      maxTotal: _totalSongs,
+      title: '歌曲加载更多',
+    );
+    if (target == null || !mounted || target <= loaded) return;
+    await _loadMoreToTarget(target);
   }
 
   Future<void> _restoreSortPrefs() async {
@@ -505,12 +549,13 @@ class _SongsPageState extends State<SongsPage>
                               ),
                             ),
                           ),
-                          Text(
-                            '共 $_totalSongs 首',
+                          LoadMoreCountText(
+                            text: '共 $_totalSongs 首',
                             style: TextStyle(
                               color: scheme.onSurfaceVariant,
                               fontSize: 13,
                             ),
+                            onTap: _hasMoreSongs ? _showLoadMoreDialog : null,
                           ),
                         ],
                       ),
