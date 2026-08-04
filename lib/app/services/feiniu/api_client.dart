@@ -370,6 +370,10 @@ class FeiNiuApiClient {
       (d) => LoginResponse.fromJson(d as Map<String, dynamic>),
     );
     if (!parsed.isSuccess || parsed.data == null) {
+      // 120001：账号或密码错误（服务端 msg 为英文，用户看不懂）
+      if (parsed.code == 120001) {
+        throw Exception('用户名或密码错误，请重试！');
+      }
       throw Exception(parsed.msg.isNotEmpty ? parsed.msg : '登录失败');
     }
     return parsed.data!;

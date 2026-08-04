@@ -147,8 +147,8 @@ class _AccountSwitchPageState extends State<AccountSwitchPage> {
             radius: 24,
             backgroundColor: scheme.primary.withValues(alpha: 0.16),
             child: Text(
-              account.displayName.isNotEmpty
-                  ? account.displayName.characters.first
+              account.username.isNotEmpty
+                  ? account.username.characters.first
                   : '?',
               style: TextStyle(
                 color: scheme.primary,
@@ -214,8 +214,8 @@ class _AccountSwitchPageState extends State<AccountSwitchPage> {
         radius: 17,
         backgroundColor: scheme.primary.withValues(alpha: 0.12),
         child: Text(
-          account.displayName.isNotEmpty
-              ? account.displayName.characters.first
+          account.username.isNotEmpty
+              ? account.username.characters.first
               : '?',
           style: TextStyle(
             color: scheme.primary,

@@ -7,8 +7,8 @@ import '../../app/state/settings_state.dart';
 
 const _primaryNavigationRoutes = <String>[
   AppRoutes.home,
-  AppRoutes.songs,
   AppRoutes.playlists,
+  AppRoutes.songs,
   AppRoutes.favorites,
   AppRoutes.profile,
 ];
@@ -95,11 +95,11 @@ class ModernNavigationBar extends StatelessWidget {
     required this.onTap,
   });
 
-  static const List<String> _labels = ['首页', '歌曲', '歌单', '收藏', '我的'];
+  static const List<String> _labels = ['首页', '歌单', '歌曲', '收藏', '我的'];
   static const List<IconData> _icons = [
     Icons.home_rounded,
-    Icons.music_note_rounded,
     Icons.queue_music_rounded,
+    Icons.music_note_rounded,
     Icons.favorite_rounded,
     Icons.person_rounded,
   ];

@@ -14,6 +14,7 @@ import '../../app/services/player_service.dart';
 import '../../app/state/song_state.dart';
 import '../../app/utils/api_cache_manager.dart';
 import '../../app/utils/deferred_page_init_mixin.dart';
+import '../../app/utils/primary_tab_refresh_mixin.dart';
 import '../../components/index.dart';
 import '../search/search_page.dart';
 import '../library/library_detail_pages.dart';
@@ -37,7 +38,7 @@ class SongsPage extends StatefulWidget {
 }
 
 class _SongsPageState extends State<SongsPage>
-    with SignalsMixin, DeferredPageInitMixin, SongMultiSelectMixin {
+    with SignalsMixin, DeferredPageInitMixin, SongMultiSelectMixin, PrimaryTabRefreshMixin {
   static const String _prefsSortKey = 'songs_sort_key';
   static const String _prefsSortAsc = 'songs_sort_asc';
   static const double _itemExtent = 64;
@@ -77,6 +78,14 @@ class _SongsPageState extends State<SongsPage>
   Future<void> runDeferredInit() async {
     await _restoreSortPrefs();
     await _loadSongs();
+  }
+
+  @override
+  int get primaryTabIndex => 2;
+
+  @override
+  Future<void> onPrimaryTabActivated() async {
+    if (mounted) await _loadSongs();
   }
 
   @override
@@ -444,7 +453,7 @@ class _SongsPageState extends State<SongsPage>
               : SideMenu(
                   onCloseDrawer: () => _scaffoldKey.currentState?.closeDrawer(),
                 ),
-          bottomNavIndex: useBottomNavigation ? 1 : null,
+          bottomNavIndex: useBottomNavigation ? 2 : null,
           onBottomNavTap: useBottomNavigation
               ? (index) => navigateToPrimaryDestination(context, index)
               : null,

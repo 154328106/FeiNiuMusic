@@ -20,6 +20,7 @@ import '../../app/state/settings_playback_state.dart';
 import '../../app/state/song_state.dart';
 import '../../app/utils/api_cache_manager.dart';
 import '../../app/utils/deferred_page_init_mixin.dart';
+import '../../app/utils/primary_tab_refresh_mixin.dart';
 import '../../app/theme/app_styles.dart';
 import '../../components/index.dart';
 import '../library/library_detail_pages.dart';
@@ -33,7 +34,7 @@ class PlaylistsPage extends StatefulWidget {
 }
 
 class _PlaylistsPageState extends State<PlaylistsPage>
-    with SignalsMixin, DeferredPageInitMixin {
+    with SignalsMixin, DeferredPageInitMixin, PrimaryTabRefreshMixin {
   static const String _prefsSortMode = 'playlists_sort_mode_v1';
   static const String _prefsSortAscending = 'playlists_sort_ascending_v1';
   static const String _prefsGridColumns = 'playlists_grid_columns_v1';
@@ -136,6 +137,14 @@ class _PlaylistsPageState extends State<PlaylistsPage>
   Future<void> _init() async {
     await _loadPrefs();
     await _load();
+  }
+
+  @override
+  int get primaryTabIndex => 1;
+
+  @override
+  Future<void> onPrimaryTabActivated() async {
+    if (mounted) await _load();
   }
 
   Future<void> _loadPrefs() async {
@@ -539,7 +548,7 @@ class _PlaylistsPageState extends State<PlaylistsPage>
             : SideMenu(
                 onCloseDrawer: () => _scaffoldKey.currentState?.closeDrawer(),
               ),
-        bottomNavIndex: useBottomNavigation ? 2 : null,
+        bottomNavIndex: useBottomNavigation ? 1 : null,
         onBottomNavTap: useBottomNavigation
             ? (index) => navigateToPrimaryDestination(context, index)
             : null,
@@ -1228,7 +1237,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
                   );
           },
         ),
-        bottomNavIndex: useBottomNavigation ? 2 : null,
+        bottomNavIndex: useBottomNavigation ? 1 : null,
         onBottomNavTap: useBottomNavigation
             ? (index) => navigateToPrimaryDestination(context, index)
             : null,

@@ -15,6 +15,7 @@ import '../../app/services/player_service.dart';
 import '../../app/state/settings_state.dart';
 import '../../app/state/song_state.dart';
 import '../../app/utils/api_cache_manager.dart';
+import '../../app/utils/primary_tab_refresh_mixin.dart';
 import '../../components/index.dart';
 import '../library/library_detail_pages.dart';
 import '../library/playlists_page.dart';
@@ -91,7 +92,8 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with SignalsMixin {
+class _HomePageState extends State<HomePage>
+    with SignalsMixin, PrimaryTabRefreshMixin {
   final FeiNiuApiClient _api = FeiNiuApiClient.instance;
   final FeiNiuTrackService _trackService = FeiNiuTrackService.instance;
   final PlayerService _player = PlayerService.instance;
@@ -113,6 +115,14 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
   void initState() {
     super.initState();
     _loadAll();
+  }
+
+  @override
+  int get primaryTabIndex => 0;
+
+  @override
+  Future<void> onPrimaryTabActivated() async {
+    if (mounted) await _loadAll();
   }
 
   Future<void> _loadAll({bool forceRefresh = false}) async {
@@ -434,7 +444,7 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
       if (mounted) {
         // mode: shuffle + roamId 直接传入 playQueue：playQueue 内部会清空
         // 再恢复 roamId，消除「返回后手动恢复」的时序窗口，确保点下一曲时
-        // _appendRoamAndPlay 走 roam-next 追加分支而非 getRoamStart 新开队列。
+        // 走 roam-next 追加分支而非 getRoamStart 新开队列。
         debugPrint(
           '[HomePage] extendAndPlay queue=${songs.map((s) => s.title).join(',')} '
           'roamId=$roamId',
@@ -446,7 +456,7 @@ class _HomePageState extends State<HomePage> with SignalsMixin {
           roamChainId: roamId,
         );
         debugPrint('[HomePage] extendAndPlay done, roamId=$roamId');
-        // 后续走 _appendRoamAndPlay 逻辑（随机模式下播完拉下一首）
+        // 后续走 PlayerService 内部漫游扩展逻辑（随机模式下播完/切歌追加下一首）
         _player.queueExtender = _roamQueueExtender;
       }
     } catch (e) {

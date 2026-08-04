@@ -11,6 +11,7 @@ import '../../app/services/player_service.dart';
 import '../../app/state/settings_playback_state.dart';
 import '../../app/state/song_state.dart';
 import '../../app/utils/api_cache_manager.dart';
+import '../../app/utils/primary_tab_refresh_mixin.dart';
 import '../../app/theme/app_styles.dart';
 import '../library/library_detail_pages.dart';
 import '../songs/song_detail_sheet.dart';
@@ -23,7 +24,7 @@ class FavoritePage extends StatefulWidget {
 }
 
 class _FavoritePageState extends State<FavoritePage>
-    with SignalsMixin, SongMultiSelectMixin {
+    with SignalsMixin, SongMultiSelectMixin, PrimaryTabRefreshMixin {
   final FeiNiuApiClient _api = FeiNiuApiClient.instance;
   final FeiNiuTrackService _trackService = FeiNiuTrackService.instance;
   final PlayerService _player = PlayerService.instance;
@@ -74,6 +75,14 @@ class _FavoritePageState extends State<FavoritePage>
     super.initState();
     _scrollController.addListener(_handleScroll);
     _load();
+  }
+
+  @override
+  int get primaryTabIndex => 3;
+
+  @override
+  Future<void> onPrimaryTabActivated() async {
+    if (mounted) await _load();
   }
 
   void _handleScroll() {
