@@ -13,6 +13,7 @@ import '../services/feiniu/favorite_service.dart';
 import '../state/song_state.dart';
 import '../state/settings_state.dart';
 import 'android_platform_service.dart';
+import 'media_notification_car_lyrics.dart';
 import 'player_service.dart';
 
 class MediaNotificationService {
@@ -264,10 +265,17 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
             'android.media.metadata.LYRICS': carLyricLine ?? '',
           }
         : null;
+    // 车机只认 AVRCP 标准属性（TITLE/ARTIST/...），extras 里的 LYRICS 到不了车机。
+    // 用 title 携带当前歌词行，车机在 TITLE 位置显示歌词；关闭时回退真实歌名。
+    final carLyricsOverride = carLyricsTitleOverride(
+      carLyricsEnabled: carLyricsEnabled,
+      isCurrentSong: isCurrentSong,
+      currentCarLyricLine: carLyricLine,
+    );
     if (lyricOnTop && lyricLine != null) {
       return MediaItem(
         id: song.id,
-        title: lyricLine,
+        title: carLyricsOverride ?? lyricLine,
         artist: songAndArtist,
         album: albumName,
         artUri: artUri,
@@ -284,8 +292,8 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
     final effectiveArtist = lyricLine ?? song.artistDisplayName;
     return MediaItem(
       id: song.id,
-      title: song.title,
-      artist: effectiveArtist,
+      title: carLyricsOverride ?? song.title,
+      artist: carLyricsOverride != null ? songAndArtist : effectiveArtist,
       album: albumName,
       artUri: artUri,
       duration: song.durationMs != null

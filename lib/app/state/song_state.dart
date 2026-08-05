@@ -18,6 +18,8 @@ class SongEntity {
   final int? trackNumber;
   final int? discNumber;
   final int? updatedAt; // 服务端 updatedAt 时间戳，用于 CDN 缓存刷新
+  final bool isCue;
+  final int? cueOffsetMs; // CUE 整轨曲目在物理文件内的起始偏移（专辑上下文累计）
 
   const SongEntity({
     required this.id,
@@ -37,6 +39,8 @@ class SongEntity {
     this.trackNumber,
     this.discNumber,
     this.updatedAt,
+    this.isCue = false,
+    this.cueOffsetMs,
   });
 
   /// 解析 artist JSON 获取歌手显示名
@@ -104,6 +108,8 @@ class SongEntity {
       'trackNumber': trackNumber,
       'discNumber': discNumber,
       'updatedAt': updatedAt,
+      'isCue': isCue ? 1 : 0,
+      'cueOffsetMs': cueOffsetMs,
     };
   }
 
@@ -131,6 +137,8 @@ class SongEntity {
       trackNumber: parseInt(map['trackNumber']),
       discNumber: parseInt(map['discNumber']),
       updatedAt: parseInt(map['updatedAt']),
+      isCue: map['isCue'] == true || map['isCue'] == 1,
+      cueOffsetMs: parseInt(map['cueOffsetMs']),
     );
   }
 
@@ -152,6 +160,8 @@ class SongEntity {
     int? trackNumber,
     int? discNumber,
     int? updatedAt,
+    bool? isCue,
+    int? cueOffsetMs,
   }) {
     return SongEntity(
       id: id ?? this.id,
@@ -171,6 +181,8 @@ class SongEntity {
       trackNumber: trackNumber ?? this.trackNumber,
       discNumber: discNumber ?? this.discNumber,
       updatedAt: updatedAt ?? this.updatedAt,
+      isCue: isCue ?? this.isCue,
+      cueOffsetMs: cueOffsetMs ?? this.cueOffsetMs,
     );
   }
 }

@@ -252,7 +252,15 @@ class FnAutoReconnectService with WidgetsBindingObserver {
 
   Future<void> _doReconnect(String fnId) async {
     try {
-      final result = await FnConnectionProbeService.instance.probe(fnId: fnId);
+      // 缓存优先：先 200ms 快探上次成功连接（probeSmart 内部为
+      // kFnCachedProbeConnectTimeout=1s），可达直接复用，避免每次断连都
+      // 全量重探所有候选（尤其最慢的中继）。缓存失效自动回退完整探测。
+      final cache = AppFnConnectionSettings.cachedConnection;
+      final result = await FnConnectionProbeService.instance.probeSmart(
+        fnId: fnId,
+        cachedUrl: cache?.url,
+        cachedIsRelay: cache?.isRelay ?? false,
+      );
 
       if (kDebugMode) {
         debugPrint(

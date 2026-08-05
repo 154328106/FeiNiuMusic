@@ -43,9 +43,7 @@ class FeiNiuRoamService {
 
   SongEntity _toSongEntity(FeiNiuTrack track, String token) {
     final artistsJson = jsonEncode(
-      track.artists
-          .map((a) => {'guid': a.guid, 'name': a.name})
-          .toList(),
+      track.artists.map((a) => {'guid': a.guid, 'name': a.name}).toList(),
     );
     final albumJson = jsonEncode({
       'guid': track.album.guid,
@@ -80,6 +78,7 @@ class FeiNiuRoamService {
       trackNumber: track.trackNo,
       discNumber: track.discNo,
       updatedAt: track.updatedAt,
+      isCue: track.isCue,
     );
   }
 }

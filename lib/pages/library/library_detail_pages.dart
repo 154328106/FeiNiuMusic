@@ -6,6 +6,7 @@ import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
 import '../../app/router/app_page_route.dart';
 import '../../app/services/feiniu/api_client.dart';
+import '../../app/services/feiniu/cue_service.dart';
 import '../../app/services/feiniu/track_service.dart';
 import '../../app/services/player_service.dart';
 
@@ -596,9 +597,11 @@ class _AlbumDetailPageState extends State<AlbumDetailPage>
       page: _loadedPages + page,
       size: 200,
     );
-    return pageData.list
-        .map((t) => _trackService.trackToSongEntity(t))
-        .toList();
+    final tracks = pageData.list;
+    return FeiNiuCueService.instance.withCueOffsets(
+      tracks.map((t) => _trackService.trackToSongEntity(t)).toList(),
+      tracks,
+    );
   }
 
   /// 按队列上限循环拉满该专辑的歌曲（供播放/随机按钮使用）。
@@ -627,9 +630,11 @@ class _AlbumDetailPageState extends State<AlbumDetailPage>
           size: 200,
         );
         if (!mounted) return;
-        final songs = pageData.list
-            .map((t) => _trackService.trackToSongEntity(t))
-            .toList();
+        final tracks = pageData.list;
+        final songs = FeiNiuCueService.instance.withCueOffsets(
+          tracks.map((t) => _trackService.trackToSongEntity(t)).toList(),
+          tracks,
+        );
         _songs.value = sortAlbumDetailSongs(
           songs,
           sortKey: _sortKey.value,

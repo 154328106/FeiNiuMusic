@@ -9,11 +9,38 @@ import 'package:flutter/foundation.dart';
 import '../../state/settings_fn_state.dart';
 import 'fn_models.dart';
 
+/// 早停并行探测的返回结果。
+///
+/// - [best]：优先级最高且已确认可达的候选（[candidates] 已按优先级降序，
+///   索引 0 最高）；全部不可达时为 null。
+/// - [bestIndex]：[best] 在候选列表中的索引（[best] 为 null 时亦为 null）。
+/// - [decided]：返回时已得出探测结论的候选结果。成功时为早停后的部分列表；
+///   全部失败时等于全部候选（供调用方构建失败摘要）。
+typedef ProbeBestReachableResult = ({
+  ProbeCandidateResult? best,
+  int? bestIndex,
+  List<ProbeCandidateResult> decided,
+});
+
+/// 探测单条候选链路的超时。
+///
+/// 中继/域名候选（relayMode）链路最长（设备 → 5ddd.com CDN → FN 设备转发），
+/// TLS 握手 + CDN 往返比直连慢，1s 窗口对「真可达但慢」的中继会误判不可达，
+/// 放宽到 4s。直连 IP 候选保持 1s（内网/公网直连通常更快，收紧可尽早失败）。
+Duration fnProbeTimeout(bool isRelay) =>
+    isRelay ? const Duration(seconds: 4) : const Duration(seconds: 1);
+
+/// 缓存/回前台校验（[FnConnectionProbeService.isAddressReachable] /
+/// [FnConnectionProbeService.probeSmart] 缓存快探）的 connect 超时。
+/// 200ms 对「慢但可达」的地址（如空闲连接被服务端关闭后需重建 TLS 的地址）
+/// 误判过激进，会误触发整轮重连；放宽到 1s。
+const Duration kFnCachedProbeConnectTimeout = Duration(seconds: 1);
+
 /// FN 连接探测服务（单例）
 ///
 /// 核心职责：
 /// 1. 调用 FN 接口获取连接参数
-/// 2. 按优先级分层探测可用链路（1 秒超时）
+/// 2. 按优先级分层探测可用链路（直连 1 秒 / 中继 4 秒超时）
 /// 3. 返回首个可用的连接地址
 ///
 /// 探测规则：
@@ -21,7 +48,7 @@ import 'fn_models.dart';
 /// - HTTPS 端口优先于 HTTP
 /// - 公网优先模式探测公网 IPv6 → IPv4 → 中继
 /// - 中继优先模式跳过公网直连
-/// - 所有单链路探测 1 秒超时
+/// - 单链路探测超时：直连 IP 1 秒，中继/域名 4 秒（见 [fnProbeTimeout]）
 class FnConnectionProbeService {
   FnConnectionProbeService._();
 
@@ -46,79 +73,12 @@ class FnConnectionProbeService {
 
   CancelToken? _cancelToken;
 
-  /// 在途连接探测（probe / probeSmart 单飞行共用）
+  /// 在途连接探测（probeSmart 单飞行共用）
   ///
   /// 相同 FNID 的并发调用复用同一探测请求，避免重复探测——例如登录页自动
   /// 静默探测与用户点击登录同时发起时，只探测一次、共享同一结果。
   Future<ConnectionProbeResult>? _inflightProbe;
   String? _inflightProbeFnId;
-
-  /// 执行分层探测
-  ///
-  /// [fnId] - FNID（如 "kuilei0926"）
-  /// [order] - 连接优先级顺序，默认读 [AppFnConnectionSettings.connectionOrder]
-  ///
-  /// 传输协议按地址类型自动选择（IP 先 HTTP、域名/中继仅 HTTPS），
-  /// 见 [buildProbeCandidateSpecs]。
-  ///
-  /// 返回 [ConnectionProbeResult]，包含最终成功的 URL。
-  /// 所有链路失败时抛出 [Exception]。
-  Future<ConnectionProbeResult> probe({
-    required String fnId,
-    List<ProbeCandidateGroup>? order,
-  }) {
-    return _joinOrStartProbe(
-      fnId: fnId,
-      start: () => _probeCore(
-        fnId: fnId,
-        order: order,
-      ),
-    );
-  }
-
-  /// 分层探测核心实现（被 [probe] 调用，受单飞行守卫）
-  Future<ConnectionProbeResult> _probeCore({
-    required String fnId,
-    List<ProbeCandidateGroup>? order,
-  }) async {
-    isProbing.value = true;
-    _cancelToken = CancelToken();
-
-    try {
-      // Step 1: 调用 FN API 获取连接参数
-      if (kDebugMode) {
-        debugPrint('[FnProbe] Fetching connection params for fnId=$fnId');
-      }
-      final params = await _callFnConnectionApi(fnId, _cancelToken!);
-
-      // Step 2: 分层探测
-      if (kDebugMode) {
-        debugPrint('[FnProbe] Starting hierarchical probe');
-      }
-      final result = await _hierarchicalProbe(
-        fnId,
-        params,
-        cancelToken: _cancelToken!,
-        order: order ?? AppFnConnectionSettings.connectionOrder.value,
-      );
-
-      if (kDebugMode) {
-        debugPrint(
-          '[FnProbe] Probe succeeded: ${result.serverUrl} (${result.probeMethod})',
-        );
-      }
-      return result;
-    } on DioException catch (e) {
-      if (e.type == DioExceptionType.cancel) {
-        throw Exception('探测已取消');
-      }
-      throw Exception('连接探测失败：${_dioErrorMessage(e)}');
-    } finally {
-      isProbing.value = false;
-      _cancelToken = null;
-      _clearInflightProbe();
-    }
-  }
 
   /// 单飞行入口：相同 FNID 的并发探测复用同一在途请求，结果共享，不重复探测。
   ///
@@ -175,7 +135,7 @@ class FnConnectionProbeService {
 
   /// 缓存优先探测（仅升级，不降级）
   ///
-  /// 下次打开优先验证上次成功连接的 URL 是否仍可用（200ms 快探）：
+  /// 下次打开优先验证上次成功连接的 URL 是否仍可用（[kFnCachedProbeConnectTimeout] 快探）：
   /// - 缓存可达：仅探测优先级高于缓存的候选，若更高优先级链路可达则自动切换（升级）；
   ///   否则保持缓存连接（不降级）。
   /// - 缓存不可达或已不在当前候选列表（陈旧地址）：回退到完整分层探测。
@@ -246,23 +206,20 @@ class FnConnectionProbeService {
             // 探测优先级更高的候选（索引 < cachedIndex），首个可达者即升级
             final better = candidates.sublist(0, cachedIndex);
             if (better.isNotEmpty) {
-              final results = await Future.wait(
-                better.map((c) => _tryAddressWithDetail(c, _cancelToken!)),
-              );
-              for (var i = 0; i < results.length; i++) {
-                if (_cancelToken!.isCancelled) throw Exception('探测已取消');
-                if (results[i].isReachable) {
-                  if (kDebugMode) {
-                    debugPrint(
-                      '[FnProbe] ✓ Upgraded (priority ${i + 1}): ${results[i].description}',
-                    );
-                  }
-                  return ConnectionProbeResult(
-                    serverUrl: results[i].address,
-                    probeMethod: results[i].description,
-                    isRelay: results[i].isRelay,
+              final ProbeBestReachableResult upgrade =
+                  await _probeBestReachable(better, _cancelToken!);
+              if (upgrade.best != null) {
+                if (kDebugMode) {
+                  debugPrint(
+                    '[FnProbe] ✓ Upgraded (priority ${upgrade.bestIndex! + 1}): '
+                    '${upgrade.best!.description}',
                   );
                 }
+                return ConnectionProbeResult(
+                  serverUrl: upgrade.best!.address,
+                  probeMethod: upgrade.best!.description,
+                  isRelay: upgrade.best!.isRelay,
+                );
               }
             }
 
@@ -307,7 +264,7 @@ class FnConnectionProbeService {
     }
   }
 
-  /// 快速验证某个地址是否可达（200ms 快探）。
+  /// 快速验证某个地址是否可达（[kFnCachedProbeConnectTimeout] 快探）。
   ///
   /// 供自动重连的「App 回到前台」一次性校验使用：不触发完整探测，不发
   /// FN API，只探测指定 URL 的连通性。被其他探测占用（isProbing）时返回
@@ -329,18 +286,19 @@ class FnConnectionProbeService {
     }
   }
 
-  /// 快速验证缓存连接是否可达（200ms 快探）
+  /// 快速验证缓存连接是否可达（[kFnCachedProbeConnectTimeout] 快探）
   Future<bool> _tryCachedAddress(
     String url,
     bool isRelay,
     CancelToken cancelToken,
   ) async {
+    final start = DateTime.now();
     try {
       await _probeDio.getUri(
         Uri.parse(url),
         cancelToken: cancelToken,
         options: Options(
-          connectTimeout: const Duration(milliseconds: 200),
+          connectTimeout: kFnCachedProbeConnectTimeout,
           receiveTimeout: const Duration(seconds: 1),
           sendTimeout: const Duration(seconds: 1),
           followRedirects: false,
@@ -352,6 +310,13 @@ class FnConnectionProbeService {
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) {
         rethrow;
+      }
+      if (kDebugMode) {
+        debugPrint(
+          '[FnProbe] Cached check FAILED $url in '
+          '${DateTime.now().difference(start).inMilliseconds}ms: '
+          '${_dioErrorMessage(e)}',
+        );
       }
       return false;
     }
@@ -489,6 +454,92 @@ class FnConnectionProbeService {
     }
   }
 
+  /// 并发探测所有候选，按优先级取「首个已确认可达」的链路，支持早停。
+  ///
+  /// [candidates] 须已按优先级降序排列（索引 0 为最高优先级）。返回
+  /// [ProbeBestReachableResult]：
+  /// - [ProbeBestReachableResult.best] 为优先级最高且已确认可达的候选；
+  ///   全部不可达时为 null。
+  /// - [ProbeBestReachableResult.decided] 为返回时已得出结论的候选结果：
+  ///   成功时为早停后的部分列表；全部失败时等于全部候选（供调用方构建中文
+  ///   失败摘要）。
+  ///
+  /// 不变量：
+  /// 1. 不牺牲优先级：仍有更高优先级候选未出结果时绝不返回（`Future.any`
+  ///    按完成序处理，配合 [bestIndex] 只在确认无更优后才早停）。
+  /// 2. 不慢于全量等待：返回时刻 ≤ 所有候选探测完成时刻。
+  /// 3. 取消优先：任一探测以 cancel 失败（[DioException] 穿透）或 token
+  ///    已取消时，立即向上传播，由调用方映射为 `Exception('探测已取消')`。
+  Future<ProbeBestReachableResult> _probeBestReachable(
+    List<ProbeCandidateSpec> candidates,
+    CancelToken cancelToken, {
+    Future<ProbeCandidateResult> Function(ProbeCandidateSpec, CancelToken)?
+        probe,
+  }) async {
+    final doProbe = probe ?? _tryAddressWithDetail;
+    if (candidates.isEmpty) {
+      final ProbeBestReachableResult empty = (
+        best: null,
+        bestIndex: null,
+        decided: <ProbeCandidateResult>[],
+      );
+      return empty;
+    }
+
+    // 每个候选的探测 future 携带自身索引（记录），Future.any 直接返回
+    // (idx, result)，无需 identity 反查。
+    final pending = <int, Future<(int, ProbeCandidateResult)>>{
+      for (var i = 0; i < candidates.length; i++)
+        i: doProbe(candidates[i], cancelToken).then((r) => (i, r)),
+    };
+
+    ProbeCandidateResult? best;
+    int? bestIndex;
+    final decided = <ProbeCandidateResult>[];
+
+    while (pending.isNotEmpty) {
+      final (idx, r) = await Future.any(pending.values);
+      pending.remove(idx);
+      decided.add(r);
+
+      if (cancelToken.isCancelled) throw Exception('探测已取消');
+
+      if (r.isReachable) {
+        if (bestIndex == null || idx < bestIndex) {
+          bestIndex = idx;
+          best = r;
+        }
+      }
+      // 早停：已有确认可达者，且不存在仍未决定（索引更小）的更高优先级
+      // 候选 —— 无论本次结果是可达还是不可达都检查：更高优先级候选确认
+      // 不可达后，同样可能满足早停条件（无需再等更低优先级）。
+      final noBetterPending = bestIndex != null &&
+          (bestIndex == 0 || !pending.keys.any((i) => i < bestIndex!));
+      if (noBetterPending) {
+        if (cancelToken.isCancelled) throw Exception('探测已取消');
+        return (best: best, bestIndex: bestIndex, decided: decided);
+      }
+    }
+
+    return (best: best, bestIndex: bestIndex, decided: decided);
+  }
+
+  /// 测试专用：注入逐候选探测函数，确定性复现「早停 + 优先级」竞态。
+  ///
+  /// 生产代码走 [_probeBestReachable] 默认的 [_tryAddressWithDetail]。
+  @visibleForTesting
+  Future<ProbeBestReachableResult> probeBestReachableForTest({
+    required List<ProbeCandidateSpec> candidates,
+    required CancelToken cancelToken,
+    required Future<ProbeCandidateResult> Function(
+      ProbeCandidateSpec,
+      CancelToken,
+    )
+    probe,
+  }) {
+    return _probeBestReachable(candidates, cancelToken, probe: probe);
+  }
+
   /// 并发探测所有候选地址，按优先级取首个可用
   Future<ConnectionProbeResult> _hierarchicalProbe(
     String fnId,
@@ -502,37 +553,31 @@ class FnConnectionProbeService {
       order: order,
     );
 
-    // 并发探测所有候选
-    final results = await Future.wait(
-      candidates.map((c) => _tryAddressWithDetail(c, cancelToken)),
-    );
+    final ProbeBestReachableResult probeResult =
+        await _probeBestReachable(candidates, cancelToken);
 
-    // 按原始优先级顺序取第一个可达的
-    for (var i = 0; i < results.length; i++) {
-      if (cancelToken.isCancelled) {
-        throw Exception('探测已取消');
-      }
-      final r = results[i];
-      if (r.isReachable) {
-        if (kDebugMode) {
-          debugPrint(
-            '[FnProbe] ✓ Success (priority ${i + 1}): ${r.description}',
-          );
-        }
-        return ConnectionProbeResult(
-          serverUrl: r.address,
-          probeMethod: r.description,
-          isRelay: r.isRelay,
+    final best = probeResult.best;
+    if (best != null) {
+      if (kDebugMode) {
+        debugPrint(
+          '[FnProbe] ✓ Success (priority ${probeResult.bestIndex! + 1}): '
+          '${best.description}',
         );
       }
+      return ConnectionProbeResult(
+        serverUrl: best.address,
+        probeMethod: best.description,
+        isRelay: best.isRelay,
+      );
     }
 
-    // 全部失败：收集去重后的失败原因，帮助用户定位（如「端口不通」）。
-    // 设置页会逐条展示；这里的摘要让登录 / 自动重连的异常也能看到关键信息。
-    // error 形如「连接失败：连接被拒绝（端口不通或服务未启动）」，摘要里已说
-    // 「所有链路均无法连接」，再去掉「连接失败：」前缀避免语义重复。
+    // 全部失败：用 decided（= 全部候选，因全部失败时不会早停）收集去重后的
+    // 失败原因，帮助用户定位（如「端口不通」）。设置页会逐条展示；这里的摘要
+    // 让登录 / 自动重连的异常也能看到关键信息。error 形如「连接失败：连接被
+    // 拒绝（端口不通或服务未启动）」，摘要里已说「所有链路均无法连接」，再去掉
+    // 「连接失败：」前缀避免语义重复。
     final reasons = <String>[
-      for (final r in results)
+      for (final r in probeResult.decided)
         if (!r.isReachable && r.error != null && r.error!.isNotEmpty)
           r.error!.replaceFirst(RegExp(r'^连接失败：'), ''),
     ];
@@ -551,11 +596,14 @@ class FnConnectionProbeService {
     ProbeCandidateSpec candidate,
     CancelToken cancelToken,
   ) async {
+    // 中继/域名候选链路更长（CDN 转发 + TLS 重建），放宽超时避免误判
+    final timeout = fnProbeTimeout(candidate.relayMode);
+    final start = DateTime.now();
     try {
       final options = Options(
-        connectTimeout: const Duration(seconds: 1),
-        receiveTimeout: const Duration(seconds: 1),
-        sendTimeout: const Duration(seconds: 1),
+        connectTimeout: timeout,
+        receiveTimeout: timeout,
+        sendTimeout: timeout,
         followRedirects: false,
         validateStatus: (_) => true,
         headers: candidate.relayMode ? {'Cookie': 'mode=relay'} : null,
@@ -578,6 +626,13 @@ class FnConnectionProbeService {
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) {
         rethrow;
+      }
+      if (kDebugMode) {
+        debugPrint(
+          '[FnProbe] Probe FAILED ${candidate.description} in '
+          '${DateTime.now().difference(start).inMilliseconds}ms: '
+          '${_dioErrorMessage(e)}',
+        );
       }
       return ProbeCandidateResult(
         address: candidate.address,

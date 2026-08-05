@@ -106,6 +106,7 @@ class FeiNiuTrackService {
       trackNumber: track.trackNo,
       discNumber: track.discNo,
       updatedAt: track.updatedAt,
+      isCue: track.isCue,
     );
   }
 

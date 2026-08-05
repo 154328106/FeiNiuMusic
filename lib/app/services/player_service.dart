@@ -16,6 +16,7 @@ import 'audio/stream_cache_service.dart';
 import 'feiniu/api_client.dart';
 import 'feiniu/api_models.dart';
 import 'feiniu/auth_service.dart';
+import 'feiniu/cue_service.dart';
 import 'feiniu/track_service.dart';
 import 'feiniu/transcode_service.dart';
 import 'player/just_audio_engine.dart';
@@ -325,7 +326,8 @@ class PlayerService with WidgetsBindingObserver {
       final wasPlaying = isPlaying.value;
       isPlaying.value = state.playing;
       // 加载中（loading/buffering）视为加载态，驱动播放按钮转圈
-      final loading = state.processingState == EngineProcessingState.loading ||
+      final loading =
+          state.processingState == EngineProcessingState.loading ||
           state.processingState == EngineProcessingState.buffering;
       if (loading != isLoading.value) {
         isLoading.value = loading;
@@ -616,12 +618,14 @@ class PlayerService with WidgetsBindingObserver {
     final localIndex = bounds.localIndex;
 
     try {
-      await target.loadQueue(
-        items: items,
-        index: localIndex,
-        initialPosition: initialPosition,
-        preload: false,
-      ).timeout(MediaKitEngine.openTimeout + const Duration(seconds: 2));
+      await target
+          .loadQueue(
+            items: items,
+            index: localIndex,
+            initialPosition: initialPosition,
+            preload: false,
+          )
+          .timeout(MediaKitEngine.openTimeout + const Duration(seconds: 2));
     } catch (e) {
       _pendingLoadLogicalIndex = null;
       if (kDebugMode) {
@@ -670,10 +674,14 @@ class PlayerService with WidgetsBindingObserver {
           'waitLocal=$waitForLocal',
         );
       }
-      return MediaKitItem(await _mediaForSong(song, waitForLocal: waitForLocal));
+      return MediaKitItem(
+        await _mediaForSong(song, waitForLocal: waitForLocal),
+      );
     }
     if (kDebugMode) {
-      debugPrint('[PlayerService] resolveEngineItem ${song.title} -> justAudio');
+      debugPrint(
+        '[PlayerService] resolveEngineItem ${song.title} -> justAudio',
+      );
     }
     return JustAudioItem(await _sourceForSong(song));
   }
@@ -696,8 +704,18 @@ class PlayerService with WidgetsBindingObserver {
     SongEntity song, {
     bool waitForLocal = false,
   }) async {
+    // CUE 整轨曲目：跳过本地缓存（命中会拿到整轨文件，缺失会让后台把整轨
+    // 下载一份），直连流 + Media(start/end) 裁剪定位。offset 解析失败时退化为
+    // 不裁剪（整轨从头播，保持现状容错）。
+    final isCue = song.isCue;
+    int? cueOffset;
+    if (isCue) {
+      cueOffset =
+          song.cueOffsetMs ?? await FeiNiuCueService.instance.offsetMsFor(song);
+    }
+
     // 1) 本地缓存文件（已存在 → 立即命中，零等待）。
-    if (StreamCacheService.instance.isEnabled) {
+    if (!isCue && StreamCacheService.instance.isEnabled) {
       try {
         final existing = await StreamCacheService.instance.completeFileFor(
           song.id,
@@ -727,15 +745,28 @@ class PlayerService with WidgetsBindingObserver {
     // 后台触发完整下载缓存（不阻塞播放）：本次流式播放的同时把整首下载到
     // 本地，下次播同一首命中缓存 `Media(file)` 秒播（media_kit 直连流本身
     // 不留缓存，必须显式下载）。下载失败静默忽略，不影响本次播放。
-    if (StreamCacheService.instance.isEnabled) {
+    // CUE 整轨曲目跳过该下载（否则每首各缓存一份整轨镜像）。
+    if (!isCue && StreamCacheService.instance.isEnabled) {
       StreamCacheService.instance.cacheSong(song);
+    }
+    if (isCue && cueOffset != null) {
+      final offset = Duration(milliseconds: cueOffset);
+      final end = Duration(milliseconds: cueOffset + (song.durationMs ?? 0));
+      return mk.Media(
+        uri,
+        start: offset,
+        end: end,
+        httpHeaders: FeiNiuApiClient.imageAuthHeaders(),
+      );
     }
     return mk.Media(uri, httpHeaders: FeiNiuApiClient.imageAuthHeaders());
   }
 
   Future<void> _applyEngineVolume(PlayerEngine engine) async {
     try {
-      await engine.setVolume(AppPlaybackVolumeSettings.volume.value.clamp(0, 1));
+      await engine.setVolume(
+        AppPlaybackVolumeSettings.volume.value.clamp(0, 1),
+      );
     } catch (_) {}
   }
 
@@ -838,9 +869,7 @@ class PlayerService with WidgetsBindingObserver {
           return true;
         } catch (e2) {
           if (kDebugMode) {
-            debugPrint(
-              'PlayerService.playQueue activate retry failed: $e2',
-            );
+            debugPrint('PlayerService.playQueue activate retry failed: $e2');
           }
           return false;
         }
@@ -1160,7 +1189,9 @@ class PlayerService with WidgetsBindingObserver {
     }
     if (failedIndex < 0 || failedIndex >= list.length) {
       if (kDebugMode) {
-        debugPrint('PlayerService player error without valid index: ${error.message}');
+        debugPrint(
+          'PlayerService player error without valid index: ${error.message}',
+        );
       }
       return;
     }
@@ -1169,7 +1200,9 @@ class PlayerService with WidgetsBindingObserver {
     final rawUri = (failedSong.uri ?? '').trim();
     if (!rawUri.startsWith('http')) {
       if (kDebugMode) {
-        debugPrint('PlayerService player error on non-remote source: ${error.message}');
+        debugPrint(
+          'PlayerService player error on non-remote source: ${error.message}',
+        );
       }
       return;
     }
@@ -1418,7 +1451,9 @@ class PlayerService with WidgetsBindingObserver {
       // roamId 为空或 roam-next 失败 → roam-start 重建新链
       final String newRoamId;
       final SongEntity? appendedTrack;
-      if (response == null || response.next == null || response.current == null) {
+      if (response == null ||
+          response.next == null ||
+          response.current == null) {
         final startResponse = await FeiNiuApiClient.instance.getRoamStart(
           deviceId,
         );
@@ -1455,8 +1490,8 @@ class PlayerService with WidgetsBindingObserver {
       // 同引擎，增量插入当前引擎（避免整段重建），否则只更新逻辑状态——
       // 真正播到边界时由逻辑层切换引擎加载。
       final appendedKind = await routeForSong(nextTrack);
-      final curKind = currentIndex.value >= 0 &&
-              currentIndex.value < _engineKinds.length
+      final curKind =
+          currentIndex.value >= 0 && currentIndex.value < _engineKinds.length
           ? _engineKinds[currentIndex.value]
           : EngineKind.justAudio;
       queue.value = allSongs;
@@ -1465,8 +1500,7 @@ class PlayerService with WidgetsBindingObserver {
       }
       _engineKinds = [..._engineKinds, appendedKind];
 
-      if (identical(_activeEngine.kind, curKind) &&
-          appendedKind == curKind) {
+      if (identical(_activeEngine.kind, curKind) && appendedKind == curKind) {
         try {
           final item = await _resolveEngineItem(nextTrack, appendedKind);
           await _activeEngine.insertItem(_activeEngine.sequenceLength, item);
@@ -1645,7 +1679,12 @@ class PlayerService with WidgetsBindingObserver {
       nextQueue = capped.$1;
       final wasPlaying = isPlaying.value;
       final pos = position.value;
-      await _reloadQueue(nextQueue, idx, play: wasPlaying, initialPosition: pos);
+      await _reloadQueue(
+        nextQueue,
+        idx,
+        play: wasPlaying,
+        initialPosition: pos,
+      );
       return;
     }
 
@@ -1667,7 +1706,12 @@ class PlayerService with WidgetsBindingObserver {
       // 重建失败（罕见）回退全量 _reloadQueue，保证队列一致
       final wasPlaying = isPlaying.value;
       final pos = position.value;
-      await _reloadQueue(nextQueue, idx, play: wasPlaying, initialPosition: pos);
+      await _reloadQueue(
+        nextQueue,
+        idx,
+        play: wasPlaying,
+        initialPosition: pos,
+      );
       return;
     }
   }
@@ -1696,7 +1740,12 @@ class PlayerService with WidgetsBindingObserver {
       nextQueue = capped.$1;
       final wasPlaying = isPlaying.value;
       final pos = position.value;
-      await _reloadQueue(nextQueue, idx, play: wasPlaying, initialPosition: pos);
+      await _reloadQueue(
+        nextQueue,
+        idx,
+        play: wasPlaying,
+        initialPosition: pos,
+      );
       return;
     }
 
@@ -1718,7 +1767,12 @@ class PlayerService with WidgetsBindingObserver {
       // 重建失败（罕见）回退全量 _reloadQueue，保证队列一致
       final wasPlaying = isPlaying.value;
       final pos = position.value;
-      await _reloadQueue(nextQueue, idx, play: wasPlaying, initialPosition: pos);
+      await _reloadQueue(
+        nextQueue,
+        idx,
+        play: wasPlaying,
+        initialPosition: pos,
+      );
       return;
     }
   }
@@ -1912,7 +1966,8 @@ class PlayerService with WidgetsBindingObserver {
     _engineKinds = await _computeEngineKinds(oldQueue);
     _emitSnapshot(force: true);
     // 移动跨引擎边界时无法就地移动（引擎物理队列不同源），走全量重建。
-    final crossesEngine = oldIndex < _engineKinds.length &&
+    final crossesEngine =
+        oldIndex < _engineKinds.length &&
         targetIndex < _engineKinds.length &&
         _engineKinds[oldIndex] != _engineKinds[targetIndex];
     if (crossesEngine) {
@@ -2539,10 +2594,7 @@ class PlayerService with WidgetsBindingObserver {
     // 重建引擎路由并重载当前 run（保持位置/播放态）。
     _engineKinds = await _computeEngineKinds(allSongs);
     try {
-      await _activateLogicalIndex(
-        newCurrentIdx,
-        initialPosition: pos,
-      );
+      await _activateLogicalIndex(newCurrentIdx, initialPosition: pos);
       if (wasPlaying && !_activeEngine.playing) {
         await _activeEngine.play();
       }
@@ -2781,11 +2833,14 @@ class PlayerService with WidgetsBindingObserver {
         FeiNiuTranscodeService.instance.invalidate(song.id);
       }
 
+      // CUE 整轨曲目：不命中/不写入整轨文件下载缓存（否则每首 CUE 曲会把
+      // 同一镜像各缓存一份），直接直连流，由下方 ClippingAudioSource 裁剪。
+      final isCue = song.isCue;
+
       // 本地不支持的格式（DSF/APE/WMA…）与 FLAC 由 media_kit 引擎处理
       // （见 _mediaForSong / _activateLogicalIndex），just_audio 只播
       // MP3/AAC/Opus 等可直接解码的格式，这里直接走缓存/直连。
-
-      if (StreamCacheService.instance.isEnabled) {
+      if (!isCue && StreamCacheService.instance.isEnabled) {
         // 缓存命中 → 直接用本地文件（拖动进度条秒播）
         final complete = await StreamCacheService.instance.completeFileFor(
           song.id,
@@ -2799,7 +2854,23 @@ class PlayerService with WidgetsBindingObserver {
       }
       final streamUrl = api.streamUrl(song.id);
       final headers = FeiNiuApiClient.imageAuthHeaders();
-      return AudioSource.uri(Uri.parse(streamUrl), headers: headers);
+      final base = AudioSource.uri(Uri.parse(streamUrl), headers: headers);
+      if (!isCue) return base;
+
+      // 裁剪到 [offset, offset+duration)：ClippingAudioSource 上报裁剪后相对
+      // 位置/时长，并在裁剪末尾触发 completed（自动切歌/单曲循环天然正确）。
+      // end 一律裁剪（即使 offset=0 也要在曲目边界停，否则会放完整轨）。
+      final offsetMs =
+          song.cueOffsetMs ?? await FeiNiuCueService.instance.offsetMsFor(song);
+      final durationMs = song.durationMs ?? 0;
+      final start = offsetMs != null && offsetMs > 0
+          ? Duration(milliseconds: offsetMs)
+          : null;
+      return ClippingAudioSource(
+        child: base,
+        start: start,
+        end: Duration(milliseconds: (offsetMs ?? 0) + durationMs),
+      );
     }
     final rawUri = (song.uri ?? '').trim();
     return AudioSource.file(rawUri);

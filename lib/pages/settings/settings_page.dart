@@ -86,14 +86,20 @@ class _SettingsPageState extends State<SettingsPage> {
               AppSettingSection(
                 title: '功能',
                 children: [
-                  AppSettingTile(
-                    title: 'FN Connect',
-                    subtitle: '连接偏好、当前连接与候选链路管理',
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () {
-                      Navigator.pushNamed(context, AppRoutes.fnConnectSettings);
-                    },
-                  ),
+                  // 仅通过 FNID 连接时才显示：候选链路管理只对 FNID 探测有意义，
+                  // 通过链接直连时该入口无意义。lastFnId 为空即链接连接。
+                  if ((AppFnConnectionSettings.lastFnId ?? '').isNotEmpty)
+                    AppSettingTile(
+                      title: 'FN Connect',
+                      subtitle: '连接偏好、当前连接与候选链路管理',
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () {
+                        Navigator.pushNamed(
+                          context,
+                          AppRoutes.fnConnectSettings,
+                        );
+                      },
+                    ),
                   AppSettingTile(
                     title: '播放器控制',
                     subtitle: '管理底部操作栏与按钮顺序',
