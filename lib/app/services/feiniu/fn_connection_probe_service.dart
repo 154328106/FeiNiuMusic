@@ -37,9 +37,9 @@ class FnConnectionProbeService {
   /// 独立 Dio 实例，不与主 API 客户端共享配置
   final Dio _probeDio = Dio(
     BaseOptions(
-      connectTimeout: const Duration(seconds: 2),
-      receiveTimeout: const Duration(seconds: 2),
-      sendTimeout: const Duration(seconds: 2),
+      connectTimeout: const Duration(seconds: 3),
+      receiveTimeout: const Duration(seconds: 3),
+      sendTimeout: const Duration(seconds: 3),
       followRedirects: false,
     ),
   );

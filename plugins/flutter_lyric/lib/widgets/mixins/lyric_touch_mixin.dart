@@ -64,10 +64,10 @@ mixin LyricTouchMixin<T extends StatefulWidget>
         0 == controller.activeIndexNotifiter.value,
         null,
         style.selectionAlignment);
-    double minValue = anchorPosition < style.contentPadding.top ||
-            contentHeight < anchorPosition
-        ? -anchorPosition + anchorOffset
-        : -style.contentPadding.top;
+    // 下界与 lineOffsetY 的锚点对齐语义一致：第一行锚点（anchorOffset）对齐到
+    // 视口锚点，行顶位置是 anchorOffset - anchorPosition（负数，内容下移）。
+    final minValue =
+        -anchorPosition + anchorOffset;
     final maxValue = contentHeight - style.contentPadding.top - anchorPosition;
     final newValue = value.clamp(minValue, maxValue);
 

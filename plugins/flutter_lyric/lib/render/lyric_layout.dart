@@ -38,10 +38,12 @@ class LyricLayout {
       indexStartY += lineHeight + style.lineGap;
     }
 
-    if (anchorPosition < indexStartY + style.contentPadding.top) {
-      return indexStartY - anchorPosition;
-    }
-    return -style.contentPadding.top;
+    // 始终把目标行锚点（indexStartY）对齐到视口锚点（anchorPosition）：即使
+    // 目标行在内容顶部（indexStartY < anchorPosition，返回负值，内容下移、当前
+    // 行居中、上方留空），也保持居中，与主流歌词页一致。不再退回
+    // -contentPadding.top——那会把首行顶到视口顶部（当前播放行在前几行时
+    // 一直显示在顶部，直到行高累计越过锚点才跳回居中）。
+    return indexStartY - anchorPosition;
   }
 
   // 用于修正Anchor对齐的偏移量
