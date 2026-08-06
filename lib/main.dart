@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app/app.dart';
 import 'app/services/debug_log_service.dart';
 import 'app/services/fn_auto_reconnect_service.dart';
+import 'app/services/island_lyric_service.dart';
 import 'app/services/media_notification_service.dart';
 import 'app/services/tv_detection.dart';
 import 'app/services/track_change_toast_service.dart';
@@ -16,6 +17,7 @@ import 'app/services/feiniu/account_store.dart';
 import 'app/services/feiniu/api_client.dart';
 import 'app/services/feiniu/auth_service.dart';
 import 'app/services/feiniu/fn_connection_probe_service.dart';
+import 'app/state/settings_island_lyric.dart';
 import 'app/state/settings_state.dart';
 
 Future<void> main() async {
@@ -71,6 +73,11 @@ Future<void> main() async {
   // 切歌通知监听：PlayerService 已构造（MediaNotificationService.init 内），
   // AppLayoutSettings 已在上面 ensureLoaded，可安全订阅 currentSong。
   TrackChangeToastService.start();
+  // 通知歌词灵动岛监听：依赖 PlayerService 与 LyricsService 已就绪。
+  // 设置懒加载（IslandLyricSettings.ensureLoaded）由设置页与 start 内部处理，
+  // 默认关闭不打扰。
+  await IslandLyricSettings.ensureLoaded();
+  IslandLyricService.start();
   await AppThemeSettings.ensureLoaded();
   await AppBackgroundSettings.ensureLoaded();
   await AppFnConnectionSettings.ensureLoaded();

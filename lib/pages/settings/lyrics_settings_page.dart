@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
 import '../../app/services/lyrics/lyrics_service.dart';
+import '../../app/state/settings_island_lyric.dart';
 import '../../app/state/settings_state.dart';
 import '../../components/index.dart';
 
@@ -37,6 +38,7 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
     await MediaNotificationSettings.ensureLoaded();
+    await IslandLyricSettings.ensureLoaded();
     if (!mounted) return;
     _meizuLyrics.value = prefs.getBool(_prefsMeizuLyrics) ?? false;
     _lyriconEnabled.value = prefs.getBool(_prefsLyriconEnabled) ?? false;
@@ -141,6 +143,52 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
                     subtitle: '通过媒体会话发送歌词，供车载蓝牙播放器显示',
                     value: _carBluetoothLyrics.value,
                     onChanged: _setCarBluetoothLyrics,
+                  ),
+                ],
+              ),
+              AppSettingSection(
+                title: '通知歌词灵动岛',
+                children: [
+                  ValueListenableBuilder<bool>(
+                    valueListenable: IslandLyricSettings.enabled,
+                    builder: (context, enabled, _) {
+                      return AppSettingSwitchTile(
+                        title: '灵动岛歌词',
+                        subtitle: '播放有歌词的歌曲时，在系统灵动岛显示当前歌词行'
+                            '（仅支持Android 16+,仅在HyperOS 3.3+上测试通过）',
+                        value: enabled,
+                        onChanged: (value) {
+                          IslandLyricSettings.setEnabled(value);
+                        },
+                      );
+                    },
+                  ),
+                  ValueListenableBuilder<bool>(
+                    valueListenable: IslandLyricSettings.showProgress,
+                    builder: (context, showProgress, _) {
+                      return AppSettingSwitchTile(
+                        title: '显示播放进度',
+                        subtitle: '在灵动岛小胶囊上显示播放进度',
+                        value: showProgress,
+                        onChanged: (value) {
+                          IslandLyricSettings.setShowProgress(value);
+                        },
+                      );
+                    },
+                  ),
+                  ValueListenableBuilder<bool>(
+                    valueListenable: IslandLyricSettings.testMode,
+                    builder: (context, testMode, _) {
+                      return AppSettingSwitchTile(
+                        title: '测试模式',
+                        subtitle: '不播放音乐时也持续模拟发送通知，'
+                            '验证暂停/无播放时灵动岛是否仍能显示',
+                        value: testMode,
+                        onChanged: (value) {
+                          IslandLyricSettings.setTestMode(value);
+                        },
+                      );
+                    },
                   ),
                 ],
               ),

@@ -44,7 +44,9 @@ CREATE TABLE ${DbConstants.tableSongs} (
   audioSpec TEXT,
   trackNumber INTEGER,
   discNumber INTEGER,
-  updatedAt INTEGER
+  updatedAt INTEGER,
+  isCue INTEGER NOT NULL DEFAULT 0,
+  cueOffsetMs INTEGER
 )
 ''');
         await db.execute(
@@ -288,6 +290,17 @@ CREATE TABLE IF NOT EXISTS ${DbConstants.tableApiCache} (
           // SongEntity.toMap() 时因缺失列使事务回滚，统计数据和歌曲元数据全丢失。
           await db.execute(
             'ALTER TABLE ${DbConstants.tableSongs} ADD COLUMN updatedAt INTEGER',
+          );
+        }
+        if (oldVersion < 14) {
+          // 8c28b36 新增 CUE 整轨曲目支持时漏改了 schema：SongEntity.toMap()
+          // 会写入 isCue/cueOffsetMs，但旧库没有这两列导致 INSERT 报错。
+          // 已有行 isCue 默认 0（非 CUE），cueOffsetMs 为空，下次扫描时回填。
+          await db.execute(
+            'ALTER TABLE ${DbConstants.tableSongs} ADD COLUMN isCue INTEGER NOT NULL DEFAULT 0',
+          );
+          await db.execute(
+            'ALTER TABLE ${DbConstants.tableSongs} ADD COLUMN cueOffsetMs INTEGER',
           );
         }
       },

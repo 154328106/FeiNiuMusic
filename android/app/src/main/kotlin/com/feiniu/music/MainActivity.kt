@@ -19,6 +19,7 @@ import io.github.proify.lyricon.lyric.model.RichLyricLine
 import io.github.proify.lyricon.lyric.model.Song
 import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
+import com.feiniu.music.island.IslandLyricNotification
 import com.feiniu.music.R
 
 class MainActivity : AudioServiceActivity() {
@@ -27,6 +28,7 @@ class MainActivity : AudioServiceActivity() {
     private val downloadsChannelName = "com.feiniu.music/downloads"
     private val artworkChannelName = "com.feiniu.music/native_artwork"
     private val tvChannelName = "com.feiniu.music/tv"
+    private val islandLyricChannelName = "com.feiniu.music/island_lyric"
     private val notificationId = 10010
     private val notificationChannelId = "meizu_lyric_channel"
     private var flagShowTicker: Int? = null
@@ -169,6 +171,49 @@ class MainActivity : AudioServiceActivity() {
                 else -> result.notImplemented()
             }
         }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            islandLyricChannelName
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "update" -> {
+                    val leftLyric = call.argument<String>("leftLyric") ?: ""
+                    val lyric = call.argument<String>("lyric") ?: ""
+                    val title = call.argument<String>("title") ?: ""
+                    val artist = call.argument<String>("artist") ?: ""
+                    val isPlaying = call.argument<Boolean>("isPlaying") ?: true
+                    // Flutter 的 int 在 Android 端可能编码为 Integer（小值）或 Long（大值），
+                    // 必须用 Number 统一读取再转 Long，否则小整数会抛 ClassCastException。
+                    val positionMs = (call.argument<Number>("positionMs") as? Number)?.toLong() ?: 0L
+                    val durationMs = (call.argument<Number>("durationMs") as? Number)?.toLong() ?: 0L
+                    val showProgress =
+                        call.argument<Boolean>("showProgress") ?: true
+                    val coverPath = call.argument<String>("coverPath")
+                    islandLyricNotification.update(
+                        leftLyric = leftLyric,
+                        lyric = lyric,
+                        title = title,
+                        artist = artist,
+                        isPlaying = isPlaying,
+                        positionMs = positionMs,
+                        durationMs = durationMs,
+                        showProgressSetting = showProgress,
+                        coverPath = coverPath
+                    )
+                    result.success(null)
+                }
+                "hide" -> {
+                    islandLyricNotification.hide()
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    /** 单一实例持有，保证歌词行去重 / 节流状态在多次 MethodChannel 调用间保持。 */
+    private val islandLyricNotification: IslandLyricNotification by lazy {
+        IslandLyricNotification(applicationContext)
     }
 
     /** 是否为 Android TV 设备：uiMode 类型为 TELEVISION，或设备声明 LEANBACK 特性。 */

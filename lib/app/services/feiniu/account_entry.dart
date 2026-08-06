@@ -58,7 +58,7 @@ class AccountEntry {
   }
 
   /// 服务器地址展示标签：
-  /// - FNID 连接的账号只显示 FNID（如 kuilei0926），不显示完整链接/域名；
+  /// - FNID 连接的账号只显示 FNID，不显示完整链接/域名；
   /// - 否则显示服务器主机名。
   String get serverLabel {
     final id = fnId;
