@@ -17,6 +17,7 @@ import 'lyrics/lyric_view.dart';
 import 'widgets/player_background.dart';
 import 'widgets/player_bottom_panel.dart';
 import 'widgets/player_header.dart';
+import 'tv_player_focus_scope.dart';
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key});
@@ -35,9 +36,14 @@ class _PlayerPageState extends State<PlayerPage>
   final ValueNotifier<double> _dismissOffset = ValueNotifier(0);
   double? _dismissDragStartY;
 
+  /// TV 遥控下键的落点：底部操作栏（随机/定时等按钮）的焦点节点。
+  final FocusNode _bottomPanelFocus = FocusNode();
+
   @override
   void initState() {
     super.initState();
+    // 播放页路由激活标记：TV 模式据此隐藏侧栏与迷你播放器。
+    AppLayoutSettings.playerRouteActive.value = true;
     _dismissController =
         AnimationController.unbounded(
           vsync: this,
@@ -119,13 +125,16 @@ class _PlayerPageState extends State<PlayerPage>
     _dismissController.dispose();
     _pageController.dispose();
     _dismissOffset.dispose();
+    _bottomPanelFocus.dispose();
+    AppLayoutSettings.playerRouteActive.value = false;
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     // 系统返回键：可退时正常 pop，不可退时（自动打开场景）走 _closePlayer 回到首页
-    return PopScope(
+    final isTv = AppLayoutSettings.tvMode.value;
+    final Widget page = PopScope(
       canPop: Navigator.of(context).canPop(),
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop) _closePlayer();
@@ -199,6 +208,7 @@ class _PlayerPageState extends State<PlayerPage>
                               children: [
                                 _PlayerView(
                                   player: _player,
+                                  bottomPanelFocus: _bottomPanelFocus,
                                   onTapLyrics: () =>
                                       _pageController.animateToPage(
                                         1,
@@ -239,14 +249,28 @@ class _PlayerPageState extends State<PlayerPage>
         ),
       ),
     );
+    if (!isTv) return page;
+    // TV 模式：包播放页遥控焦点域（OK 播放暂停 / 长按切歌 / 下键落底部操作栏）。
+    return TvPlayerFocusScope(
+      bottomActionsFocusNode: _bottomPanelFocus,
+      onTogglePlayPause: () => _player.togglePlayPause(),
+      onPrevious: _player.previous,
+      onNext: _player.next,
+      child: page,
+    );
   }
 }
 
 class _PlayerView extends StatelessWidget {
   final PlayerService player;
   final VoidCallback onTapLyrics;
+  final FocusNode? bottomPanelFocus;
 
-  const _PlayerView({required this.player, required this.onTapLyrics});
+  const _PlayerView({
+    required this.player,
+    required this.onTapLyrics,
+    this.bottomPanelFocus,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -254,12 +278,14 @@ class _PlayerView extends StatelessWidget {
       valueListenable: PlayerStyleSettings.stylePreset,
       builder: (context, stylePreset, _) {
         return ValueListenableBuilder<bool>(
-          valueListenable: AppLayoutSettings.tabletMode,
-          builder: (context, tabletMode, _) {
+          valueListenable: AppLayoutSettings.effectiveTabletModeNotifier,
+          builder: (context, effectiveTabletMode, _) {
             final mq = MediaQuery.of(context);
+            // TV 恒横屏，无需 orientation 门；普通平板仍需横屏 + 宽度门槛。
             final isTabletLandscape =
-                tabletMode &&
-                mq.orientation == Orientation.landscape &&
+                effectiveTabletMode &&
+                (AppLayoutSettings.tvMode.value ||
+                    mq.orientation == Orientation.landscape) &&
                 mq.size.width >= 900;
             if (!isTabletLandscape) {
               if (stylePreset == PlayerStylePreset.poster) {
@@ -269,12 +295,14 @@ class _PlayerView extends StatelessWidget {
                 player: player,
                 stylePreset: stylePreset,
                 onTapLyrics: onTapLyrics,
+                bottomPanelFocus: bottomPanelFocus,
               );
             }
             return _TabletLandscapePlayerLayout(
               player: player,
               stylePreset: stylePreset,
               onTapLyrics: onTapLyrics,
+              bottomPanelFocus: bottomPanelFocus,
             );
           },
         );
@@ -287,11 +315,13 @@ class _MobilePlayerLayout extends StatelessWidget {
   final PlayerService player;
   final PlayerStylePreset stylePreset;
   final VoidCallback onTapLyrics;
+  final FocusNode? bottomPanelFocus;
 
   const _MobilePlayerLayout({
     required this.player,
     required this.stylePreset,
     required this.onTapLyrics,
+    this.bottomPanelFocus,
   });
 
   @override
@@ -312,6 +342,7 @@ class _MobilePlayerLayout extends StatelessWidget {
           player: player,
           stylePreset: stylePreset,
           onTapLyrics: onTapLyrics,
+          bottomPanelFocus: bottomPanelFocus,
         ),
       ],
     );
@@ -322,11 +353,13 @@ class _TabletLandscapePlayerLayout extends StatelessWidget {
   final PlayerService player;
   final PlayerStylePreset stylePreset;
   final VoidCallback onTapLyrics;
+  final FocusNode? bottomPanelFocus;
 
   const _TabletLandscapePlayerLayout({
     required this.player,
     required this.stylePreset,
     required this.onTapLyrics,
+    this.bottomPanelFocus,
   });
 
   @override
@@ -364,6 +397,7 @@ class _TabletLandscapePlayerLayout extends StatelessWidget {
                   stylePreset: stylePreset,
                   onTapLyrics: onTapLyrics,
                   showMiniLyrics: false,
+                  bottomPanelFocus: bottomPanelFocus,
                 ),
                 const Spacer(),
               ],
@@ -950,14 +984,20 @@ class _PlayerArtwork extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<bool>(
-      valueListenable: AppLayoutSettings.tabletMode,
-      builder: (context, tabletMode, _) {
+      valueListenable: AppLayoutSettings.effectiveTabletModeNotifier,
+      builder: (context, effectiveTabletMode, _) {
         final isTabletLayout =
-            tabletMode && MediaQuery.sizeOf(context).width >= 720;
+            effectiveTabletMode &&
+            MediaQuery.sizeOf(context).width >= 720;
+        final isTv = AppLayoutSettings.tvMode.value;
         return Watch.builder(
           builder: (context) {
             final song = songSignal.value;
-            final spec = _ArtworkSpec.fromPreset(stylePreset, isTabletLayout);
+            final spec = _ArtworkSpec.fromPreset(
+              stylePreset,
+              isTabletLayout,
+              isTv,
+            );
             final border = BorderRadius.circular(spec.borderRadius);
             final maxSize = spec.maxSize;
             if (song == null) {
@@ -1042,19 +1082,24 @@ class _ArtworkSpec {
     required this.maxSize,
   });
 
-  factory _ArtworkSpec.fromPreset(PlayerStylePreset preset, bool isTablet) {
+  factory _ArtworkSpec.fromPreset(
+    PlayerStylePreset preset,
+    bool isTablet, [
+    bool isTv = false,
+  ]) {
     switch (preset) {
       case PlayerStylePreset.poster:
+        // TV 大屏放开封面上限，让封面用满可用空间（横向布局下高度充足）。
         return _ArtworkSpec(
           borderRadius: 0,
           horizontalInset: 0,
-          maxSize: isTablet ? 360 : double.infinity,
+          maxSize: isTv ? 640 : (isTablet ? 360 : double.infinity),
         );
       case PlayerStylePreset.classic:
         return _ArtworkSpec(
           borderRadius: 12,
           horizontalInset: 32,
-          maxSize: isTablet ? 320 : double.infinity,
+          maxSize: isTv ? 560 : (isTablet ? 320 : double.infinity),
         );
     }
   }

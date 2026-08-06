@@ -9,6 +9,7 @@
         android:label="飞牛音乐"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
+        android:banner="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true"
         android:enableOnBackInvokedCallback="true">
         <meta-data android:name="lyricon_module" android:value="true" />
@@ -35,6 +36,37 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- 音乐应用身份（AOSP 标准）：CATEGORY_APP_MUSIC 是 Android 定义
+                 "音乐应用" 的官方机制（Intent.java 注释：Used with ACTION_MAIN to
+                 launch the music application）。系统 / MIUI / ColorOS 的默认音乐
+                 选择器据此枚举候选。含 ACTION_MUSIC_PLAYER 兼容旧 ROM。
+                 MainActivity 为此类入口时自带 FLAG_ACTIVITY_NEW_TASK。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <action android:name="android.intent.action.MUSIC_PLAYER" />
+                <category android:name="android.intent.category.APP_MUSIC" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <!-- 音乐应用身份（能力补充）：能打开 / 接收音频文件。部分 ROM 的
+                 默认音乐选择器也认"能否处理 audio/*"。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
+            <!-- Android TV Leanback 启动入口：同一 Activity 出现在 TV 启动器。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
@@ -92,4 +124,8 @@
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <!-- TV 支持声明：required=false 保持手机/平板可安装；
+         Play / Google TV 据此将应用识别为 TV 应用并允许 Leanback 启动器入口。 -->
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 </manifest>
