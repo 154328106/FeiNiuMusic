@@ -120,7 +120,9 @@ class IslandLyricNotification(private val context: Context) {
             title = lyric,
             islandTitleLeft = leftLyric,
             fullLyric = fullLyric,
-            notificationTitleLeft = title,
+            // 通知/AOD 标题：关闭息屏歌词时显示「歌名 · 歌手」，
+            // 开启时被 fullLyric 覆盖（歌词上标题、歌名·歌手移到副标题）。
+            notificationTitleLeft = songInfo,
             notificationTitleRight = lyric,
             songInfo = songInfo,
             progress = progress,
