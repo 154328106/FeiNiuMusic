@@ -52,19 +52,18 @@ jobs:
              FeiNiuMusic-v${VERSION}-armeabi-v7a.apk
           mv build/app/outputs/flutter-apk/app-x86_64-release.apk \
              FeiNiuMusic-v${VERSION}-x86_64.apk
-      # 2) 投音兼容包（非官方）：applicationId 覆盖为 com.luna.music，仅 arm64。
-      #    用于鸿蒙 4/6、iQOO、VIVO 的播控中心显示投音控制（见 README 声明）。
-      #    仅在 GitHub Actions 自动打包时产出，本地构建不做此覆盖。
-      - run: flutter build apk --release --target-platform android-arm64 \
-          --android-project-arg applicationIdOverride=com.luna.music
+      # 2) 汽水音乐兼容包（非官方）：applicationId 覆盖为 com.luna.music，仅 arm64。
+      #    用于鸿蒙 4/6、iQOO、VIVO 的播控中心显示汽水音乐控制（见 README 声明）。
+      #    media_kit 媒体库（否则包体会大 ~13MB）。
+      - run: flutter build apk --release --split-per-abi --target-platform android-arm64 --android-project-arg applicationIdOverride=com.luna.music
         env:
           SIGNING_STORE_FILE: release.keystore
           SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       - run: |
-          mv build/app/outputs/flutter-apk/app-release.apk \
-             FeiNiuMusic-v${VERSION}-arm64-v8a-luna.apk
+          mv build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+             FeiNiuMusic-v${VERSION}-z-luna-arm64-v8a.apk
       - run: |
           git log -1 --pretty=format:"- %s%n%b" > release_notes.txt
           if [ ! -s release_notes.txt ]; then
@@ -79,4 +78,4 @@ jobs:
             FeiNiuMusic-v${{ env.VERSION }}-arm64-v8a.apk
             FeiNiuMusic-v${{ env.VERSION }}-armeabi-v7a.apk
             FeiNiuMusic-v${{ env.VERSION }}-x86_64.apk
-            FeiNiuMusic-v${{ env.VERSION }}-arm64-v8a-luna.apk
+            FeiNiuMusic-v${{ env.VERSION }}-z-luna-arm64-v8a.apk

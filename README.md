@@ -33,7 +33,6 @@
 
 - **搜索** — 全局搜索歌曲、专辑、歌手
 - **收藏与管理** — 收藏歌曲、创建/编辑歌单
-- **列表加载更多** — 列表支持按数量加载更多
 
 ### 界面与适配
 
@@ -71,12 +70,6 @@
 1. 手机安装本应用，并安装 Android Auto 应用
 2. 通过数据线连接支持 Android Auto 的车机（或使用 Android Auto 模拟器）
 3. 在车机启动器中选择「飞牛音乐」
-
-### 上架说明
-
-要在 Google Play 上架并支持 Android Auto，需要在 Play Console 中将应用
-**声明为媒体应用**并提交 Android Auto 审核，详见
-[Android Auto 媒体应用质量要求](https://developer.android.com/training/cars/media)。
 
 ## 界面预览
 
@@ -148,28 +141,27 @@ flutter build apk --release --split-per-abi
 
 构建产物位于 `build/app/outputs/flutter-apk/`，按 CPU 架构（arm64-v8a / armeabi-v7a / x86_64）拆分。
 
-## 鸿蒙 / iQOO / VIVO 投音兼容包（非官方）
+## 鸿蒙 / iQOO / VIVO 音乐兼容包（非官方）
 
 某些手机系统（鸿蒙 4 / 鸿蒙 6、iQOO、VIVO）在系统播控中心（控制中心右上角的
-媒体卡片）里，默认只对系统「白名单」内的音乐应用显示 **投音（投放音频）控制按钮**。
-第三方音乐应用即使正常播放，也不显示投音入口。
+媒体卡片）里，默认只对系统「白名单」内的音乐应用显示 **音频控制按钮**。
+第三方音乐应用即使正常播放，也不显示入口。
 
 为解决该问题（参考
 [lx-music-mobile issue #908](https://github.com/lyswhut/lx-music-mobile/issues/908)），
-本项目额外提供一种 **投音兼容安装包**：该包的 **Android 包名（applicationId）被
-覆盖为 `com.luna.music`**，从而让系统将应用识别为受支持的投音来源。
+本项目额外提供一种 **音乐兼容安装包**：该包的 **Android 包名（applicationId）被
+覆盖为 `com.luna.music`**，从而让系统将应用识别为受支持的音乐应用来源。
 
 ### ⚠️ 非官方声明与法律风险
 
 请在使用该兼容包前仔细阅读以下内容：
 
-- **非官方安装包**：该包不是官方发布的飞牛音乐版本，也不是飞牛官方或本项目维护者
-  提供的正式发行版。它是为解决特定机型投音问题而生成的改装包，与系统正式包
+- **非官方安装包**：该包不是官方发布的汽水音乐音乐版本。它是为解决特定机型音乐控制问题而生成的改装包，与系统正式包
   （`com.feiniu.music`）可以共存安装，但功能与行为以本仓库源码为准。
 - **包名冲突风险**：`com.luna.music` 是字节跳动旗下「汽水音乐」App 使用的包名。
   安装本兼容包后：
-  - 若设备上**已安装汽水音乐**，安装本包会**覆盖**汽水音乐（数据迁移、卸载原应用）；
-    反之，已安装本包时再安装汽水音乐会覆盖本包。
+  - 若设备上**已安装汽水音乐**，安装本包需要先卸载汽水音乐；
+    反之，已安装本包时再安装汽水音乐需要卸载本包。
   - 系统通知、媒体卡片、快捷图标等会**共用同一套包名身份**，可能造成混淆。
   - 因覆盖导致的原应用数据丢失，本项目不承担任何责任。
 - **品牌与商标风险**：本兼容包与汽水音乐 / 字节跳动、以及任何其他使用
@@ -186,7 +178,7 @@ flutter build apk --release --split-per-abi
 | `FeiNiuMusic-vX.Y.Z-arm64-v8a.apk` | `com.feiniu.music`（正式） | 常规设备，飞牛音乐正式包（arm64） |
 | `FeiNiuMusic-vX.Y.Z-armeabi-v7a.apk` | `com.feiniu.music`（正式） | 常规设备，飞牛音乐正式包（32 位） |
 | `FeiNiuMusic-vX.Y.Z-x86_64.apk` | `com.feiniu.music`（正式） | 常规设备，飞牛音乐正式包（x86_64） |
-| `FeiNiuMusic-vX.Y.Z-arm64-v8a-luna.apk` | `com.luna.music`（投音兼容，非官方） | 鸿蒙 4/6、iQOO、VIVO 投音问题（仅 arm64） |
+| `FeiNiuMusic-vX.Y.Z-z-luna-arm64-v8a.apk` | `com.luna.music`（音乐控制兼容，非官方） | 鸿蒙 4/6、iQOO、VIVO 汽水音频控制问题（仅 arm64） |
 
 四个安装包可以同时安装、互不影响数据；不确定时请安装正式包。
 
