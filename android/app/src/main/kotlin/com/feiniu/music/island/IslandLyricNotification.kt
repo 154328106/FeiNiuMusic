@@ -41,6 +41,7 @@ class IslandLyricNotification(private val context: Context) {
     private var lastSongKey: String? = null
     private var lastUpdateMs: Long = 0
     private var lastCoverPath: String? = null
+    private var lastAodLyrics: Boolean = false
 
     init {
         ensureNotificationChannel()
@@ -72,13 +73,15 @@ class IslandLyricNotification(private val context: Context) {
     fun update(
         leftLyric: String,
         lyric: String,
+        fullLyric: String,
         title: String,
         artist: String,
         isPlaying: Boolean,
         positionMs: Long,
         durationMs: Long,
         showProgressSetting: Boolean,
-        coverPath: String?
+        coverPath: String?,
+        aodLyrics: Boolean
     ) {
         // 完整歌词 = 左 + 右 拼接，用于歌曲变化判定（左右分割点变化不算切歌）
         val songKey = "$title|$artist"
@@ -88,12 +91,14 @@ class IslandLyricNotification(private val context: Context) {
         val lyricChanged = lyricKey != lastLyricKey
         val songChanged = songKey != lastSongKey
         val coverChanged = coverPath != lastCoverPath
+        val aodLyricsChanged = aodLyrics != lastAodLyrics
         lastCoverPath = coverPath
+        lastAodLyrics = aodLyrics
 
         val now = System.currentTimeMillis()
         val progressChanged = (now - lastUpdateMs) >= MIN_UPDATE_INTERVAL_MS
 
-        if (!lyricChanged && !songChanged && !coverChanged && !progressChanged) {
+        if (!lyricChanged && !songChanged && !coverChanged && !aodLyricsChanged && !progressChanged) {
             return
         }
 
@@ -114,13 +119,15 @@ class IslandLyricNotification(private val context: Context) {
         val uiState = IslandUiState(
             title = lyric,
             islandTitleLeft = leftLyric,
+            fullLyric = fullLyric,
             notificationTitleLeft = title,
             notificationTitleRight = lyric,
             songInfo = songInfo,
             progress = progress,
             isPlaying = isPlaying,
             showProgress = showProgressSetting,
-            hasCover = !coverPath.isNullOrBlank()
+            hasCover = !coverPath.isNullOrBlank(),
+            aodLyrics = aodLyrics
         )
 
         notify(uiState, coverPath)
@@ -132,6 +139,7 @@ class IslandLyricNotification(private val context: Context) {
         lastSongKey = null
         lastUpdateMs = 0
         lastCoverPath = null
+        lastAodLyrics = false
     }
 
     private fun notify(uiState: IslandUiState, coverPath: String?) {
@@ -158,7 +166,14 @@ class IslandLyricNotification(private val context: Context) {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
-            .setContentTitle(uiState.notificationTitleLeft)
+            // 息屏歌词开启：标题 = 完整歌词帧，歌名移到副标题；
+            // 关闭：标题 = 歌名，内容 = 歌词（现状）
+            .setContentTitle(
+                if (uiState.aodLyrics) uiState.fullLyric else uiState.notificationTitleLeft
+            )
+            .setSubText(
+                if (uiState.aodLyrics) uiState.songInfo else null
+            )
             .setContentText(uiState.notificationTitleRight)
             .addExtras(extras)
 

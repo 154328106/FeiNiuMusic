@@ -48,4 +48,17 @@ void main() {
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getBool('island_lyric_test_mode'), true);
   });
+
+  test('island lyric settings aod lyrics defaults off and persists', () async {
+    SharedPreferences.setMockInitialValues({});
+
+    await IslandLyricSettings.ensureLoaded();
+    expect(IslandLyricSettings.aodLyrics.value, false);
+
+    await IslandLyricSettings.setAodLyrics(true);
+    expect(IslandLyricSettings.aodLyrics.value, true);
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('island_lyric_aod_lyrics'), true);
+  });
 }

@@ -30,6 +30,17 @@ class IslandLyricService {
     'com.feiniu.music/island_lyric',
   );
 
+  /// 跳转到 MIUI/HyperOS 息屏通知动画设置页（供「息屏歌词」提示使用）。
+  /// 无 root 时通过显式 Intent 启动；目标组件不存在 / 未导出时返回 false。
+  static Future<bool> openAodSettings() async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('openAodSettings');
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// 进度更新节流：同一首歌内，两次进度驱动发送的最小间隔。
   static const Duration _progressThrottle = Duration(milliseconds: 500);
 
@@ -63,6 +74,7 @@ class IslandLyricService {
     _started = true;
     IslandLyricSettings.enabled.addListener(_onSettingsChanged);
     IslandLyricSettings.testMode.addListener(_onSettingsChanged);
+    IslandLyricSettings.aodLyrics.addListener(_onSettingsChanged);
     LyricsService.instance.currentLineText.addListener(_onLyricLineChanged);
     PlayerService.instance.isPlaying.addListener(_onPlayingChanged);
     PlayerService.instance.position.addListener(_onPositionChanged);
@@ -76,6 +88,7 @@ class IslandLyricService {
     if (!_started) return;
     IslandLyricSettings.enabled.removeListener(_onSettingsChanged);
     IslandLyricSettings.testMode.removeListener(_onSettingsChanged);
+    IslandLyricSettings.aodLyrics.removeListener(_onSettingsChanged);
     LyricsService.instance.currentLineText.removeListener(_onLyricLineChanged);
     PlayerService.instance.isPlaying.removeListener(_onPlayingChanged);
     PlayerService.instance.position.removeListener(_onPositionChanged);
@@ -482,19 +495,55 @@ class IslandLyricService {
     final frame = frames[frameIndex];
     final split = splitLyricForIsland(frame);
 
-    _channel.invokeMethod('update', {
-      'lyric': split.right,
-      'leftLyric': split.left,
-      'title': song?.title ?? '',
-      'artist': song?.artistDisplayName ?? '',
-      'isPlaying': player.isPlaying.value,
-      'positionMs': player.position.value.inMilliseconds,
-      'durationMs': song?.durationMs ?? 0,
-      'showProgress': IslandLyricSettings.showProgress.value,
-      'coverPath': _lastCoverPath,
-    });
+    final payload = buildUpdatePayload(
+      fullLyric: frame,
+      title: song?.title ?? '',
+      artist: song?.artistDisplayName ?? '',
+      isPlaying: player.isPlaying.value,
+      positionMs: player.position.value.inMilliseconds,
+      durationMs: song?.durationMs ?? 0,
+      showProgress: IslandLyricSettings.showProgress.value,
+      coverPath: _lastCoverPath,
+      aodLyrics: IslandLyricSettings.aodLyrics.value,
+    );
+    // 左右分割后的实际显示内容（覆盖 payload 里由 fullLyric 派生的 lyric/leftLyric）
+    payload['lyric'] = split.right;
+    payload['leftLyric'] = split.left;
+
+    _channel.invokeMethod('update', payload);
   }
 
+  /// 构建发送给原生层的 update payload（纯函数，可测）。
+  ///
+  /// [fullLyric] = 完整当前歌词帧（供息屏 aodTitle / 通知标题使用）。
+  /// 返回的 map 含 lyric/leftLyric，但由调用方按 split 结果覆盖为左右半。
+  @visibleForTesting
+  static Map<String, Object?> buildUpdatePayload({
+    required String fullLyric,
+    required String title,
+    required String artist,
+    required bool isPlaying,
+    required int positionMs,
+    required int durationMs,
+    required bool showProgress,
+    required String? coverPath,
+    required bool aodLyrics,
+  }) {
+    final split = splitLyricForIsland(fullLyric);
+    return {
+      'fullLyric': fullLyric,
+      'lyric': split.right,
+      'leftLyric': split.left,
+      'title': title,
+      'artist': artist,
+      'isPlaying': isPlaying,
+      'positionMs': positionMs,
+      'durationMs': durationMs,
+      'showProgress': showProgress,
+      'coverPath': coverPath,
+      'aodLyrics': aodLyrics,
+    };
+  }
   /// 当前歌词行的时间窗口 [start, end]，毫秒。无歌词模型时返回兜底（start=0）。
   static (int, int?) _currentLineWindow() {
     final model = LyricsService.instance.snapshot.value.model;

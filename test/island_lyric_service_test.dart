@@ -100,6 +100,41 @@ void main() {
     });
   });
 
+  group('IslandLyricService.buildUpdatePayload', () {
+    test('payload 含完整歌词帧（fullLyric = 当前帧左+右拼接）', () {
+      const frame = '聆听山语 回荡不清';
+      final p = IslandLyricService.buildUpdatePayload(
+        fullLyric: frame,
+        title: '测试歌曲',
+        artist: '歌手',
+        isPlaying: true,
+        positionMs: 1000,
+        durationMs: 60000,
+        showProgress: true,
+        coverPath: null,
+        aodLyrics: true,
+      );
+      expect(p['fullLyric'], frame, reason: 'fullLyric 应为完整歌词帧，供息屏标题使用');
+    });
+
+    test('payload 无 fullLyric 时（aodLyrics 关）不影响其它字段', () {
+      final p = IslandLyricService.buildUpdatePayload(
+        fullLyric: '短歌词',
+        title: '测试歌曲',
+        artist: '歌手',
+        isPlaying: false,
+        positionMs: 0,
+        durationMs: 60000,
+        showProgress: false,
+        coverPath: 'cover.jpg',
+        aodLyrics: false,
+      );
+      expect(p['title'], '测试歌曲');
+      expect(p['aodLyrics'], false);
+      expect(p['coverPath'], 'cover.jpg');
+    });
+  });
+
   group('IslandLyricService.splitLyricForIsland', () {
     test('短歌词也左右拼接：两侧非空且拼成完整歌词', () {
       const lyric = '短歌词';

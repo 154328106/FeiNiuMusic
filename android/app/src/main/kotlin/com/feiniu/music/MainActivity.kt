@@ -1,10 +1,12 @@
 package com.feiniu.music
 
+import android.content.ComponentName
 import android.content.ContentValues
+import android.content.Context
+import android.content.Intent
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Environment
@@ -179,6 +181,7 @@ class MainActivity : AudioServiceActivity() {
                 "update" -> {
                     val leftLyric = call.argument<String>("leftLyric") ?: ""
                     val lyric = call.argument<String>("lyric") ?: ""
+                    val fullLyric = call.argument<String>("fullLyric") ?: lyric
                     val title = call.argument<String>("title") ?: ""
                     val artist = call.argument<String>("artist") ?: ""
                     val isPlaying = call.argument<Boolean>("isPlaying") ?: true
@@ -189,22 +192,29 @@ class MainActivity : AudioServiceActivity() {
                     val showProgress =
                         call.argument<Boolean>("showProgress") ?: true
                     val coverPath = call.argument<String>("coverPath")
+                    val aodLyrics = call.argument<Boolean>("aodLyrics") ?: false
                     islandLyricNotification.update(
                         leftLyric = leftLyric,
                         lyric = lyric,
+                        fullLyric = fullLyric,
                         title = title,
                         artist = artist,
                         isPlaying = isPlaying,
                         positionMs = positionMs,
                         durationMs = durationMs,
                         showProgressSetting = showProgress,
-                        coverPath = coverPath
+                        coverPath = coverPath,
+                        aodLyrics = aodLyrics
                     )
                     result.success(null)
                 }
                 "hide" -> {
                     islandLyricNotification.hide()
                     result.success(null)
+                }
+                "openAodSettings" -> {
+                    val ok = openAodSettings()
+                    result.success(ok)
                 }
                 else -> result.notImplemented()
             }
@@ -214,6 +224,33 @@ class MainActivity : AudioServiceActivity() {
     /** 单一实例持有，保证歌词行去重 / 节流状态在多次 MethodChannel 调用间保持。 */
     private val islandLyricNotification: IslandLyricNotification by lazy {
         IslandLyricNotification(applicationContext)
+    }
+
+    /**
+     * 跳转到 MIUI/HyperOS 息屏通知动画设置页（供息屏歌词提示用）。
+     * 目标：com.miui.aod/.settings.NotificationAnimationSelectActivity。
+     * 返回是否成功发起（目标组件可能不存在，如非小米设备）。
+     */
+    private fun openAodSettings(): Boolean {
+        return try {
+            val intent = Intent().apply {
+                component = ComponentName(
+                    "com.miui.aod",
+                    "com.miui.aod.settings.NotificationAnimationSelectActivity"
+                )
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                // 用户提供的原始 intent 附加参数
+                putExtra("REQUEST_PAGE_PREV_REF", "")
+                putExtra("FLAG_FROM_RESOURCE_BROWSER", true)
+                putExtra("miref", "personalize")
+                putExtra("REQUEST_PAGE_REF", "personalize")
+            }
+            startActivity(intent)
+            true
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "打开息屏通知设置失败", e)
+            false
+        }
     }
 
     /** 是否为 Android TV 设备：uiMode 类型为 TELEVISION，或设备声明 LEANBACK 特性。 */

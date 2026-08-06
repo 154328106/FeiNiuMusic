@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
+import '../../app/services/island_lyric_service.dart';
 import '../../app/services/lyrics/lyrics_service.dart';
 import '../../app/state/settings_island_lyric.dart';
 import '../../app/state/settings_state.dart';
@@ -81,6 +82,19 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
   void _setCarBluetoothLyrics(bool value) {
     _carBluetoothLyrics.value = value;
     MediaNotificationSettings.setCarBluetoothLyrics(value);
+  }
+
+  /// 打开 MIUI/HyperOS 息屏通知设置页（提示用户关闭息屏通知）。
+  Future<void> _openAodSettings() async {
+    final ok = await IslandLyricService.openAodSettings();
+    if (!mounted) return;
+    if (!ok) {
+      AppToast.show(
+        context,
+        '无法打开息屏通知设置（可能不是小米设备或系统限制）',
+        type: ToastType.error,
+      );
+    }
   }
 
   @override
@@ -163,30 +177,62 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
                       );
                     },
                   ),
+                  // 子选项随「灵动岛歌词」主开关显示/隐藏：未开启时隐藏
                   ValueListenableBuilder<bool>(
-                    valueListenable: IslandLyricSettings.showProgress,
-                    builder: (context, showProgress, _) {
-                      return AppSettingSwitchTile(
-                        title: '显示播放进度',
-                        subtitle: '在灵动岛小胶囊上显示播放进度',
-                        value: showProgress,
-                        onChanged: (value) {
-                          IslandLyricSettings.setShowProgress(value);
-                        },
-                      );
-                    },
-                  ),
-                  ValueListenableBuilder<bool>(
-                    valueListenable: IslandLyricSettings.testMode,
-                    builder: (context, testMode, _) {
-                      return AppSettingSwitchTile(
-                        title: '测试模式',
-                        subtitle: '不播放音乐时也持续模拟发送通知，'
-                            '验证暂停/无播放时灵动岛是否仍能显示',
-                        value: testMode,
-                        onChanged: (value) {
-                          IslandLyricSettings.setTestMode(value);
-                        },
+                    valueListenable: IslandLyricSettings.enabled,
+                    builder: (context, enabled, _) {
+                      if (!enabled) return const SizedBox.shrink();
+                      return Column(
+                        children: [
+                          ValueListenableBuilder<bool>(
+                            valueListenable: IslandLyricSettings.showProgress,
+                            builder: (context, showProgress, _) {
+                              return AppSettingSwitchTile(
+                                title: '显示播放进度',
+                                subtitle: '在灵动岛小胶囊上显示播放进度',
+                                value: showProgress,
+                                onChanged: (value) {
+                                  IslandLyricSettings.setShowProgress(value);
+                                },
+                              );
+                            },
+                          ),
+                          ValueListenableBuilder<bool>(
+                            valueListenable: IslandLyricSettings.aodLyrics,
+                            builder: (context, aodLyrics, _) {
+                              return AppSettingSwitchTile(
+                                title: '息屏歌词',
+                                subtitle: '息屏时在通知标题显示当前歌词（封面+歌词）；'
+                                    '建议配合关闭系统息屏通知使用\n'
+                                    '（仅 HyperOS 3.3 上测试通过）',
+                                value: aodLyrics,
+                                onChanged: (value) {
+                                  IslandLyricSettings.setAodLyrics(value);
+                                },
+                              );
+                            },
+                          ),
+                          AppSettingTile(
+                            title: '息屏通知设置',
+                            subtitle: '跳转到系统息屏通知设置页，'
+                                '关闭息屏通知以配合息屏歌词',
+                            onTap: _openAodSettings,
+                          ),
+                          ValueListenableBuilder<bool>(
+                            valueListenable: IslandLyricSettings.testMode,
+                            builder: (context, testMode, _) {
+                              return AppSettingSwitchTile(
+                                title: '测试模式',
+                                subtitle: '不播放音乐时也持续模拟发送通知，'
+                                    '验证暂停/无播放时灵动岛是否仍能显示',
+                                value: testMode,
+                                onChanged: (value) {
+                                  IslandLyricSettings.setTestMode(value);
+                                },
+                              );
+                            },
+                          ),
+                        ],
                       );
                     },
                   ),
