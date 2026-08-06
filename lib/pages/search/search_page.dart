@@ -321,7 +321,10 @@ class _SearchPageState extends State<SearchPage> {
                   subtitle: album.trackCount != null ? Text('${album.trackCount} 首') : null,
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (_) => AlbumDetailPage(albumName: album.name),
+                      builder: (_) => AlbumDetailPage(
+                        albumName: album.name,
+                        albumGuid: album.guid.isNotEmpty ? album.guid : null,
+                      ),
                     ),
                   ),
                 );

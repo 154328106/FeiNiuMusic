@@ -43,7 +43,15 @@ class _PlayerPageState extends State<PlayerPage>
   void initState() {
     super.initState();
     // 播放页路由激活标记：TV 模式据此隐藏侧栏与迷你播放器。
-    AppLayoutSettings.playerRouteActive.value = true;
+    // 延迟到首帧后设置：initState 在 build 阶段执行，此时直接改
+    // playerRouteActive 会通知祖先的 ValueListenableBuilder 触发
+    // markNeedsBuild → "setState() called during build" 崩溃
+    // （栈：_PlayerPageState.initState → _ValueListenableBuilderState._valueChanged）。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        AppLayoutSettings.playerRouteActive.value = true;
+      }
+    });
     _dismissController =
         AnimationController.unbounded(
           vsync: this,
@@ -126,7 +134,15 @@ class _PlayerPageState extends State<PlayerPage>
     _pageController.dispose();
     _dismissOffset.dispose();
     _bottomPanelFocus.dispose();
-    AppLayoutSettings.playerRouteActive.value = false;
+    // 卸载阶段（finalizeTree → _unmountAll）widget tree 已锁定，这里直接给
+    // playerRouteActive 赋值会 notify 仍挂在树上的祖先 ValueListenableBuilder
+    // （tablet_layout_host）→ markNeedsBuild → "setState() called when widget
+    // tree was locked"。且异常中断 _unmountAll，播放页子树残留未卸载。
+    // 与 initState 对称，延迟到帧后写，避开锁定期。
+    final routeActive = AppLayoutSettings.playerRouteActive;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      routeActive.value = false;
+    });
     super.dispose();
   }
 

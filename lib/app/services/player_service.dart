@@ -358,6 +358,13 @@ class PlayerService with WidgetsBindingObserver {
     engine.currentIndexStream.listen((idx) {
       if (!identical(engine, _activeEngine)) return;
       if (idx == null) return;
+      // 恢复期间（_restoringState=true）忽略所有 indexStream 过渡事件：
+      // preload=false 的 setAudioSources 在 just_audio 上会走 _IdleAudioPlayer，
+      // 它异步广播 sequenceState.currentIndex=0（seed 值）——但当前歌曲已由
+      // _activateLogicalIndexLocked 显式 _activateSong(logicalIndex) 设好，
+      // 这些 0/过渡广播都是噪音，放行会把 UI 打回 run 起点（「第 N 首重启
+      // 变第 1 首」）。恢复完成后 _restoringState 置 false，真实切歌正常驱动。
+      if (_restoringState) return;
       // setAudioSources 替换队列期间，just_audio 会广播过渡 currentIndex
       // （_broadcastSequence 保留旧 currentIndex，只有 sequence 变化）。
       // 这些过渡广播会触发 _activateSong 把 UI 切到旧歌——「点歌跳一遍」。
@@ -639,12 +646,21 @@ class PlayerService with WidgetsBindingObserver {
       rethrow;
     }
     _pendingLoadLogicalIndex = null;
-    // loadQueue 返回后校准：以引擎实际 currentIndex 为准（等待匹配期望值）。
-    final actualIdx = target.currentIndex;
-    if (actualIdx != null && actualIdx >= 0) {
-      final actualLogical = _activeRunStart + actualIdx;
-      if (actualLogical >= 0 && actualLogical < queue.value.length) {
-        _activateSong(actualLogical);
+    // loadQueue 返回后校准：以引擎实际 currentIndex 为准。
+    //
+    // 只在引擎**确实加载了源**（非 idle）时校准。preload=false 的
+    // setAudioSources（just_audio 未播放时走 _setPlatformActive(false)，
+    // 不执行 source._shuffle(initialIndex:)）会把 currentIndex 保持在种子值
+    // null → getter 返回 0，此时 currentIndex 是"列表首项"而非"我们请求的
+    // localIndex"。若用 0 校准会覆盖第 597 行已设对的 logicalIndex（UI 跳回
+    // run 起点），持久化错位 → 重启后恢复错歌曲。引擎 idle = 未加载，跳过。
+    if (target.processingState != EngineProcessingState.idle) {
+      final actualIdx = target.currentIndex;
+      if (actualIdx != null && actualIdx >= 0) {
+        final actualLogical = _activeRunStart + actualIdx;
+        if (actualLogical >= 0 && actualLogical < queue.value.length) {
+          _activateSong(actualLogical);
+        }
       }
     }
     await target.setLoopMode(
@@ -1221,6 +1237,18 @@ class PlayerService with WidgetsBindingObserver {
           !isMediaKitError &&
           (errorMsg.contains('InsufficientCapacity') ||
               errorMsg.contains('Buffer too small'));
+      // 系统解码器失败（非 FLAC 帧超限）：
+      // `MediaCodecAudioRenderer error` / `Decoder failed` / `CodecException` /
+      // `0x80000000`。ExoPlayer 选中某解码器（如高通 C2 软解 c2.qti.alac.sw
+      // .decoder）后失败不会自动换解码器，重试 just_audio 必然再失败（日志里
+      // ALAC 反复失败卡死）。升级 media_kit（FFmpeg 软解）保证可播。
+      final isSystemDecoderFail =
+          !isMediaKitError &&
+          (errorMsg.contains('MediaCodecAudioRenderer') ||
+              errorMsg.contains('Decoder failed') ||
+              errorMsg.contains('CodecException') ||
+              errorMsg.contains('0x80000000') ||
+              errorMsg.contains('0xffffffff'));
 
       _debugLog(
         'recover current source index=$failedIndex song=${failedSong.title} '
@@ -1232,9 +1260,9 @@ class PlayerService with WidgetsBindingObserver {
           ? position.value
           : Duration.zero;
 
-      if (isFlacTooLarge) {
-        // FLAC 帧超限 → 升级 media_kit（FFmpeg 无损解码，无 32KB 限制，
-        // 直连原始 FLAC 流）。
+      if (isFlacTooLarge || isSystemDecoderFail) {
+        // FLAC 帧超限 / 系统解码器失败 → 升级 media_kit（FFmpeg 软解，
+        // 无 32KB 限制、无设备解码器差异）。
         _mediaKitEscalateSongIds.add(failedSong.id);
         FeiNiuTranscodeService.instance.invalidate(failedSong.id);
         _engineKinds = await _computeEngineKinds(list);
@@ -1512,11 +1540,17 @@ class PlayerService with WidgetsBindingObserver {
         }
       }
       queue.value = allSongs;
-      // 追加后超长按上限截断（保留当前歌曲）
+      // 追加后超长按上限截断（保留当前歌曲，裁掉最旧的前部）。
+      // 裁剪会把当前歌曲重映射到新索引（裁掉前部后落到 0/靠前位置），
+      // 必须同步 currentIndex/currentSong，否则索引与实际歌曲逐次错位，
+      // 持久化的播放位置/歌名在重启后恢复错乱。
       final curIdx = currentIndex.value;
       final capped = _capQueue(allSongs, curIdx);
       if (capped != null) {
         queue.value = capped.$1;
+        if (capped.$2 != curIdx) {
+          _activateSong(capped.$2);
+        }
       }
       // 后台预加载下一曲文件：漫游模式下队列即真源，下一首已确定，
       // 提前把文件缓存好，切歌时无缝衔接。
@@ -2079,11 +2113,23 @@ class PlayerService with WidgetsBindingObserver {
     if (shouldAutoPlayOnLaunch) {
       try {
         _debugLog('restorePlaybackState autoPlay');
-        await _startPlayback();
+        // 自动播放的兜底：_startPlayback 内部已用 playbackStateStream 确认
+        // 播放开始（不再死等 play() 的 Future），此处再留一层总超时，确保
+        // 极端情况下 _init 也能完成（否则 _initFuture 永不完成 → 所有
+        // playQueue 卡死，点击歌曲无响应）。超时放行，不强停引擎——引擎
+        // 可能正在正常播放，只是状态确认因网络慢而未及时到达。
+        await _startPlayback().timeout(const Duration(seconds: 8));
         return;
       } catch (e) {
         if (kDebugMode) {
           debugPrint('Auto play on app launch failed: $e');
+        }
+        // 仅在引擎确实没在播时清理：避免误杀正在正常播放的音频。
+        if (!_activeEngine.playing && !isPlaying.value) {
+          _clearRestoreSession();
+          try {
+            await _activeEngine.stop();
+          } catch (_) {}
         }
       }
     }
@@ -2214,13 +2260,48 @@ class PlayerService with WidgetsBindingObserver {
     }
   }
 
+  /// 发起播放并确认「已真正开始播」。
+  ///
+  /// 不能死等 `engine.play()` 的 Future：just_audio 在 `preload:false` 的
+  /// 平台激活路径下，即使音频已正常播出（ExoPlayer 解码 + AudioTrack 输出），
+  /// `play()` 的 playCompleter 也可能永不完成（已知竞态）。死等会卡死调用方
+  /// （曾导致 `_initFuture` 永不完成、点击歌曲全部无响应）。
+  ///
+  /// 正确做法：`play()` 启动时引擎会乐观广播 `playing=true`，监听引擎的
+  /// `playbackStateStream` 等首个 playing=true 即可可靠确认播放开始——
+  /// 不依赖 play() 的 Future，也不会挂起。对 play() 本身只做短超时等待，
+  /// 超时不视为失败（音频由状态流确认在播）。
   Future<void> _startPlayback() async {
     _debugLog('startPlayback song=${currentSong.value?.title ?? 'none'}');
     final active = await _setAudioSessionActive(true);
     if (!active) {
       throw Exception('Failed to activate audio session');
     }
-    await _activeEngine.play();
+    final engine = _activeEngine;
+    // 状态确认在 play() 之前订阅：just_audio 在 play() 开头就乐观广播
+    // playing=true，先订阅才不会漏掉该事件。
+    final stateConfirmed = engine.playing
+        ? Future<void>.value()
+        : engine.playbackStateStream
+            .firstWhere((s) => s.playing)
+            .timeout(const Duration(seconds: 5))
+            .then((_) {}, onError: (_) {});
+    try {
+      // play() 的 Future 可能永不完成（平台激活竞态）：短超时等待，超时
+      // 不视为失败——播放请求已发出，是否在播由 stateConfirmed 确认。
+      await engine.play().timeout(const Duration(seconds: 3));
+    } on TimeoutException {
+      // 播放请求已发出，播放状态由 stateConfirmed 等待确认。
+    } catch (e) {
+      // play() 显式抛错（如源不可播）：仅当引擎确实没在播时才视为失败。
+      if (!engine.playing && !isPlaying.value) rethrow;
+      if (kDebugMode) {
+        debugPrint('PlayerService startPlayback play request failed: $e');
+      }
+    }
+    // 等待播放状态确认（正常路径在 play() 乐观广播后即完成，毫秒级；
+    // 超时也只是放行，不阻塞、不产生副作用）。
+    await stateConfirmed;
     _completeRestoreSessionIfReady();
     _startBackgroundAudioKeepAliveIfNeeded();
   }
@@ -2324,7 +2405,16 @@ class PlayerService with WidgetsBindingObserver {
     position.value = restored;
     _emitSnapshot(force: true);
     try {
-      await _activeEngine.seek(restored);
+      // 引擎未加载（idle，preload=false 的恢复场景）时跳过真实 seek：
+      // just_audio 的 seek 会调 resetInitialSeekValues 清掉 setAudioSources
+      // 保留的 _PluginLoadRequest.initialIndex/initialPosition——而 play 激活
+      // 时正是靠它恢复正确索引+位置。idle 下 seek 只写 _IdleAudioPlayer 内部
+      // 状态、不落真机，位置由 _activateLogicalIndex(initialPosition:) 已传入
+      // _PluginLoadRequest，play 激活时由 load 的 initialPosition 应用。跳过
+      // 它才能保证 play 不从第 1 首（种子 currentIndex=0）开始播。
+      if (_activeEngine.processingState != EngineProcessingState.idle) {
+        await _activeEngine.seek(restored);
+      }
     } finally {
       _isSeeking = false;
       if (_activeEngine.position > Duration.zero) {

@@ -528,7 +528,10 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
                         onTap: () {
                           Navigator.of(context).push(
                             buildAppPageRoute(
-                              (_) => AlbumDetailPage(albumName: album.name),
+                              (_) => AlbumDetailPage(
+                                albumName: album.name,
+                                albumGuid: rep?.albumGuid,
+                              ),
                             ),
                           );
                         },

@@ -1424,7 +1424,10 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
                 onOpenAlbum: (albumName) {
                   Navigator.of(context).push(
                     buildAppPageRoute(
-                      (_) => AlbumDetailPage(albumName: albumName),
+                      (_) => AlbumDetailPage(
+                        albumName: albumName,
+                        albumGuid: song.albumGuid,
+                      ),
                     ),
                   );
                 },
