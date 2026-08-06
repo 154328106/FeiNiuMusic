@@ -8,7 +8,14 @@ plugins {
 import java.io.FileInputStream
 import java.util.Properties
 
+// 默认包名（飞牛音乐正式包）。
+val DEFAULT_APP_ID = "com.feiniu.music"
+// CI 投音兼容包包名：仅用于 GitHub Actions 自动打包（--android-project-arg
+// applicationIdOverride=com.luna.music），本地构建不传入该属性，恒为正式包名。
+val appIdOverride: String? = project.findProperty("applicationIdOverride") as String?
+
 android {
+    // namespace 与 Kotlin 源码包名保持一致，不能随 applicationId 变化。
     namespace = "com.feiniu.music"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
@@ -24,8 +31,13 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.feiniu.music"
+        // applicationId：CI 传 applicationIdOverride 时（如 com.luna.music 投音
+        // 兼容包）覆盖为传入值；本地构建恒为正式包名 com.feiniu.music。
+        applicationId = appIdOverride ?: DEFAULT_APP_ID
+        // 应用名随包区分：正式包「飞牛音乐」，投音兼容包追加「·投音版」便于
+        // 桌面识别，也降低与同名应用混淆的可能。
+        manifestPlaceholders["appLabel"] =
+            if (appIdOverride == null) "飞牛音乐" else "飞牛音乐·投音版"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 27

@@ -126,6 +126,48 @@ flutter build apk --release --split-per-abi
 
 构建产物位于 `build/app/outputs/flutter-apk/`，按 CPU 架构（arm64-v8a / armeabi-v7a / x86_64）拆分。
 
+## 鸿蒙 / iQOO / VIVO 投音兼容包（非官方）
+
+某些手机系统（鸿蒙 4 / 鸿蒙 6、iQOO、VIVO）在系统播控中心（控制中心右上角的
+媒体卡片）里，默认只对系统「白名单」内的音乐应用显示 **投音（投放音频）控制按钮**。
+第三方音乐应用即使正常播放，也不显示投音入口。
+
+为解决该问题（参考
+[lx-music-mobile issue #908](https://github.com/lyswhut/lx-music-mobile/issues/908)），
+本项目额外提供一种 **投音兼容安装包**：该包的 **Android 包名（applicationId）被
+覆盖为 `com.luna.music`**，从而让系统将应用识别为受支持的投音来源。
+
+### ⚠️ 非官方声明与法律风险
+
+请在使用该兼容包前仔细阅读以下内容：
+
+- **非官方安装包**：该包不是官方发布的飞牛音乐版本，也不是飞牛官方或本项目维护者
+  提供的正式发行版。它是为解决特定机型投音问题而生成的改装包，与系统正式包
+  （`com.feiniu.music`）可以共存安装，但功能与行为以本仓库源码为准。
+- **包名冲突风险**：`com.luna.music` 是字节跳动旗下「汽水音乐」App 使用的包名。
+  安装本兼容包后：
+  - 若设备上**已安装汽水音乐**，安装本包会**覆盖**汽水音乐（数据迁移、卸载原应用）；
+    反之，已安装本包时再安装汽水音乐会覆盖本包。
+  - 系统通知、媒体卡片、快捷图标等会**共用同一套包名身份**，可能造成混淆。
+  - 因覆盖导致的原应用数据丢失，本项目不承担任何责任。
+- **品牌与商标风险**：本兼容包与汽水音乐 / 字节跳动、以及任何其他使用
+  `com.luna.music` 或 `luna` 标识的软件**均无任何关联、授权或赞助关系**。冒用
+  第三方包名可能涉及商标、不正当竞争等法律风险，请您自行评估后谨慎使用，本项目
+  不对由此产生的任何后果负责。
+- **卸载方式**：卸载该兼容包等同于卸载一个以 `com.luna.music` 为包名的应用，
+  不会影响正式包（`com.feiniu.music`）的数据。
+
+### 如何区分两个安装包
+
+| 安装包 | 包名（applicationId） | 适用 |
+| --- | --- | --- |
+| `FeiNiuMusic-vX.Y.Z-arm64-v8a.apk` | `com.feiniu.music`（正式） | 常规设备，飞牛音乐正式包（arm64） |
+| `FeiNiuMusic-vX.Y.Z-armeabi-v7a.apk` | `com.feiniu.music`（正式） | 常规设备，飞牛音乐正式包（32 位） |
+| `FeiNiuMusic-vX.Y.Z-x86_64.apk` | `com.feiniu.music`（正式） | 常规设备，飞牛音乐正式包（x86_64） |
+| `FeiNiuMusic-vX.Y.Z-arm64-v8a-luna.apk` | `com.luna.music`（投音兼容，非官方） | 鸿蒙 4/6、iQOO、VIVO 投音问题（仅 arm64） |
+
+四个安装包可以同时安装、互不影响数据；不确定时请安装正式包。
+
 ## 开源协议
 
 本项目基于上游 [NagoMusic](https://github.com/Keduoli03/NagoMusic) 项目的开源协议发布。
