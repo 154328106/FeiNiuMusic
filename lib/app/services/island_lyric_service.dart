@@ -41,6 +41,28 @@ class IslandLyricService {
     }
   }
 
+  /// 当前设备是否 HyperOS/MIUI（用于「息屏通知设置」跳转行仅在 HyperOS 显示）。
+  ///
+  /// 判定：MIUI 系统包 [com.miui.aod] 存在即视为小米 HyperOS 系设备。
+  /// 结果缓存（跨次调用不变），调用失败按非 HyperOS 处理。
+  static bool? _isHyperOs;
+  static Future<bool> isHyperOs() async {
+    if (_isHyperOs != null) return _isHyperOs!;
+    try {
+      final ok = await _channel.invokeMethod<bool>('isHyperOs');
+      _isHyperOs = ok ?? false;
+    } catch (_) {
+      _isHyperOs = false;
+    }
+    return _isHyperOs!;
+  }
+
+  /// 测试专用：清空 HyperOS 探测缓存，供测试重复探测。
+  @visibleForTesting
+  static void resetDeviceProbeForTest() {
+    _isHyperOs = null;
+  }
+
   /// 进度更新节流：同一首歌内，两次进度驱动发送的最小间隔。
   static const Duration _progressThrottle = Duration(milliseconds: 500);
 

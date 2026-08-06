@@ -30,6 +30,9 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
   late final _carBluetoothLyrics = createSignal(false);
   late final _loading = createSignal(true);
 
+  /// 是否 HyperOS/MIUI 设备（「息屏通知设置」跳转行仅在其上显示）。
+  late final _isHyperOs = createSignal(false);
+
   @override
   void initState() {
     super.initState();
@@ -50,6 +53,8 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
     _carBluetoothLyrics.value =
         MediaNotificationSettings.carBluetoothLyrics.value;
     await LyricsService.instance.refreshSettings();
+    // 探测当前设备是否 HyperOS（决定是否显示「息屏通知设置」跳转行）。
+    _isHyperOs.value = await IslandLyricService.isHyperOs();
     _loading.value = false;
   }
 
@@ -212,12 +217,14 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
                               );
                             },
                           ),
-                          AppSettingTile(
-                            title: '息屏通知设置',
-                            subtitle: '跳转到系统息屏通知设置页，'
-                                '关闭息屏通知以配合息屏歌词',
-                            onTap: _openAodSettings,
-                          ),
+                          if (_isHyperOs.value)
+                            AppSettingTile(
+                              title: '息屏通知设置',
+                              subtitle: '跳转到系统息屏通知设置页，'
+                                  '关闭息屏通知以配合息屏歌词\n'
+                                  '（仅 HyperOS 设备显示）',
+                              onTap: _openAodSettings,
+                            ),
                           ValueListenableBuilder<bool>(
                             valueListenable: IslandLyricSettings.testMode,
                             builder: (context, testMode, _) {

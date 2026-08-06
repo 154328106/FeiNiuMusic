@@ -216,6 +216,9 @@ class MainActivity : AudioServiceActivity() {
                     val ok = openAodSettings()
                     result.success(ok)
                 }
+                "isHyperOs" -> {
+                    result.success(isHyperOs())
+                }
                 else -> result.notImplemented()
             }
         }
@@ -259,6 +262,21 @@ class MainActivity : AudioServiceActivity() {
             android.content.res.Configuration.UI_MODE_TYPE_MASK
         return uiMode == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION ||
             packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK)
+    }
+
+    /**
+     * 是否为 HyperOS/MIUI 设备：MIUI 息屏系统包 [com.miui.aod] 存在即视为小米 HyperOS 系。
+     * 用于「息屏通知设置」跳转行仅在 HyperOS 上显示（其它设备该设置项无意义）。
+     */
+    private fun isHyperOs(): Boolean {
+        return try {
+            packageManager.getPackageInfo(
+                "com.miui.aod",
+                0
+            ) != null
+        } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
+            false
+        }
     }
 
     private fun loadAudioThumbnail(path: String, size: Int): ByteArray? {
