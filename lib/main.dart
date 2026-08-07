@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app/app.dart';
+import 'app/services/audio/stream_cache_service.dart';
 import 'app/services/debug_log_service.dart';
 import 'app/services/fn_auto_reconnect_service.dart';
 import 'app/services/island_lyric_service.dart';
@@ -93,6 +95,9 @@ Future<void> main() async {
   await AppLaunchNavigationSettings.ensureLoaded();
   // 初始化自动重连服务（监听网络变化 + API 失败）
   FnAutoReconnectService.instance.init();
+  // 迁移歌曲缓存到系统标准缓存目录后，启动时顺手清理旧版 app-support 目录中的
+  // 缓存（仅首次运行执行一次，见 StreamCacheService.cleanupLegacyDirOnce）。
+  unawaited(StreamCacheService.instance.cleanupLegacyDirOnce());
   runApp(const FeiNiuMusicApp());
   // Fire-and-forget warm-ups that run in parallel with the first frame so
   // per-page initState calls don't have to pay for these cold starts:

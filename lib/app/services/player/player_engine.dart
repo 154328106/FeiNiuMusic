@@ -41,6 +41,9 @@ abstract interface class PlayerEngine {
   Future<void> setLoopMode(EngineLoopMode mode);
   Future<void> setVolume(double volume);
 
+  /// 设置播放速度倍率（1.0 为正常）。引擎内部保持音调不变。
+  Future<void> setSpeed(double speed);
+
   // ---- 队列原地修改（同 run 增量路径） ----
   Future<void> insertItem(int index, EngineItem item);
   Future<void> insertItems(int index, List<EngineItem> items);

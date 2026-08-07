@@ -257,6 +257,15 @@ class MediaKitEngine implements PlayerEngine {
   }
 
   @override
+  Future<void> setSpeed(double speed) async {
+    final p = _player;
+    if (p == null) return;
+    try {
+      await p.setRate(speed);
+    } catch (_) {}
+  }
+
+  @override
   Future<void> insertItem(int index, EngineItem item) async {
     final p = _player;
     if (p == null) return;

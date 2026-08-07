@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -119,6 +121,177 @@ void main() {
     );
 
     expect(AccountStore.instance.accounts.value, hasLength(2));
+  });
+
+  group('FNID 维度去重（重连换地址不产生新账号）', () {
+    test('identityKey 相同 FNID + 用户名即使 serverUrl 不同也视为同一账号', () async {
+      await AccountStore.instance.init();
+
+      // 同一 FNID，但探测地址变了（内网 IP → 中继）
+      final first = await AccountStore.instance.addOrUpdate(
+        AccountEntry.build(
+          fnId: 'fnid-a',
+          serverUrl: 'https://192.168.1.10:5667',
+          username: 'u',
+          token: 't1',
+        ),
+      );
+      final second = await AccountStore.instance.addOrUpdate(
+        AccountEntry.build(
+          fnId: 'fnid-a',
+          serverUrl: 'https://abc.5ddd.com',
+          username: 'u',
+          token: 't2',
+        ),
+      );
+
+      // 去重命中同一账号：仅更新地址与 token，不新增条目
+      expect(AccountStore.instance.accounts.value, hasLength(1));
+      expect(second.id, first.id);
+      expect(second.serverUrl, 'https://abc.5ddd.com');
+      expect(second.token, 't2');
+    });
+
+    test('不同 FNID 的账号保持独立', () async {
+      await AccountStore.instance.init();
+
+      await AccountStore.instance.addOrUpdate(
+        AccountEntry.build(fnId: 'fnid-a', serverUrl: 'https://a.5ddd.com', username: 'u', token: 't'),
+      );
+      await AccountStore.instance.addOrUpdate(
+        AccountEntry.build(fnId: 'fnid-b', serverUrl: 'https://b.5ddd.com', username: 'u', token: 't'),
+      );
+
+      expect(AccountStore.instance.accounts.value, hasLength(2));
+    });
+
+    test('无 FNID 时仍按 serverUrl 去重（回退行为）', () async {
+      await AccountStore.instance.init();
+
+      await AccountStore.instance.addOrUpdate(
+        AccountEntry.build(serverUrl: 'https://x:5667', username: 'u', token: 't1'),
+      );
+      await AccountStore.instance.addOrUpdate(
+        AccountEntry.build(serverUrl: 'https://y:5667', username: 'u', token: 't2'),
+      );
+
+      expect(AccountStore.instance.accounts.value, hasLength(2));
+    });
+
+    test('合并历史重复 FNID 账号：init 时收敛，保留 token 非空的条目', () async {
+      // 模拟 1.3.5 之前积累的重复条目：同一 FNID + 用户名，地址不同
+      final now = DateTime.now();
+      final legacyAccounts = [
+        // 有 token（当前有效会话）
+        {
+          'id': 'dup-old',
+          'name': '客厅 NAS',
+          'serverUrl': 'https://192.168.1.10:5667',
+          'username': 'u',
+          'password': 'pw',
+          'token': 't-old',
+          'relayMode': false,
+          'fnId': 'fnid-a',
+          'createdAtMs': now.subtract(const Duration(days: 30)).millisecondsSinceEpoch,
+        },
+        // 无 token（登录过期），较新
+        {
+          'id': 'dup-new',
+          'name': '',
+          'serverUrl': 'https://abc.5ddd.com',
+          'username': 'u',
+          'password': 'pw',
+          'token': '',
+          'relayMode': true,
+          'fnId': 'fnid-a',
+          'createdAtMs': now.subtract(const Duration(days: 1)).millisecondsSinceEpoch,
+        },
+      ];
+      SharedPreferences.setMockInitialValues({
+        'feiniu_accounts_v1': jsonEncode(legacyAccounts),
+        'feiniu_current_account_id': 'dup-new',
+      });
+
+      await AccountStore.instance.init();
+
+      // 合并为一条：保留 token 非空的 dup-old，currentAccountId 指向它
+      expect(AccountStore.instance.accounts.value, hasLength(1));
+      final kept = AccountStore.instance.accounts.value.first;
+      expect(kept.id, 'dup-old');
+      expect(kept.token, 't-old');
+      expect(kept.serverUrl, 'https://192.168.1.10:5667');
+      expect(AccountStore.instance.currentAccountId.value, 'dup-old');
+    });
+
+    test('合并历史重复 FNID 账号：保留条目无备注时继承被删条目的备注', () async {
+      final now = DateTime.now();
+      final legacyAccounts = [
+        {
+          'id': 'winner',
+          'name': '',
+          'serverUrl': 'https://192.168.1.10:5667',
+          'username': 'u',
+          'token': 't-winner',
+          'relayMode': false,
+          'fnId': 'fnid-b',
+          'createdAtMs': now.subtract(const Duration(days: 10)).millisecondsSinceEpoch,
+        },
+        {
+          'id': 'loser-named',
+          'name': '书房 NAS',
+          'serverUrl': 'https://abc.5ddd.com',
+          'username': 'u',
+          'token': '',
+          'relayMode': true,
+          'fnId': 'fnid-b',
+          'createdAtMs': now.millisecondsSinceEpoch,
+        },
+      ];
+      SharedPreferences.setMockInitialValues({
+        'feiniu_accounts_v1': jsonEncode(legacyAccounts),
+        'feiniu_current_account_id': 'winner',
+      });
+
+      await AccountStore.instance.init();
+
+      expect(AccountStore.instance.accounts.value, hasLength(1));
+      final kept = AccountStore.instance.accounts.value.first;
+      expect(kept.id, 'winner');
+      expect(kept.name, '书房 NAS', reason: '被删条目的备注应合并进保留条目');
+    });
+
+    test('非 FNID 账号不受合并影响', () async {
+      final now = DateTime.now();
+      final legacyAccounts = [
+        {
+          'id': 'manual-a',
+          'name': '',
+          'serverUrl': 'https://x:5667',
+          'username': 'u',
+          'token': 't',
+          'relayMode': false,
+          'createdAtMs': now.subtract(const Duration(days: 5)).millisecondsSinceEpoch,
+        },
+        {
+          'id': 'manual-b',
+          'name': '',
+          'serverUrl': 'https://y:5667',
+          'username': 'u',
+          'token': 't',
+          'relayMode': false,
+          'createdAtMs': now.subtract(const Duration(days: 1)).millisecondsSinceEpoch,
+        },
+      ];
+      SharedPreferences.setMockInitialValues({
+        'feiniu_accounts_v1': jsonEncode(legacyAccounts),
+        'feiniu_current_account_id': 'manual-a',
+      });
+
+      await AccountStore.instance.init();
+
+      // 手动地址账号（无 FNID）保持两条（不同服务器是不同账号）
+      expect(AccountStore.instance.accounts.value, hasLength(2));
+    });
   });
 
   test('rename and remove persist; remove current falls back to first', () async {

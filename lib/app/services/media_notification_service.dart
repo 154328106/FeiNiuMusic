@@ -370,7 +370,9 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
       playing: playing,
       updatePosition: snap.position,
       bufferedPosition: snap.bufferedPosition,
-      speed: 1.0,
+      // 系统媒体进度按 speed 外推剩余播放时间：倍速播放时必须同步真实倍率，
+      // 否则通知栏/Android Auto 的进度条以 1× 估算、随倍速漂移。
+      speed: player.speed.value,
       queueIndex: snap.index >= 0 ? snap.index : null,
     );
   }
@@ -495,6 +497,7 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
       snap.position.inMilliseconds,
       snap.bufferedPosition.inMilliseconds,
       snap.duration?.inMilliseconds ?? -1,
+      player.speed.value,
       _isFavorite,
       MediaNotificationSettings.showLyrics.value,
       MediaNotificationSettings.lyricOnTop.value,

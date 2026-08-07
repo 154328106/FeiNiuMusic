@@ -83,6 +83,9 @@ class JustAudioEngine implements PlayerEngine {
   Future<void> setVolume(double volume) => _player.setVolume(volume);
 
   @override
+  Future<void> setSpeed(double speed) => _player.setSpeed(speed);
+
+  @override
   Future<void> insertItem(int index, EngineItem item) =>
       _player.insertAudioSource(index, (item as JustAudioItem).source);
 

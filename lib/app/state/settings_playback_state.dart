@@ -340,3 +340,45 @@ class AppLaunchNavigationSettings {
     _hasHandledNavigationThisSession = false;
   }
 }
+
+/// 播放速度倍率（0.1×–5.0×，0.1 步进）。倍速只改播放速率、音调不变（引擎内部保持）。
+class AppPlaybackSpeedSettings {
+  static const String _prefsSpeed = 'player_playback_speed';
+
+  static const double minSpeed = 0.1;
+  static const double maxSpeed = 5.0;
+
+  /// 滑条每格增量（0.1×）。
+  static const double step = 0.1;
+
+  static final ValueNotifier<double> speed = ValueNotifier(1.0);
+
+  static Future<void>? _loading;
+
+  static Future<void> ensureLoaded() => _loading ??= _doLoad();
+
+  static Future<void> _doLoad() async {
+    final prefs = await SharedPreferences.getInstance();
+    speed.value = _normalize(prefs.getDouble(_prefsSpeed) ?? 1.0);
+  }
+
+  /// 设置倍速并持久化，值归一到 0.1 步进档位（越界钳制在 [minSpeed, maxSpeed]）。
+  static Future<void> setSpeed(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    final normalized = _normalize(value);
+    await prefs.setDouble(_prefsSpeed, normalized);
+    speed.value = normalized;
+  }
+
+  /// 把任意值归一到 0.1 步进档位；越界钳制在边界。
+  static double _normalize(double value) {
+    final clamped = value.clamp(minSpeed, maxSpeed);
+    return (clamped / step).round() * step;
+  }
+
+  /// 测试专用：重置内存状态（清空懒加载缓存），供测试 setUp 复用。
+  static void resetForTest() {
+    _loading = null;
+    speed.value = 1.0;
+  }
+}

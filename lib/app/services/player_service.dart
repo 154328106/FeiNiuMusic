@@ -65,6 +65,13 @@ class PlayerService with WidgetsBindingObserver {
   /// 时当场升级，由 FFmpeg 无损解码）。会话内持续生效。
   final Set<String> _mediaKitEscalateSongIds = {};
 
+  /// 手动切换解码器覆盖表：`Map<songId, EngineKind>`（会话级）。用户点歌曲信息
+  /// 面板的解码 tag 手动指定引擎时写入，_computeEngineKinds 命中后优先于
+  /// routeForSong 默认路由。**仅当前歌曲命中**，不参与现有自动升级
+  /// （_mediaKitEscalateSongIds）与无声看门狗（_silenceWatchEscalatedSongIds）
+  /// 逻辑；切歌后新歌曲 id 不命中即失效。
+  final Map<String, EngineKind> _forcedEngineKinds = {};
+
   /// media_kit 连续解码失败的歌曲 id（会话内）。第二次失败即跳过该歌
   /// （前进/回卷），避免媒体损坏时无限重试刷屏。
   final Set<String> _mediaKitFailedSongIds = {};
@@ -104,6 +111,9 @@ class PlayerService with WidgetsBindingObserver {
       _state.sleepTimerDisplayText;
   ValueNotifier<bool> get sleepUntilSongEnd => _state.sleepUntilSongEnd;
   ValueNotifier<EngineKind> get decoderEngine => _state.decoderEngine;
+
+  /// 当前播放速度倍率（0.1–5.0，1.0 为正常）。UI 经此读取/监听。
+  ValueNotifier<double> get speed => AppPlaybackSpeedSettings.speed;
 
   Signal<Duration> get positionSignal => _state.positionSignal;
   Signal<Duration?> get durationSignal => _state.durationSignal;
@@ -250,6 +260,7 @@ class PlayerService with WidgetsBindingObserver {
     _persistTimer?.cancel();
     _debugLog('init start');
     await AppPlaybackVolumeSettings.ensureLoaded();
+    await AppPlaybackSpeedSettings.ensureLoaded();
     await VolumeScheduleService.instance.ensureStarted();
     await WebDavPlaybackSettings.ensureLoaded();
     await AppCacheSettings.ensureLoaded();
@@ -275,7 +286,9 @@ class PlayerService with WidgetsBindingObserver {
     }
     _wireEngine(_activeEngine);
     AppPlaybackVolumeSettings.volume.addListener(_handleAppVolumeChanged);
+    AppPlaybackSpeedSettings.speed.addListener(_handlePlaybackSpeedChanged);
     await _applyAppVolume(AppPlaybackVolumeSettings.volume.value);
+    await _applyEngineSpeed(_activeEngine);
     // 用户可能在播放器初始化完成前就点了首页漫游（playQueue 递增
     // _queueGeneration）。_restorePlaybackState 内部按 generation 判断，
     // 一旦用户已开始新播放就跳过恢复，避免覆盖用户刚选的漫游队列/模式。
@@ -487,6 +500,13 @@ class PlayerService with WidgetsBindingObserver {
           _debugLog('engineKind ${s.title} -> mediaKit (escalated)');
           return EngineKind.mediaKit;
         }
+        // 用户手动指定的解码器（歌曲信息面板点解码 tag 切换）。放在 escalate
+        // 之后：自动升级（解码失败/无声）仍优先，手动切换失败由现有兜底接管。
+        final forced = _forcedEngineKinds[s.id];
+        if (forced != null) {
+          _debugLog('engineKind ${s.title} -> ${forced.name} (manual)');
+          return forced;
+        }
         final kind = await routeForSong(s);
         // 只打印走 media_kit 的异常路由（正常 just_audio 不刷屏），用于
         // 确诊「为什么普通歌进了 media_kit」。
@@ -681,6 +701,7 @@ class PlayerService with WidgetsBindingObserver {
           : EngineLoopMode.none,
     );
     await _applyEngineVolume(target);
+    await _applyEngineSpeed(target);
   }
 
   /// 按引擎类型返回引擎实例（media_kit 懒创建）。
@@ -796,6 +817,24 @@ class PlayerService with WidgetsBindingObserver {
         AppPlaybackVolumeSettings.volume.value.clamp(0, 1),
       );
     } catch (_) {}
+  }
+
+  /// 把当前持久化倍速应用到指定引擎。任何倍速变更都经这里落引擎。
+  Future<void> _applyEngineSpeed(PlayerEngine engine) async {
+    try {
+      await engine.setSpeed(
+        AppPlaybackSpeedSettings.speed.value
+            .clamp(
+              AppPlaybackSpeedSettings.minSpeed,
+              AppPlaybackSpeedSettings.maxSpeed,
+            )
+            .toDouble(),
+      );
+    } catch (_) {}
+  }
+
+  void _handlePlaybackSpeedChanged() {
+    unawaited(_applyEngineSpeed(_activeEngine));
   }
 
   void _handleAppVolumeChanged() {
@@ -1018,19 +1057,24 @@ class PlayerService with WidgetsBindingObserver {
 
     // 预加载下一首歌的 800px 封面图，切歌时封面立显
     if (song.coverId != null && song.coverId!.isNotEmpty) {
-      unawaited(
-        precacheImage(
-          CachedNetworkImageProvider(
-            FeiNiuApiClient.instance.coverUrl(
-              song.coverId!,
-              size: 800,
-              updatedAt: song.updatedAt,
+      // 恢复播放/初始化窗口内根元素可能尚未挂载（rootElement 为 null），
+      // 封面预热尽力而为：挂载后才调用，否则跳过。
+      final root = WidgetsBinding.instance.rootElement;
+      if (root != null) {
+        unawaited(
+          precacheImage(
+            CachedNetworkImageProvider(
+              FeiNiuApiClient.instance.coverUrl(
+                song.coverId!,
+                size: 800,
+                updatedAt: song.updatedAt,
+              ),
+              headers: FeiNiuApiClient.imageAuthHeaders(),
             ),
-            headers: FeiNiuApiClient.imageAuthHeaders(),
+            root,
           ),
-          WidgetsBinding.instance.rootElement!,
-        ),
-      );
+        );
+      }
     }
   }
 
@@ -1979,6 +2023,40 @@ class PlayerService with WidgetsBindingObserver {
     }
   }
 
+  /// 设置播放速度倍率。值先持久化（吸附到档位），再应用到当前引擎；
+  /// 引擎异步失败不影响 UI 状态。
+  Future<void> setSpeed(double speed) async {
+    await _initFuture;
+    AppPlaybackSpeedSettings.setSpeed(speed);
+    _debugLog('setSpeed -> $speed');
+    await _applyEngineSpeed(_activeEngine);
+  }
+
+  /// 手动切换当前歌曲的解码引擎（系统解码 just_audio / FFmpeg media_kit），
+  /// 并立即用新引擎重载当前曲（保持播放/暂停状态与进度）。
+  ///
+  /// 覆盖写进 [_forcedEngineKinds]，仅当前歌曲命中、优先于默认路由；
+  /// **不参与**现有自动升级（_mediaKitEscalateSongIds）与无声看门狗逻辑，
+  /// 切歌后新歌曲不命中即自动失效。
+  Future<void> setDecoderEngine(EngineKind kind) async {
+    final song = currentSong.value;
+    final idx = currentIndex.value;
+    if (song == null || idx < 0) return;
+    if (kind == _activeEngine.kind) return; // 已是目标引擎，无操作
+    final seekPos = position.value;
+    final wasPlaying = isPlaying.value;
+    _debugLog('setDecoderEngine ${song.title} -> ${kind.name}');
+    _forcedEngineKinds[song.id] = kind;
+    // 清除转码/格式缓存，让新引擎按原始格式重新解析（media_kit 直连原始流）。
+    FeiNiuTranscodeService.instance.invalidate(song.id);
+    _engineKinds = await _computeEngineKinds(queue.value);
+    await _activateLogicalIndex(
+      idx,
+      initialPosition: seekPos > Duration.zero ? seekPos : null,
+    );
+    if (wasPlaying) await _startPlayback();
+  }
+
   bool get isSleepTimerActive => _sleepTimer != null;
 
   Duration? get sleepRemaining {
@@ -2296,19 +2374,25 @@ class PlayerService with WidgetsBindingObserver {
     // 预热当前曲 800px 封面：恢复播放进播放页时封面立显，不闪转圈。
     // 磁盘已有缓存 → 秒显；无缓存 → 提前下载（与 _prefetchUpcoming 同路径）。
     if (song.coverId != null && song.coverId!.isNotEmpty) {
-      unawaited(
-        precacheImage(
-          CachedNetworkImageProvider(
-            FeiNiuApiClient.instance.coverUrl(
-              song.coverId!,
-              size: 800,
-              updatedAt: song.updatedAt,
+      // 恢复流程在 _init（构造后立即触发）的同步段执行，此时根元素可能尚未
+      // 挂载（rootElement 为 null）。封面预热尽力而为：挂载后才调用，
+      // 否则跳过——封面会在播放页构建时正常加载。
+      final root = WidgetsBinding.instance.rootElement;
+      if (root != null) {
+        unawaited(
+          precacheImage(
+            CachedNetworkImageProvider(
+              FeiNiuApiClient.instance.coverUrl(
+                song.coverId!,
+                size: 800,
+                updatedAt: song.updatedAt,
+              ),
+              headers: FeiNiuApiClient.imageAuthHeaders(),
             ),
-            headers: FeiNiuApiClient.imageAuthHeaders(),
+            root,
           ),
-          WidgetsBinding.instance.rootElement!,
-        ),
-      );
+        );
+      }
     }
   }
 
@@ -2872,19 +2956,24 @@ class PlayerService with WidgetsBindingObserver {
         unawaited(_precacheNextChained(song, list, idx));
       }
       if (songChanged && song.coverId != null && song.coverId!.isNotEmpty) {
-        unawaited(
-          precacheImage(
-            CachedNetworkImageProvider(
-              FeiNiuApiClient.instance.coverUrl(
-                song.coverId!,
-                size: 800,
-                updatedAt: song.updatedAt,
+        // 引擎 song-changed 事件可能在恢复播放/初始化窗口内到达，此时根元素
+        // 可能尚未挂载（rootElement 为 null）。封面预热尽力而为，跳过即可。
+        final root = WidgetsBinding.instance.rootElement;
+        if (root != null) {
+          unawaited(
+            precacheImage(
+              CachedNetworkImageProvider(
+                FeiNiuApiClient.instance.coverUrl(
+                  song.coverId!,
+                  size: 800,
+                  updatedAt: song.updatedAt,
+                ),
+                headers: FeiNiuApiClient.imageAuthHeaders(),
               ),
-              headers: FeiNiuApiClient.imageAuthHeaders(),
+              root,
             ),
-            WidgetsBinding.instance.rootElement!,
-          ),
-        );
+          );
+        }
       }
     } else {
       position.value = Duration.zero;
@@ -3075,6 +3164,7 @@ class PlayerService with WidgetsBindingObserver {
   Future<void> dispose() async {
     WidgetsBinding.instance.removeObserver(this);
     AppPlaybackVolumeSettings.volume.removeListener(_handleAppVolumeChanged);
+    AppPlaybackSpeedSettings.speed.removeListener(_handlePlaybackSpeedChanged);
     cancelSleepTimer();
     _silenceWatchTimer?.cancel();
     _silenceWatchTimer = null;

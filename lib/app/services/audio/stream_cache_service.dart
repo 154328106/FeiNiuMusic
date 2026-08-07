@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../feiniu/api_client.dart';
 import '../feiniu/transcode_service.dart';
@@ -13,8 +14,9 @@ import 'cache_source.dart';
 
 /// 音频流缓存管理器 —— 注册表 + 上限淘汰
 ///
-/// - 缓存目录：`getApplicationSupportDirectory()/stream_cache/`（app-support，
-///   不会被系统临时清理器清掉）。
+/// - 缓存目录：`getTemporaryDirectory()/stream_cache/`（系统标准缓存目录，系统
+///   空间不足时可自动清理）。迁移自旧的 `getApplicationSupportDirectory()/stream_cache/`
+///   （app 私有目录，系统不会清）。首次进入新目录时把旧目录一次性清理掉。
 /// - 注册表 `Map<songId, StreamAudioCacheSource>`：播放器与预缓存器**共享同一实例**，
 ///   保证每个缓存文件只有一个下载循环。
 /// - 淘汰：总量超限时按 mtime 删最旧**完整文件**，直到 ≤ 上限。保护当前播放歌曲与
@@ -22,7 +24,15 @@ import 'cache_source.dart';
 class StreamCacheService {
   static final StreamCacheService instance = StreamCacheService._internal();
 
+  /// 当前使用的缓存目录名（位于系统缓存目录下）。
   static const String dirName = 'stream_cache';
+
+  /// 旧版缓存目录名（位于 app-support 目录下）。升级后首次运行清理一次，
+  /// 由 [_prefsLegacyCleanupDone] 标记去重，只清一次。
+  static const String legacyDirName = 'stream_cache';
+
+  /// 旧版缓存目录是否已清理的持久化标记（SharedPreferences）。
+  static const String _prefsLegacyCleanupDone = 'stream_cache_legacy_cleanup_done';
 
   /// 兜底扩展名（无法确认格式时的默认后缀）。
   static const String defaultExtension = 'mp3';
@@ -65,10 +75,13 @@ class StreamCacheService {
       return _dir!;
     }
     final future = () async {
-      final support = await getApplicationSupportDirectory();
-      final dir = Directory(p.join(support.path, dirName));
+      final temp = await getTemporaryDirectory();
+      final dir = Directory(p.join(temp.path, dirName));
       if (!await dir.exists()) await dir.create(recursive: true);
       _dir = dir;
+      // 迁移到系统缓存目录后，清理旧版 app-support 目录中的缓存。
+      // 仅首次运行执行一次（标记去重），避免每次启动都删除文件。
+      unawaited(cleanupLegacyDirOnce());
     }();
     _initFuture = future;
     await future;
@@ -407,6 +420,40 @@ class StreamCacheService {
         }
       }
     } catch (_) {}
+  }
+
+  /// 一次性清理旧版缓存目录（`getApplicationSupportDirectory()/stream_cache`）。
+  ///
+  /// 缓存目录已迁移到系统缓存目录（见 [_resolveDir]），旧目录内的文件已无人消费。
+  /// 仅首次运行执行一次：删除成功后写入 [_prefsLegacyCleanupDone] 标记，下次启动
+  /// 不再重复扫描/删除；若删除失败（目录被占用等）不写标记，下次启动重试。
+  /// 目录不存在也照常写标记。任何失败均静默忽略，不阻塞启动。
+  ///
+  /// [legacyDir] 测试用：传入临时目录模拟旧版缓存目录，跳过插件调用。
+  Future<void> cleanupLegacyDirOnce({Directory? legacyDir}) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool(_prefsLegacyCleanupDone) ?? false) return;
+      Directory? legacy;
+      if (legacyDir != null) {
+        legacy = legacyDir;
+      } else {
+        final support = await getApplicationSupportDirectory();
+        legacy = Directory(p.join(support.path, legacyDirName));
+      }
+      var deleted = false;
+      if (await legacy.exists()) {
+        await legacy.delete(recursive: true);
+        deleted = true;
+      }
+      // 目录不存在也算清理完成；删除失败会抛异常落到 catch，不写标记。
+      await prefs.setBool(_prefsLegacyCleanupDone, true);
+      if (deleted && kDebugMode) {
+        debugPrint('[StreamCache] 已清理旧版缓存目录: ${legacy.path}');
+      }
+    } catch (_) {
+      // 清理失败静默忽略：不写标记，下次启动重试（不影响缓存正常使用）
+    }
   }
 
   /// 缓存总大小（字节）

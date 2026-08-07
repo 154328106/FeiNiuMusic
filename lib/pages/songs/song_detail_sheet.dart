@@ -49,6 +49,7 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
   void initState() {
     super.initState();
     AppPlaybackVolumeSettings.ensureLoaded();
+    AppPlaybackSpeedSettings.ensureLoaded();
     _loadFavoriteState();
   }
 
@@ -84,6 +85,21 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
       if (!mounted) return;
       AppToast.show(context, '操作失败', type: ToastType.error);
     }
+  }
+
+  /// 点击解码 tag：弹出二选一解码器选择。选定后切换当前歌曲的解码引擎并关掉
+  /// 面板（重载期间避免拖其他控件）。
+  Future<void> _showDecoderPicker(BuildContext context, EngineKind current) async {
+    final selected = await showModalBottomSheet<EngineKind>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _DecoderPickerSheet(current: current),
+    );
+    if (selected == null || !mounted) return;
+    final nav = Navigator.of(this.context);
+    nav.pop();
+    await PlayerService.instance.setDecoderEngine(selected);
   }
 
   @override
@@ -172,6 +188,7 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
             ),
             const Divider(height: 1, thickness: 0.6),
             const _AppVolumeControl(),
+            const _PlaybackSpeedControl(),
             AppListTile(
               leading: const Icon(Icons.queue_play_next),
               title: '下一首播放',
@@ -268,6 +285,7 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                   valueListenable: PlayerService.instance.decoderEngine,
                   builder: (context, engine, _) => _DecoderTag(
                     engine: engine,
+                    onTap: () => _showDecoderPicker(context, engine),
                   ),
                 ),
                 onTap: () {
@@ -403,10 +421,102 @@ class _AppVolumeControl extends StatelessWidget {
   }
 }
 
-/// 解码引擎标签：显示当前歌曲由哪个播放器解码。
+/// 播放速度倍率滑条（0.1×–5.0×，0.1 步进）。与 [_AppVolumeControl] 完全同构：
+/// leading 图标 + 标题「倍速」（宽 42）+ 滑条 + 右侧倍速值（宽 42 右对齐）。
+/// 离散滑条，每格 0.1，松手即持久化。
+class _PlaybackSpeedControl extends StatelessWidget {
+  const _PlaybackSpeedControl();
+
+  /// 显示用倍速文本：去尾零（1×、1.5×、2.5×、5×）。
+  static String _formatSpeed(double speed) {
+    final text = speed == speed.roundToDouble()
+        ? speed.toInt().toString()
+        : speed.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '');
+    return '$text×';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    // 与下方 AppListTile 的标题对齐：同用 ListTileTheme 的 contentPadding。
+    final tilePadding = ListTileTheme.of(context).contentPadding?.resolve(
+          Directionality.of(context),
+        ) ??
+        const EdgeInsets.symmetric(horizontal: 16);
+    return Padding(
+      padding: EdgeInsets.only(
+        left: tilePadding.left,
+        right: tilePadding.right,
+        top: 8,
+        bottom: 2,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 24,
+            child: Icon(
+              Icons.speed_rounded,
+              size: 24,
+              color: colors.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: ValueListenableBuilder<double>(
+              valueListenable: AppPlaybackSpeedSettings.speed,
+              builder: (context, persisted, _) {
+                final valueText = _formatSpeed(persisted);
+                return Row(
+                  children: [
+                    SizedBox(
+                      width: 42,
+                      child: Text(
+                        '倍速',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: colors.onSurface,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Slider(
+                        value: persisted,
+                        min: AppPlaybackSpeedSettings.minSpeed,
+                        max: AppPlaybackSpeedSettings.maxSpeed,
+                        divisions: 49,
+                        label: valueText,
+                        onChanged: (v) => PlayerService.instance.setSpeed(v),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 42,
+                      child: Text(
+                        valueText,
+                        textAlign: TextAlign.end,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 解码引擎标签：显示当前歌曲由哪个播放器解码。可点击弹出解码器选择。
 class _DecoderTag extends StatelessWidget {
   final EngineKind engine;
-  const _DecoderTag({required this.engine});
+  final VoidCallback? onTap;
+  const _DecoderTag({required this.engine, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -414,19 +524,105 @@ class _DecoderTag extends StatelessWidget {
     final color = isMediaKit
         ? const Color(0xFF6750A4) // 紫：FFmpeg 软解
         : const Color(0xFF00897B); // 青绿：系统解码器
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withValues(alpha: 0.4)),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: color.withValues(alpha: 0.4)),
+        ),
+        child: Text(
+          isMediaKit ? 'FFmpeg' : '系统解码',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: color,
+          ),
+        ),
       ),
-      child: Text(
-        isMediaKit ? 'FFmpeg' : '系统解码',
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          color: color,
+    );
+  }
+}
+
+/// 解码器二选一选择面板：系统解码（just_audio / ExoPlayer）或 FFmpeg（media_kit）。
+class _DecoderPickerSheet extends StatelessWidget {
+  final EngineKind current;
+
+  const _DecoderPickerSheet({required this.current});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final cardColor = theme.scaffoldBackgroundColor;
+    final secondaryTextColor = isDark
+        ? Colors.white70
+        : const Color.fromARGB(255, 100, 100, 100);
+
+    Widget tile(EngineKind kind, String title, String subtitle, Color color) {
+      final selected = kind == current;
+      return AppListTile(
+        leading: Icon(
+          selected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+          color: selected ? color : secondaryTextColor,
+        ),
+        title: title,
+        titleColor: selected ? color : null,
+        subtitle: subtitle,
+        onTap: () => Navigator.of(context).pop(kind),
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Center(
+              child: Container(
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                width: 32,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.grey[800] : Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                '选择解码器',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+            ),
+            tile(
+              EngineKind.justAudio,
+              '系统解码',
+              'ExoPlayer 硬件/系统解码，省电、支持倍速',
+              const Color(0xFF00897B),
+            ),
+            tile(
+              EngineKind.mediaKit,
+              'FFmpeg 软解',
+              'media_kit / libmpv，兼容性最强，支持无损与罕见格式',
+              const Color(0xFF6750A4),
+            ),
+            const SizedBox(height: 8),
+          ],
         ),
       ),
     );

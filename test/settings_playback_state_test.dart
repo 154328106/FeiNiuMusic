@@ -16,4 +16,24 @@ void main() {
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getDouble('player_app_volume'), 1);
   });
+
+  test('app playback speed loads, saves, and snaps to 0.1 step', () async {
+    SharedPreferences.setMockInitialValues({'player_playback_speed': 1.5});
+
+    await AppPlaybackSpeedSettings.ensureLoaded();
+    expect(AppPlaybackSpeedSettings.speed.value, 1.5);
+
+    // 0.1 步进归一化。
+    await AppPlaybackSpeedSettings.setSpeed(1.34);
+    expect(AppPlaybackSpeedSettings.speed.value, 1.3);
+
+    await AppPlaybackSpeedSettings.setSpeed(5.4);
+    expect(AppPlaybackSpeedSettings.speed.value, 5.0);
+
+    await AppPlaybackSpeedSettings.setSpeed(0.05);
+    expect(AppPlaybackSpeedSettings.speed.value, 0.1);
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getDouble('player_playback_speed'), 0.1);
+  });
 }

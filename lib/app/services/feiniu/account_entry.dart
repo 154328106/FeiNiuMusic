@@ -47,8 +47,20 @@ class AccountEntry {
     required this.createdAt,
   });
 
-  /// 去重键：同一服务器 + 同一用户名视为同一账号
-  String get identityKey => '${serverUrl.trim()}::$username';
+  /// 去重键：同一 FNID + 同一用户名视为同一账号；无 FNID 时回退
+  /// 「同一服务器 + 同一用户名」。
+  ///
+  /// FNID 账号的 serverUrl 是探测出来的最优地址（内网 IP / 公网 IP / 中继），
+  /// 会随网络环境与重连而改变；若按 serverUrl 去重，重连探测到新地址就会
+  /// 把同一账号拆成多个条目（「很多个服务器」）。FNID 是设备的稳定标识，
+  /// 用它做去重键可让账号跨地址切换保持唯一。
+  String get identityKey {
+    final id = fnId;
+    if (id != null && id.isNotEmpty) {
+      return 'fnid:${id.trim()}::$username';
+    }
+    return '${serverUrl.trim()}::$username';
+  }
 
   /// 服务器主机名（用于展示）
   String get host {

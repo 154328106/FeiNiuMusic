@@ -20,7 +20,21 @@ void main() {
   setUp(() {
     AppCacheSettings.resetForTest();
     StreamCacheService.instance.resetForTest();
+    SharedPreferences.setMockInitialValues({});
   });
+
+  Future<void> withTempDir(
+    Future<void> Function(String base) body,
+  ) async {
+    final tmp = await Directory.systemTemp.createTemp('stream_cache_test_');
+    addTearDown(() async {
+      try {
+        await tmp.delete(recursive: true);
+      } catch (_) {}
+    });
+    final base = '${tmp.path}${Platform.pathSeparator}';
+    await body(base);
+  }
 
   group('AppCacheSettings', () {
     test('defaults: cacheLimitMb = 1024, precacheNextSong = true', () async {
@@ -215,6 +229,62 @@ void main() {
       // 保护列表按 mtime 排序 → current 最新；即使保护失效也应最后删。验证保护生效：
       // 若未保护 new/current，则 new 在 current 之前（new 较旧）被删。
       expect(File('$base${StreamCacheService.safeCacheName('new')}.mp3').existsSync(), isTrue);
+    });
+  });
+
+  group('旧缓存目录一次性清理', () {
+    test('首次调用删除旧目录并写标记', () async {
+      await withTempDir((base) async {
+        // 模拟旧版 app-support 目录中的缓存文件
+        final legacy = Directory('$base${StreamCacheService.legacyDirName}');
+        await legacy.create(recursive: true);
+        final file = File('${legacy.path}${Platform.pathSeparator}song.mp3');
+        await file.writeAsBytes([1, 2, 3]);
+        expect(legacy.existsSync(), isTrue);
+
+        await StreamCacheService.instance.cleanupLegacyDirOnce(legacyDir: legacy);
+
+        expect(legacy.existsSync(), isFalse, reason: '旧缓存目录应被删除');
+        final prefs = await SharedPreferences.getInstance();
+        expect(
+          prefs.getBool('stream_cache_legacy_cleanup_done'),
+          isTrue,
+          reason: '清理完成后应写入去重标记',
+        );
+      });
+    });
+
+    test('标记已写则不再删除目录', () async {
+      await withTempDir((base) async {
+        // 预置标记，模拟上一次启动已完成清理
+        SharedPreferences.setMockInitialValues({
+          'stream_cache_legacy_cleanup_done': true,
+        });
+        final legacy = Directory('$base${StreamCacheService.legacyDirName}');
+        await legacy.create(recursive: true);
+        final file = File('${legacy.path}${Platform.pathSeparator}song.mp3');
+        await file.writeAsBytes([1, 2, 3]);
+
+        await StreamCacheService.instance.cleanupLegacyDirOnce(legacyDir: legacy);
+
+        expect(legacy.existsSync(), isTrue, reason: '标记已写，不应再次删除');
+        expect(
+          File('${legacy.path}${Platform.pathSeparator}song.mp3').existsSync(),
+          isTrue,
+        );
+      });
+    });
+
+    test('旧目录不存在时仍写标记（幂等）', () async {
+      await withTempDir((base) async {
+        final absent = Directory('$base${StreamCacheService.legacyDirName}');
+
+        await StreamCacheService.instance.cleanupLegacyDirOnce(legacyDir: absent);
+
+        final prefs = await SharedPreferences.getInstance();
+        expect(prefs.getBool('stream_cache_legacy_cleanup_done'), isTrue);
+        expect(absent.existsSync(), isFalse);
+      });
     });
   });
 }

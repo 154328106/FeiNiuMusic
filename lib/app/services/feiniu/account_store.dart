@@ -87,6 +87,10 @@ class AccountStore {
 
     _reconcileCurrent();
     await _persist();
+    // 合并历史重复账号：1.3.5 之前按 serverUrl::username 去重，FNID 账号
+    // 每次重连换地址就新增一条，导致列表积累多个「同一 FNID」的条目。
+    // 按 FNID 维度合并（保留 token 最新的），只影响已登录的 FNID 账号。
+    await _mergeDuplicateFnidAccounts();
     if (kDebugMode) {
       debugPrint(
         '[AccountStore] init: ${accounts.value.length} account(s), '
@@ -165,6 +169,21 @@ class AccountStore {
     if (api.baseUrl.isNotEmpty) {
       final activeIdentity =
           '${api.baseUrl.trim()}::${AuthService.instance.username.value ?? ''}';
+      // 优先按 FNID 匹配（当前激活槽位带 FNID 时）：FNID 是稳定标识，
+      // 探测地址会变，地址匹配可能落空。
+      final activeFnId = AppFnConnectionSettings.lastFnId;
+      if (activeFnId != null && activeFnId.isNotEmpty) {
+        for (final e in list) {
+          final eFnId = e.fnId;
+          if (eFnId != null &&
+              eFnId.isNotEmpty &&
+              eFnId == activeFnId &&
+              e.username == (AuthService.instance.username.value ?? '')) {
+            currentAccountId.value = e.id;
+            return;
+          }
+        }
+      }
       for (final e in list) {
         if (e.identityKey == activeIdentity) {
           currentAccountId.value = e.id;
@@ -173,6 +192,82 @@ class AccountStore {
       }
     }
     currentAccountId.value = list.first.id;
+  }
+
+  /// 合并历史重复的 FNID 账号条目（一次性的数据修复，非每次启动必做）。
+  ///
+  /// 1.3.5 之前 [identityKey] 按 `serverUrl::username` 去重，FNID 账号每次
+  /// 重连探测到新地址（内网 IP / 公网 IP / 中继）就新增一条，列表会积累
+  /// 多个同一 FNID 的条目。本方法把这些条目合并为一个：
+  /// - 保留 [AccountEntry.token] 非空、否则 createdAt 最新的条目（最可能是
+  ///   当前有效会话）；
+  /// - 被删重复条目的自定义备注合并进保留条目；
+  /// - 更新 `currentAccountId` 指向保留条目，避免悬空。
+  ///
+  /// 幂等：仅在检测到同一 `fnId + username` 有多条时才改动并持久化。
+  Future<void> _mergeDuplicateFnidAccounts() async {
+    final list = List<AccountEntry>.from(accounts.value);
+    // 分组：fnId::username → 条目
+    final byKey = <String, List<AccountEntry>>{};
+    for (final e in list) {
+      final fnId = e.fnId;
+      if (fnId == null || fnId.isEmpty) continue;
+      byKey.putIfAbsent('${fnId.trim()}::${e.username}', () => []).add(e);
+    }
+    final groups = byKey.values.where((g) => g.length > 1).toList();
+    if (groups.isEmpty) return;
+
+    // 每组的保留条目 + 被删重复条目集合 + 备注补丁（按保留条目 id）
+    final removeIds = <String>{};
+    final namePatch = <String, String>{};
+    for (final group in groups) {
+      final sorted = List<AccountEntry>.from(group)
+        ..sort((a, b) {
+          final aToken = a.token.isNotEmpty ? 1 : 0;
+          final bToken = b.token.isNotEmpty ? 1 : 0;
+          if (aToken != bToken) return bToken.compareTo(aToken);
+          return b.createdAt.compareTo(a.createdAt);
+        });
+      final winner = sorted.first;
+      // 保留条目无备注时，取被删条目中的第一个非空备注
+      if (winner.name.isEmpty) {
+        for (final dup in sorted.skip(1)) {
+          if (dup.name.isNotEmpty) {
+            namePatch[winner.id] = dup.name;
+            break;
+          }
+        }
+      }
+      for (final dup in sorted.skip(1)) {
+        removeIds.add(dup.id);
+      }
+    }
+
+    final cid = currentAccountId.value;
+    final nextList = <AccountEntry>[];
+    for (final e in list) {
+      if (removeIds.contains(e.id)) {
+        // 被删条目是当前账号 → currentAccountId 指向保留条目
+        if (e.id == cid) {
+          final winner = groups
+              .expand((g) => g)
+              .firstWhere(
+                (g) => !removeIds.contains(g.id) &&
+                    g.fnId == e.fnId &&
+                    g.username == e.username,
+              );
+          currentAccountId.value = winner.id;
+        }
+        continue;
+      }
+      final patchedName = namePatch[e.id];
+      nextList.add(patchedName != null ? e.copyWith(name: patchedName) : e);
+    }
+    accounts.value = nextList;
+    await _persist();
+    if (kDebugMode) {
+      debugPrint('[AccountStore] merged ${removeIds.length} duplicate FNID account(s)');
+    }
   }
 
   // ── CRUD ────────────────────────────────────────────────────────────
