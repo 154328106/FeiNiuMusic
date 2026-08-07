@@ -94,6 +94,15 @@
             </intent-filter>
         </service>
 
+        <!-- Album art is copied into a dedicated cache and exposed as a
+             read-only content URI. Android Auto/AAOS run outside this app
+             process and therefore cannot read app-private file:// paths. -->
+        <provider
+            android:name=".CoverArtContentProvider"
+            android:authorities="${applicationId}.coverart"
+            android:exported="true"
+            android:grantUriPermissions="false" />
+
         <!-- audio_service: receives MEDIA_BUTTON broadcasts (Bluetooth/headset
              keys and, on OEM ROMs like Meizu Flyme, the notification's
              play/pause/skip buttons). Without this the notification controls do
