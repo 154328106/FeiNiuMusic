@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
 import '../../app/services/audio/stream_cache_service.dart';
+import '../../app/services/cover_local_cache.dart';
 import '../../app/services/db/dao/song_dao.dart';
 import '../../app/state/settings_state.dart';
 import '../../components/index.dart';
@@ -66,7 +67,12 @@ class _CacheSettingsPageState extends State<CacheSettingsPage>
       final notifDir = Directory(
         p.join(tempDir.path, kNotificationCoverDirName),
       );
-      return await _dirSize(cacheDir) + await _dirSize(notifDir);
+      final carCoverDir = Directory(
+        p.join(tempDir.path, CoverLocalCache.kDirName),
+      );
+      return await _dirSize(cacheDir) +
+          await _dirSize(notifDir) +
+          await _dirSize(carCoverDir);
     } catch (_) {
       return 0;
     }
@@ -132,6 +138,10 @@ class _CacheSettingsPageState extends State<CacheSettingsPage>
         p.join(tempDir.path, kNotificationCoverDirName),
       );
       await _clearDirContents(notifDir);
+      final carCoverDir = Directory(
+        p.join(tempDir.path, CoverLocalCache.kDirName),
+      );
+      await _clearDirContents(carCoverDir);
     } catch (_) {}
     if (!mounted) return;
     await _loadCacheSizes();
@@ -211,8 +221,10 @@ class _CacheSettingsPageState extends State<CacheSettingsPage>
 
   @override
   Widget build(BuildContext context) {
-    final bottomPadding =
-        AppPageScaffold.scrollableBottomPadding(context, showMiniPlayer: false);
+    final bottomPadding = AppPageScaffold.scrollableBottomPadding(
+      context,
+      showMiniPlayer: false,
+    );
     return AppPageScaffold(
       extendBodyBehindAppBar: true,
       appBar: const AppTopBar(
@@ -262,7 +274,7 @@ class _CacheSettingsPageState extends State<CacheSettingsPage>
                   subtitle: _loading.value
                       ? '计算中...'
                       : '已缓存: ${_formatSize(_streamCacheSize.value)} / '
-                          '上限 ${_formatGb(AppCacheSettings.cacheLimitMb.value)}',
+                            '上限 ${_formatGb(AppCacheSettings.cacheLimitMb.value)}',
                   trailing: const Icon(Icons.audiotrack_outlined),
                   onTap: _loading.value ? null : _clearStreamCache,
                 ),

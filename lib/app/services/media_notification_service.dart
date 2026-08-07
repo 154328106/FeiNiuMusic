@@ -9,10 +9,13 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../services/lyrics/lyrics_service.dart';
 import '../services/feiniu/api_client.dart';
+import '../services/feiniu/api_models.dart';
 import '../services/feiniu/favorite_service.dart';
+import '../services/feiniu/track_service.dart';
 import '../state/song_state.dart';
 import '../state/settings_state.dart';
 import 'android_platform_service.dart';
+import 'cover_local_cache.dart';
 import 'media_notification_car_lyrics.dart';
 import 'player_service.dart';
 
@@ -68,6 +71,11 @@ class MediaNotificationService {
           androidNotificationOngoing: true,
           androidStopForegroundOnPause: true,
           androidShowNotificationBadge: false,
+          androidBrowsableRootExtras: <String, dynamic>{
+            AndroidContentStyle.supportedKey: true,
+            AndroidContentStyle.browsableHintKey:
+                AndroidContentStyle.listItemHintValue,
+          },
         ),
       );
       _debugLog('init completed');
@@ -90,6 +98,9 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
   String? _lastSongId;
   bool _isFavorite = false;
   String? _lastQueueKey;
+  List<String> _publishedQueueIds = const <String>[];
+  String? _roamQueueAnchorId;
+  List<SongEntity>? _stableRoamQueue;
   String? _lastMediaItemKey;
   String? _lastPlaybackStateKey;
   bool _supportsCustomActions = true;
@@ -99,6 +110,25 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
   String? _coverDirPath;
   String? _lastCoverId;
   Uri? _cachedCoverUri;
+  final Map<String, _CarBrowseSong> _browseSongs = <String, _CarBrowseSong>{};
+  Future<void>? _apiAuthReady;
+
+  static const String _browseHomeId = 'car:home';
+  static const String _browseTracksId = 'car:home:tracks';
+  static const String _browseArtistsId = 'car:home:artists';
+  static const String _browseAlbumsId = 'car:home:albums';
+  static const String _browseGenresId = 'car:home:genres';
+  static const String _browseHistoryId = 'car:history';
+  static const String _browseFavoritesId = 'car:favorites';
+  static const String _browseRoamId = 'car:roam';
+  static const String _browseRoamStartId = 'car:roam:start';
+  static const String _browseSearchId = 'car:search';
+  static const String _browseArtistPrefix = 'car:artist:';
+  static const String _browseAlbumPrefix = 'car:album:';
+  static const String _browseGenrePrefix = 'car:genre:';
+  static const String _carDrawableUriPrefix =
+      'android.resource://com.feiniu.music/drawable/';
+  static const String _defaultAlbumArtworkName = 'ic_car_album';
 
   _FeiNiuAudioHandler(this.player) {
     player.snapshot.addListener(_syncFromPlayer);
@@ -156,7 +186,9 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
   /// 所以必须使用本地文件 URI 而不是远程 API URL。
   Future<Uri?> _getLocalCoverUri(String coverId, {int? updatedAt}) async {
     final url = FeiNiuApiClient.instance.coverUrl(
-      coverId, size: 120, updatedAt: updatedAt,
+      coverId,
+      size: 120,
+      updatedAt: updatedAt,
     );
     _debugLog('getLocalCoverUri coverId=$coverId url=$url');
 
@@ -181,7 +213,8 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
     // 2. 让 flutter_cache_manager 下载到缓存（带认证头，完成后加入缓存池）
     try {
       // getSingleFile 返回 package:file 的 File 对象，与 dart:io File 不兼容
-      final cacheFile = await _coverCache.getSingleFile(url,
+      final cacheFile = await _coverCache.getSingleFile(
+        url,
         headers: FeiNiuApiClient.imageAuthHeaders(),
       );
       final localPath = cacheFile.path;
@@ -259,7 +292,11 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
       } else {
         // 本地封面尚未就绪时发远程 URL，audio_service 会自动下载并缓存
         artUri = Uri.tryParse(
-          FeiNiuApiClient.instance.coverUrl(song.coverId!, size: 120, updatedAt: song.updatedAt),
+          FeiNiuApiClient.instance.coverUrl(
+            song.coverId!,
+            size: 120,
+            updatedAt: song.updatedAt,
+          ),
         );
       }
     }
@@ -274,9 +311,7 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
         ? LyricsService.instance.currentLineText.value
         : null;
     final carLyricsExtras = carLyricsEnabled
-        ? <String, dynamic>{
-            'android.media.metadata.LYRICS': carLyricLine ?? '',
-          }
+        ? <String, dynamic>{'android.media.metadata.LYRICS': carLyricLine ?? ''}
         : null;
     // 车机只认 AVRCP 标准属性（TITLE/ARTIST/...），extras 里的 LYRICS 到不了车机。
     // 用 title 携带当前歌词行，车机在 TITLE 位置显示歌词；关闭时回退真实歌名。
@@ -321,8 +356,468 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
     );
   }
 
+  List<MediaItem> _rootBrowseItems() {
+    return <MediaItem>[
+      _browseCategory(id: _browseHomeId, title: '主页', subtitle: '歌曲、歌手、专辑、风格'),
+      _browseCategory(id: _browseHistoryId, title: '最近', subtitle: '最近播放的音乐'),
+      _browseCategory(id: _browseFavoritesId, title: '收藏', subtitle: '已收藏的音乐'),
+      _browseCategory(id: _browseRoamId, title: '漫游模式', subtitle: '发现下一首喜欢的歌'),
+    ];
+  }
+
+  List<MediaItem> _homeBrowseItems() {
+    return <MediaItem>[
+      _browseSection(id: _browseTracksId, title: '歌曲'),
+      _browseSection(id: _browseArtistsId, title: '歌手'),
+      _browseSection(id: _browseAlbumsId, title: '专辑'),
+      _browseSection(id: _browseGenresId, title: '风格'),
+    ];
+  }
+
+  MediaItem _browseCategory({
+    required String id,
+    required String title,
+    required String subtitle,
+  }) {
+    return MediaItem(
+      id: id,
+      title: title,
+      playable: false,
+      artUri: _browseCategoryArtwork(id),
+      displayTitle: title,
+      displaySubtitle: subtitle,
+      extras: const <String, dynamic>{
+        AndroidContentStyle.browsableHintKey:
+            AndroidContentStyle.listItemHintValue,
+      },
+    );
+  }
+
+  Uri? _browseCategoryArtwork(String id) {
+    final drawableName = switch (id) {
+      _browseHomeId => 'ic_car_home',
+      _browseHistoryId => 'ic_car_history',
+      _browseFavoritesId => 'ic_car_favorite',
+      _browseRoamId => 'ic_car_roam',
+      _ => null,
+    };
+    if (drawableName == null) return null;
+    return Uri.parse('$_carDrawableUriPrefix$drawableName');
+  }
+
+  Uri get _defaultAlbumArtwork =>
+      Uri.parse('$_carDrawableUriPrefix$_defaultAlbumArtworkName');
+
+  Future<Uri> _browseArtwork(String? coverId) async {
+    if (coverId == null || coverId.isEmpty) return _defaultAlbumArtwork;
+    try {
+      final localPath = await CoverLocalCache.downloadToLocal(coverId);
+      return await CoverLocalCache.contentUriForPath(localPath) ??
+          _defaultAlbumArtwork;
+    } catch (error) {
+      _debugLog('load car browse artwork failed: $error');
+      return _defaultAlbumArtwork;
+    }
+  }
+
+  MediaItem _browseSection({required String id, required String title}) {
+    return MediaItem(
+      id: id,
+      title: title,
+      playable: false,
+      extras: const <String, dynamic>{
+        AndroidContentStyle.browsableHintKey:
+            AndroidContentStyle.listItemHintValue,
+      },
+    );
+  }
+
+  @override
+  Future<List<MediaItem>> getChildren(
+    String parentMediaId, [
+    Map<String, dynamic>? options,
+  ]) async {
+    if (parentMediaId.startsWith(_browseArtistPrefix)) {
+      return _loadBrowseSongs(
+        parentMediaId: parentMediaId,
+        songs: _loadArtistSongs(
+          parentMediaId.substring(_browseArtistPrefix.length),
+        ),
+      );
+    }
+    if (parentMediaId.startsWith(_browseAlbumPrefix)) {
+      return _loadBrowseSongs(
+        parentMediaId: parentMediaId,
+        songs: _loadAlbumSongs(
+          parentMediaId.substring(_browseAlbumPrefix.length),
+        ),
+      );
+    }
+    if (parentMediaId.startsWith(_browseGenrePrefix)) {
+      return _loadBrowseSongs(
+        parentMediaId: parentMediaId,
+        songs: _loadGenreSongs(
+          parentMediaId.substring(_browseGenrePrefix.length),
+        ),
+      );
+    }
+    switch (parentMediaId) {
+      case AudioService.browsableRootId:
+        return _rootBrowseItems();
+      case _browseHomeId:
+        return _homeBrowseItems();
+      case _browseTracksId:
+        return _loadBrowseSongs(
+          parentMediaId: _browseTracksId,
+          songs: _loadTracks(),
+        );
+      case _browseArtistsId:
+        return _loadArtists();
+      case _browseAlbumsId:
+        return _loadAlbums();
+      case _browseGenresId:
+        return _loadGenres();
+      case AudioService.recentRootId:
+      case _browseHistoryId:
+        return _loadBrowseSongs(
+          parentMediaId: _browseHistoryId,
+          songs: _loadHistorySongs(),
+        );
+      case _browseFavoritesId:
+        return _loadBrowseSongs(
+          parentMediaId: _browseFavoritesId,
+          songs: _loadFavoriteSongs(),
+        );
+      case _browseRoamId:
+        return <MediaItem>[
+          const MediaItem(
+            id: _browseRoamStartId,
+            title: '开始音乐漫游',
+            artist: '根据你的音乐库随机播放',
+            playable: true,
+            extras: <String, dynamic>{
+              AndroidContentStyle.playableHintKey:
+                  AndroidContentStyle.listItemHintValue,
+            },
+          ),
+        ];
+      default:
+        return const <MediaItem>[];
+    }
+  }
+
+  @override
+  Future<MediaItem?> getMediaItem(String mediaId) async {
+    final browseSong = _browseSongs[mediaId];
+    if (browseSong != null) return browseSong.mediaItem;
+    for (final song in player.snapshot.value.queue) {
+      if (song.id == mediaId) return _itemFromSong(song);
+    }
+    return null;
+  }
+
+  @override
+  Future<List<MediaItem>> search(
+    String query, [
+    Map<String, dynamic>? extras,
+  ]) async {
+    final normalizedQuery = query.trim();
+    if (normalizedQuery.isEmpty) return const <MediaItem>[];
+    return _loadBrowseSongs(
+      parentMediaId: _browseSearchId,
+      songs: _loadSearchSongs(normalizedQuery),
+    );
+  }
+
+  Future<List<SongEntity>> _loadHistorySongs() async {
+    await _ensureApiAuth();
+    final pageData = await FeiNiuApiClient.instance.getPlayHistory(
+      page: 1,
+      size: 40,
+    );
+    return pageData.list
+        .map(FeiNiuTrackService.instance.trackToSongEntity)
+        .toList();
+  }
+
+  Future<List<SongEntity>> _loadFavoriteSongs() async {
+    await _ensureApiAuth();
+    final pageData = await FeiNiuApiClient.instance.getFavoriteList(
+      page: 1,
+      size: 40,
+    );
+    return pageData.list
+        .map(FeiNiuTrackService.instance.trackToSongEntity)
+        .toList();
+  }
+
+  Future<List<SongEntity>> _loadTracks() async {
+    await _ensureApiAuth();
+    final pageData = await FeiNiuApiClient.instance.getTrackList(
+      page: 1,
+      size: 100,
+    );
+    return pageData.list
+        .map(FeiNiuTrackService.instance.trackToSongEntity)
+        .toList();
+  }
+
+  Future<List<SongEntity>> _loadArtistSongs(String artistId) async {
+    await _ensureApiAuth();
+    final pageData = await FeiNiuApiClient.instance.getArtistTracks(
+      artistGUID: artistId,
+      page: 1,
+      size: 100,
+    );
+    return pageData.list
+        .map(FeiNiuTrackService.instance.trackToSongEntity)
+        .toList();
+  }
+
+  Future<List<SongEntity>> _loadAlbumSongs(String albumId) async {
+    await _ensureApiAuth();
+    final pageData = await FeiNiuApiClient.instance.getAlbumTracks(
+      albumGUID: albumId,
+      page: 1,
+      size: 100,
+    );
+    return pageData.list
+        .map(FeiNiuTrackService.instance.trackToSongEntity)
+        .toList();
+  }
+
+  Future<List<SongEntity>> _loadGenreSongs(String genreId) async {
+    await _ensureApiAuth();
+    final pageData = await FeiNiuApiClient.instance.getGenreTracks(
+      genreGUID: genreId,
+      page: 1,
+      size: 100,
+    );
+    return pageData.list
+        .map(FeiNiuTrackService.instance.trackToSongEntity)
+        .toList();
+  }
+
+  Future<List<MediaItem>> _loadArtists() async {
+    try {
+      await _ensureApiAuth();
+      final pageData = await FeiNiuApiClient.instance.getArtistList(
+        page: 1,
+        size: 100,
+      );
+      return await _mapWithConcurrency(pageData.list, _artistItem);
+    } catch (error) {
+      _debugLog('load car artists failed: $error');
+      return const <MediaItem>[];
+    }
+  }
+
+  Future<List<MediaItem>> _loadAlbums() async {
+    try {
+      await _ensureApiAuth();
+      final pageData = await FeiNiuApiClient.instance.getAlbumList(
+        page: 1,
+        size: 100,
+      );
+      return await _mapWithConcurrency(pageData.list, _albumItem);
+    } catch (error) {
+      _debugLog('load car albums failed: $error');
+      return const <MediaItem>[];
+    }
+  }
+
+  Future<List<MediaItem>> _loadGenres() async {
+    try {
+      await _ensureApiAuth();
+      final pageData = await FeiNiuApiClient.instance.getGenreList(
+        page: 1,
+        size: 100,
+      );
+      return pageData.list.map(_genreItem).toList();
+    } catch (error) {
+      _debugLog('load car genres failed: $error');
+      return const <MediaItem>[];
+    }
+  }
+
+  Future<List<T>> _mapWithConcurrency<S, T>(
+    List<S> values,
+    Future<T> Function(S value) mapper, {
+    int maxConcurrent = 6,
+  }) async {
+    if (values.isEmpty) return <T>[];
+    // 专辑和歌手列表最多各 100 项；限流避免首次进入车机页面时并发下载
+    // 过多封面，既拖慢 NAS，也会挤占当前歌曲的封面请求。
+    final results = List<T?>.filled(values.length, null);
+    var nextIndex = 0;
+
+    Future<void> worker() async {
+      while (nextIndex < values.length) {
+        final index = nextIndex++;
+        results[index] = await mapper(values[index]);
+      }
+    }
+
+    await Future.wait(
+      List<Future<void>>.generate(
+        values.length < maxConcurrent ? values.length : maxConcurrent,
+        (_) => worker(),
+      ),
+    );
+    return List<T>.generate(values.length, (index) => results[index]!);
+  }
+
+  Future<MediaItem> _artistItem(FeiNiuArtist artist) async {
+    final hasArtwork = artist.coverId != null && artist.coverId!.isNotEmpty;
+    return MediaItem(
+      id: '$_browseArtistPrefix${artist.guid}',
+      title: artist.name,
+      artist: artist.trackCount == null ? null : '${artist.trackCount} 首歌曲',
+      playable: false,
+      artUri: hasArtwork ? await _browseArtwork(artist.coverId) : null,
+      extras: <String, dynamic>{
+        AndroidContentStyle.browsableHintKey: hasArtwork
+            ? AndroidContentStyle.categoryGridItemHintValue
+            : AndroidContentStyle.listItemHintValue,
+      },
+    );
+  }
+
+  Future<MediaItem> _albumItem(FeiNiuAlbum album) async {
+    return MediaItem(
+      id: '$_browseAlbumPrefix${album.guid}',
+      title: album.name,
+      artist: album.trackCount == null ? null : '${album.trackCount} 首歌曲',
+      playable: false,
+      artUri: await _browseArtwork(album.coverId),
+      extras: const <String, dynamic>{
+        AndroidContentStyle.browsableHintKey:
+            AndroidContentStyle.categoryGridItemHintValue,
+      },
+    );
+  }
+
+  MediaItem _genreItem(FeiNiuGenre genre) {
+    return MediaItem(
+      id: '$_browseGenrePrefix${genre.guid}',
+      title: genre.name,
+      artist: '${genre.trackCount} 首歌曲',
+      playable: false,
+      extras: const <String, dynamic>{
+        AndroidContentStyle.browsableHintKey:
+            AndroidContentStyle.listItemHintValue,
+      },
+    );
+  }
+
+  Future<List<SongEntity>> _loadSearchSongs(String query) async {
+    await _ensureApiAuth();
+    return FeiNiuTrackService.instance.searchTracks(query);
+  }
+
+  Future<void> _ensureApiAuth() {
+    return _apiAuthReady ??= FeiNiuApiClient.instance.tryLoadAuth().then(
+      (_) {},
+    );
+  }
+
+  Future<List<MediaItem>> _loadBrowseSongs({
+    required String parentMediaId,
+    required Future<List<SongEntity>> songs,
+  }) async {
+    try {
+      return _cacheBrowseSongs(
+        parentMediaId: parentMediaId,
+        songs: await songs,
+      );
+    } catch (error) {
+      _debugLog('load car browse data failed for $parentMediaId: $error');
+      return const <MediaItem>[];
+    }
+  }
+
+  List<MediaItem> _cacheBrowseSongs({
+    required String parentMediaId,
+    required List<SongEntity> songs,
+  }) {
+    _browseSongs.removeWhere(
+      (_, entry) => entry.parentMediaId == parentMediaId,
+    );
+    final queue = List<SongEntity>.unmodifiable(
+      songs.where((song) => (song.uri ?? '').trim().isNotEmpty),
+    );
+    return List<MediaItem>.generate(queue.length, (index) {
+      final song = queue[index];
+      final mediaId = '$parentMediaId:track:$index:${song.id}';
+      final item = _browseSongItem(song, mediaId);
+      _browseSongs[mediaId] = _CarBrowseSong(
+        parentMediaId: parentMediaId,
+        mediaItem: item,
+        queue: queue,
+        index: index,
+      );
+      return item;
+    });
+  }
+
+  MediaItem _browseSongItem(SongEntity song, String mediaId) {
+    final artist = song.artistDisplayName.trim();
+    return MediaItem(
+      id: mediaId,
+      title: song.title,
+      artist: artist.isEmpty ? null : artist,
+      album: song.albumDisplayName,
+      artUri: song.coverId == _lastCoverId ? _cachedCoverUri : null,
+      duration: song.durationMs == null
+          ? null
+          : Duration(milliseconds: song.durationMs!),
+      playable: true,
+      displayTitle: song.title,
+      displaySubtitle: artist.isEmpty ? song.albumDisplayName : artist,
+      extras: const <String, dynamic>{
+        AndroidContentStyle.playableHintKey:
+            AndroidContentStyle.listItemHintValue,
+      },
+    );
+  }
+
+  Future<void> _playBrowseMediaId(String mediaId) async {
+    if (mediaId == _browseRoamStartId) {
+      await player.startRoamPlayback();
+      return;
+    }
+    final browseSong = _browseSongs[mediaId];
+    if (browseSong != null) {
+      await player.playQueue(browseSong.queue, browseSong.index);
+      return;
+    }
+    final queue = player.snapshot.value.queue;
+    final index = queue.indexWhere((song) => song.id == mediaId);
+    if (index >= 0) await player.playQueue(queue, index);
+  }
+
+  @override
+  Future<void> playFromMediaId(String mediaId, [Map<String, dynamic>? extras]) {
+    return _playBrowseMediaId(mediaId);
+  }
+
+  @override
+  Future<void> playMediaItem(MediaItem mediaItem) {
+    return _playBrowseMediaId(mediaItem.id);
+  }
+
+  @override
+  Future<void> playFromSearch(
+    String query, [
+    Map<String, dynamic>? extras,
+  ]) async {
+    final results = await search(query, extras);
+    if (results.isNotEmpty) await _playBrowseMediaId(results.first.id);
+  }
+
   PlaybackState _stateFromSnap(PlaybackSnapshot snap) {
     final playing = snap.isPlaying;
+    final queueIndex = _publishedQueueIds.indexOf(snap.song?.id ?? '');
     final showClose =
         _supportsCustomActions &&
         MediaNotificationSettings.showCloseAction.value;
@@ -373,7 +868,7 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
       // 系统媒体进度按 speed 外推剩余播放时间：倍速播放时必须同步真实倍率，
       // 否则通知栏/Android Auto 的进度条以 1× 估算、随倍速漂移。
       speed: player.speed.value,
-      queueIndex: snap.index >= 0 ? snap.index : null,
+      queueIndex: queueIndex >= 0 ? queueIndex : null,
     );
   }
 
@@ -405,24 +900,19 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
       _debugLog('song changed to ${snap.song?.title ?? 'none'}');
     }
 
-    // 核心改动：先发 MediaItem（远程 URL + artHeaders），
-    // audio_service 内部会自动下载封面转为 Bitmap 通知栏显示。
-    // 同时后台获取本地缓存路径，进一步替换为 file://。
+    // 先发布带认证头的 MediaItem，再在后台将封面复制到专用缓存并
+    // 替换为 content:// URI。后者可供 Android Auto 等外部进程读取。
     if (songChanged) {
       final song = snap.song;
-      final oldCoverId = _lastCoverId;
       _cachedCoverUri = null;
-      if (song != null &&
-          song.coverId != null &&
-          song.coverId!.isNotEmpty &&
-          song.coverId != oldCoverId) {
+      if (song != null && song.coverId != null && song.coverId!.isNotEmpty) {
         _lastCoverId = song.coverId;
-        // 先发送 MediaItem（带 artHeaders，audio_service 会自动下载缓存封面）
+        // 先发送带认证头的 MediaItem，避免等待封面下载阻塞播放状态。
         _syncQueue(snap);
         _syncMediaItem();
-        // 后台异步下载本地封面，缓存后替换 MediaItem 为 file:// URI
+        // 后台下载封面，缓存后通过只读 Provider 发布 content:// URI。
         if (io.Platform.isAndroid) {
-          _syncAndUpdateCover(song);
+          unawaited(_syncAndUpdateCover(song));
         }
       } else {
         _syncQueue(snap);
@@ -438,31 +928,55 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
     }
   }
 
-  /// 获取本地封面后立即刷新通知，确保通知栏从第一次渲染就用本地文件。
+  /// 封面缓存完成后刷新媒体项，使车机和系统媒体客户端读取 content:// URI。
   Future<void> _syncAndUpdateCover(SongEntity song) async {
     if (song.coverId == null || song.coverId!.isEmpty) return;
-    _debugLog('syncAndUpdateCover song=${song.title} coverId=${song.coverId}');
-    final localUri = await _getLocalCoverUri(
-      song.coverId!,
-      updatedAt: song.updatedAt,
-    );
-    _debugLog('syncAndUpdateCover localUri=$localUri');
-    if (localUri != null && song.id == _lastSongId) {
-      _cachedCoverUri = localUri;
+    try {
+      _debugLog(
+        'syncAndUpdateCover song=${song.title} coverId=${song.coverId}',
+      );
+      final localPath = await CoverLocalCache.downloadToLocal(
+        song.coverId!,
+        updatedAt: song.updatedAt,
+      );
+      final contentUri = await CoverLocalCache.contentUriForPath(localPath);
+      final localUri =
+          contentUri ??
+          await _getLocalCoverUri(song.coverId!, updatedAt: song.updatedAt);
+      _debugLog('syncAndUpdateCover localUri=$localUri');
+      if (localUri != null && song.id == _lastSongId) {
+        _cachedCoverUri = localUri;
+      }
+      // 拿到本地封面（或返回 null）后再同步队列和当前曲目
+      _syncQueue(player.snapshot.value);
+      _syncMediaItem();
+    } catch (error) {
+      _debugLog('sync car cover failed: $error');
     }
-    // 拿到本地封面（或返回 null）后再同步队列和当前曲目
-    _syncQueue(player.snapshot.value);
-    _syncMediaItem();
   }
 
-  /// 后台尝试将封面替换为本地文件。
-  /// 优先使用 CachedNetworkImage 已有的磁盘缓存（不发起网络请求），
-  /// 缓存不存在时通过 flutter_cache_manager 下载至本地缓存。
+  /// 将应用内播放队列发布给系统媒体会话。
   void _syncQueue(PlaybackSnapshot snap) {
-    final queueKey = snap.queue.map((song) => song.id).join('|');
+    final sessionQueue = _queueForMediaSession(snap);
+    final queueKey = sessionQueue.map((song) => song.id).join('|');
     if (queueKey == _lastQueueKey) return;
     _lastQueueKey = queueKey;
-    queue.add(snap.queue.map(_itemFromSong).toList());
+    _publishedQueueIds = sessionQueue.map((song) => song.id).toList();
+    queue.add(sessionQueue.map(_itemFromSong).toList());
+  }
+
+  List<SongEntity> _queueForMediaSession(PlaybackSnapshot snap) {
+    if (!player.roamActive || snap.queue.isEmpty) {
+      _roamQueueAnchorId = null;
+      _stableRoamQueue = null;
+      return snap.queue;
+    }
+    final anchorId = snap.queue.first.id;
+    if (_roamQueueAnchorId != anchorId || _stableRoamQueue == null) {
+      _roamQueueAnchorId = anchorId;
+      _stableRoamQueue = List<SongEntity>.unmodifiable(snap.queue.take(2));
+    }
+    return _stableRoamQueue!;
   }
 
   void _syncMediaItem() {
@@ -619,4 +1133,18 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
     _debugLog('stop action');
     return player.stopAndClear();
   }
+}
+
+class _CarBrowseSong {
+  const _CarBrowseSong({
+    required this.parentMediaId,
+    required this.mediaItem,
+    required this.queue,
+    required this.index,
+  });
+
+  final String parentMediaId;
+  final MediaItem mediaItem;
+  final List<SongEntity> queue;
+  final int index;
 }
