@@ -221,8 +221,7 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
                             AppSettingTile(
                               title: '息屏通知设置',
                               subtitle: '跳转到系统息屏通知设置页，'
-                                  '关闭息屏通知以配合息屏歌词\n'
-                                  '（仅 HyperOS 设备显示）',
+                                  '关闭息屏通知以配合息屏歌词使用避免被系统息屏重复亮屏',
                               onTap: _openAodSettings,
                             ),
                           ValueListenableBuilder<bool>(

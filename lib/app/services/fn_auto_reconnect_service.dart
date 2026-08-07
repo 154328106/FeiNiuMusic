@@ -104,8 +104,9 @@ class FnAutoReconnectService with WidgetsBindingObserver {
   /// App 生命周期回调：从后台回到前台时做一次性轻量校验。
   ///
   /// 后台期间 Dart isolate 被挂起，网络变化事件可能丢失（如内网 → 公网
-  /// 切换恰好发生在后台），恢复时用 200ms 快探验证当前连接；只有不可达
-  /// 才触发完整重连，可达时不打扰用户。不做周期探测。
+  /// 切换恰好发生在后台），恢复时用快探（[kFnCachedProbeConnectTimeout]，
+  /// 直连 3s / 中继 10s）验证当前连接；只有不可达才触发完整重连，可达时
+  /// 不打扰用户。不做周期探测。
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
@@ -252,9 +253,10 @@ class FnAutoReconnectService with WidgetsBindingObserver {
 
   Future<void> _doReconnect(String fnId) async {
     try {
-      // 缓存优先：先 200ms 快探上次成功连接（probeSmart 内部为
-      // kFnCachedProbeConnectTimeout=1s），可达直接复用，避免每次断连都
-      // 全量重探所有候选（尤其最慢的中继）。缓存失效自动回退完整探测。
+      // 缓存优先：先快探上次成功连接（probeSmart 内部为
+      // kFnCachedProbeConnectTimeout，直连 3s / 中继 10s），可达直接复用，
+      // 避免每次断连都全量重探所有候选（尤其最慢的中继）。缓存失效自动
+      // 回退完整探测。
       final cache = AppFnConnectionSettings.cachedConnection;
       final result = await FnConnectionProbeService.instance.probeSmart(
         fnId: fnId,

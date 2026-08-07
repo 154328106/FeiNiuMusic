@@ -1,13 +1,10 @@
 import 'dart:async';
-import 'dart:io' as io;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
-import 'package:path_provider/path_provider.dart';
 
 import '../state/settings_island_lyric.dart';
-import '../services/feiniu/api_client.dart';
+import 'cover_local_cache.dart';
 import '../services/lyrics/lyrics_service.dart';
 import '../services/player_service.dart';
 
@@ -85,10 +82,6 @@ class IslandLyricService {
   static String? _lastSongId;
   static String? _lastCoverId;
   static String? _lastCoverPath;
-
-  /// 封面本地缓存目录
-  static String? _coverDirPath;
-  static final DefaultCacheManager _coverCache = DefaultCacheManager();
 
   /// 幂等启动。默认监听 [LyricsService.instance] 与 [PlayerService.instance]。
   static void start() {
@@ -422,80 +415,16 @@ class IslandLyricService {
 
     if (coverId == null || coverId.isEmpty) return;
 
-    final path = await _downloadCoverLocal(coverId, updatedAt: song?.updatedAt);
+    final path = await CoverLocalCache.downloadToLocal(
+      coverId,
+      updatedAt: song?.updatedAt,
+    );
     if (path == null) return;
     _lastCoverPath = path;
     // 封面就绪后补发一次 update（带 coverPath），让原生层刷新左侧封面
     if (_started && _lastLyricLine != null) {
       _sendUpdate();
     }
-  }
-
-  static Future<String?> _downloadCoverLocal(
-    String coverId, {
-    int? updatedAt,
-  }) async {
-    final url = FeiNiuApiClient.instance.coverUrl(
-      coverId, size: 120, updatedAt: updatedAt,
-    );
-    // 1. 先查缓存
-    try {
-      final cacheObject = await _coverCache.getFileFromCache(url);
-      if (cacheObject != null) {
-        final cachedPath = cacheObject.file.path;
-        final cachedFile = io.File(cachedPath);
-        if (await cachedFile.exists()) return cachedPath;
-      }
-    } catch (_) {}
-    // 2. 下载到缓存
-    try {
-      final cacheFile = await _coverCache.getSingleFile(
-        url,
-        headers: FeiNiuApiClient.imageAuthHeaders(),
-      );
-      final localFile = io.File(cacheFile.path);
-      if (await localFile.exists()) return cacheFile.path;
-    } catch (_) {}
-    // 3. fallback 下载到独立目录（自签名证书兼容）
-    try {
-      final dir = await _coverDir();
-      final suffix = (updatedAt != null && updatedAt > 0) ? '_$updatedAt' : '';
-      final filePath = '$dir/${coverId}_120$suffix.jpg';
-      final file = io.File(filePath);
-      if (await file.exists()) return filePath;
-      final httpClient = io.HttpClient()
-        ..badCertificateCallback = (_, _, _) => true;
-      try {
-        final request = await httpClient.getUrl(Uri.parse(url));
-        if (FeiNiuApiClient.instance.token.isNotEmpty) {
-          final headers = FeiNiuApiClient.instance.authHeaders();
-          for (final entry in headers.entries) {
-            request.headers.set(entry.key, entry.value);
-          }
-        }
-        final response = await request.close();
-        if (response.statusCode == 200) {
-          final bytes = await response.fold<List<int>>(
-            <int>[],
-            (prev, chunk) => prev..addAll(chunk),
-          );
-          await file.writeAsBytes(bytes);
-          return filePath;
-        }
-      } finally {
-        httpClient.close(force: true);
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  static Future<String> _coverDir() async {
-    if (_coverDirPath == null) {
-      final dir = await getTemporaryDirectory();
-      _coverDirPath = '${dir.path}/island_covers';
-      await io.Directory(_coverDirPath!).create(recursive: true);
-    }
-    return _coverDirPath!;
   }
 
   /// 向原生层发送完整当前状态（歌词 + 歌曲信息 + 播放进度）。

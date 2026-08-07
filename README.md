@@ -149,14 +149,14 @@ flutter build apk --release --split-per-abi
 
 为解决该问题（参考
 [lx-music-mobile issue #908](https://github.com/lyswhut/lx-music-mobile/issues/908)），
-本项目额外提供一种 **音乐兼容安装包**：该包的 **Android 包名（applicationId）被
+本项目额外提供一种 **兼容安装包**：该包的 **Android 包名（applicationId）被
 覆盖为 `com.luna.music`**，从而让系统将应用识别为受支持的音乐应用来源。
 
 ### ⚠️ 非官方声明与法律风险
 
 请在使用该兼容包前仔细阅读以下内容：
 
-- **非官方安装包**：该包不是官方发布的汽水音乐音乐版本。它是为解决特定机型音乐控制问题而生成的改装包，与系统正式包
+- **非官方安装包**：该包不是官方发布的汽水音乐版本。它是为解决特定机型音乐控制问题而生成的改装包，与系统正式包
   （`com.feiniu.music`）可以共存安装，但功能与行为以本仓库源码为准。
 - **包名冲突风险**：`com.luna.music` 是字节跳动旗下「汽水音乐」App 使用的包名。
   安装本兼容包后：

@@ -94,6 +94,48 @@ void main() {
     });
   });
 
+  group('isMediaKitCodec', () {
+    test('风险 codec 返回 true（EAC3/AC3/ALAC/环绕）', () {
+      for (final c in ['eac3', 'EAC3', 'ac3', 'alac', 'dts', 'truehd', 'mlp']) {
+        expect(FeiNiuTranscodeService.isMediaKitCodec(c), isTrue,
+            reason: '$c 应交给 media_kit（FFmpeg）');
+      }
+    });
+
+    test('常见 codec 返回 false（系统解码器可处理）', () {
+      for (final c in ['aac', 'mp3', 'flac', 'opus', 'vorbis']) {
+        expect(FeiNiuTranscodeService.isMediaKitCodec(c), isFalse,
+            reason: '$c 应留在 just_audio');
+      }
+    });
+
+    test('null/空返回 false', () {
+      expect(FeiNiuTranscodeService.isMediaKitCodec(null), isFalse);
+      expect(FeiNiuTranscodeService.isMediaKitCodec(''), isFalse);
+    });
+  });
+
+  group('isRiskySilenceContainer', () {
+    test('可能内嵌风险 codec 的容器返回 true', () {
+      for (final f in ['m4a', 'M4A', 'm4b', 'mp4', 'aac', 'mka', 'mkv']) {
+        expect(FeiNiuTranscodeService.isRiskySilenceContainer(f), isTrue,
+            reason: '$f 可能需要无声看门狗');
+      }
+    });
+
+    test('普通容器返回 false', () {
+      for (final f in ['flac', 'mp3', 'ogg', 'wav', 'opus', 'dsf']) {
+        expect(FeiNiuTranscodeService.isRiskySilenceContainer(f), isFalse,
+            reason: '$f 无需看门狗');
+      }
+    });
+
+    test('null/空返回 false', () {
+      expect(FeiNiuTranscodeService.isRiskySilenceContainer(null), isFalse);
+      expect(FeiNiuTranscodeService.isRiskySilenceContainer(''), isFalse);
+    });
+  });
+
   group('hlsUrlForFlac', () {
     test('metadata 确认是 dsf → 请求转码并返回绝对 URL（FLAC）', () async {
       final api = FeiNiuApiClient.instance;
@@ -298,6 +340,102 @@ void main() {
         api.resolveHlsUrl('https://cdn.example.com/a.m3u8'),
         'https://cdn.example.com/a.m3u8',
       );
+    });
+  });
+
+  group('resolvedCodecFor', () {
+    test('song.codec 非空 → 直接返回，不请求 metadata', () async {
+      var metadataCalls = 0;
+      FeiNiuApiClient.instance.setDioForTest(
+        _mockDio((o) {
+          if (o.path.contains('metadata')) metadataCalls++;
+          return {
+            'code': 0,
+            'data': {
+              'audioSpec': {'codec': 'eac3', 'format': 'm4a'},
+            },
+          };
+        }),
+      );
+      final song = SongEntity(
+        id: 'id-c1',
+        title: 't',
+        artist: '[{"name":"a"}]',
+        format: 'm4a',
+        codec: 'aac',
+      );
+      expect(await FeiNiuTranscodeService.instance.resolvedCodecFor(song), 'aac');
+      expect(metadataCalls, 0, reason: 'song.codec 已有值不应请求网络');
+    });
+
+    test('song.codec 为空 → 经 metadata 解析 codec 并返回', () async {
+      FeiNiuApiClient.instance.setDioForTest(
+        _mockDio((o) => {
+          'code': 0,
+          'data': {
+            'audioSpec': {'codec': 'eac3', 'format': 'm4a'},
+          },
+        }),
+      );
+      final song = _song('id-c2', format: 'm4a'); // codec 为空
+      expect(
+        await FeiNiuTranscodeService.instance.resolvedCodecFor(song),
+        'eac3',
+      );
+    });
+
+    test('codec 经缓存命中，第二次不重复请求 metadata', () async {
+      var metadataCalls = 0;
+      FeiNiuApiClient.instance.setDioForTest(
+        _mockDio((o) {
+          if (o.path.contains('metadata')) metadataCalls++;
+          return {
+            'code': 0,
+            'data': {
+              'audioSpec': {'codec': 'alac', 'format': 'm4a'},
+            },
+          };
+        }),
+      );
+      final song = _song('id-c3', format: 'm4a');
+      final first = await FeiNiuTranscodeService.instance.resolvedCodecFor(song);
+      final second = await FeiNiuTranscodeService.instance.resolvedCodecFor(song);
+      expect(first, 'alac');
+      expect(second, 'alac');
+      expect(metadataCalls, 1, reason: '第二次应命中会话缓存');
+    });
+
+    test('metadata 失败 → 返回 null', () async {
+      FeiNiuApiClient.instance.setDioForTest(
+        _mockDio(
+          (o) => {},
+          error: (o) =>
+              DioException(requestOptions: o, type: DioExceptionType.connectionError),
+        ),
+      );
+      final song = _song('id-c4', format: 'm4a');
+      expect(await FeiNiuTranscodeService.instance.resolvedCodecFor(song), isNull);
+    });
+
+    test('format/codec 共享一次 metadata：先查 codec 后查 format 只请求一次', () async {
+      var metadataCalls = 0;
+      FeiNiuApiClient.instance.setDioForTest(
+        _mockDio((o) {
+          if (o.path.contains('metadata')) metadataCalls++;
+          return {
+            'code': 0,
+            'data': {
+              'audioSpec': {'codec': 'eac3', 'format': 'm4a'},
+            },
+          };
+        }),
+      );
+      final song = _song('id-c5', format: ''); // 两者都空
+      final codec = await FeiNiuTranscodeService.instance.resolvedCodecFor(song);
+      final format = await FeiNiuTranscodeService.instance.resolvedFormatFor(song);
+      expect(codec, 'eac3');
+      expect(format, 'm4a');
+      expect(metadataCalls, 1, reason: 'codec+format 应共享同一次 metadata 请求');
     });
   });
 }

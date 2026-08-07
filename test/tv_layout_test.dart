@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -150,6 +151,47 @@ void main() {
       // ThemeData.focusColor 非空：TV 分支覆盖为主题色半透明，与默认不同。
       expect(theme.focusColor, isNot(base.focusColor));
       expect(theme.focusColor.a, closeTo(0.34, 0.01));
+    });
+  });
+
+  group('AppLayoutSettings.orientationsForDevice（屏幕方向策略）', () {
+    test('TV：恒横屏（左右两方向）', () {
+      final orientations = AppLayoutSettings.orientationsForDevice(
+        isTv: true,
+        shortestSide: 400,
+      );
+      expect(orientations, contains(DeviceOrientation.landscapeLeft));
+      expect(orientations, contains(DeviceOrientation.landscapeRight));
+      expect(orientations, isNot(contains(DeviceOrientation.portraitUp)));
+      expect(orientations.length, 2);
+    });
+
+    test('平板（最短边≥600dp）：四方向自由旋转', () {
+      final orientations = AppLayoutSettings.orientationsForDevice(
+        isTv: false,
+        shortestSide: 800,
+      );
+      expect(orientations, contains(DeviceOrientation.landscapeLeft));
+      expect(orientations, contains(DeviceOrientation.portraitUp));
+      expect(orientations.length, 4);
+    });
+
+    test('手机（最短边<600dp）：锁竖屏', () {
+      final orientations = AppLayoutSettings.orientationsForDevice(
+        isTv: false,
+        shortestSide: 390,
+      );
+      expect(orientations, [DeviceOrientation.portraitUp]);
+    });
+
+    test('手机 + 手动平板模式：四方向自由旋转', () {
+      final orientations = AppLayoutSettings.orientationsForDevice(
+        isTv: false,
+        shortestSide: 390,
+        manualTabletMode: true,
+      );
+      expect(orientations, contains(DeviceOrientation.landscapeLeft));
+      expect(orientations.length, 4);
     });
   });
 }

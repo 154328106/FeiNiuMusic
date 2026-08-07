@@ -554,6 +554,21 @@ class _SwipeableInfoState extends State<_SwipeableInfo>
   @override
   Widget build(BuildContext context) {
     final hasSong = widget.song != null;
+    final scheme = Theme.of(context).colorScheme;
+    // 滑动提示：右滑（上一曲）→ 左侧浮现「上一曲」；左滑（下一曲）→
+    // 右侧浮现「下一曲」。提示固定贴条的两端（不随内容位移），滑动时
+    // 在原位淡入，松手/回弹时随内容一起淡出。
+    final hintStyle = TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w700,
+      color: scheme.onSurfaceVariant,
+      letterSpacing: 0.5,
+    );
+    final hintBg = BoxDecoration(
+      color: scheme.primary.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(999),
+    );
+
     return ClipRect(
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
@@ -581,26 +596,103 @@ class _SwipeableInfoState extends State<_SwipeableInfo>
           }
           _animateBack();
         },
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: AnimatedBuilder(
-            animation: _controller,
-            builder: (context, child) {
-              final value = _animation != null
-                  ? _animation!.value
-                  : _dragOffsetX;
-              return Transform.translate(
-                offset: Offset(value, 0),
-                child: child,
-              );
-            },
-            child: _InfoContent(
-              song: widget.song,
-              player: widget.player,
-              onOpenPlayer: widget.onOpenPlayer,
-              artwork: widget.artwork,
-              artworkGap: widget.artworkGap,
-            ),
+        child: AnimatedBuilder(
+          animation: _controller,
+          builder: (context, child) {
+            // 用动画值（回弹期间）否则用拖动值（拖动中），
+            // 让提示随回弹动画一起淡出，而不是动画结束才消失。
+            final currentOffset = _animation?.value ?? _dragOffsetX;
+            final prevOpacity =
+                hasSong && currentOffset > 0
+                    ? (currentOffset / 60.0).clamp(0.0, 1.0)
+                    : 0.0;
+            final nextOpacity =
+                hasSong && currentOffset < 0
+                    ? ((-currentOffset) / 60.0).clamp(0.0, 1.0)
+                    : 0.0;
+            return Stack(
+              children: [
+                // 左侧「上一曲」提示：右滑时在原位淡入
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  child: IgnorePointer(
+                    child: Opacity(
+                      opacity: prevOpacity,
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          decoration: hintBg,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.skip_previous_rounded,
+                                size: 16,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                              const SizedBox(width: 4),
+                              Text('上一曲', style: hintStyle),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                // 右侧「下一曲」提示：左滑时在原位淡入
+                Positioned(
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                  child: IgnorePointer(
+                    child: Opacity(
+                      opacity: nextOpacity,
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          decoration: hintBg,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('下一曲', style: hintStyle),
+                              const SizedBox(width: 4),
+                              Icon(
+                                Icons.skip_next_rounded,
+                                size: 16,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                // 可滑动内容：随位移移动（带动画回弹）
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Transform.translate(
+                    offset: Offset(currentOffset, 0),
+                    child: child,
+                  ),
+                ),
+              ],
+            );
+          },
+          child: _InfoContent(
+            song: widget.song,
+            player: widget.player,
+            onOpenPlayer: widget.onOpenPlayer,
+            artwork: widget.artwork,
+            artworkGap: widget.artworkGap,
           ),
         ),
       ),

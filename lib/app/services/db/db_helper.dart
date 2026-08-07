@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
@@ -17,6 +18,17 @@ class DbHelper {
     _db = await _openDb();
     return _db!;
   }
+
+  /// 测试专用：注入数据库文件路径（覆盖 getApplicationDocumentsDirectory），
+  /// 并重置已缓存的连接。用于在内存/临时目录中验证真实迁移逻辑。
+  @visibleForTesting
+  void resetForTest({String? overridePath}) {
+    _db?.close();
+    _db = null;
+    _pathOverride = overridePath;
+  }
+
+  String? _pathOverride;
 
   /// 幂等加列：songs 表缺少 [column] 时才执行 `ALTER TABLE ... ADD COLUMN`。
   ///
@@ -43,8 +55,14 @@ class DbHelper {
   }
 
   Future<Database> _openDb() async {
-    final directory = await getApplicationDocumentsDirectory();
-    final path = p.join(directory.path, DbConstants.dbName);
+    final override = _pathOverride;
+    final String path;
+    if (override != null) {
+      path = override;
+    } else {
+      final directory = await getApplicationDocumentsDirectory();
+      path = p.join(directory.path, DbConstants.dbName);
+    }
     return openDatabase(
       path,
       version: DbConstants.dbVersion,
@@ -63,6 +81,7 @@ CREATE TABLE ${DbConstants.tableSongs} (
   sampleRate INTEGER,
   fileSize INTEGER,
   format TEXT,
+  codec TEXT,
   isFavorite INTEGER NOT NULL DEFAULT 0,
   coverId TEXT,
   audioSpec TEXT,
@@ -302,6 +321,11 @@ CREATE TABLE IF NOT EXISTS ${DbConstants.tableApiCache} (
             'INTEGER NOT NULL DEFAULT 0',
           );
           await _addSongColumnIfMissing(db, 'cueOffsetMs', 'INTEGER');
+        }
+        if (oldVersion < 15) {
+          // 引入 audioSpec.codec 路由（EAC3/ALAC 无声兜底）时，SongEntity.toMap()
+          // 新增 codec 列写入；旧库缺列会使 upsertSongs / stats 事务回滚。
+          await _addSongColumnIfMissing(db, 'codec', 'TEXT');
         }
       },
     );

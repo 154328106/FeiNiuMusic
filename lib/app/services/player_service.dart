@@ -69,6 +69,18 @@ class PlayerService with WidgetsBindingObserver {
   /// （前进/回卷），避免媒体损坏时无限重试刷屏。
   final Set<String> _mediaKitFailedSongIds = {};
 
+  /// 无声看门狗：对「codec 未知 + 可疑容器」的 just_audio 歌曲，播放确认后
+  /// 若位置照常推进但可能无声（ExoPlayer 设备解码器静默失败），升级 media_kit
+  /// 重播。升级后不再重复处理：media_kit（FFmpeg）解码即出声，失败走 mpv
+  /// errorStream 由既有 `_mediaKitFailedSongIds` 兜底跳过。
+  String? _silenceWatchSongId;
+  Timer? _silenceWatchTimer;
+
+  /// 已由看门狗升级过 media_kit 的歌曲 id（会话级）。用于去重与日志。
+  final Set<String> _silenceWatchEscalatedSongIds = {};
+  static const Duration _silenceGrace = Duration(seconds: 3);
+  static const Duration _silenceMinAdvance = Duration(seconds: 1);
+
   /// 网络缓慢提示计时器：media_kit 播无损大文件缓冲超时时触发一次提示。
   Timer? _slowNetworkTimer;
   bool _slowNetworkNotified = false;
@@ -1360,6 +1372,77 @@ class PlayerService with WidgetsBindingObserver {
     await _advanceToLogicalIndex(idx + 1);
   }
 
+  /// 是否应为当前歌曲启动无声看门狗。
+  ///
+  /// - just_audio 引擎：仅当 codec **未知**且容器可能内嵌风险 codec
+  ///   （m4a/mp4/aac…）时 arm——这类歌 ExoPlayer 设备解码器可能静默失败。
+  ///   codec 已知（eac3/alac 等）已由路由层直接走 media_kit，无需看门狗；
+  ///   普通 flac/mp3/ogg 容器不 arm，避免误报。
+  /// - media_kit 引擎：不再 arm——升级后由 mpv errorStream 兜底，避免把
+  ///   「media_kit 已正常出声」误判为再次无声。
+  bool _shouldArmSilenceWatch() {
+    if (_recoveringCurrentSource || _restoringState) return false;
+    final song = currentSong.value;
+    if (song == null) return false;
+    if (_activeEngine.kind != EngineKind.justAudio) return false;
+    // 已升级过 → 不重复处理。
+    if (_silenceWatchEscalatedSongIds.contains(song.id)) return false;
+    return song.codec == null &&
+        FeiNiuTranscodeService.isRiskySilenceContainer(song.format);
+  }
+
+  /// 歌曲切换时重新启动无声看门狗。取消旧 timer，按条件决定是否 arm。
+  void _restartSilenceWatch() {
+    _silenceWatchTimer?.cancel();
+    _silenceWatchTimer = null;
+    _silenceWatchSongId = null;
+    if (!_shouldArmSilenceWatch()) return;
+    final song = currentSong.value;
+    if (song == null) return;
+    _silenceWatchSongId = song.id;
+    _silenceWatchTimer = Timer(_silenceGrace, _maybeHandleSilence);
+  }
+
+  /// 无声看门狗到点：判断「位置照常推进但可能无声」，升级 media_kit 重播。
+  Future<void> _maybeHandleSilence() async {
+    _silenceWatchTimer = null;
+    // 守卫：歌未变、仍在播、位置确有推进、不在错误恢复中。
+    final song = currentSong.value;
+    if (song == null || _silenceWatchSongId != song.id) return;
+    if (_recoveringCurrentSource || _restoringState) return;
+    if (!isPlaying.value || !_activeEngine.playing) return;
+    if (position.value < _silenceMinAdvance) return;
+
+    _debugLog(
+      'possible silent playback song=${song.title} '
+      'pos=${position.value}',
+    );
+    final seekPos = position.value;
+    final wasPlaying = isPlaying.value;
+    _silenceWatchEscalatedSongIds.add(song.id);
+
+    _recoveringCurrentSource = true;
+    try {
+      // 仅该歌升级 media_kit 重播（复用 FLAC 帧超限升级路径）。
+      _mediaKitEscalateSongIds.add(song.id);
+      FeiNiuTranscodeService.instance.invalidate(song.id);
+      _engineKinds = await _computeEngineKinds(queue.value);
+      await _activateLogicalIndex(
+        currentIndex.value,
+        initialPosition: seekPos > Duration.zero ? seekPos : null,
+      );
+      if (wasPlaying) {
+        await _startPlayback();
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('PlayerService silence recovery failed: $e');
+      }
+    } finally {
+      _recoveringCurrentSource = false;
+    }
+  }
+
   Future<void> togglePlayPause() async {
     if (_activeEngine.playing) {
       await _pausePlayback();
@@ -2210,6 +2293,23 @@ class PlayerService with WidgetsBindingObserver {
         : null;
     isPlaying.value = false;
     _emitSnapshot(force: true);
+    // 预热当前曲 800px 封面：恢复播放进播放页时封面立显，不闪转圈。
+    // 磁盘已有缓存 → 秒显；无缓存 → 提前下载（与 _prefetchUpcoming 同路径）。
+    if (song.coverId != null && song.coverId!.isNotEmpty) {
+      unawaited(
+        precacheImage(
+          CachedNetworkImageProvider(
+            FeiNiuApiClient.instance.coverUrl(
+              song.coverId!,
+              size: 800,
+              updatedAt: song.updatedAt,
+            ),
+            headers: FeiNiuApiClient.imageAuthHeaders(),
+          ),
+          WidgetsBinding.instance.rootElement!,
+        ),
+      );
+    }
   }
 
   Future<void> _prepareRestoredAudioSource(
@@ -2308,6 +2408,10 @@ class PlayerService with WidgetsBindingObserver {
 
   Future<void> _pausePlayback() async {
     _debugLog('pausePlayback song=${currentSong.value?.title ?? 'none'}');
+    // 暂停不检测无声：取消看门狗，避免暂停态误触发升级。
+    _silenceWatchTimer?.cancel();
+    _silenceWatchTimer = null;
+    _silenceWatchSongId = null;
     _stopBackgroundAudioKeepAlive();
     await _activeEngine.pause();
     _syncPositionFromPlayer(
@@ -2787,6 +2891,8 @@ class PlayerService with WidgetsBindingObserver {
       bufferedPosition.value = Duration.zero;
       duration.value = null;
     }
+    // 歌曲切换：重新 arm 无声看门狗（取消旧 timer，按新歌条件决定）。
+    _restartSilenceWatch();
     _emitSnapshot(force: true);
   }
 
@@ -2970,6 +3076,8 @@ class PlayerService with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     AppPlaybackVolumeSettings.volume.removeListener(_handleAppVolumeChanged);
     cancelSleepTimer();
+    _silenceWatchTimer?.cancel();
+    _silenceWatchTimer = null;
     _statsFlushTimer?.cancel();
     _statsService.flush();
     await _interruptionSub?.cancel();

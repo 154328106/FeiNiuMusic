@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -6,6 +7,36 @@ import 'package:feiniu_music/app/services/feiniu/account_store.dart';
 import 'package:feiniu_music/app/services/feiniu/api_client.dart';
 import 'package:feiniu_music/app/services/feiniu/auth_service.dart';
 import 'package:feiniu_music/app/state/settings_fn_state.dart';
+
+/// 构造拦截器短路返回的 Dio（沿用 transcode_service_test 的 mock 模式）。
+Dio _mockDio(dynamic Function(RequestOptions) respond) {
+  final dio = Dio();
+  dio.interceptors.add(
+    InterceptorsWrapper(
+      onRequest: (options, handler) {
+        handler.resolve(
+          Response<dynamic>(
+            requestOptions: options,
+            statusCode: 200,
+            data: respond(options),
+          ),
+        );
+      },
+    ),
+  );
+  return dio;
+}
+
+/// 模拟一次成功的密码登录响应（userToken 可注入）。
+/// FeiNiuResponse 包裹 data 段，data 内含 userToken 与 user。
+Map<String, dynamic> _loginResp(String token) => {
+      'code': 0,
+      'msg': 'ok',
+      'data': {
+        'userToken': token,
+        'user': {'name': 'user-a'},
+      },
+    };
 
 void main() {
   setUp(() {
@@ -146,31 +177,6 @@ void main() {
     expect(AuthService.instance.isLoggedIn.value, true);
   });
 
-  test('onTokenExpired clears only the current entry token', () async {
-    await AccountStore.instance.init();
-
-    final a = await AccountStore.instance.addOrUpdate(
-      AccountEntry.build(
-        serverUrl: 'https://a:5667',
-        username: 'u1',
-        token: 'ta',
-      ),
-    );
-    final b = await AccountStore.instance.addOrUpdate(
-      AccountEntry.build(
-        serverUrl: 'https://b:5667',
-        username: 'u2',
-        token: 'tb',
-      ),
-    );
-    AccountStore.instance.currentAccountId.value = a.id;
-
-    AccountStore.instance.onTokenExpired();
-
-    expect(AccountStore.instance.byId(a.id)!.token, '');
-    expect(AccountStore.instance.byId(b.id)!.token, 'tb');
-  });
-
   test('updateServerUrl clears token when URL changes', () async {
     await AccountStore.instance.init();
 
@@ -245,5 +251,78 @@ void main() {
     );
     expect(third.id, first.id);
     expect(third.name, '书房');
+  });
+
+  group('handleTokenExpired', () {
+    test('有保存密码且重登成功 → token 刷新、保持登录态、不打断会话', () async {
+      await AccountStore.instance.init();
+
+      // 造一个带密码的当前账号，并注入成功的登录响应
+      await FeiNiuApiClient.instance.setAuth('https://s:5667', 'stale-token');
+      final a = await AccountStore.instance.persistLogin(
+        serverUrl: 'https://s:5667',
+        username: 'user-a',
+        password: 'pw-a',
+        relayMode: false,
+      );
+      AccountStore.instance.currentAccountId.value = a.id;
+      FeiNiuApiClient.instance.setDioForTest(_mockDio((o) => _loginResp('fresh-token')));
+
+      final result = await AccountStore.instance.handleTokenExpired();
+
+      expect(result, isTrue, reason: '重登成功应保持登录');
+      expect(FeiNiuApiClient.instance.token, 'fresh-token', reason: 'API 客户端应换上新 token');
+      expect(AuthService.instance.isLoggedIn.value, isTrue, reason: '不应跳回登录页');
+      expect(AccountStore.instance.byId(a.id)!.token, 'fresh-token', reason: '账号应更新 token');
+    });
+
+    test('无保存密码 → 强制登出、isLoggedIn=false、保留凭据供登录页预填', () async {
+      await AccountStore.instance.init();
+
+      final a = await AccountStore.instance.addOrUpdate(
+        AccountEntry.build(
+          serverUrl: 'https://s:5667',
+          username: 'user-a',
+          token: 'stale-token',
+        ),
+      );
+      AccountStore.instance.currentAccountId.value = a.id;
+      await FeiNiuApiClient.instance.setAuth('https://s:5667', 'stale-token');
+      AuthService.instance.isLoggedIn.value = true;
+
+      final result = await AccountStore.instance.handleTokenExpired();
+
+      expect(result, isFalse, reason: '无密码应登出');
+      expect(AuthService.instance.isLoggedIn.value, isFalse, reason: '应触发登录页门控');
+      expect(FeiNiuApiClient.instance.token, isEmpty);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('feiniu_server_url'), 'https://s:5667', reason: '保留服务器供预填');
+      expect(prefs.getString('feiniu_username'), 'user-a', reason: '保留用户名供预填');
+      expect(AccountStore.instance.byId(a.id)!.token, '', reason: '账号 token 应被清空');
+    });
+
+    test('有密码但重登失败 → 回退强制登出', () async {
+      await AccountStore.instance.init();
+
+      await FeiNiuApiClient.instance.setAuth('https://s:5667', 'stale-token');
+      final a = await AccountStore.instance.persistLogin(
+        serverUrl: 'https://s:5667',
+        username: 'user-a',
+        password: 'pw-a',
+        relayMode: false,
+      );
+      AccountStore.instance.currentAccountId.value = a.id;
+      // 重登返回业务错误（如账号被禁用）
+      FeiNiuApiClient.instance.setDioForTest(
+        _mockDio((o) => {'code': 120001, 'msg': '用户名或密码错误'}),
+      );
+      AuthService.instance.isLoggedIn.value = true;
+
+      final result = await AccountStore.instance.handleTokenExpired();
+
+      expect(result, isFalse, reason: '重登失败应登出');
+      expect(AuthService.instance.isLoggedIn.value, isFalse);
+      expect(AccountStore.instance.byId(a.id)!.token, '');
+    });
   });
 }

@@ -59,7 +59,7 @@ class AccountStore {
     if (_initialized) return;
     _initialized = true;
 
-    FeiNiuApiClient.instance.onTokenCleared = onTokenExpired;
+    FeiNiuApiClient.instance.onSessionExpired = handleTokenExpired;
     await AppFnConnectionSettings.ensureLoaded();
 
     final prefs = await SharedPreferences.getInstance();
@@ -100,7 +100,7 @@ class AccountStore {
     _initialized = false;
     accounts.value = [];
     currentAccountId.value = null;
-    FeiNiuApiClient.instance.onTokenCleared = null;
+    FeiNiuApiClient.instance.onSessionExpired = null;
   }
 
   Future<void> _loadAccounts(SharedPreferences prefs) async {
@@ -501,16 +501,67 @@ class AccountStore {
     await _persist();
   }
 
-  /// 401 导致激活槽位 token 被清除时同步当前账号（仅清 token，不翻转登录态）。
-  void onTokenExpired() {
+  /// 处理 token 失效（401 / INVALID TOKEN）。
+  ///
+  /// 优先尝试用当前账号保存的密码静默重新登录换取新 token，保持会话不中断；
+  /// 无密码或重登失败时强制登出——清空激活槽位 token、翻转 [AuthService.isLoggedIn]
+  /// 为 false，让 `_AppStartupGate` 自动回到登录页。登出会保留
+  /// `feiniu_server_url` / `feiniu_username`（沿用 [clearAuth] 约定），登录页
+  /// 仍能预填，用户只需重新输入密码。
+  ///
+  /// 返回是否已恢复登录（true = 静默重登成功；false = 已登出，需用户重新登录）。
+  ///
+  /// 调用方应在识别到 401/INVALID TOKEN 时调用（如 [FeiNiuApiClient] 拦截器）。
+  Future<bool> handleTokenExpired() async {
     final current = currentAccount;
-    if (current == null || !current.isLoggedIn) return;
-    final list = List<AccountEntry>.from(accounts.value);
-    final index = list.indexWhere((e) => e.id == current.id);
-    if (index < 0) return;
-    list[index] = current.copyWith(token: '');
-    accounts.value = list;
-    _persist();
+    final api = FeiNiuApiClient.instance;
+    if (current == null) return false;
+
+    // 1) 尝试用保存的密码静默重登（与 switchTo 的自动登录一致）
+    if (current.token.isNotEmpty && current.password != null && current.password!.isNotEmpty) {
+      try {
+        final deviceId = AuthService.instance.getOrCreateDeviceId();
+        await api.setBaseUrl(current.serverUrl);
+        if (current.relayMode) api.setRelayMode(true);
+        final response = await api.login(
+          current.username,
+          current.password!,
+          deviceId,
+          relayMode: current.relayMode,
+        );
+        final refreshed = current.copyWith(token: response.userToken);
+        _replaceInList(refreshed);
+        await activate(refreshed);
+        await _persist();
+        return true;
+      } catch (_) {
+        // 重登失败 → 落到登出分支
+      }
+    }
+
+    // 2) 无密码或重登失败 → 强制登出（门控自动回登录页，凭据保留供预填）
+    if (current.token.isNotEmpty) {
+      final list = List<AccountEntry>.from(accounts.value);
+      final index = list.indexWhere((e) => e.id == current.id);
+      if (index >= 0) {
+        list[index] = current.copyWith(token: '');
+        accounts.value = list;
+      }
+    }
+    await api.clearAuth();
+    await api.setBaseUrl(current.serverUrl);
+    api.setRelayMode(current.relayMode);
+    // 保留用户名/密码供登录页自动填充（clearAuth 已保留 server_url）
+    if (current.username.isNotEmpty) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('feiniu_username', current.username);
+      if (current.password != null && current.password!.isNotEmpty) {
+        await prefs.setString('feiniu_password', current.password!);
+      }
+    }
+    AuthService.instance.isLoggedIn.value = false;
+    await _persist();
+    return false;
   }
 
   // ── 工具 ────────────────────────────────────────────────────────────

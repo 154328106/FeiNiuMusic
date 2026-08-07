@@ -32,7 +32,10 @@ class HomeHeroBanner extends StatelessWidget {
     final coverId = song?.coverId;
     // TV 端：16:9 全宽卡在横屏下会占满整屏。改 12:5 并限制最大宽度，
     // 让 Banner 仍是大视觉但不再"漫游区几乎全屏"；整卡可聚焦，Enter 即播放。
+    // 平板（非 TV）：同样限制宽度并居中，避免横屏下占满整屏高度。
     final isTv = AppLayoutSettings.tvMode.value;
+    final isTablet = AppLayoutSettings.effectiveTabletMode && !isTv;
+    final useLarge = isTv || isTablet;
     final banner = ClipRRect(
       borderRadius: BorderRadius.circular(isTv ? 28 : 24),
       child: AspectRatio(
@@ -159,18 +162,22 @@ class HomeHeroBanner extends StatelessWidget {
       ),
     );
 
-    if (!isTv) return banner;
-    // TV：整卡可聚焦 → Enter 播放；同时限制最大宽度避免全屏占比。
-    return Center(
+    if (!useLarge) return banner;
+    // TV/平板大屏：限制最大宽度避免全屏占比，居中显示。
+    // TV 额外包 TvFocusable（遥控器整卡可聚焦，Enter 即播放）。
+    final centered = Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 960),
-        child: TvFocusable(
-          borderRadius: BorderRadius.circular(28),
-          onActivate: onPlay,
-          child: banner,
-        ),
+        constraints: BoxConstraints(maxWidth: isTv ? 960 : 720),
+        child: isTv
+            ? TvFocusable(
+                borderRadius: BorderRadius.circular(28),
+                onActivate: onPlay,
+                child: banner,
+              )
+            : banner,
       ),
     );
+    return centered;
   }
 }
 

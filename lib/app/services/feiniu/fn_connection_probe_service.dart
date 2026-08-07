@@ -7,7 +7,31 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../state/settings_fn_state.dart';
+import 'api_client.dart';
 import 'fn_models.dart';
+
+/// 探测响应是否判定候选「可用」。
+///
+/// [authChecked] 为 true（已登录、探测携带 token）时，候选必须通过鉴权才算
+/// 可用：TCP 可达但 token 被拒的地址（HTTP 401/403、5xx，或业务码非 0 如
+/// `INVALID TOKEN`）会被排除，避免探测选到「能连上但用不了」的链路（典型：
+/// 当前登录凭据绑定 FNID 中继，但候选列表里有 TCP 可达的公网直连 IP——
+/// 会因 token 不匹配全量 401）。未鉴权检查（登录前 TCP-only）时一律视为可用。
+bool fnProbeResponseUsable(
+  dynamic response, {
+  required bool authChecked,
+}) {
+  if (!authChecked) return true;
+  if (response is! Response) return false;
+  final status = response.statusCode ?? 0;
+  if (status >= 400) return false;
+  final data = response.data;
+  if (data is Map<String, dynamic>) {
+    final code = data['code'];
+    if (code is num) return code == 0;
+  }
+  return true;
+}
 
 /// 早停并行探测的返回结果。
 ///
@@ -25,22 +49,41 @@ typedef ProbeBestReachableResult = ({
 /// 探测单条候选链路的超时。
 ///
 /// 中继/域名候选（relayMode）链路最长（设备 → 5ddd.com CDN → FN 设备转发），
-/// TLS 握手 + CDN 往返比直连慢，1s 窗口对「真可达但慢」的中继会误判不可达，
-/// 放宽到 4s。直连 IP 候选保持 1s（内网/公网直连通常更快，收紧可尽早失败）。
+/// TLS 握手 + CDN 往返比直连慢，探测窗口要足够容纳「真可达但慢」的中继，
+/// 放宽到 10s。直连 IP 候选 3s（内网/公网直连通常更快，但公网经移动网络跨网/
+/// 弱网可达的直连需要一定缓冲，3s 平衡「尽早失败」与「不误判慢速直连」）。
 Duration fnProbeTimeout(bool isRelay) =>
-    isRelay ? const Duration(seconds: 4) : const Duration(seconds: 1);
+    isRelay ? const Duration(seconds: 10) : const Duration(seconds: 3);
 
 /// 缓存/回前台校验（[FnConnectionProbeService.isAddressReachable] /
-/// [FnConnectionProbeService.probeSmart] 缓存快探）的 connect 超时。
+/// [FnConnectionProbeService.probeSmart] 缓存快探）直连缓存的 connect 超时。
 /// 200ms 对「慢但可达」的地址（如空闲连接被服务端关闭后需重建 TLS 的地址）
-/// 误判过激进，会误触发整轮重连；放宽到 1s。
-const Duration kFnCachedProbeConnectTimeout = Duration(seconds: 1);
+/// 误判过激进，会误触发整轮重连；放宽到 3s。
+const Duration kFnCachedProbeConnectTimeout = Duration(seconds: 3);
+
+/// 缓存/回前台校验（[_tryCachedAddress]）的 connect 超时，按中继语义区分。
+///
+/// - 中继缓存（relay）链路最长（设备 → 5ddd.com CDN → FN 设备转发），
+///   3s 快探窗口对「真可达但慢」的中继会误判不可达，进而回退整轮全量探测
+///   （直连候选逐个等 3s 超时 + 中继 10s）——比直接放慢快探更拖时间。
+///   故与全量中继探测同预算 [fnProbeTimeout]（10s）。
+/// - 直连缓存保持 [kFnCachedProbeConnectTimeout]（3s）。
+Duration cachedProbeTimeout(bool isRelay) =>
+    isRelay ? fnProbeTimeout(true) : kFnCachedProbeConnectTimeout;
+
+/// 缓存可达后的「升级扫描」超时（[FnConnectionProbeService.probeSmart]
+/// Step 2 探测优先级更高的候选）。
+///
+/// 升级扫描是锦上添花：扫不到更高优先级只是留在当前缓存连接，不损失功能。
+/// 收紧到 400ms，避免每次启动/重连为「确认没有更好」白白等直连候选逐个
+/// 3s 超时（尤其当缓存是中继、直连候选在当下网络全不可达时）。
+const Duration kFnUpgradeProbeTimeout = Duration(milliseconds: 400);
 
 /// FN 连接探测服务（单例）
 ///
 /// 核心职责：
 /// 1. 调用 FN 接口获取连接参数
-/// 2. 按优先级分层探测可用链路（直连 1 秒 / 中继 4 秒超时）
+/// 2. 按优先级分层探测可用链路（直连 3 秒 / 中继 10 秒超时）
 /// 3. 返回首个可用的连接地址
 ///
 /// 探测规则：
@@ -48,7 +91,7 @@ const Duration kFnCachedProbeConnectTimeout = Duration(seconds: 1);
 /// - HTTPS 端口优先于 HTTP
 /// - 公网优先模式探测公网 IPv6 → IPv4 → 中继
 /// - 中继优先模式跳过公网直连
-/// - 单链路探测超时：直连 IP 1 秒，中继/域名 4 秒（见 [fnProbeTimeout]）
+/// - 单链路探测超时：直连 IP 3 秒，中继/域名 10 秒（见 [fnProbeTimeout]）
 class FnConnectionProbeService {
   FnConnectionProbeService._();
 
@@ -203,11 +246,18 @@ class FnConnectionProbeService {
           if (cacheOk) {
             if (_cancelToken!.isCancelled) throw Exception('探测已取消');
 
-            // 探测优先级更高的候选（索引 < cachedIndex），首个可达者即升级
+            // 探测优先级更高的候选（索引 < cachedIndex），首个可达者即升级。
+            // 升级是锦上添花：扫不到更高优先级只是留在当前缓存连接，故收紧
+            // 超时（kFnUpgradeProbeTimeout）避免为「确认没有更好」白等直连候选
+            // 逐个 3s 超时（缓存为中继、直连全不可达时尤其慢）。
             final better = candidates.sublist(0, cachedIndex);
             if (better.isNotEmpty) {
               final ProbeBestReachableResult upgrade =
-                  await _probeBestReachable(better, _cancelToken!);
+                  await _probeBestReachable(
+                    better,
+                    _cancelToken!,
+                    timeoutOverride: (_) => kFnUpgradeProbeTimeout,
+                  );
               if (upgrade.best != null) {
                 if (kDebugMode) {
                   debugPrint(
@@ -286,26 +336,49 @@ class FnConnectionProbeService {
     }
   }
 
-  /// 快速验证缓存连接是否可达（[kFnCachedProbeConnectTimeout] 快探）
+  /// 快速验证缓存连接是否可达（[cachedProbeTimeout] 快探）
   Future<bool> _tryCachedAddress(
     String url,
     bool isRelay,
     CancelToken cancelToken,
   ) async {
     final start = DateTime.now();
+    final token = FeiNiuApiClient.instance.token;
+    final authChecked = token.isNotEmpty;
     try {
-      await _probeDio.getUri(
-        Uri.parse(url),
+      // 已登录时缓存校验也打鉴权接口：TCP 可达但 token 被拒（INVALID TOKEN）
+      // 的缓存地址应视为失效回退重探，而不是「Cached connection still valid」。
+      final probePath = authChecked ? '/music/api/v1/track/list' : '';
+      final response = await _probeDio.getUri(
+        Uri.parse(url + probePath),
         cancelToken: cancelToken,
         options: Options(
-          connectTimeout: kFnCachedProbeConnectTimeout,
+          connectTimeout: cachedProbeTimeout(isRelay),
           receiveTimeout: const Duration(seconds: 1),
           sendTimeout: const Duration(seconds: 1),
           followRedirects: false,
           validateStatus: (_) => true,
-          headers: isRelay ? {'Cookie': 'mode=relay'} : null,
+          // 鉴权与中继合并进同一个 Cookie 头，避免拆成两个键互相覆盖丢 mode=relay。
+          headers: {
+            if (authChecked)
+              'Cookie': isRelay
+                  ? 'music-token=$token; mode=relay'
+                  : 'music-token=$token'
+            else if (isRelay)
+              'Cookie': 'mode=relay',
+          },
         ),
       );
+      if (!fnProbeResponseUsable(response, authChecked: authChecked)) {
+        if (kDebugMode) {
+          debugPrint(
+            '[FnProbe] Cached check REJECTED $url in '
+            '${DateTime.now().difference(start).inMilliseconds}ms '
+            '(status ${response.statusCode}): token 未被该地址接受',
+          );
+        }
+        return false;
+      }
       return true;
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) {
@@ -475,8 +548,14 @@ class FnConnectionProbeService {
     CancelToken cancelToken, {
     Future<ProbeCandidateResult> Function(ProbeCandidateSpec, CancelToken)?
         probe,
+    Duration Function(bool isRelay)? timeoutOverride,
   }) async {
-    final doProbe = probe ?? _tryAddressWithDetail;
+    final pickTimeout = timeoutOverride ?? fnProbeTimeout;
+    // 未注入 probe 时走默认探测，并把超时策略透传给 _tryAddressWithDetail
+    // （默认 fnProbeTimeout；升级扫描注入 kFnUpgradeProbeTimeout）。
+    final doProbe = probe ??
+        (ProbeCandidateSpec c, CancelToken token) =>
+            _tryAddressWithDetail(c, token, timeoutOverride: pickTimeout);
     if (candidates.isEmpty) {
       final ProbeBestReachableResult empty = (
         best: null,
@@ -594,11 +673,16 @@ class FnConnectionProbeService {
   /// 探测单条链路并返回探测结果详情
   Future<ProbeCandidateResult> _tryAddressWithDetail(
     ProbeCandidateSpec candidate,
-    CancelToken cancelToken,
-  ) async {
+    CancelToken cancelToken, {
+    Duration Function(bool isRelay)? timeoutOverride,
+  }) async {
     // 中继/域名候选链路更长（CDN 转发 + TLS 重建），放宽超时避免误判
-    final timeout = fnProbeTimeout(candidate.relayMode);
+    final timeout = (timeoutOverride ?? fnProbeTimeout)(candidate.relayMode);
     final start = DateTime.now();
+    // 已登录时探测携带当前 token：候选须通过鉴权才算「可用」，排除 TCP 可达
+    // 但 token 被拒的链路（如与当前登录凭据不匹配的服务器 IP → INVALID TOKEN）。
+    final token = FeiNiuApiClient.instance.token;
+    final authChecked = token.isNotEmpty;
     try {
       final options = Options(
         connectTimeout: timeout,
@@ -606,14 +690,46 @@ class FnConnectionProbeService {
         sendTimeout: timeout,
         followRedirects: false,
         validateStatus: (_) => true,
-        headers: candidate.relayMode ? {'Cookie': 'mode=relay'} : null,
+        // 注意：中继与鉴权都要走 Cookie，且 relay 必须带上 mode=relay，
+        // 不能拆成两个 'Cookie' 键（map 字面量后者覆盖前者）——
+        // 否则中继链路鉴权会丢 mode=relay 被服务器误判。
+        headers: {
+          if (authChecked)
+            'Cookie': candidate.relayMode
+                ? 'music-token=$token; mode=relay'
+                : 'music-token=$token'
+          else if (candidate.relayMode)
+            'Cookie': 'mode=relay',
+        },
       );
 
-      await _probeDio.getUri(
-        Uri.parse(candidate.address),
+      // 已登录：打一个轻量鉴权接口（track/list 不产生副作用）验证 token 是否
+      // 被该地址接受；未登录则探测根路径（仅 TCP 可达性）。
+      final probePath = authChecked ? '/music/api/v1/track/list' : '';
+      final response = await _probeDio.getUri(
+        Uri.parse(candidate.address + probePath),
         options: options,
         cancelToken: cancelToken,
       );
+
+      if (!fnProbeResponseUsable(response, authChecked: authChecked)) {
+        if (kDebugMode) {
+          debugPrint(
+            '[FnProbe] Probe REJECTED ${candidate.description} in '
+            '${DateTime.now().difference(start).inMilliseconds}ms '
+            '(status ${response.statusCode}): token 未被该地址接受',
+          );
+        }
+        return ProbeCandidateResult(
+          address: candidate.address,
+          description: candidate.description,
+          group: candidate.group,
+          ipLabel: candidate.ipLabel,
+          isRelay: candidate.relayMode,
+          isReachable: false,
+          error: '连接可用但登录校验失败（token 未被该地址接受）',
+        );
+      }
 
       return ProbeCandidateResult(
         address: candidate.address,

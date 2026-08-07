@@ -185,13 +185,22 @@ class _PlayerPageState extends State<PlayerPage>
                   valueListenable: PlayerStyleSettings.stylePreset,
                   builder: (context, stylePreset, _) {
                     final isPoster = stylePreset == PlayerStylePreset.poster;
+                    // 平板横屏：桌面式布局（左侧封面+控制、右侧歌词块），
+                    // 自带顶部 header，外层全宽 header 隐藏，避免重复占位
+                    // 把右侧歌词块推到下方留出大片空白。
+                    final mq = MediaQuery.of(context);
+                    final isTabletLandscape =
+                        AppLayoutSettings.effectiveTabletMode &&
+                        (AppLayoutSettings.tvMode.value ||
+                            mq.orientation == Orientation.landscape) &&
+                        mq.size.width >= 900;
                     // Poster 关闭顶部/底部 SafeArea 让封面延伸到屏幕边缘
                     // （覆盖状态栏/导航栏），歌词页再手动补回 inset 避免文字
                     // 滑入系统栏下方。
                     final topInset = MediaQuery.paddingOf(context).top;
                     final bottomInset = MediaQuery.paddingOf(context).bottom;
                     return SafeArea(
-                      top: !isPoster,
+                      top: !isPoster && !isTabletLandscape,
                       bottom: !isPoster,
                       child: Column(
                         children: [
@@ -201,7 +210,7 @@ class _PlayerPageState extends State<PlayerPage>
                             onVerticalDragUpdate: _handleDismissDragUpdate,
                             onVerticalDragEnd: _handleDismissDragEnd,
                             onVerticalDragCancel: _handleDismissDragCancel,
-                            child: isPoster
+                            child: isPoster || isTabletLandscape
                                 ? const SizedBox.shrink()
                                 : PlayerHeader(
                                     songSignal: _player.currentSongSignal,

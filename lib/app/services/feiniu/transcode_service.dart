@@ -38,12 +38,42 @@ class FeiNiuTranscodeService {
     return unsupportedFormats.contains(f);
   }
 
+  /// 交给 media_kit（FFmpeg）解码的**编码**黑名单：M4A/MP4 容器内常见的
+  /// 环绕声/无损编码。ExoPlayer 的设备解码器（MediaCodec）对这些 codec 的
+  /// 支持因设备而异：解码器不可用/静默失败时，进度条照常走但无声音。
+  /// FFmpeg 全部原生解码，交给 media_kit 必定出声。
+  ///
+  /// `eac3`/`ac3`：杜比数字（Plus）；`alac`：Apple 无损；`dts`/`truehd`/`mlp`：
+  /// 家庭影院环绕编码。
+  static const Set<String> mediaKitCodecs = {
+    'eac3', 'ac3', 'alac', 'dts', 'truehd', 'mlp',
+  };
+
+  /// codec 是否为 media_kit 专属（ExoPlayer 设备解码不可靠）。
+  static bool isMediaKitCodec(String? codec) {
+    if (codec == null || codec.isEmpty) return false;
+    return mediaKitCodecs.contains(codec.trim().toLowerCase());
+  }
+
+  /// 可能内嵌风险 codec（EAC3/ALAC…）的容器格式。codec 未知（null）时，
+  /// 这些容器需要无声看门狗兜底。
+  static const Set<String> riskySilenceContainers = {
+    'm4a', 'm4b', 'm4p', 'mp4', 'aac', 'mov', '3gp', 'mka', 'mkv',
+  };
+
+  /// 容器是否可能内嵌风险 codec（codec 未知时据此判断是否需要看门狗）。
+  static bool isRiskySilenceContainer(String? format) {
+    if (format == null || format.isEmpty) return false;
+    return riskySilenceContainers.contains(format.trim().toLowerCase());
+  }
+
   static const Duration _ttl = Duration(minutes: 30);
 
   FeiNiuApiClient _api = FeiNiuApiClient.instance;
   final Map<String, _CachedHls> _cache = {};
-  final Map<String, Future<String?>> _formatInflight = {};
+  final Map<String, Future<Map<String, dynamic>?>> _formatInflight = {};
   final Map<String, String> _formats = {};
+  final Map<String, String> _codecs = {};
 
   /// 该格式是否需要在服务器侧转码。
   bool isTranscodeNeeded(String? format) {
@@ -63,26 +93,71 @@ class FeiNiuTranscodeService {
     final cached = _formats[song.id];
     if (cached != null) return cached;
 
-    // 本歌曲的 metadata 解析去重：并发调用复用同一个在途 Future
+    // 与 resolvedCodecFor 共享同一次 metadata 请求：拉取时同时提取并缓存
+    // format 与 codec，避免各发一次网络请求。
+    final spec = await _resolveSpec(song);
+    if (spec == null) return null;
+    final format = _extractFormat(spec)?.trim();
+    if (format != null && format.isNotEmpty) {
+      _formats[song.id] = format;
+    }
+    _cacheCodecFromSpec(song.id, spec);
+    return format;
+  }
+
+  /// 获取某首歌的**有效编码**（audioSpec.codec，如 eac3/alac/aac）。优先
+  /// `song.codec`（列表接口已带则直接用，零网络开销）；为空时先查会话内
+  /// codec 缓存，未命中再请求 `/track/metadata` 确认。
+  ///
+  /// 返回 null 表示无法确认编码（无需处理 / metadata 失败）。
+  Future<String?> resolvedCodecFor(SongEntity song) async {
+    final local = song.codec;
+    if (local != null && local.trim().isNotEmpty) return local.trim();
+
+    final cached = _codecs[song.id];
+    if (cached != null) return cached;
+
+    // 与 resolvedFormatFor 共享同一次 metadata 请求。
+    final spec = await _resolveSpec(song);
+    if (spec == null) return null;
+    final codec = _extractCodec(spec)?.trim();
+    if (codec != null && codec.isNotEmpty) {
+      _codecs[song.id] = codec;
+    }
+    _cacheFormatFromSpec(song.id, spec);
+    return codec;
+  }
+
+  /// 拉取一次 metadata。并发调用去重：复用同一个在途 Future。
+  /// metadata 失败返回 null（按无需处理，不阻塞播放）。
+  Future<Map<String, dynamic>?> _resolveSpec(SongEntity song) async {
     final inflight = _formatInflight[song.id];
     if (inflight != null) return inflight;
 
     final future = () async {
       try {
-        final meta = await _api.trackMetadata(song.id);
-        final format = _extractFormat(meta)?.trim();
-        if (format != null && format.isNotEmpty) {
-          _formats[song.id] = format;
-        }
-        return format;
+        return await _api.trackMetadata(song.id);
       } catch (_) {
-        // metadata 失败：无法确认格式 → 按无需转码处理，不阻塞播放
         return null;
       }
     }();
     _formatInflight[song.id] = future;
     future.whenComplete(() => _formatInflight.remove(song.id));
     return future;
+  }
+
+  void _cacheFormatFromSpec(String songId, Map<String, dynamic> spec) {
+    final format = _extractFormat(spec)?.trim();
+    if (format != null && format.isNotEmpty) {
+      _formats[songId] = format;
+    }
+  }
+
+  void _cacheCodecFromSpec(String songId, Map<String, dynamic> spec) {
+    final codec = _extractCodec(spec)?.trim();
+    if (codec != null && codec.isNotEmpty) {
+      _codecs[songId] = codec;
+    }
   }
 
   /// 获取某首歌的 **FLAC HLS** 播放绝对地址。
@@ -133,6 +208,7 @@ class FeiNiuTranscodeService {
     _cache.remove(songId);
     _formatInflight.remove(songId);
     _formats.remove(songId);
+    _codecs.remove(songId);
   }
 
   /// 从 metadata 响应中提取格式（`data.audioSpec.format` 或
@@ -155,6 +231,26 @@ class FeiNiuTranscodeService {
     return null;
   }
 
+  /// 从 metadata 响应中提取编码（`data.audioSpec.codec` 或
+  /// `data.track.audioSpec.codec`，两者都存在）。镜像 [_extractFormat]。
+  String? _extractCodec(Map<String, dynamic>? meta) {
+    if (meta == null) return null;
+    final audioSpec = meta['audioSpec'];
+    if (audioSpec is Map<String, dynamic>) {
+      final codec = audioSpec['codec'];
+      if (codec is String && codec.isNotEmpty) return codec;
+    }
+    final track = meta['track'];
+    if (track is Map<String, dynamic>) {
+      final trackSpec = track['audioSpec'];
+      if (trackSpec is Map<String, dynamic>) {
+        final codec = trackSpec['codec'];
+        if (codec is String && codec.isNotEmpty) return codec;
+      }
+    }
+    return null;
+  }
+
   @visibleForTesting
   void setApiForTest(FeiNiuApiClient api) => _api = api;
 
@@ -163,6 +259,7 @@ class FeiNiuTranscodeService {
     _cache.clear();
     _formatInflight.clear();
     _formats.clear();
+    _codecs.clear();
   }
 
   @visibleForTesting
@@ -171,6 +268,7 @@ class FeiNiuTranscodeService {
     _cache.clear();
     _formatInflight.clear();
     _formats.clear();
+    _codecs.clear();
   }
 }
 

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:feiniu_music/app/router/app_router.dart';
 import 'package:feiniu_music/app/state/settings_layout_state.dart';
 import 'package:feiniu_music/components/layout/tablet_layout_host.dart';
+import 'package:feiniu_music/components/player/mini_player/mini_player_bar.dart';
 
 void main() {
   setUp(() {
@@ -70,5 +71,24 @@ void main() {
     AppLayoutSettings.playerRouteActive.value = false;
     await tester.pump();
     expect(sideMenuInvisible(tester), isFalse);
+  });
+
+  testWidgets('平板/TV 迷你播放器不覆盖侧边栏（侧栏底部设置入口可点击）',
+      (tester) async {
+    AppLayoutSettings.tvMode.value = true;
+    await tester.pumpWidget(buildHost());
+    await tester.pump();
+
+    // 迷你播放器全宽时 left 应为 drawerWidth（=侧边栏宽度），
+    // 不覆盖左侧侧边栏区域。
+    final miniPlayer = tester.widget<Positioned>(
+      find.ancestor(
+        of: find.byType(MiniPlayerBar),
+        matching: find.byType(Positioned),
+      ).first,
+    );
+    // 侧边栏宽度：TV 模式 (width*0.28).clamp(320,360)。测试窗口默认 800×600，
+    // width=800 → 800*0.28=224 → clamp 到 320。
+    expect(miniPlayer.left, 320);
   });
 }

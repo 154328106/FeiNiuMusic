@@ -244,10 +244,11 @@ class FeiNiuMusicApp extends StatelessWidget {
   }
 }
 
-/// TV 模式方向同步：`tv` 变化时锁定/解锁横屏。
+/// 方向同步：`tv` / 手动平板模式变化时按设备类型锁定/解锁方向。
 ///
 /// 自动检测或手动开关任一改变 tvMode，这里都会响应：TV 开启锁横屏，
-/// 关闭恢复竖屏（手机默认）。手机端 tv=false 时是 no-op。
+/// 关闭回到设备默认（平板自由旋转 / 手机锁竖屏）。手机端 tv=false 时
+/// 仍然锁竖屏（1.2.9 起的预期行为）；平板端则解锁四方向自由旋转。
 class _TvOrientationSync extends StatefulWidget {
   final bool tv;
   final Widget child;
@@ -260,27 +261,36 @@ class _TvOrientationSync extends StatefulWidget {
 
 class _TvOrientationSyncState extends State<_TvOrientationSync> {
   @override
+  void initState() {
+    super.initState();
+    // 首帧应用一次，覆盖 main() 里未处理的手动开关场景。
+    _applyOrientation(widget.tv);
+    // 运行中切换「平板模式」即时重设方向（平板解锁 / 手机锁竖屏）。
+    AppLayoutSettings.tabletMode.addListener(_handleTabletModeChanged);
+  }
+
+  @override
+  void dispose() {
+    AppLayoutSettings.tabletMode.removeListener(_handleTabletModeChanged);
+    super.dispose();
+  }
+
+  @override
   void didUpdateWidget(_TvOrientationSync oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.tv == widget.tv) return;
     _applyOrientation(widget.tv);
   }
 
-  @override
-  void initState() {
-    super.initState();
-    // 首帧应用一次，覆盖 main() 里未处理的手动开关场景。
-    _applyOrientation(widget.tv);
-  }
+  void _handleTabletModeChanged() => _applyOrientation(widget.tv);
 
   void _applyOrientation(bool tv) {
     SystemChrome.setPreferredOrientations(
-      tv
-          ? const [
-              DeviceOrientation.landscapeLeft,
-              DeviceOrientation.landscapeRight,
-            ]
-          : const [DeviceOrientation.portraitUp],
+      AppLayoutSettings.orientationsForDevice(
+        isTv: tv,
+        shortestSide: AppLayoutSettings.currentShortestSide(),
+        manualTabletMode: AppLayoutSettings.tabletMode.value,
+      ),
     );
   }
 

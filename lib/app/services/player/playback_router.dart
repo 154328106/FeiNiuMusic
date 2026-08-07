@@ -12,13 +12,21 @@ import 'player_engine.dart';
 /// - **media_kit**：
 ///   - 黑名单格式（dsf/dff/dsd/wma/ape/dts/aiff…）：ExoPlayer 原生无法解码，
 ///     media_kit 直连原始流，FFmpeg 软解。
+///   - 黑名单 codec（eac3/ac3/alac/dts/truehd/mlp…）：M4A/MP4 容器内常见的
+///     环绕声/无损编码，ExoPlayer 设备解码器支持因设备而异（解码器不可用或
+///     静默失败时进度条走但无声音），media_kit（FFmpeg）必定出声。
 ///   - **运行时升级**的歌曲（见 PlayerService `_mediaKitEscalateSongIds`）：
 ///     普通 FLAC 若 ExoPlayer 解码触发 32KB 帧缓冲超限（`Buffer too small`），
 ///     当场升级到 media_kit 无损解码。**只有这类 FLAC 才走 media_kit**。
 ///
 /// 未知/空格式走 just_audio 直连（与现状一致）：格式探测延后，播放出错由
 /// 引擎错误处理兜底。
-EngineKind routeForFormat(String? format) {
+EngineKind routeForFormat(String? format, {String? codec}) {
+  // codec 判断优先：eac3/ac3/alac 等 ExoPlayer 设备解码不可靠的编码直接
+  // 走 media_kit（FFmpeg），即使容器是 m4a（format 不在黑名单）。
+  if (FeiNiuTranscodeService.isMediaKitCodec(codec)) {
+    return EngineKind.mediaKit;
+  }
   if (format == null || format.isEmpty) return EngineKind.justAudio;
   final f = format.trim().toLowerCase();
   // 普通 FLAC 走系统解码（just_audio），不强制 media_kit。
@@ -27,9 +35,11 @@ EngineKind routeForFormat(String? format) {
       : EngineKind.justAudio;
 }
 
-/// 解析歌曲格式后返回引擎类型。格式解析走 `resolvedFormatFor`（会话内缓存），
-/// 对列表接口已带 `audioSpec.format` 的曲目零网络开销。
+/// 解析歌曲格式与编码后返回引擎类型。格式/编码解析走 `resolvedFormatFor` /
+/// `resolvedCodecFor`（会话内缓存），对列表接口已带 `audioSpec.format` /
+/// `audioSpec.codec` 的曲目零网络开销。
 Future<EngineKind> routeForSong(SongEntity song) async {
   final format = await FeiNiuTranscodeService.instance.resolvedFormatFor(song);
-  return routeForFormat(format);
+  final codec = await FeiNiuTranscodeService.instance.resolvedCodecFor(song);
+  return routeForFormat(format, codec: codec);
 }

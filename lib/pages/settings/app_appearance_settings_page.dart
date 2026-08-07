@@ -357,68 +357,6 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                   );
                 },
               ),
-              // 切歌通知：切歌时应用内弹出「正在播放」提示。
-              // 放在 TV 模式下，便于电视/平板大屏上看到下一首信息。
-              ValueListenableBuilder<bool>(
-                valueListenable: AppLayoutSettings.trackChangeNotify,
-                builder: (context, enabled, _) {
-                  return Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      AppSettingSwitchTile(
-                        title: '切歌弹窗',
-                        subtitle: enabled
-                            ? '切换歌曲时在界面顶部弹出正在播放的歌曲信息'
-                            : '切换歌曲时不弹出提示',
-                        value: enabled,
-                        onChanged: (value) {
-                          AppLayoutSettings.setTrackChangeNotify(value);
-                        },
-                      ),
-                      if (enabled)
-                        ValueListenableBuilder<int>(
-                          valueListenable:
-                              AppLayoutSettings.trackChangeToastDurationMs,
-                          builder: (context, ms, _) {
-                            final seconds = (ms / 1000).round();
-                            return AppSettingSlider(
-                              title: '提示时长',
-                              value: seconds.toDouble(),
-                              min: 2,
-                              max: 10,
-                              divisions: 8,
-                              valueText: '$seconds秒',
-                              onChanged: (next) {
-                                AppLayoutSettings
-                                    .setTrackChangeToastDurationMs(
-                                      (next * 1000).round(),
-                                    );
-                              },
-                            );
-                          },
-                        ),
-                      if (enabled)
-                        ValueListenableBuilder<double>(
-                          valueListenable:
-                              AppLayoutSettings.trackChangeToastScale,
-                          builder: (context, scale, _) {
-                            return AppSettingSlider(
-                              title: '卡片大小',
-                              value: scale,
-                              min: 1,
-                              max: 3,
-                              divisions: 20,
-                              valueText: '${scale.toStringAsFixed(1)}×',
-                              onChanged: (next) {
-                                AppLayoutSettings.setTrackChangeToastScale(next);
-                              },
-                            );
-                          },
-                        ),
-                    ],
-                  );
-                },
-              ),
               ValueListenableBuilder<bool>(
                 valueListenable: AppThemeSettings.dynamicColorEnabled,
                 builder: (context, enabled, _) {

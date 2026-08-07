@@ -161,7 +161,10 @@ class _TabletLayoutHostState extends State<TabletLayoutHost>
                     ),
                     if (AppLayoutSettings.effectiveTabletMode)
                       Positioned(
-                        left: 0,
+                        // 迷你播放器左侧对齐侧边栏右缘，不覆盖侧边栏
+                        // （侧边栏底部「设置」等入口需可点击）。动画期间随
+                        // 侧边栏一起滑入/滑出。
+                        left: drawerWidth * t,
                         right: 0,
                         bottom: bottomInset,
                         child: IgnorePointer(

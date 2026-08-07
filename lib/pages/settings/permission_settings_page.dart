@@ -41,6 +41,13 @@ class _PermissionSettingsPageState extends State<PermissionSettingsPage>
       icon: Icons.battery_saver_outlined,
       openSettingsOnly: true,
     ),
+    _PermissionItem(
+      permission: Permission.systemAlertWindow,
+      title: '悬浮窗权限',
+      description: '用于后台播放时在系统层级显示切歌悬浮卡片',
+      icon: Icons.picture_in_picture_alt_outlined,
+      openSettingsOnly: true,
+    ),
   ];
 
   @override

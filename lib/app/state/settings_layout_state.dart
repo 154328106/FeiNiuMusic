@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 enum AppNavigationStyle { drawer, bottomBar }
@@ -14,6 +15,8 @@ class AppLayoutSettings {
       'setting_track_change_toast_duration_ms';
   static const String _prefsTrackChangeToastScale =
       'setting_track_change_toast_scale';
+  static const String _prefsTrackChangeOverlayNotify =
+      'setting_track_change_overlay_notify';
 
   /// TV 首次启动的「向右打开播放页」提示是否已展示过。
   static bool _tvEdgeHintShown = true;
@@ -40,6 +43,9 @@ class AppLayoutSettings {
 
   /// 切歌通知开关：切歌时应用内弹出「正在播放」提示。
   static final ValueNotifier<bool> trackChangeNotify = ValueNotifier(false);
+
+  /// 切歌通知·应用外通知子开关：后台播放切歌时用悬浮窗显示（需悬浮窗权限）。
+  static final ValueNotifier<bool> trackChangeOverlayNotify = ValueNotifier(false);
 
   /// 切歌提示展示时长（毫秒），默认 3s，范围 2s–10s。
   static final ValueNotifier<int> trackChangeToastDurationMs =
@@ -68,6 +74,46 @@ class AppLayoutSettings {
     required double shortestSide,
   }) {
     return isTv || shortestSide >= tabletMinShortestSide;
+  }
+
+  /// 依据设备类型返回应启用的屏幕方向。
+  ///
+  /// - TV：恒横屏（左右两方向）；
+  /// - 平板（最短边 ≥ [tabletMinShortestSide]）或手动开启平板模式：
+  ///   四方向自由旋转（还原 1.2.9 之前的行为）；
+  /// - 手机：锁竖屏。
+  static List<DeviceOrientation> orientationsForDevice({
+    required bool isTv,
+    required double shortestSide,
+    bool manualTabletMode = false,
+  }) {
+    if (isTv) {
+      return const [
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ];
+    }
+    if (shortestSide >= tabletMinShortestSide || manualTabletMode) {
+      return const [
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ];
+    }
+    return const [DeviceOrientation.portraitUp];
+  }
+
+  /// 当前窗口逻辑尺寸最短边（dp），无视图时返回 0。
+  ///
+  /// 用 `WidgetsBinding.instance.platformDispatcher.views` 读取首个视图的
+  /// 物理尺寸 / devicePixelRatio，等价于 `MediaQuery.sizeOf(context).shortestSide`，
+  /// 但无需 BuildContext，可在 runApp 前的 main() 中调用。
+  static double currentShortestSide() {
+    final views = WidgetsBinding.instance.platformDispatcher.views;
+    if (views.isEmpty) return 0;
+    final view = views.first;
+    return (view.physicalSize / view.devicePixelRatio).shortestSide;
   }
 
   /// 首次使用：检测为 TV 或平板（大屏）时自动开启「切歌弹窗」开关。
@@ -113,6 +159,8 @@ class AppLayoutSettings {
     forceTvMode.value = prefs.getBool(_prefsForceTvMode) ?? false;
     _tvEdgeHintShown = prefs.getBool(_prefsTvEdgeHintShown) ?? false;
     trackChangeNotify.value = prefs.getBool(_prefsTrackChangeNotify) ?? false;
+    trackChangeOverlayNotify.value =
+        prefs.getBool(_prefsTrackChangeOverlayNotify) ?? false;
     trackChangeToastDurationMs.value = _clampTrackChangeDuration(
       prefs.getInt(_prefsTrackChangeToastDurationMs) ?? 3000,
     );
@@ -170,6 +218,12 @@ class AppLayoutSettings {
     trackChangeNotify.value = enabled;
   }
 
+  static Future<void> setTrackChangeOverlayNotify(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsTrackChangeOverlayNotify, enabled);
+    trackChangeOverlayNotify.value = enabled;
+  }
+
   static Future<void> setTrackChangeToastDurationMs(int ms) async {
     final clamped = _clampTrackChangeDuration(ms);
     final prefs = await SharedPreferences.getInstance();
@@ -194,6 +248,7 @@ class AppLayoutSettings {
     tvMode.value = false;
     _tvEdgeHintShown = true;
     trackChangeNotify.value = false;
+    trackChangeOverlayNotify.value = false;
     trackChangeToastDurationMs.value = 3000;
     trackChangeToastScale.value = 1.0;
     playerRouteActive.value = false;

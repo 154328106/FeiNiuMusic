@@ -12,6 +12,7 @@ class SongEntity {
   final int? sampleRate;
   final int? fileSize;
   final String? format;
+  final String? codec; // 音频编码（audioSpec.codec，如 eac3/alac/aac），路由层用于判断 ExoPlayer 是否可靠
   final bool isFavorite;
   final String? coverId;
   final String? audioSpec;
@@ -33,6 +34,7 @@ class SongEntity {
     this.sampleRate,
     this.fileSize,
     this.format,
+    this.codec,
     this.isFavorite = false,
     this.coverId,
     this.audioSpec,
@@ -102,6 +104,7 @@ class SongEntity {
       'sampleRate': sampleRate,
       'fileSize': fileSize,
       'format': format,
+      'codec': codec,
       'isFavorite': isFavorite ? 1 : 0,
       'coverId': coverId,
       'audioSpec': audioSpec,
@@ -131,6 +134,7 @@ class SongEntity {
       sampleRate: parseInt(map['sampleRate']),
       fileSize: parseInt(map['fileSize']),
       format: map['format']?.toString(),
+      codec: map['codec']?.toString(),
       isFavorite: map['isFavorite'] == true || map['isFavorite'] == 1,
       coverId: map['coverId']?.toString(),
       audioSpec: map['audioSpec']?.toString(),
@@ -154,6 +158,7 @@ class SongEntity {
     int? sampleRate,
     int? fileSize,
     String? format,
+    String? codec,
     bool? isFavorite,
     String? coverId,
     String? audioSpec,
@@ -175,6 +180,7 @@ class SongEntity {
       sampleRate: sampleRate ?? this.sampleRate,
       fileSize: fileSize ?? this.fileSize,
       format: format ?? this.format,
+      codec: codec ?? this.codec,
       isFavorite: isFavorite ?? this.isFavorite,
       coverId: coverId ?? this.coverId,
       audioSpec: audioSpec ?? this.audioSpec,

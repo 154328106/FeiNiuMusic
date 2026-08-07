@@ -632,8 +632,8 @@ class _PlayerStyleSelector extends StatelessWidget {
   Widget build(BuildContext context) {
     // 每张卡片等宽（Spacer 占位）+ 尾部留 10px 间距，保证两个预览图
     // 宽度一致 → AspectRatio 高度一致，避免 classic/poster 卡片大小不一。
-    // TV 端：两卡并排 + 遥控器导航，限制整体宽度防止预览占满横屏。
-    final isTv = AppLayoutSettings.tvMode.value;
+    // TV/平板大屏：两卡并排 + 遥控器导航，限制整体宽度防止预览占满横屏。
+    final isLarge = AppLayoutSettings.effectiveTabletMode;
     final row = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: PlayerStylePreset.values.map((preset) {
@@ -646,7 +646,7 @@ class _PlayerStyleSelector extends StatelessWidget {
         );
       }).toList(),
     );
-    if (!isTv) return row;
+    if (!isLarge) return row;
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 860),

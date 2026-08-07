@@ -23,9 +23,11 @@ class FeiNiuApiClient {
           for (final monitor in _reconnectMonitors) {
             monitor(error);
           }
-          // 401 时自动清除 token，交给 AuthService 处理
-          if (error.response?.statusCode == 401) {
-            _clearToken();
+          // HTTP 401 → 会话失效，交由高层恢复（静默重登或强制登出）。
+          // 仅在已持有 token 时触发：登录请求（无有效 token）返回 401 属正常
+          // 登录失败，不应走会话失效恢复。
+          if (_token.isNotEmpty && error.response?.statusCode == 401) {
+            onSessionExpired?.call();
           }
           handler.next(error);
         },
@@ -33,6 +35,11 @@ class FeiNiuApiClient {
           // 收到响应即表示服务器可达，通知连接恢复监听器
           for (final monitor in _recoveryMonitors) {
             monitor();
+          }
+          // 会话失效：HTTP 401 或业务码 INVALID TOKEN（validateStatus 全接受，
+          // 401 走 onResponse；INVALID TOKEN 是 HTTP 200 + 业务 code≠0）。
+          if (_token.isNotEmpty && _isSessionExpired(response)) {
+            onSessionExpired?.call();
           }
           // 全局处理 3xx 重定向（手动跟随以保持自定义 Cookie）
           final statusCode = response.statusCode ?? 0;
@@ -50,6 +57,25 @@ class FeiNiuApiClient {
         },
       ),
     );
+  }
+
+  /// 判断响应是否表示会话失效（token 过期/被拒）。
+  ///
+  /// - HTTP 401；
+  /// - 业务码 401；
+  /// - 业务 msg 含 INVALID TOKEN（服务器对失效 token 的典型返回，HTTP 200 承载）。
+  bool _isSessionExpired(Response response) {
+    if (response.statusCode == 401) return true;
+    final data = response.data;
+    if (data is Map<String, dynamic>) {
+      final code = data['code'];
+      if (code == 401) return true;
+      final msg = data['msg'];
+      if (msg is String && msg.toLowerCase().contains('invalid token')) {
+        return true;
+      }
+    }
+    return false;
   }
 
   static final FeiNiuApiClient instance = FeiNiuApiClient._();
@@ -99,9 +125,12 @@ class FeiNiuApiClient {
     _relayMode = value;
   }
 
-  /// 401 导致 token 被自动清除时的回调（供 AccountStore 同步已保存账号状态）。
-  /// 仅在 401 拦截器路径触发，登出（clearAuth）不会触发。
-  VoidCallback? onTokenCleared;
+  /// 会话失效回调（HTTP 401 或业务码 INVALID TOKEN）。
+  ///
+  /// 由 [AccountStore] 注册，内部实现静默重登或强制登出（见
+  /// [AccountStore.handleTokenExpired]）。登录（password-login）请求自身
+  /// 不会携带有效 token，应排除在外。
+  VoidCallback? onSessionExpired;
 
   /// 从 SharedPreferences 读取已存储的 token、serverUrl 和 relay 模式
   Future<bool> tryLoadAuth() async {
@@ -147,16 +176,6 @@ class FeiNiuApiClient {
   }
 
   /// 清除认证凭据
-  void _clearToken() {
-    _token = '';
-    SharedPreferences.getInstance().then((prefs) {
-      prefs.remove('feiniu_music_token');
-      prefs.remove('feiniu_server_url');
-      prefs.remove('feiniu_relay_mode');
-    });
-    onTokenCleared?.call();
-  }
-
   Future<void> clearAuth() async {
     _token = '';
     _baseUrl = '';

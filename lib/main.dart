@@ -12,7 +12,7 @@ import 'app/services/fn_auto_reconnect_service.dart';
 import 'app/services/island_lyric_service.dart';
 import 'app/services/media_notification_service.dart';
 import 'app/services/tv_detection.dart';
-import 'app/services/track_change_toast_service.dart';
+import 'app/services/track_change_overlay_service.dart';
 import 'app/services/feiniu/account_store.dart';
 import 'app/services/feiniu/api_client.dart';
 import 'app/services/feiniu/auth_service.dart';
@@ -51,13 +51,15 @@ Future<void> main() async {
   // 合并自动检测 + 设置页手动强制开关，写入 tvMode。
   TvDetectionAutoValue.value = isTvDevice;
   AppLayoutSettings.syncTvMode();
-  // TV 恒横屏：运行时锁定方向，manifest 不强制（避免连带手机横屏）。
-  if (AppLayoutSettings.tvMode.value) {
-    await SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
-  }
+  // 按设备类型锁定方向：TV 恒横屏；平板（或手动平板模式）四方向自由旋转；
+  // 手机锁竖屏。运行中开关切换由 app.dart 的 _TvOrientationSync 负责再应用。
+  await SystemChrome.setPreferredOrientations(
+    AppLayoutSettings.orientationsForDevice(
+      isTv: AppLayoutSettings.tvMode.value,
+      shortestSide: AppLayoutSettings.currentShortestSide(),
+      manualTabletMode: AppLayoutSettings.tabletMode.value,
+    ),
+  );
   // 必须先恢复认证信息（token / 服务器地址）再初始化播放相关服务：
   // MediaNotificationService.init() 会实例化 PlayerService，其启动恢复流程
   // （含「进入应用自动播放」）依赖 FeiNiuApiClient.baseUrl 已就绪，
@@ -72,13 +74,15 @@ Future<void> main() async {
   await MediaNotificationService.init();
   // 切歌通知监听：PlayerService 已构造（MediaNotificationService.init 内），
   // AppLayoutSettings 已在上面 ensureLoaded，可安全订阅 currentSong。
-  TrackChangeToastService.start();
+  // AppThemeSettings 需先 ensureLoaded：TrackChangeOverlayService 在切歌时
+  // 用主题设置计算悬浮窗卡片配色（computeCardColors），若未加载会读到默认值。
+  await AppThemeSettings.ensureLoaded();
+  TrackChangeOverlayService.start();
   // 通知歌词灵动岛监听：依赖 PlayerService 与 LyricsService 已就绪。
   // 设置懒加载（IslandLyricSettings.ensureLoaded）由设置页与 start 内部处理，
   // 默认关闭不打扰。
   await IslandLyricSettings.ensureLoaded();
   IslandLyricService.start();
-  await AppThemeSettings.ensureLoaded();
   await AppBackgroundSettings.ensureLoaded();
   await AppFnConnectionSettings.ensureLoaded();
   // 已保存账号列表初始化：迁移/校正当前账号，并注册 401 token 同步回调。

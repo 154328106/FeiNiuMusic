@@ -8,6 +8,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.net.Uri
 import android.os.Environment
 import android.os.Build
@@ -22,6 +23,7 @@ import io.github.proify.lyricon.lyric.model.Song
 import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
 import com.feiniu.music.island.IslandLyricNotification
+import com.feiniu.music.track_change.OverlayTrackChange
 import com.feiniu.music.R
 
 class MainActivity : AudioServiceActivity() {
@@ -222,11 +224,54 @@ class MainActivity : AudioServiceActivity() {
                 else -> result.notImplemented()
             }
         }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.feiniu.music/track_change_overlay"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "show" -> {
+                    val title = call.argument<String>("title") ?: ""
+                    val artist = call.argument<String>("artist") ?: ""
+                    val coverPath = call.argument<String>("coverPath")
+                    val durationMs = call.argument<Number>("durationMs")?.toLong() ?: 3000L
+                    val isLarge = call.argument<Boolean>("isLarge") ?: false
+                    val scale = call.argument<Double>("scale") ?: 1.0
+                    // 颜色为 32 位 ARGB（如 0xFFFFFFFF 超出 Java int 范围），
+                    // Flutter 会编码为 Long，必须用 Number 统一读取再转 Int。
+                    val isDark = call.argument<Boolean>("isDark") ?: false
+                    val cardColor = (call.argument<Number>("cardColor")?.toInt()) ?: 0xFF262A30.toInt()
+                    val textColor = (call.argument<Number>("textColor")?.toInt()) ?: Color.WHITE
+                    val secondaryColor = (call.argument<Number>("secondaryColor")?.toInt()) ?: 0xFFB0B3B8.toInt()
+                    val accentColor = (call.argument<Number>("accentColor")?.toInt()) ?: 0xFF3B82F6.toInt()
+                    overlayTrackChange.show(
+                        title, artist, coverPath, durationMs, isLarge, scale,
+                        isDark, cardColor, textColor, secondaryColor, accentColor
+                    )
+                    result.success(null)
+                }
+                "updateCover" -> {
+                    val coverPath = call.argument<String>("coverPath")
+                    overlayTrackChange.updateCover(coverPath)
+                    result.success(null)
+                }
+                "hide" -> {
+                    overlayTrackChange.hide()
+                    result.success(null)
+                }
+                "hasOverlayPermission" -> result.success(overlayTrackChange.hasOverlayPermission())
+                "openOverlaySettings" -> result.success(overlayTrackChange.openOverlaySettings())
+                else -> result.notImplemented()
+            }
+        }
     }
 
     /** 单一实例持有，保证歌词行去重 / 节流状态在多次 MethodChannel 调用间保持。 */
     private val islandLyricNotification: IslandLyricNotification by lazy {
         IslandLyricNotification(applicationContext)
+    }
+
+    private val overlayTrackChange: OverlayTrackChange by lazy {
+        OverlayTrackChange(applicationContext)
     }
 
     /**

@@ -106,4 +106,17 @@ void main() {
     AppLayoutSettings.resetForTest();
     expect(AppLayoutSettings.trackChangeToastScale.value, 1.0);
   });
+
+  test('应用外通知子开关默认关闭，可持久化读写与复位', () async {
+    await AppLayoutSettings.ensureLoaded();
+    expect(AppLayoutSettings.trackChangeOverlayNotify.value, false);
+
+    await AppLayoutSettings.setTrackChangeOverlayNotify(true);
+    expect(AppLayoutSettings.trackChangeOverlayNotify.value, true);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('setting_track_change_overlay_notify'), true);
+
+    AppLayoutSettings.resetForTest();
+    expect(AppLayoutSettings.trackChangeOverlayNotify.value, false);
+  });
 }
