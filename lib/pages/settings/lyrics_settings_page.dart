@@ -33,6 +33,10 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
   /// 是否 HyperOS/MIUI 设备（「息屏通知设置」跳转行仅在其上显示）。
   late final _isHyperOs = createSignal(false);
 
+  /// 灵动岛 / 焦点通知能力（探测结果决定显示哪些通知类型开关）。
+  late final _capabilities =
+      createSignal<IslandCapabilities>(IslandCapabilities.none);
+
   @override
   void initState() {
     super.initState();
@@ -55,7 +59,29 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
     await LyricsService.instance.refreshSettings();
     // 探测当前设备是否 HyperOS（决定是否显示「息屏通知设置」跳转行）。
     _isHyperOs.value = await IslandLyricService.isHyperOs();
+    // 探测灵动岛 / 焦点通知能力（决定显示哪些通知类型开关）。
+    final caps = await IslandLyricService.queryCapabilities();
+    if (!mounted) return;
+    _capabilities.value = caps;
+    _ensureNotificationTypeAvailable(caps);
     _loading.value = false;
+  }
+
+  /// 若当前保存的通知类型在当前设备上不可用，回退到可用的默认类型
+  /// （优先实时通知，其次焦点通知；都不可用时整个区块会被隐藏）。
+  void _ensureNotificationTypeAvailable(IslandCapabilities caps) {
+    final liveAvailable = caps.liveEnabled;
+    final focusAvailable = caps.focusEnabled;
+    final current = IslandLyricSettings.notificationType.value;
+    final currentAvailable = current == IslandLyricSettings.typeLive
+        ? liveAvailable
+        : focusAvailable;
+    if (currentAvailable) return;
+    if (liveAvailable) {
+      IslandLyricSettings.setNotificationType(IslandLyricSettings.typeLive);
+    } else if (focusAvailable) {
+      IslandLyricSettings.setNotificationType(IslandLyricSettings.typeFocus);
+    }
   }
 
   Future<void> _updateBool(String key, bool value) async {
@@ -100,6 +126,24 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
         type: ToastType.error,
       );
     }
+  }
+
+  /// 切换「Shizuku 绕过白名单」：开启前先探测 Shizuku 授权，
+  /// 未授权则拉起系统授权弹窗，授权成功才真正开启。
+  Future<void> _setBypassFocusLimit(bool value) async {
+    if (value) {
+      final granted = await IslandLyricService.checkShizukuGranted();
+      if (!mounted) return;
+      if (!granted) {
+        AppToast.show(
+          context,
+          'Shizuku 未授权或未运行，无法开启绕过',
+          type: ToastType.error,
+        );
+        return;
+      }
+    }
+    await IslandLyricSettings.setBypassFocusLimit(value);
   }
 
   @override
@@ -168,80 +212,8 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
               AppSettingSection(
                 title: '通知歌词灵动岛',
                 children: [
-                  ValueListenableBuilder<bool>(
-                    valueListenable: IslandLyricSettings.enabled,
-                    builder: (context, enabled, _) {
-                      return AppSettingSwitchTile(
-                        title: '灵动岛歌词',
-                        subtitle: '播放有歌词的歌曲时，在系统灵动岛显示当前歌词行'
-                            '（仅支持Android 16+,仅在HyperOS 3.3+上测试通过）',
-                        value: enabled,
-                        onChanged: (value) {
-                          IslandLyricSettings.setEnabled(value);
-                        },
-                      );
-                    },
-                  ),
-                  // 子选项随「灵动岛歌词」主开关显示/隐藏：未开启时隐藏
-                  ValueListenableBuilder<bool>(
-                    valueListenable: IslandLyricSettings.enabled,
-                    builder: (context, enabled, _) {
-                      if (!enabled) return const SizedBox.shrink();
-                      return Column(
-                        children: [
-                          ValueListenableBuilder<bool>(
-                            valueListenable: IslandLyricSettings.showProgress,
-                            builder: (context, showProgress, _) {
-                              return AppSettingSwitchTile(
-                                title: '显示播放进度',
-                                subtitle: '在灵动岛小胶囊上显示播放进度',
-                                value: showProgress,
-                                onChanged: (value) {
-                                  IslandLyricSettings.setShowProgress(value);
-                                },
-                              );
-                            },
-                          ),
-                          ValueListenableBuilder<bool>(
-                            valueListenable: IslandLyricSettings.aodLyrics,
-                            builder: (context, aodLyrics, _) {
-                              return AppSettingSwitchTile(
-                                title: '息屏歌词',
-                                subtitle: '息屏时在通知标题显示当前歌词（封面+歌词）；'
-                                    '建议配合关闭系统息屏通知使用\n'
-                                    '（仅 HyperOS 3.3 上测试通过）',
-                                value: aodLyrics,
-                                onChanged: (value) {
-                                  IslandLyricSettings.setAodLyrics(value);
-                                },
-                              );
-                            },
-                          ),
-                          if (_isHyperOs.value)
-                            AppSettingTile(
-                              title: '息屏通知设置',
-                              subtitle: '跳转到系统息屏通知设置页，'
-                                  '关闭息屏通知以配合息屏歌词使用避免被系统息屏重复亮屏',
-                              onTap: _openAodSettings,
-                            ),
-                          ValueListenableBuilder<bool>(
-                            valueListenable: IslandLyricSettings.testMode,
-                            builder: (context, testMode, _) {
-                              return AppSettingSwitchTile(
-                                title: '测试模式',
-                                subtitle: '不播放音乐时也持续模拟发送通知，'
-                                    '验证暂停/无播放时灵动岛是否仍能显示',
-                                value: testMode,
-                                onChanged: (value) {
-                                  IslandLyricSettings.setTestMode(value);
-                                },
-                              );
-                            },
-                          ),
-                        ],
-                      );
-                    },
-                  ),
+                  // 灵动岛歌词主开关 + 子选项：两者都不可用时整个区块隐藏
+                  ..._buildIslandSection(),
                 ],
               ),
             ],
@@ -249,5 +221,208 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
         );
       },
     );
+  }
+
+  /// 灵动岛设置区块内容。
+  ///
+  /// 按设备能力（[IslandCapabilities]）隐藏开关：
+  /// - 实时通知需 [IslandCapabilities.liveEnabled]（Android 16+）；
+  /// - 焦点通知需 [IslandCapabilities.focusEnabled]（HyperOS 3 + 支持岛 + 权限）；
+  /// - 两种模式都不可用时返回空（整个区块隐藏）。
+  List<Widget> _buildIslandSection() {
+    final caps = _capabilities.value;
+    final liveAvailable = caps.liveEnabled;
+    final focusAvailable = caps.focusEnabled;
+    if (!liveAvailable && !focusAvailable) return const [];
+
+    return [
+      ValueListenableBuilder<bool>(
+        valueListenable: IslandLyricSettings.enabled,
+        builder: (context, enabled, _) {
+          return AppSettingSwitchTile(
+            title: '灵动岛歌词',
+            subtitle: '播放有歌词的歌曲时，在系统灵动岛显示当前歌词行'
+                '（实时通知需 Android 16+，HyperOS 需 3.0.300+，'
+                'ColorOS/OneUI/AOSP 社区支持；焦点通知需 HyperOS 3.0 + '
+                'Android 15+）',
+            value: enabled,
+            onChanged: (value) {
+              IslandLyricSettings.setEnabled(value);
+            },
+          );
+        },
+      ),
+      // 子选项随「灵动岛歌词」主开关显示/隐藏：未开启时隐藏
+      ValueListenableBuilder<bool>(
+        valueListenable: IslandLyricSettings.enabled,
+        builder: (context, enabled, _) {
+          if (!enabled) return const SizedBox.shrink();
+          return Column(
+            children: [
+              // 通知类型：实时通知（无 root/Shizuku）vs 焦点通知
+              ValueListenableBuilder<int>(
+                valueListenable: IslandLyricSettings.notificationType,
+                builder: (context, type, _) {
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '通知类型',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: SegmentedButton<int>(
+                            segments: [
+                              if (liveAvailable)
+                                const ButtonSegment(
+                                  value: IslandLyricSettings.typeLive,
+                                  icon: Icon(
+                                    Icons.notifications_active_outlined,
+                                  ),
+                                  label: Text('实时通知'),
+                                ),
+                              if (focusAvailable)
+                                const ButtonSegment(
+                                  value: IslandLyricSettings.typeFocus,
+                                  icon: Icon(
+                                    Icons.notification_important_outlined,
+                                  ),
+                                  label: Text('焦点通知'),
+                                ),
+                            ],
+                            selected: {type},
+                            showSelectedIcon: false,
+                            onSelectionChanged: (selection) {
+                              IslandLyricSettings.setNotificationType(
+                                selection.first,
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          type == IslandLyricSettings.typeLive
+                              ? '实时通知（实况通知）：无 root/Shizuku，'
+                                  '走系统实时通知接口上岛。支持小米 '
+                                  'HyperOS（3.0.300+，已验证）、ColorOS、'
+                                  'OneUI、AOSP（社区支持），需 Android 16+'
+                              : '焦点通知（小米超级岛）：走 MIUI 焦点通知上岛，'
+                                  '需 HyperOS 3.0 + Android 15+。'
+                                  '需将本应用加入系统焦点通知白名单'
+                                  '（或开启下方 Shizuku 绕过）',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+              // Shizuku 绕过焦点通知白名单：仅焦点通知需要白名单，
+              // 实时通知无需此开关（无 root 直接上岛）。
+              ValueListenableBuilder<int>(
+                valueListenable: IslandLyricSettings.notificationType,
+                builder: (context, type, _) {
+                  if (type != IslandLyricSettings.typeFocus) {
+                    return const SizedBox.shrink();
+                  }
+                  return ValueListenableBuilder<bool>(
+                    valueListenable: IslandLyricSettings.bypassFocusLimit,
+                    builder: (context, bypass, _) {
+                      return AppSettingSwitchTile(
+                        title: 'Shizuku 绕过白名单',
+                        subtitle: '通过 Shizuku 在发送时短暂拦截 XMSF 网络'
+                            '以绕过焦点通知白名单（需已授予 Shizuku 权限）'
+                            '。注意：可能导致耗电增加或消息延迟',
+                        value: bypass,
+                        onChanged: _setBypassFocusLimit,
+                      );
+                    },
+                  );
+                },
+              ),
+              ValueListenableBuilder<bool>(
+                valueListenable: IslandLyricSettings.showProgress,
+                builder: (context, showProgress, _) {
+                  return AppSettingSwitchTile(
+                    title: '显示播放进度',
+                    subtitle: '在灵动岛小胶囊上显示播放进度',
+                    value: showProgress,
+                    onChanged: (value) {
+                      IslandLyricSettings.setShowProgress(value);
+                    },
+                  );
+                },
+              ),
+              // 息屏歌词：焦点通知下可开/关；实时通知下息屏歌词由系统
+              // 实时动态自带（关不掉），开关显示为置灰常开，但关闭状态
+              // 仍透传给 service 层。
+              ValueListenableBuilder<int>(
+                valueListenable: IslandLyricSettings.notificationType,
+                builder: (context, type, _) {
+                  final isLive = type == IslandLyricSettings.typeLive;
+                  return Column(
+                    children: [
+                      ValueListenableBuilder<bool>(
+                        valueListenable: IslandLyricSettings.aodLyrics,
+                        builder: (context, aodLyrics, _) {
+                          // 反向语义：开 = 息屏显示歌曲名；关（默认）=
+                          // 息屏显示歌词。实时通知下开关不可操作，
+                          // 显示为关闭（默认）；但实际设置值仍透传。
+                          return AppSettingSwitchTile(
+                            title: '息屏显示为歌名',
+                            subtitle: isLive
+                                ? '实时通知不支持，保持关闭'
+                                : '开启后息屏显示歌曲名；关闭则息屏显示当前歌词'
+                                    '（封面+歌词）',
+                            value: isLive ? false : aodLyrics,
+                            onChanged: isLive
+                                ? null
+                                : (value) {
+                                    IslandLyricSettings.setAodLyrics(value);
+                                  },
+                          );
+                        },
+                      ),
+                      if (_isHyperOs.value)
+                        AppSettingTile(
+                          title: '息屏通知设置',
+                          subtitle: '跳转到系统息屏通知设置页，'
+                              '关闭息屏通知以配合息屏歌词使用避免被系统息屏重复亮屏',
+                          onTap: _openAodSettings,
+                        ),
+                    ],
+                  );
+                },
+              ),
+              ValueListenableBuilder<bool>(
+                valueListenable: IslandLyricSettings.testMode,
+                builder: (context, testMode, _) {
+                  return AppSettingSwitchTile(
+                    title: '测试模式',
+                    subtitle: '不播放音乐时也持续模拟发送通知，'
+                        '验证暂停/无播放时灵动岛是否仍能显示',
+                    value: testMode,
+                    onChanged: (value) {
+                      IslandLyricSettings.setTestMode(value);
+                    },
+                  );
+                },
+              ),
+            ],
+          );
+        },
+      ),
+    ];
   }
 }

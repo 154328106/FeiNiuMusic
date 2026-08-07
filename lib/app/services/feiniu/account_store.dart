@@ -368,15 +368,28 @@ class AccountStore {
     final list = List<AccountEntry>.from(accounts.value);
     final index = list.indexWhere((e) => e.id == id);
     if (index < 0) return;
+    final isCurrent = currentAccountId.value == id;
     list.removeAt(index);
     accounts.value = list;
-    if (currentAccountId.value == id) {
-      currentAccountId.value = list.isEmpty ? null : list.first.id;
+    if (isCurrent) {
+      if (list.isEmpty) {
+        currentAccountId.value = null;
+      } else {
+        // 删除的是当前账号 → 激活账号将切到剩余第一个。先清空旧账号数据缓存
+        // （顺序：清缓存 → 再设 currentAccountId，避免新外壳读到旧缓存），
+        // 重建后的界面直接渲染新账号数据。
+        await _clearDataCaches();
+        currentAccountId.value = list.first.id;
+      }
     }
     await _persist();
   }
 
   /// 登录成功后捕获账号并入列表（供登录页调用）。
+  ///
+  /// 登录成功意味着激活账号变更（可能换了服务器/账号），先清空上一账号的
+  /// 数据缓存（内存 + SQLite api_cache）并停止播放，避免新账号首页/列表
+  /// 先渲染旧账号缓存、点歌因服务器不匹配而无法播放。
   Future<AccountEntry> persistLogin({
     required String serverUrl,
     required String username,
@@ -400,6 +413,12 @@ class AccountStore {
         createdAt: DateTime.now(),
       ),
     );
+    // 登录成功意味着激活账号变更（可能换了服务器/账号），先清空上一账号的
+    // 数据缓存（内存 + SQLite api_cache）并停止播放，避免新账号首页/列表
+    // 先渲染旧账号缓存、点歌因服务器不匹配而无法播放。
+    // 注意顺序：必须在本方法里先清缓存再设 currentAccountId——设 currentAccountId
+    // 会触发门控重建外壳、新首页立即读 SQLite 缓存，若缓存未清会先渲染旧数据。
+    await _clearDataCaches();
     currentAccountId.value = entry.id;
     await _persist();
     return entry;
@@ -447,12 +466,36 @@ class AccountStore {
     );
     list[index] = updated;
     accounts.value = list;
+    // 编辑账号重新登录后服务器地址/身份可能已变，先清空旧数据缓存
+    // （顺序同上：须在设 currentAccountId 触发外壳重建前清完），
+    // 避免新账号首页/列表渲染旧服务器数据。
+    await _clearDataCaches();
     currentAccountId.value = id;
     await _persist();
     return updated;
   }
 
   // ── 激活 / 切换 ─────────────────────────────────────────────────────
+
+  /// 账号变更前清空数据缓存：停止播放、清空内存与 SQLite 层 API 缓存。
+  ///
+  /// 切换账号 / 登录新账号 / 编辑账号后，旧账号的缓存数据（首页 dashboard、
+  /// 列表页等）与新账号服务器不匹配：先渲染旧数据、点歌因服务器上没有对应
+  /// 歌曲而无法播放。此方法统一清理，让重建后的页面重拉新账号数据。
+  Future<void> _clearDataCaches() async {
+    // 停止播放（含清队列/持久化播放状态）
+    try {
+      await PlayerService.instance.stopAndClear();
+    } catch (_) {}
+    // 清空内存 API 缓存层
+    PageCacheStore.instance.clearAll();
+    // 清空 SQLite api_cache 表（不同服务器内容不串）
+    try {
+      await SongDao.instance.clearApiCache();
+    } catch (_) {}
+    // 触发缓存版本变更，令依赖缓存版本的页面重新拉取
+    CacheVersionStore.instance.bump('song_library');
+  }
 
   /// 把 [entry] 写入「当前激活账号槽位」。
   ///
@@ -506,18 +549,8 @@ class AccountStore {
     final entry = byId(id);
     if (entry == null || id == currentAccountId.value) return false;
 
-    // 停止播放（含清队列/持久化播放状态）
-    try {
-      await PlayerService.instance.stopAndClear();
-    } catch (_) {}
-    // 清空内存 API 缓存层
-    PageCacheStore.instance.clearAll();
-    // 清空 SQLite api_cache 表（不同服务器内容不串）
-    try {
-      await SongDao.instance.clearApiCache();
-    } catch (_) {}
-    // 触发缓存版本变更，令依赖缓存版本的页面重新拉取
-    CacheVersionStore.instance.bump('song_library');
+    // 账号切换前先清空上一账号的数据缓存并停止播放
+    await _clearDataCaches();
 
     // token 失效/为空但有密码 → 自动重新登录验证
     if (entry.token.isEmpty) {

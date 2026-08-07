@@ -566,6 +566,8 @@ class BottomActions extends StatelessWidget {
       isScrollControlled: true,
       builder: (_) => SongDetailSheet(
         song: song,
+        // 播放器右下角「⋯」打开：显示音量/倍速/解码器等播放控制
+        showPlayerControls: true,
         onOpenPlayerAppearanceSettings: () {
           Navigator.of(context).pushNamed(AppRoutes.playerAppearanceSettings);
         },
@@ -1504,6 +1506,8 @@ void showPosterSongDetailSheet(BuildContext context, PlayerService player) {
     isScrollControlled: true,
     builder: (_) => SongDetailSheet(
       song: song,
+      // 海报模式底部「更多」：显示播放控制
+      showPlayerControls: true,
       onOpenPlayerAppearanceSettings: () {
         Navigator.of(context).pushNamed(AppRoutes.playerAppearanceSettings);
       },

@@ -69,6 +69,68 @@ class SongEntity {
     }
   }
 
+  /// 解析第一个 artist 的 coverId（歌手自身图片）。
+  ///
+  /// artist JSON 由 [FeiNiuTrackService] 写入，携带 `coverId` 字段
+  /// （数据库/旧数据可能没有，返回 null）。
+  String? get firstArtistCoverId {
+    try {
+      final list = jsonDecode(artist) as List<dynamic>;
+      if (list.isEmpty) return null;
+      return (list.first as Map<String, dynamic>)['coverId'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 解析 artist JSON 中指定 guid 歌手的 coverId（多歌手时精确匹配，
+  /// 找不到返回 null）。
+  String? artistCoverIdForGuid(String? guid) {
+    if (guid == null || guid.isEmpty) return null;
+    try {
+      final list = jsonDecode(artist) as List<dynamic>;
+      for (final e in list) {
+        final m = e as Map<String, dynamic>;
+        if (m['guid'] == guid) return m['coverId'] as String?;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 解析 artist JSON 中指定名称歌手的 coverId（多歌手时按名精确匹配，
+  /// 找不到返回 null）。
+  String? artistCoverIdForName(String? name) {
+    if (name == null || name.isEmpty) return null;
+    try {
+      final list = jsonDecode(artist) as List<dynamic>;
+      for (final e in list) {
+        final m = e as Map<String, dynamic>;
+        if (m['name'] == name) return m['coverId'] as String?;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 解析 artist JSON 中指定名称歌手的 guid（多歌手时按名精确匹配，
+  /// 找不到返回 null）。
+  String? artistGuidForName(String? name) {
+    if (name == null || name.isEmpty) return null;
+    try {
+      final list = jsonDecode(artist) as List<dynamic>;
+      for (final e in list) {
+        final m = e as Map<String, dynamic>;
+        if (m['name'] == name) return m['guid'] as String?;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 解析 album JSON 获取专辑显示名
   String get albumDisplayName {
     try {

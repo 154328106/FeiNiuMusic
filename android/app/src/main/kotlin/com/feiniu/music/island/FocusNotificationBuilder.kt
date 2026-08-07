@@ -38,10 +38,12 @@ class FocusNotificationBuilder(
         }
 
         // 4. AOD / 状态栏
-        // 息屏歌词开启时，aodTitle = 完整歌词帧；否则 = 歌名
+        // 息屏歌词开关为反向语义：
+        // 开（aodLyrics=true）→ aodTitle = 歌名（息屏显示歌曲名）；
+        // 关（aodLyrics=false，默认）→ aodTitle = 完整歌词帧（息屏显示歌词）。
         paramV2.put(
             "aodTitle",
-            if (uiState.aodLyrics) uiState.fullLyric else uiState.notificationTitleLeft
+            if (uiState.aodLyrics) uiState.notificationTitleLeft else uiState.fullLyric
         )
         paramV2.put("aodPic", "miui.focus.pic_album")
 

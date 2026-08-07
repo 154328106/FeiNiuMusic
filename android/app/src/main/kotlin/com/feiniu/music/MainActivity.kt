@@ -10,9 +10,11 @@ import android.app.NotificationManager
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
+import android.os.Bundle
 import android.os.Environment
 import android.os.Build
 import android.provider.MediaStore
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -23,8 +25,13 @@ import io.github.proify.lyricon.lyric.model.Song
 import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
 import com.feiniu.music.island.IslandLyricNotification
+import com.feiniu.music.island.shizuku.ShizukuManager
 import com.feiniu.music.track_change.OverlayTrackChange
 import com.feiniu.music.R
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class MainActivity : AudioServiceActivity() {
     private val channelName = "com.feiniu.music/meizu_lyrics"
@@ -33,6 +40,7 @@ class MainActivity : AudioServiceActivity() {
     private val artworkChannelName = "com.feiniu.music/native_artwork"
     private val tvChannelName = "com.feiniu.music/tv"
     private val islandLyricChannelName = "com.feiniu.music/island_lyric"
+    private val islandShizukuChannelName = "com.feiniu.music/island_lyric_shizuku"
     private val notificationId = 10010
     private val notificationChannelId = "meizu_lyric_channel"
     private var flagShowTicker: Int? = null
@@ -195,6 +203,11 @@ class MainActivity : AudioServiceActivity() {
                         call.argument<Boolean>("showProgress") ?: true
                     val coverPath = call.argument<String>("coverPath")
                     val aodLyrics = call.argument<Boolean>("aodLyrics") ?: false
+                    val notificationType =
+                        (call.argument<Number>("notificationType") as? Number)?.toInt()
+                            ?: IslandLyricNotification.TYPE_FOCUS
+                    val bypassFocusLimit =
+                        call.argument<Boolean>("bypassFocusLimit") ?: false
                     islandLyricNotification.update(
                         leftLyric = leftLyric,
                         lyric = lyric,
@@ -206,7 +219,9 @@ class MainActivity : AudioServiceActivity() {
                         durationMs = durationMs,
                         showProgressSetting = showProgress,
                         coverPath = coverPath,
-                        aodLyrics = aodLyrics
+                        aodLyrics = aodLyrics,
+                        notificationType = notificationType,
+                        bypassFocusLimit = bypassFocusLimit
                     )
                     result.success(null)
                 }
@@ -220,6 +235,32 @@ class MainActivity : AudioServiceActivity() {
                 }
                 "isHyperOs" -> {
                     result.success(isHyperOs())
+                }
+                // 查询当前 OS 的灵动岛 / 焦点通知能力，供设置页按设备能力隐藏开关：
+                // - supportIsland: persist.sys.feature.island（是否支持岛）
+                // - focusProtocol: notification_focus_protocol（1=OS1, 2=OS2, 3=OS3，
+                //   仅 OS3 支持岛）
+                // - focusPermission: canShowFocus（应用焦点通知权限是否开启）
+                "queryCapabilities" -> {
+                    result.success(queryIslandCapabilities())
+                }
+                else -> result.notImplemented()
+            }
+        }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            islandShizukuChannelName
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "checkAvailable", "requestPermission" -> {
+                    // Shizuku 授权探测：必须在后台协程执行，绝不阻塞主线程。
+                    // checkShizukuPermission 未授权时会弹出系统授权框并挂起等待
+                    // 用户交互，用 runBlocking 堵住主线程会导致授权完成时
+                    // （尤其 Sui/root 场景）进程被卡死/闪退。
+                    shizukuScope.launch {
+                        val granted = ShizukuManager.checkShizukuPermission(packageName)
+                        result.success(granted)
+                    }
                 }
                 else -> result.notImplemented()
             }
@@ -274,6 +315,9 @@ class MainActivity : AudioServiceActivity() {
         OverlayTrackChange(applicationContext)
     }
 
+    /** Shizuku 授权探测作用域（后台协程，避免阻塞主线程导致授权时闪退）。 */
+    private val shizukuScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     /**
      * 跳转到 MIUI/HyperOS 息屏通知动画设置页（供息屏歌词提示用）。
      * 目标：com.miui.aod/.settings.NotificationAnimationSelectActivity。
@@ -320,6 +364,78 @@ class MainActivity : AudioServiceActivity() {
                 0
             ) != null
         } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
+            false
+        }
+    }
+
+    /**
+     * 查询当前 OS 的灵动岛 / 焦点通知能力（供设置页按设备能力隐藏开关）。
+     *
+     * 对齐小米官方文档（dev.mi.com 焦点通知）：
+     * - supportIsland: 反射读取 `persist.sys.feature.island`，是否支持岛功能；
+     * - focusProtocol: `notification_focus_protocol` 系统设置，1=OS1 焦点通知模板、
+     *   2=OS2 焦点通知模板、3=OS3 小米超级岛通知模板。OS2 与 OS3 模板不同，
+     *   且只在 OS3 版本上支持岛；
+     * - focusPermission: `canShowFocus`（content provider 调用，耗时操作），
+     *   当前应用焦点通知权限是否开启。权限关闭时通知不会以岛形式展示。
+     *
+     * 任一探测失败按「不支持」处理（安全降级，隐藏对应开关）。
+     */
+    private fun queryIslandCapabilities(): Map<String, Any> {
+        val supportIsland = isSupportIsland("persist.sys.feature.island", false)
+        val focusProtocol = try {
+            Settings.System.getInt(
+                contentResolver,
+                "notification_focus_protocol",
+                0
+            )
+        } catch (_: Throwable) {
+            0
+        }
+        val focusPermission = hasFocusPermission()
+
+        val result = HashMap<String, Any>(4)
+        result["supportIsland"] = supportIsland
+        result["focusProtocol"] = focusProtocol
+        result["focusPermission"] = focusPermission
+        // Android 版本号：实时通知（实况通知）需 Android 16+，供 Flutter 侧判定
+        result["androidSdk"] = Build.VERSION.SDK_INT
+        // HyperOS 3.0（OS3）+ 支持岛 + 应用焦点通知权限开启 → 焦点通知可用
+        result["focusEnabled"] = supportIsland && focusProtocol >= 3 && focusPermission
+        return result
+    }
+
+    /** 反射读取 SystemProperties 布尔值（小米文档提供的 isSupportIsland 实现）。 */
+    private fun isSupportIsland(key: String, defaultValue: Boolean): Boolean {
+        return try {
+            val clazz = Class.forName("android.os.SystemProperties")
+            val method = clazz.getDeclaredMethod("getBoolean", String::class.java, Boolean::class.java)
+            val obj = method.invoke(null, key, defaultValue)
+            if (obj !is Boolean) {
+                defaultValue
+            } else {
+                obj
+            }
+        } catch (_: Exception) {
+            defaultValue
+        }
+    }
+
+    /**
+     * 查询当前应用是否开启焦点通知权限。
+     *
+     * 耗时操作。OS1 之前无焦点通知功能的版本返回 false；OS1/OS2/OS3 上权限
+     * 关闭返回 false、开启返回 true。
+     */
+    private fun hasFocusPermission(): Boolean {
+        return try {
+            val uri = android.net.Uri.parse("content://miui.statusbar.notification.public")
+            val extras = Bundle().apply {
+                putString("package", packageName)
+            }
+            val bundle = contentResolver.call(uri, "canShowFocus", null, extras)
+            bundle?.getBoolean("canShowFocus", false) ?: false
+        } catch (_: Exception) {
             false
         }
     }

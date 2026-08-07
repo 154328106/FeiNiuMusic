@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:lpinyin/lpinyin.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
@@ -132,6 +133,20 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
 
   /// 已加载页数：首拉 page:1 size:200 一次拿完，后续填充从已加载页之后起。
   final int _loadedPages = 1;
+
+  /// 歌手自身 coverId：优先按 artistGuid 精确匹配（多歌手时不取错人），
+  /// 找不到则回退到第一个含 coverId 的歌手（服务端歌曲常只回填主要歌手）。
+  String? _artistCoverIdFor(List<SongEntity> songs, String? artistGuid) {
+    for (final s in songs) {
+      final byGuid = s.artistCoverIdForGuid(artistGuid);
+      if (byGuid != null && byGuid.isNotEmpty) return byGuid;
+    }
+    for (final s in songs) {
+      final byFirst = s.firstArtistCoverId;
+      if (byFirst != null && byFirst.isNotEmpty) return byFirst;
+    }
+    return null;
+  }
 
   @override
   void initState() {
@@ -270,19 +285,11 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       if (representative != null)
-                        ArtworkWidget(
-                          song: representative,
+                        _ArtistHeaderAvatar(
+                          coverId: _artistCoverIdFor(songs, widget.artistGuid),
+                          name: widget.artistName,
                           size: 110,
-                          borderRadius: 55,
-                          placeholder: CircleAvatar(
-                            radius: 55,
-                            child: Text(
-                              widget.artistName.isEmpty
-                                  ? '?'
-                                  : widget.artistName.substring(0, 1),
-                              style: const TextStyle(fontSize: 36),
-                            ),
-                          ),
+                          fallback: representative,
                         )
                       else
                         CircleAvatar(
@@ -1026,12 +1033,18 @@ class _AlbumDetailPageState extends State<AlbumDetailPage>
                       (s) => splitArtists(s.artistDisplayName).contains(artist),
                       orElse: () => songs.first,
                     );
+                    // 歌手自身图片：按歌手名精确匹配 coverId（多歌手时不取错人）；
+                    // 找不到则回退到该歌手参与的第一首歌封面。
+                    final artistCoverId = artistSong.artistCoverIdForName(artist) ??
+                        artistSong.firstArtistCoverId;
+                    // 歌手 guid：按名从歌曲中精确匹配，供打开歌手详情页拉取歌曲
+                    final artistGuid = artistSong.artistGuidForName(artist);
                     final initial = artist.isNotEmpty ? artist[0] : '?';
                     return ListTile(
-                      leading: ArtworkWidget(
-                        song: artistSong,
+                      leading: _ArtistCoverTile(
+                        coverId: artistCoverId,
                         size: 44,
-                        borderRadius: 22,
+                        fallback: artistSong,
                         placeholder: CircleAvatar(
                           radius: 22,
                           child: Text(initial),
@@ -1041,7 +1054,10 @@ class _AlbumDetailPageState extends State<AlbumDetailPage>
                       onTap: () {
                         Navigator.of(context).push(
                           buildAppPageRoute(
-                            (_) => ArtistDetailPage(artistName: artist),
+                            (_) => ArtistDetailPage(
+                              artistName: artist,
+                              artistGuid: artistGuid,
+                            ),
                           ),
                         );
                       },
@@ -1071,4 +1087,106 @@ class _AlbumGroup {
   final List<SongEntity> songs;
 
   const _AlbumGroup({required this.name, required this.songs});
+}
+
+/// 歌手头像：有歌手自身 coverId 时显示歌手图片，否则回退到代表性歌曲封面，
+/// 再不行显示首字母占位。头像为圆形（对齐歌手列表的 _ArtistAvatar）。
+class _ArtistHeaderAvatar extends StatelessWidget {
+  final String? coverId;
+  final String name;
+  final double size;
+  final SongEntity fallback;
+
+  const _ArtistHeaderAvatar({
+    required this.coverId,
+    required this.name,
+    required this.size,
+    required this.fallback,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = size / 2;
+    final initial = name.isNotEmpty ? name.characters.first : '?';
+
+    // 歌手自身图片
+    if (coverId != null && coverId!.isNotEmpty) {
+      final coverUrl = FeiNiuApiClient.instance.coverUrl(
+        coverId!,
+        size: (size * MediaQuery.devicePixelRatioOf(context)).round().clamp(120, 800),
+      );
+      return CircleAvatar(
+        radius: radius,
+        backgroundImage: CachedNetworkImageProvider(
+          coverUrl,
+          headers: FeiNiuApiClient.imageAuthHeaders(),
+        ),
+      );
+    }
+
+    // 无歌手图片：用代表性歌曲封面（原 ArtworkWidget 行为），圆角处理
+    return ClipOval(
+      child: ArtworkWidget(
+        song: fallback,
+        size: size,
+        borderRadius: radius,
+        placeholder: CircleAvatar(
+          radius: radius,
+          child: Text(initial),
+        ),
+      ),
+    );
+  }
+}
+
+/// 歌手头像条目：有歌手自身 coverId 时显示歌手图片，否则回退到歌曲封面，
+/// 再不行显示占位图。圆形裁剪（对齐歌手列表的 _ArtistAvatar）。
+class _ArtistCoverTile extends StatelessWidget {
+  final String? coverId;
+  final double size;
+  final SongEntity fallback;
+  final Widget placeholder;
+
+  const _ArtistCoverTile({
+    required this.coverId,
+    required this.size,
+    required this.fallback,
+    required this.placeholder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = size / 2;
+
+    // 歌手自身图片（按 DPR 请求清晰图，含 auth 头）
+    if (coverId != null && coverId!.isNotEmpty) {
+      final coverUrl = FeiNiuApiClient.instance.coverUrl(
+        coverId!,
+        size: (size * MediaQuery.devicePixelRatioOf(context)).round().clamp(120, 800),
+      );
+      return ClipOval(
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: CachedNetworkImage(
+            imageUrl: coverUrl,
+            httpHeaders: FeiNiuApiClient.imageAuthHeaders(),
+            fit: BoxFit.cover,
+            placeholder: (context, url) => placeholder,
+            errorWidget: (context, url, error) => placeholder,
+          ),
+        ),
+      );
+    }
+
+    // 无歌手图片：回退到该歌手参与的第一首歌封面
+    return ClipOval(
+      child: ArtworkWidget(
+        song: fallback,
+        size: size,
+        borderRadius: radius,
+        placeholder: placeholder,
+      ),
+    );
+  }
 }

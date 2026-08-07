@@ -26,6 +26,12 @@ android {
         isCoreLibraryDesugaringEnabled = true
     }
 
+    buildFeatures {
+        // Shizuku 特权服务：主工程含 AIDL（IPrivilegedService/IPrivilegedLogCallback），
+        // 需显式开启 AIDL 编译，否则生成的 Stub 接口不可用。
+        aidl = true
+    }
+
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_17.toString()
     }
@@ -131,6 +137,10 @@ android {
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     implementation("io.github.proify.lyricon:provider:0.1.68")
+    // Shizuku：歌词灵动岛焦点通知绕过系统白名单限制（ShizukuManager 等）。
+    // api 自带 rikka.sui.Sui（"API of Shizuku and Sui"），无需单独引入 sui。
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 }
 
 flutter {

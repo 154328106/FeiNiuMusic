@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_lyric/core/lyric_model.dart' as fl;
 
 import '../state/settings_island_lyric.dart';
 import 'cover_local_cache.dart';
@@ -26,6 +27,22 @@ class IslandLyricService {
   static const MethodChannel _channel = MethodChannel(
     'com.feiniu.music/island_lyric',
   );
+
+  /// Shizuku 绕过焦点通知白名单的通道（授权探测）。
+  static const MethodChannel _shizukuChannel = MethodChannel(
+    'com.feiniu.music/island_lyric_shizuku',
+  );
+
+  /// 探测 Shizuku 授权状态：服务运行且权限已授予。未授权时会拉起系统授权弹窗。
+  /// 用于「Shizuku 绕过白名单」开关打开前的授权检查。失败按未授权处理。
+  static Future<bool> checkShizukuGranted() async {
+    try {
+      final ok = await _shizukuChannel.invokeMethod<bool>('checkAvailable');
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
 
   /// 跳转到 MIUI/HyperOS 息屏通知动画设置页（供「息屏歌词」提示使用）。
   /// 无 root 时通过显式 Intent 启动；目标组件不存在 / 未导出时返回 false。
@@ -54,6 +71,36 @@ class IslandLyricService {
     return _isHyperOs!;
   }
 
+  /// 灵动岛 / 焦点通知能力探测结果。
+  ///
+  /// - [supportIsland]：`persist.sys.feature.island`，当前 OS 是否支持岛功能；
+  /// - [focusProtocol]：`notification_focus_protocol`，1=OS1 焦点通知模板、
+  ///   2=OS2 焦点通知模板、3=OS3 小米超级岛通知模板（仅 OS3 支持岛）；
+  /// - [focusPermission]：`canShowFocus`，当前应用焦点通知权限是否开启；
+  /// - [focusEnabled]：[supportIsland] && [focusProtocol]>=3 && [focusPermission]，
+  ///   即当前设备上「焦点通知」模式是否可用。
+  ///
+  /// 探测失败按「不支持」处理（安全降级，隐藏对应开关）。
+  static IslandCapabilities? _capabilities;
+  static Future<IslandCapabilities> queryCapabilities() async {
+    if (_capabilities != null) return _capabilities!;
+    try {
+      final raw = await _channel.invokeMapMethod<Object, Object>(
+        'queryCapabilities',
+      );
+      _capabilities = IslandCapabilities.fromMap(raw ?? const {});
+    } catch (_) {
+      _capabilities = IslandCapabilities.none;
+    }
+    return _capabilities!;
+  }
+
+  /// 测试专用：清空能力探测缓存，供测试重复探测。
+  @visibleForTesting
+  static void resetCapabilitiesForTest() {
+    _capabilities = null;
+  }
+
   /// 测试专用：清空 HyperOS 探测缓存，供测试重复探测。
   @visibleForTesting
   static void resetDeviceProbeForTest() {
@@ -70,6 +117,10 @@ class IslandLyricService {
   /// 避免焦点通知单侧文本被系统中间截断。每帧再对半分配到左右两侧。
   static const int _frameChars = 10;
 
+  /// 实时通知（shortCriticalText）单侧最多显示 7 个字：超过则智能截断，
+  /// 空格优先断点，取首帧作为灵动岛右侧歌词。
+  static const int _liveMaxChars = 7;
+
   static bool _started = false;
   static String? _lastLyricLine;
   static bool _lastIsPlaying = false;
@@ -77,6 +128,12 @@ class IslandLyricService {
   static Timer? _testModeTimer;
   static int _testTick = 0;
   static int _lastFrameIndex = 0;
+
+  /// 上次发送用的通知类型。切换类型时即使歌词未变也要重发（让实时/焦点切换即时生效）。
+  static int _lastNotificationType = IslandLyricSettings.typeLive;
+
+  /// 上次发送用的绕过状态。切换绕过开关时即使歌词未变也要重发（让绕过即时生效）。
+  static bool _lastBypassFocusLimit = false;
 
   // 封面相关状态
   static String? _lastSongId;
@@ -90,6 +147,8 @@ class IslandLyricService {
     IslandLyricSettings.enabled.addListener(_onSettingsChanged);
     IslandLyricSettings.testMode.addListener(_onSettingsChanged);
     IslandLyricSettings.aodLyrics.addListener(_onSettingsChanged);
+    IslandLyricSettings.notificationType.addListener(_onSettingsChanged);
+    IslandLyricSettings.bypassFocusLimit.addListener(_onSettingsChanged);
     LyricsService.instance.currentLineText.addListener(_onLyricLineChanged);
     PlayerService.instance.isPlaying.addListener(_onPlayingChanged);
     PlayerService.instance.position.addListener(_onPositionChanged);
@@ -104,6 +163,8 @@ class IslandLyricService {
     IslandLyricSettings.enabled.removeListener(_onSettingsChanged);
     IslandLyricSettings.testMode.removeListener(_onSettingsChanged);
     IslandLyricSettings.aodLyrics.removeListener(_onSettingsChanged);
+    IslandLyricSettings.notificationType.removeListener(_onSettingsChanged);
+    IslandLyricSettings.bypassFocusLimit.removeListener(_onSettingsChanged);
     LyricsService.instance.currentLineText.removeListener(_onLyricLineChanged);
     PlayerService.instance.isPlaying.removeListener(_onPlayingChanged);
     PlayerService.instance.position.removeListener(_onPositionChanged);
@@ -113,6 +174,8 @@ class IslandLyricService {
     _lastIsPlaying = false;
     _lastProgressSent = null;
     _lastFrameIndex = 0;
+    _lastNotificationType = IslandLyricSettings.typeLive;
+    _lastBypassFocusLimit = false;
     _lastSongId = null;
     _lastCoverId = null;
     _lastCoverPath = null;
@@ -164,6 +227,9 @@ class IslandLyricService {
       'positionMs': progress * 1000, // 模拟进度对应位置
       'durationMs': 100000, // 100s
       'showProgress': true,
+      // 测试模式同样尊重当前通知类型（实时/焦点），便于分别验证两条路径
+      'notificationType': IslandLyricSettings.notificationType.value,
+      'bypassFocusLimit': IslandLyricSettings.bypassFocusLimit.value,
     };
   }
 
@@ -255,6 +321,23 @@ class IslandLyricService {
     return true;
   }
 
+  /// 分隔符 rune 集合：空格、连字符、连接号、间隔号等。
+  ///
+  /// 拆帧时作为智能断点（避免把词从中间切开），且最终显示时被过滤掉
+  /// （不留存在帧内），避免灵动岛/通知上出现孤立的空格或连字符。
+  static const Set<int> _separators = {
+    0x20, // 空格
+    0x2D, // - 连字符
+    0x2013, // – en dash
+    0x2014, // — em dash
+    0x00B7, // · 间隔号
+    0x30FB, // ・ 片假名中黑点
+    0x7E, // ~
+    0xFF5E, // ～
+  };
+
+  static bool _isSeparator(int rune) => _separators.contains(rune);
+
   /// 超长歌词智能拆帧（纯函数）。
   ///
   /// 按 [frameChars] 字符数拆帧，每帧不超过该容量。优先在空格/词边界断，
@@ -262,23 +345,42 @@ class IslandLyricService {
   /// 时仍切成多帧（每帧不超容量）。短歌词单帧，空歌词无帧。所有帧拼接 =
   /// 完整歌词（无丢失）。
   ///
+  /// 分隔符（空格、连字符、间隔号等 [_separators]）作为断点使用，并在帧内
+  /// 被过滤：帧首尾和帧中的分隔符都不保留，避免灵动岛/通知上出现孤立
+  /// 分隔符。所有帧去掉分隔符后拼接 = 原歌词去掉分隔符（无内容丢失）。
+  ///
   /// 用途：焦点通知单侧文本超宽会被系统中间截断（隐藏中间字），拆帧后每帧
   /// 用满左右两侧、按行节奏切换，避免截断。
   @visibleForTesting
   static List<String> chunkLyric(String lyric, {required int frameChars}) {
     if (lyric.isEmpty) return const [];
     final chars = lyric.runes.toList();
-    if (chars.length <= frameChars) return [lyric.trim()];
+
+    final buildFrame = (int start, int end) {
+      // 过滤帧内的分隔符后返回文本；全是分隔符时返回空
+      final buf = StringBuffer();
+      for (var k = start; k < end; k++) {
+        if (!_isSeparator(chars[k])) {
+          buf.writeCharCode(chars[k]);
+        }
+      }
+      return buf.toString();
+    };
+
+    if (chars.length <= frameChars) {
+      final text = buildFrame(0, chars.length);
+      return text.isEmpty ? const [] : [text];
+    }
 
     final frames = <String>[];
     var i = 0;
     while (i < chars.length) {
       var end = (i + frameChars).clamp(0, chars.length);
-      // 智能断点：优先在最近的空格/词边界断，避免把词从中间切开
+      // 智能断点：优先在最近的分隔符/词边界断，避免把词从中间切开
       if (end < chars.length) {
         var boundary = -1;
         for (var j = end; j > i; j--) {
-          if (chars[j - 1] == 0x20) {
+          if (_isSeparator(chars[j - 1])) {
             boundary = j;
             break;
           }
@@ -287,18 +389,21 @@ class IslandLyricService {
           end = boundary;
         }
       }
-      // 跳过段首空格（空格作为分隔符，不留在帧首）
+      // 跳过段首分隔符（分隔符作为断点，不留在帧首）
       var start = i;
-      while (start < end && chars[start] == 0x20) {
+      while (start < end && _isSeparator(chars[start])) {
         start++;
       }
-      // 跳过段尾空格（不留在帧尾，避免系统侧滚动/错位）
-      while (end > start && chars[end - 1] == 0x20) {
+      // 跳过段尾分隔符（不留在帧尾，避免系统侧滚动/错位）
+      while (end > start && _isSeparator(chars[end - 1])) {
         end--;
       }
 
       if (end > start) {
-        frames.add(String.fromCharCodes(chars.sublist(start, end)));
+        final text = buildFrame(start, end);
+        if (text.isNotEmpty) {
+          frames.add(text);
+        }
       }
       i = end > i ? end : i + 1;
     }
@@ -326,6 +431,65 @@ class IslandLyricService {
     return index.clamp(0, frameCount - 1);
   }
 
+  /// 基于逐字时间戳的帧索引（纯函数）。
+  ///
+  /// 逐字歌词每字有精确 [LyricWord.start]/[end] 时间戳。当前播放位置
+  /// 落在哪个字，就把该字对应到 [frames]（按字符切好的帧）里的哪一帧。
+  ///
+  /// 相比按行窗口等分的 [frameIndexForPosition]，字级时间戳能精确同步
+  /// 演唱进度——不会出现"等分错位导致唱完了才翻帧"的问题。
+  ///
+  /// 无逐字时间戳 / 单帧时退回 [frameIndexForPosition] 的等分逻辑。
+  @visibleForTesting
+  static int frameIndexForPositionWithWords({
+    required List<String> frames,
+    required List<fl.LyricWord>? words,
+    required int lineStartMs,
+    required int? lineEndMs,
+    required int positionMs,
+  }) {
+    if (frames.length <= 1) return 0;
+    if (words == null || words.isEmpty) {
+      return frameIndexForPosition(
+        frameCount: frames.length,
+        lineStartMs: lineStartMs,
+        lineEndMs: lineEndMs,
+        positionMs: positionMs,
+      );
+    }
+
+    // 当前播放位置对应的字下标：最后一个 start ≤ positionMs 的字。
+    var currentWord = -1;
+    for (var i = 0; i < words.length; i++) {
+      if (words[i].start.inMilliseconds <= positionMs) {
+        currentWord = i;
+      } else {
+        break;
+      }
+    }
+    if (currentWord < 0) return 0;
+    if (currentWord >= words.length - 1) return frames.length - 1;
+
+    // 把字词文本拼接，用其累积字符长度映射到 frames 的字符边界。
+    // 帧按字符切：累计到当前字的字符数占总字符数的比例 → 帧索引。
+    final totalChars = words.fold<int>(0, (sum, w) => sum + w.text.runes.length);
+    if (totalChars <= 0) {
+      return frameIndexForPosition(
+        frameCount: frames.length,
+        lineStartMs: lineStartMs,
+        lineEndMs: lineEndMs,
+        positionMs: positionMs,
+      );
+    }
+    var charsBefore = 0;
+    for (var i = 0; i <= currentWord; i++) {
+      charsBefore += words[i].text.runes.length;
+    }
+    final ratio = charsBefore / totalChars;
+    final index = (ratio * frames.length).floor();
+    return index.clamp(0, frames.length - 1);
+  }
+
   // ---- 监听回调 ----
 
   static void _onLyricLineChanged() => _syncLyric();
@@ -341,21 +505,35 @@ class IslandLyricService {
     }
     if (_lastLyricLine == null) return; // 当前未在显示，无需刷进度
 
-    // 超长歌词：检测拆帧翻转（帧推进），翻转时立即重发
-    final frames = chunkLyric(_lastLyricLine!, frameChars: _frameChars);
+    // 超长歌词（多帧）：按播放位置推进帧，帧翻转时重发。实时/焦点都适用——
+    // 这样「旧梦前尘 一去不回」这类长行会随进度推进显示后半段。
+    // 有逐字时间戳时用字级进度精确推进，避免等分错位导致"唱完了才翻帧"。
+    final isLive =
+        IslandLyricSettings.notificationType.value == IslandLyricSettings.typeLive;
+    final frames = chunkLyric(
+      _lastLyricLine!,
+      frameChars: isLive ? _liveMaxChars : _frameChars,
+    );
     if (frames.length > 1) {
-      final (startMs, endMs) = _currentLineWindow();
-      final frame = frameIndexForPosition(
-        frameCount: frames.length,
+      final (startMs, endMs, words) = _currentLineWords();
+      final positionMs = PlayerService.instance.position.value.inMilliseconds;
+      final frame = frameIndexForPositionWithWords(
+        frames: frames,
+        words: words,
         lineStartMs: startMs,
         lineEndMs: endMs,
-        positionMs: PlayerService.instance.position.value.inMilliseconds,
+        positionMs: positionMs,
       );
       if (frame != _lastFrameIndex) {
         _lastFrameIndex = frame;
         _sendUpdate();
         return;
       }
+    }
+
+    // 实时通知：单帧（短行）歌词没变就不更新，避免进度驱动高频重发。
+    if (isLive) {
+      return;
     }
 
     final now = DateTime.now();
@@ -383,6 +561,8 @@ class IslandLyricService {
         _lastIsPlaying = false;
         _lastProgressSent = null;
         _lastFrameIndex = 0;
+        _lastNotificationType = IslandLyricSettings.typeLive;
+        _lastBypassFocusLimit = false;
         _channel.invokeMethod('hide');
       }
       return;
@@ -392,8 +572,27 @@ class IslandLyricService {
       _lastLyricLine = lyricLine;
       _lastIsPlaying = isPlaying;
       _lastFrameIndex = 0;
+      _lastNotificationType = IslandLyricSettings.notificationType.value;
+      _lastBypassFocusLimit = IslandLyricSettings.bypassFocusLimit.value;
       _sendUpdate();
       _maybeDownloadCover();
+      return;
+    }
+
+    // 歌词未变但通知类型切换：当前正在显示时需立即用新类型重发，
+    // 否则实时/焦点切换在播放中不会生效（仅对当前行生效）。
+    if (_lastNotificationType != IslandLyricSettings.notificationType.value) {
+      _lastNotificationType = IslandLyricSettings.notificationType.value;
+      _lastBypassFocusLimit = IslandLyricSettings.bypassFocusLimit.value;
+      _sendUpdate();
+      return;
+    }
+
+    // 歌词与类型未变但绕过开关切换：焦点通知下立即用新绕过状态重发，
+    // 否则绕过开关在播放中不会即时生效。
+    if (_lastBypassFocusLimit != IslandLyricSettings.bypassFocusLimit.value) {
+      _lastBypassFocusLimit = IslandLyricSettings.bypassFocusLimit.value;
+      _sendUpdate();
     }
   }
 
@@ -429,21 +628,35 @@ class IslandLyricService {
 
   /// 向原生层发送完整当前状态（歌词 + 歌曲信息 + 播放进度）。
   ///
-  /// 歌词展示：拆帧后每帧对半分配到左右两侧（leftLyric = 帧前半、lyric = 帧后半）。
-  /// 短歌词单帧（整行）；超长歌词按行节奏推进帧（[_lastFrameIndex] 由位置监听
-  /// 更新），每帧用满左右两侧且每侧不超系统容量 → 避免单侧文本被系统中间截断。
+  /// 焦点通知：拆帧后每帧对半分配到左右两侧（leftLyric = 帧前半、
+  /// lyric = 帧后半），每帧用满左右两侧且每侧不超系统容量，避免单侧文本
+  /// 被系统中间截断。
+  /// 实时通知：短歌词单帧（整行）；超长歌词不拆帧，完整歌词行给
+  /// shortCriticalText（系统侧自动滚动适配）。
   static void _sendUpdate() {
     final player = PlayerService.instance;
     final song = player.currentSong.value;
     final lyricLine = _lastLyricLine;
     if (lyricLine == null) return;
 
-    final frames = chunkLyric(lyricLine, frameChars: _frameChars);
-    // 帧索引：单帧恒 0；多帧取当前已计算的帧（位置监听负责推进 _lastFrameIndex）
-    final frameIndex = frames.length <= 1
-        ? 0
-        : _lastFrameIndex.clamp(0, frames.length - 1);
-    final frame = frames[frameIndex];
+    final isLive =
+        IslandLyricSettings.notificationType.value == IslandLyricSettings.typeLive;
+    // 超长歌词按容量智能截断（空格优先断点）：实时 7 字、焦点 10 字。
+    // 多帧时按播放位置推进（_lastFrameIndex，由 _onPositionChanged 更新），
+    // 让「旧梦前尘 一去不回」这类长行能推进显示后半段。
+    final frames = chunkLyric(
+      lyricLine,
+      frameChars: isLive ? _liveMaxChars : _frameChars,
+    );
+    String frame;
+    if (frames.isEmpty) {
+      frame = lyricLine;
+    } else {
+      final frameIndex = frames.length <= 1
+          ? 0
+          : _lastFrameIndex.clamp(0, frames.length - 1);
+      frame = frames[frameIndex];
+    }
     final split = splitLyricForIsland(frame);
 
     final payload = buildUpdatePayload(
@@ -460,6 +673,11 @@ class IslandLyricService {
     // 左右分割后的实际显示内容（覆盖 payload 里由 fullLyric 派生的 lyric/leftLyric）
     payload['lyric'] = split.right;
     payload['leftLyric'] = split.left;
+
+    // 记录本次发送用的通知类型（供切换类型时即时重发判定）
+    _lastNotificationType = IslandLyricSettings.notificationType.value;
+    // 记录本次发送用的绕过状态（供切换绕过开关时即时重发判定）
+    _lastBypassFocusLimit = IslandLyricSettings.bypassFocusLimit.value;
 
     _channel.invokeMethod('update', payload);
   }
@@ -493,19 +711,79 @@ class IslandLyricService {
       'showProgress': showProgress,
       'coverPath': coverPath,
       'aodLyrics': aodLyrics,
+      // 通知类型：实时通知（无 root）还是焦点通知
+      'notificationType': IslandLyricSettings.notificationType.value,
+      // 焦点通知下是否用 Shizuku 绕过系统白名单（仅 typeFocus 生效）
+      'bypassFocusLimit': IslandLyricSettings.bypassFocusLimit.value,
     };
   }
-  /// 当前歌词行的时间窗口 [start, end]，毫秒。无歌词模型时返回兜底（start=0）。
-  static (int, int?) _currentLineWindow() {
+  /// 当前歌词行的时间窗口 + 逐字时间戳。无歌词模型时返回兜底。
+  static (int, int?, List<fl.LyricWord>?) _currentLineWords() {
     final model = LyricsService.instance.snapshot.value.model;
     final index = LyricsService.instance.controller.activeIndexNotifiter.value;
     if (model == null || index < 0 || index >= model.lines.length) {
-      return (0, null);
+      return (0, null, null);
     }
     final line = model.lines[index];
     return (
       line.start.inMilliseconds,
       line.end?.inMilliseconds,
+      line.words,
+    );
+  }
+}
+
+/// 灵动岛 / 焦点通知能力探测结果（来自原生层 [MainActivity.queryIslandCapabilities]）。
+class IslandCapabilities {
+  const IslandCapabilities({
+    required this.supportIsland,
+    required this.focusProtocol,
+    required this.focusPermission,
+    required this.focusEnabled,
+    required this.androidSdk,
+  });
+
+  /// 探测失败 / 原生层不可用时的安全兜底（全部按不支持处理）。
+  static const IslandCapabilities none = IslandCapabilities(
+    supportIsland: false,
+    focusProtocol: 0,
+    focusPermission: false,
+    focusEnabled: false,
+    androidSdk: 0,
+  );
+
+  /// 当前 OS 是否支持岛功能（`persist.sys.feature.island`）。
+  final bool supportIsland;
+
+  /// 焦点通知协议版本：1=OS1、2=OS2、3=OS3 小米超级岛（仅 OS3 支持岛）。
+  final int focusProtocol;
+
+  /// 当前应用焦点通知权限是否开启（`canShowFocus`）。
+  final bool focusPermission;
+
+  /// 当前设备上「焦点通知」模式是否可用（支持岛 && 协议>=3 && 权限开启）。
+  final bool focusEnabled;
+
+  /// Android 版本号（SDK_INT）：实时通知（实况通知）需 Android 16（API 36+）。
+  final int androidSdk;
+
+  /// 当前设备上「实时通知」模式是否可用（Android 16+）。
+  bool get liveEnabled => androidSdk >= 36;
+
+  /// 解析原生层返回的 map。缺字段 / 类型不符按默认（不支持）处理。
+  factory IslandCapabilities.fromMap(Map<Object, Object> raw) {
+    bool readBool(Object? v) => v is bool && v;
+    int readInt(Object? v) => v is num ? v.toInt() : 0;
+    final supportIsland = readBool(raw['supportIsland']);
+    final focusProtocol = readInt(raw['focusProtocol']);
+    final focusPermission = readBool(raw['focusPermission']);
+    return IslandCapabilities(
+      supportIsland: supportIsland,
+      focusProtocol: focusProtocol,
+      focusPermission: focusPermission,
+      focusEnabled: readBool(raw['focusEnabled']) ||
+          (supportIsland && focusProtocol >= 3 && focusPermission),
+      androidSdk: readInt(raw['androidSdk']),
     );
   }
 }

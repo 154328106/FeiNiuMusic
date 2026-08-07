@@ -93,7 +93,13 @@ class _ArtworkWidgetState extends State<ArtworkWidget> with SignalsMixin {
 
     Widget child;
     if (coverId != null && coverId.isNotEmpty) {
-      final requestSize = widget.preferOriginal ? 800 : 120;
+      // 封面源图尺寸：按显示逻辑尺寸 × 设备 DPR 请求，保证在 2x/3x 屏上清晰。
+      // 此前写死 120px，在详情页大封面（110 逻辑 px）上被放大 2~3 倍导致模糊。
+      // preferOriginal（播放页大图）直接用 800px 原图。
+      final dpr = MediaQuery.devicePixelRatioOf(context);
+      final requestSize = widget.preferOriginal
+          ? 800
+          : (size * dpr).round().clamp(120, 800);
       final coverUrl =
           FeiNiuApiClient.instance.coverUrl(
             coverId,

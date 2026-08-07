@@ -341,6 +341,7 @@ class _FavoritePageState extends State<FavoritePage>
       isScrollControlled: true,
       builder: (_) => SongDetailSheet(
         song: song,
+        onUpdated: (_) => _load(forceRefresh: true),
         onOpenArtist: (name) {
           final artistGuid = song.firstArtistGuid;
           if (artistGuid != null) {

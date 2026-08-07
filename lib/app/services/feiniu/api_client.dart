@@ -493,6 +493,65 @@ class FeiNiuApiClient {
         : null;
   }
 
+  /// 保存曲目元数据（编辑歌曲：名称/专辑/歌手/封面/序号/风格/年份）。
+  ///
+  /// body 约定（服务端格式）：
+  /// `{album, artistGUIDs, coverGUID, coverId, discNo, genreGUIDs, guid, title, trackNo, year}`
+  ///
+  /// 失败（业务 code != 0）时抛异常，携带服务器返回的 msg。
+  Future<void> updateTrackMetadata(Map<String, dynamic> body) async {
+    final data = await _post('/track/metadata', data: body);
+    final parsed = FeiNiuResponse.fromJson(data, null);
+    if (!parsed.isSuccess) {
+      throw Exception(parsed.msg.isNotEmpty ? parsed.msg : '保存失败');
+    }
+  }
+
+  /// 上传歌曲封面图片字节，返回 coverId（`track_<guid>` 格式）。
+  ///
+  /// 与歌单封面上传（_uploadPlaylistCoverBytes）同构：multipart/form-data，
+  /// 文件字段名 `file`。失败时抛异常（带服务器 msg）。
+  Future<String> uploadTrackCover(List<int> imageBytes) async {
+    final formData = FormData.fromMap({
+      'file': MultipartFile.fromBytes(
+        imageBytes,
+        filename: 'cover.png',
+        contentType: DioMediaType('image', 'png'),
+      ),
+    });
+    final response = await _dio.post(
+      _url('/static/cover/track'),
+      data: formData,
+      options: Options(
+        headers: {...authHeaders(), 'Content-Type': 'multipart/form-data'},
+      ),
+    );
+    final rawData = response.data;
+    final data = rawData is Map<String, dynamic> ? rawData : <String, dynamic>{};
+    final parsed = FeiNiuResponse.fromJson(
+      data,
+      (d) => (d as Map<String, dynamic>)['coverId'] as String?,
+    );
+    if (!parsed.isSuccess || parsed.data == null) {
+      throw Exception(parsed.msg.isNotEmpty ? parsed.msg : '上传封面失败');
+    }
+    return parsed.data!;
+  }
+
+  /// 从 coverId 派生 coverGUID：剥掉类型前缀（`track_`/`album_`/`artist_`/
+  /// `playlist_`），供编辑歌曲提交时使用。
+  ///
+  /// 例：`track_7de7f67ca7344e158560653721c64dbe` → `7de7f67ca7344e158560653721c64dbe`。
+  /// 无已知前缀时原样返回。
+  static String deriveCoverGuid(String coverId) {
+    for (final prefix in const ['track_', 'album_', 'artist_', 'playlist_']) {
+      if (coverId.startsWith(prefix)) {
+        return coverId.substring(prefix.length);
+      }
+    }
+    return coverId;
+  }
+
   /// 请求服务器转码，返回 HLS 播放地址（`data.url`，通常为相对路径）。
   ///
   /// 默认请求 FLAC（无损）；FLAC 帧超过解码器能力时由上层降级为
@@ -609,6 +668,22 @@ class FeiNiuApiClient {
       (d) => _parsePage(d as Map<String, dynamic>, FeiNiuArtist.fromJson),
     );
     return response.data ?? const FeiNiuPageData(list: [], total: 0);
+  }
+
+  /// 获取歌手全量列表（无分页，供编辑歌曲的歌手选择器使用）。
+  ///
+  /// 响应 `data.list` 直接为歌手数组（与 `/artist/list` 的 FeiNiuPageData
+  /// 不同，没有 total 分页字段）。
+  Future<List<FeiNiuArtist>> getArtistListAll() async {
+    final data = await _get('/artist/list-all');
+    // _get 返回整个响应体 {code,msg,data}，实际列表在 data.data.list
+    final body = data['data'];
+    final rawList = (body is Map<String, dynamic>) ? body['list'] : null;
+    final list = (rawList as List<dynamic>?)
+            ?.map((e) => FeiNiuArtist.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        const [];
+    return list;
   }
 
   // endregion

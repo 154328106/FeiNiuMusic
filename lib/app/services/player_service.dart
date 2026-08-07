@@ -3060,6 +3060,37 @@ class PlayerService with WidgetsBindingObserver {
     _persistSongUpdate(song, durationMs: durationMs);
   }
 
+  /// 歌曲元数据变更后更新本地持久化与当前播放状态（编辑歌曲保存后调用）。
+  ///
+  /// - [SongDao.upsertSongs] 持久化（重启后保持新标题/封面等）；
+  /// - 若 [queue] 中存在同 id 歌曲则就地替换（迷你播放器/播放页/媒体通知
+  ///   立即显示新元数据）；
+  /// - 若替换的正是当前播放歌曲，失效已解析的播放源并重新预热（封面/标题
+  ///   变化不影响已加载音频源，但需让播放页监听的新实体生效）。
+  Future<void> updateSongMetadata(SongEntity updated) async {
+    if (updated.id.isEmpty) return;
+    await _songDao.upsertSongs([updated]);
+
+    final list = queue.value;
+    final idx = list.indexWhere((e) => e.id == updated.id);
+    if (idx >= 0) {
+      final updatedQueue = [...list];
+      updatedQueue[idx] = updated;
+      queue.value = updatedQueue;
+    }
+
+    final current = currentSong.value;
+    if (current != null && current.id == updated.id) {
+      _invalidateResolvedSource(updated);
+      currentSong.value = updated;
+      _warmupPlaybackSources(
+        updated,
+        nextSong: _nextSongForIndex(queue.value, currentIndex.value),
+      );
+      _emitSnapshot(force: true);
+    }
+  }
+
   Future<void> _persistSongUpdate(
     SongEntity song, {
     int? durationMs,

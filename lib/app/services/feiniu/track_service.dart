@@ -63,7 +63,13 @@ class FeiNiuTrackService {
   /// 将单个 FeiNiuTrack 映射为 SongEntity
   SongEntity _feiNiuTrackToEntity(FeiNiuTrack track) {
     final artistsJson = jsonEncode(
-      track.artists.map((a) => {'guid': a.guid, 'name': a.name}).toList(),
+      track.artists.map((a) => {
+        'guid': a.guid,
+        'name': a.name,
+        // 携带歌手自身 coverId，供歌手详情页/参与歌手列表显示歌手图片
+        if (a.coverId != null && a.coverId!.isNotEmpty)
+          'coverId': a.coverId,
+      }).toList(),
     );
     final albumJson = jsonEncode({
       'guid': track.album.guid,

@@ -29,6 +29,30 @@
 - **媒体通知** — 通知栏播放控制，使用本地封面（携带 Cookie 认证的封面无法直连，自动换用缓存文件）
 - **切歌通知弹窗** — 切歌时应用内弹出「正在播放」卡片（封面 + 歌名 + 歌手），可设置提示时长（2–10s），平板/TV 下卡片自动放大且倍数可调（1.0–3.0×），支持手动关闭
 
+### 通知歌词灵动岛
+
+在系统灵动岛显示当前歌词行，支持两种工作模式（设置 → 歌词设置 → 通知歌词灵动岛）：
+
+| 模式 | 说明 | 要求 | 支持机型 |
+| :--- | :--- | :--- | :--- |
+| **实时通知（实况通知）** | 走系统标准实时通知接口上岛，无 root / Shizuku | Android 16+；HyperOS 需 3.0.300+ | 小米 HyperOS（3.0.300，已验证）；ColorOS、OneUI、AOSP（社区支持） |
+| **焦点通知（小米超级岛）** | 走 MIUI 焦点通知上岛，系统灵动岛渲染歌词卡片 | HyperOS 3.0 + Android 15+ | HyperOS 设备（需 Root 或 Shizuku） |
+
+- **Shizuku 绕过白名单** — 未加入系统焦点通知白名单的应用，可通过授权 Shizuku 并开启「Shizuku 绕过白名单」临时绕过限制：发送焦点通知时短暂拦截 XMSF 网络，使系统无法向小米服务端校验白名单。注意可能导致耗电增加或消息延迟。
+
+> 低于 Android 16 或 HyperOS 3.0 的系统不支持原生动态歌词。
+
+### 按设备能力自动隐藏开关
+
+设置页会根据当前设备的能力自动显示/隐藏通知类型开关（对齐小米焦点通知官方文档）：
+
+- **实时通知** 仅在 Android 16+（API 36+）设备上显示；
+- **焦点通知** 仅当设备支持岛（`persist.sys.feature.island`）+ 焦点通知协议版本 ≥ 3（`notification_focus_protocol`，即 HyperOS 3 / OS3）+ 应用焦点通知权限已开启（`canShowFocus`）时显示；
+- 两种模式都不可用的设备（如旧版 Android / 非小米且非 Android 16）不显示「通知歌词灵动岛」区块；
+- 已保存的通知类型在设备上不可用时，自动回退到可用的默认类型（优先实时通知）。
+
+> 注：`focusPermission`（`canShowFocus`）探测是耗时操作，仅在进入歌词设置页时执行一次并缓存。
+
 ### 浏览与管理
 
 - **搜索** — 全局搜索歌曲、专辑、歌手
@@ -185,3 +209,8 @@ flutter build apk --release --split-per-abi
 ## 开源协议
 
 本项目基于上游 [NagoMusic](https://github.com/Keduoli03/NagoMusic) 项目的开源协议发布。
+
+## 致谢
+
+- [NagoMusic](https://github.com/Keduoli03/NagoMusic) — 本项目的基础
+- [HyperNotification](https://github.com/limczhh/HyperNotification) — 焦点通知 / 灵动岛 API 及 Shizuku 绕过白名单实现等移植来源）

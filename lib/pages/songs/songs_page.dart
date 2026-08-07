@@ -624,6 +624,7 @@ class _SongsPageState extends State<SongsPage>
       isScrollControlled: true,
       builder: (_) => SongDetailSheet(
         song: song,
+        onUpdated: (_) => _loadSongs(forceRefresh: true),
         onOpenArtist: (name) {
           final artistGuid = song.firstArtistGuid;
           if (artistGuid != null) {

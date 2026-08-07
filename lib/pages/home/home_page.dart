@@ -417,7 +417,10 @@ class _HomePageState extends State<HomePage>
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => SongDetailSheet(song: song),
+      builder: (_) => SongDetailSheet(
+        song: song,
+        onUpdated: (_) => _loadAll(forceRefresh: true),
+      ),
     );
   }
 

@@ -138,17 +138,17 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                   AppSettingTile(
                     title: '歌词设置',
-                    subtitle: '状态栏歌词与显示偏好',
+                    subtitle: '状态栏 / 车载蓝牙 / 通知歌词灵动岛',
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () =>
                         Navigator.pushNamed(context, AppRoutes.lyricsSettings),
                   ),
                   AppSettingTile(
-                    title: '听歌统计',
-                    subtitle: '日历与播放数据概览',
+                    title: '启动设置',
+                    subtitle: '控制APP启动后的行为',
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () =>
-                        Navigator.pushNamed(context, AppRoutes.listeningStats),
+                        Navigator.pushNamed(context, AppRoutes.launchSettings),
                   ),
                   AppSettingTile(
                     title: '缓存设置',
@@ -156,19 +156,6 @@ class _SettingsPageState extends State<SettingsPage> {
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () =>
                         Navigator.pushNamed(context, AppRoutes.cacheSettings),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              AppSettingSection(
-                title: '启动',
-                children: [
-                  AppSettingTile(
-                    title: '启动设置',
-                    subtitle: '控制APP启动后的行为',
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () =>
-                        Navigator.pushNamed(context, AppRoutes.launchSettings),
                   ),
                 ],
               ),

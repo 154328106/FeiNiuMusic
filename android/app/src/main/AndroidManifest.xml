@@ -5,6 +5,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Android 16「实时动态」提升通知权限：setRequestPromotedOngoing(true)
+         请求把 ongoing 通知提升为状态栏胶囊/灵动岛卡片时，系统会校验本权限。
+         HyperOS 3 通知设置里的「实时动态」开关即由此权限驱动；无此权限时
+         提升请求被忽略，实时通知只会落成普通通知而无法上岛。
+         对齐 HyperLyric（其 manifest 声明了本权限）。 -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <application
         android:label="${appLabel}"
@@ -120,6 +126,16 @@
             android:name="com.yalantis.ucrop.UCropActivity"
             android:screenOrientation="portrait"
             android:theme="@style/AppTheme.UCrop" />
+        <!-- Shizuku：为「焦点通知绕过白名单」提供运行环境（Sui/Shizuku 需此
+             Provider 完成初始化）。authorities 随 applicationId（正式包
+             com.feiniu.music.shizuku / 汽水兼容包 com.luna.music.shizuku）。 -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

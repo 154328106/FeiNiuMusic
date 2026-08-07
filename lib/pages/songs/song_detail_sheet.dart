@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
+import '../../app/router/app_page_route.dart';
 import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/feiniu/favorite_service.dart';
 import '../../app/services/player/player_engine.dart';
@@ -13,6 +14,7 @@ import '../../components/common/app_list_tile.dart';
 import '../../components/feedback/app_toast.dart';
 import '../library/library_detail_pages.dart';
 import '../library/playlists_page.dart';
+import 'song_edit_page.dart';
 
 class SongDetailSheet extends StatefulWidget {
   final SongEntity song;
@@ -25,6 +27,13 @@ class SongDetailSheet extends StatefulWidget {
   /// 由调用方决定是否传，避免所有入口都显示。
   final List<AppListTile>? extraActions;
 
+  /// 是否显示播放控制（音量 / 倍速 / 解码器）。
+  ///
+  /// 这些选项只在**播放器界面**打开本面板时显示（右下角「⋯」、海报模式
+  /// 「更多」），其余入口（列表/搜索/收藏等）打开的是「歌曲信息 + 管理」面板，
+  /// 不显示播放控制。默认 false。
+  final bool showPlayerControls;
+
   const SongDetailSheet({
     super.key,
     required this.song,
@@ -33,6 +42,7 @@ class SongDetailSheet extends StatefulWidget {
     this.onOpenAlbum,
     this.onOpenPlayerAppearanceSettings,
     this.extraActions,
+    this.showPlayerControls = false,
   });
 
   @override
@@ -187,8 +197,12 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
               ),
             ),
             const Divider(height: 1, thickness: 0.6),
-            const _AppVolumeControl(),
-            const _PlaybackSpeedControl(),
+            // 播放控制（音量/倍速/解码器）：仅播放器界面打开时显示，
+            // 列表/搜索等入口打开的是「歌曲信息」面板，不显示播放控制。
+            if (widget.showPlayerControls) ...[
+              const _AppVolumeControl(),
+              const _PlaybackSpeedControl(),
+            ],
             AppListTile(
               leading: const Icon(Icons.queue_play_next),
               title: '下一首播放',
@@ -211,6 +225,24 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                 await showAddToPlaylistDialog(context, songIds: [song.id]);
                 if (!context.mounted) return;
                 Navigator.of(context).pop();
+              },
+            ),
+            AppListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: '编辑歌曲',
+              onTap: () async {
+                final nav = Navigator.of(context);
+                nav.pop(); // 关闭详情 sheet
+                final updated = await nav.push<SongEntity>(
+                  buildAppPageRoute(
+                    (_) => SongEditPage(song: widget.song),
+                  ),
+                );
+                if (updated != null) {
+                  // 激活回调刷新列表 + 更新当前播放/队列
+                  widget.onUpdated?.call(updated);
+                  await PlayerService.instance.updateSongMetadata(updated);
+                }
               },
             ),
             if (widget.extraActions != null)
@@ -281,13 +313,16 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                 leading: const Icon(Icons.info_outline),
                 title: '音频规格',
                 subtitle: song.audioSpec,
-                trailing: ValueListenableBuilder<EngineKind>(
-                  valueListenable: PlayerService.instance.decoderEngine,
-                  builder: (context, engine, _) => _DecoderTag(
-                    engine: engine,
-                    onTap: () => _showDecoderPicker(context, engine),
-                  ),
-                ),
+                // 解码器 tag 属于播放控制：仅播放器界面打开时显示，点击可切换。
+                trailing: widget.showPlayerControls
+                    ? ValueListenableBuilder<EngineKind>(
+                        valueListenable: PlayerService.instance.decoderEngine,
+                        builder: (context, engine, _) => _DecoderTag(
+                          engine: engine,
+                          onTap: () => _showDecoderPicker(context, engine),
+                        ),
+                      )
+                    : null,
                 onTap: () {
                   final nav = Navigator.of(context);
                   nav.pop();

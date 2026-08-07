@@ -216,6 +216,7 @@ class _RecentPlaybackPageState extends State<RecentPlaybackPage>
       isScrollControlled: true,
       builder: (_) => SongDetailSheet(
         song: song,
+        onUpdated: (_) => _loadHistory(),
         onOpenArtist: (name) {
           final artistGuid = song.firstArtistGuid;
           if (artistGuid != null) {

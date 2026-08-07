@@ -214,6 +214,8 @@ class FeiNiuTrack {
   final bool isFavorite;
   final bool? hasLyric;
   final FeiNiuAudioSpec? audioSpec;
+  final String? isrc;
+  final List<FeiNiuGenre> genres;
 
   const FeiNiuTrack({
     required this.guid,
@@ -231,6 +233,8 @@ class FeiNiuTrack {
     this.isFavorite = false,
     this.hasLyric,
     this.audioSpec,
+    this.isrc,
+    this.genres = const [],
   });
 
   factory FeiNiuTrack.fromJson(Map<String, dynamic> json) {
@@ -256,6 +260,12 @@ class FeiNiuTrack {
       audioSpec: json['audioSpec'] != null
           ? FeiNiuAudioSpec.fromJson(json['audioSpec'] as Map<String, dynamic>)
           : null,
+      isrc: json['isrc'] as String?,
+      genres:
+          (json['genres'] as List<dynamic>?)
+              ?.map((e) => FeiNiuGenre.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          [],
     );
   }
 
@@ -284,6 +294,8 @@ class FeiNiuTrack {
             'size': audioSpec!.size,
           }
         : null,
+    'isrc': isrc,
+    'genres': genres.map((g) => g.toJson()).toList(),
   };
 }
 

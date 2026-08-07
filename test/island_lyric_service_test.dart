@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_lyric/core/lyric_model.dart' as fl;
 
 import 'package:feiniu_music/app/services/island_lyric_service.dart';
+import 'package:feiniu_music/app/state/settings_island_lyric.dart';
 
 void main() {
   group('IslandLyricService.shouldShow', () {
@@ -97,6 +99,27 @@ void main() {
       final p = IslandLyricService.simulateTestPayload(tick: 1, lyricCount: 2);
       expect(p['isPlaying'], true);
       expect(p['title'], '灵动岛测试');
+    });
+  });
+
+  group('IslandLyricService notificationType', () {
+    test('buildUpdatePayload 携带通知类型（默认实时通知）', () {
+      final p = IslandLyricService.buildUpdatePayload(
+        fullLyric: '测试歌词',
+        title: '测试歌曲',
+        artist: '歌手',
+        isPlaying: true,
+        positionMs: 1000,
+        durationMs: 60000,
+        showProgress: true,
+        coverPath: null,
+        aodLyrics: false,
+      );
+      expect(
+        p['notificationType'],
+        IslandLyricSettings.typeLive,
+        reason: '默认应透传实时通知类型',
+      );
     });
   });
 
@@ -302,6 +325,37 @@ void main() {
       expect(frames.single, lyric);
     });
 
+    test('实时通知 7 字截断：空格优先断点，首帧不超 7 字', () {
+      // 空格分隔：优先在空格断，首帧 = 空格前的完整词
+      const lyric = '今天天气很好 我们去爬山';
+      final frames = IslandLyricService.chunkLyric(lyric, frameChars: 7);
+      expect(frames.length, greaterThan(1), reason: '超长行应拆多帧');
+      expect(frames.first, '今天天气很好', reason: '首帧应取空格前的完整词');
+      for (final frame in frames) {
+        expect(frame.runes.length, lessThanOrEqualTo(7),
+            reason: '每帧不超过 7 字');
+      }
+      // 无空格：按 7 字硬切，首帧 = 前 7 字
+      const noSpace = '这是一首超长的歌没有空格';
+      final nf = IslandLyricService.chunkLyric(noSpace, frameChars: 7);
+      expect(nf.first, '这是一首超长的', reason: '无空格时首帧取前 7 字');
+    });
+
+    test('拆帧过滤分隔符：空格、连字符、间隔号不留在帧内', () {
+      // 连字符分隔：断点优先在连字符，且连字符被过滤
+      const hyphen = '旧梦前尘-一去不回';
+      final hf = IslandLyricService.chunkLyric(hyphen, frameChars: 7);
+      expect(hf.length, greaterThan(1), reason: '连字符分隔的超长行应拆多帧');
+      expect(hf.first, '旧梦前尘', reason: '首帧应为连字符前的完整词，且不含连字符');
+      expect(hf.any((f) => f.contains('-')), isFalse, reason: '帧内不应含连字符');
+
+      // 间隔号分隔：同样作为断点并被过滤
+      const middot = '半山听雨·夜雨声烦';
+      final mf = IslandLyricService.chunkLyric(middot, frameChars: 7);
+      expect(mf.any((f) => f.contains('·')), isFalse, reason: '帧内不应含间隔号');
+      expect(mf.join(), '半山听雨夜雨声烦', reason: '去掉间隔号后拼接等于过滤后的完整歌词');
+    });
+
     test('拆帧不含尾随空格（避免空格留在帧尾导致滚动）', () {
       const lyric = '聆听山语 回荡不清 若即若离';
       final frames = IslandLyricService.chunkLyric(lyric, frameChars: 10);
@@ -388,6 +442,170 @@ void main() {
         ),
         0,
       );
+    });
+  });
+
+  group('IslandLyricService.frameIndexForPositionWithWords', () {
+    const frames = ['旧梦前尘', '一去不回'];
+
+    test('无逐字时间戳：退回等分逻辑', () {
+      expect(
+        IslandLyricService.frameIndexForPositionWithWords(
+          frames: frames,
+          words: null,
+          lineStartMs: 2000,
+          lineEndMs: 6000,
+          positionMs: 3000,
+        ),
+        0,
+      );
+      expect(
+        IslandLyricService.frameIndexForPositionWithWords(
+          frames: frames,
+          words: null,
+          lineStartMs: 2000,
+          lineEndMs: 6000,
+          positionMs: 5000,
+        ),
+        1,
+      );
+    });
+
+    test('逐字时间戳：唱到后半段立即翻帧（不等到行结束）', () {
+      // 「旧梦前尘」(2000-4000) 是前半帧，「一去不回」从 4000ms 开始（后半帧）
+      final List<fl.LyricWord> words = [
+        fl.LyricWord(text: '旧', start: Duration(milliseconds: 2000), end: Duration(milliseconds: 2500)),
+        fl.LyricWord(text: '梦', start: Duration(milliseconds: 2500), end: Duration(milliseconds: 3000)),
+        fl.LyricWord(text: '前', start: Duration(milliseconds: 3000), end: Duration(milliseconds: 3500)),
+        fl.LyricWord(text: '尘', start: Duration(milliseconds: 3500), end: Duration(milliseconds: 4000)),
+        fl.LyricWord(text: '一', start: Duration(milliseconds: 4000), end: Duration(milliseconds: 4500)),
+        fl.LyricWord(text: '去', start: Duration(milliseconds: 4500), end: Duration(milliseconds: 5000)),
+        fl.LyricWord(text: '不', start: Duration(milliseconds: 5000), end: Duration(milliseconds: 5500)),
+        fl.LyricWord(text: '回', start: Duration(milliseconds: 5500), end: Duration(milliseconds: 6000)),
+      ];
+      // 行开始前 → 0
+      expect(
+        IslandLyricService.frameIndexForPositionWithWords(
+          frames: frames,
+          words: words,
+          lineStartMs: 2000,
+          lineEndMs: 6000,
+          positionMs: 1500,
+        ),
+        0,
+      );
+      // 唱到「旧」(2000) → 帧 0
+      expect(
+        IslandLyricService.frameIndexForPositionWithWords(
+          frames: frames,
+          words: words,
+          lineStartMs: 2000,
+          lineEndMs: 6000,
+          positionMs: 2000,
+        ),
+        0,
+      );
+      // 唱到「尘」末尾 / 「一」开始 (4000) → 翻到帧 1（后半段）
+      expect(
+        IslandLyricService.frameIndexForPositionWithWords(
+          frames: frames,
+          words: words,
+          lineStartMs: 2000,
+          lineEndMs: 6000,
+          positionMs: 4000,
+        ),
+        1,
+      );
+      // 行结束后 → 最后一帧
+      expect(
+        IslandLyricService.frameIndexForPositionWithWords(
+          frames: frames,
+          words: words,
+          lineStartMs: 2000,
+          lineEndMs: 6000,
+          positionMs: 99999,
+        ),
+        1,
+      );
+    });
+
+    test('逐字行 end 为 null：仍能按字推进（不退回第 0 帧）', () {
+      final List<fl.LyricWord> words = [
+        fl.LyricWord(text: '一', start: Duration(milliseconds: 2000), end: Duration(milliseconds: 3000)),
+        fl.LyricWord(text: '去', start: Duration(milliseconds: 3000), end: Duration(milliseconds: 4000)),
+      ];
+      expect(
+        IslandLyricService.frameIndexForPositionWithWords(
+          frames: ['一', '去'],
+          words: words,
+          lineStartMs: 2000,
+          lineEndMs: null, // 行无结束时间
+          positionMs: 3500, // 唱到「去」后半
+        ),
+        1,
+      );
+    });
+  });
+
+  group('IslandCapabilities 能力探测解析', () {
+    test('解析原生层返回的 map（支持岛 + 焦点通知 + Android 16+）', () {
+      final caps = IslandCapabilities.fromMap({
+        'supportIsland': true,
+        'focusProtocol': 3,
+        'focusPermission': true,
+        'focusEnabled': true,
+        'androidSdk': 36,
+      });
+      expect(caps.supportIsland, isTrue);
+      expect(caps.focusProtocol, 3);
+      expect(caps.focusPermission, isTrue);
+      expect(caps.focusEnabled, isTrue);
+      expect(caps.liveEnabled, isTrue, reason: 'Android 16（API 36）以上实时通知可用');
+    });
+
+    test('Android <16 时实时通知不可用，焦点通知不受影响', () {
+      final caps = IslandCapabilities.fromMap({
+        'supportIsland': true,
+        'focusProtocol': 3,
+        'focusPermission': true,
+        'focusEnabled': true,
+        'androidSdk': 35,
+      });
+      expect(caps.liveEnabled, isFalse, reason: 'Android 15 不支持实时通知');
+      expect(caps.focusEnabled, isTrue, reason: '焦点通知需 HyperOS 3 + 岛 + 权限，与 Android 版本无关');
+    });
+
+    test('协议 <3 或不支持岛时焦点通知不可用', () {
+      final noIsland = IslandCapabilities.fromMap({
+        'supportIsland': false,
+        'focusProtocol': 3,
+        'focusPermission': true,
+        'focusEnabled': false,
+        'androidSdk': 36,
+      });
+      expect(noIsland.focusEnabled, isFalse, reason: '不支持岛则焦点通知不可用');
+
+      final os2 = IslandCapabilities.fromMap({
+        'supportIsland': true,
+        'focusProtocol': 2,
+        'focusPermission': true,
+        'focusEnabled': false,
+        'androidSdk': 36,
+      });
+      expect(os2.focusEnabled, isFalse, reason: 'OS2 协议不支持岛，焦点通知不可用');
+    });
+
+    test('缺字段 / 探测失败按不支持兜底', () {
+      const none = IslandCapabilities.none;
+      expect(none.supportIsland, isFalse);
+      expect(none.focusProtocol, 0);
+      expect(none.focusPermission, isFalse);
+      expect(none.focusEnabled, isFalse);
+      expect(none.liveEnabled, isFalse, reason: 'androidSdk=0 时实时通知不可用');
+
+      final empty = IslandCapabilities.fromMap(const {});
+      expect(empty.focusEnabled, isFalse);
+      expect(empty.liveEnabled, isFalse);
     });
   });
 }
