@@ -57,6 +57,8 @@
 
 - **搜索** — 全局搜索歌曲、专辑、歌手
 - **收藏与管理** — 收藏歌曲、创建/编辑歌单
+- **数据匹配（Lyrico 数据源）** — 导入 [Lyrico](https://github.com/Replica0110/Lyrico) 搜索源插件（zip），在歌曲信息编辑页**一键匹配**歌曲信息（标题/歌手/专辑/封面），或歌曲页多选后**批量匹配**并回传 NAS；设置页可维护数据源（导入/启用/配置/卸载）与匹配偏好（歌词模式/简繁转换/过滤规则/并发）
+- **歌词修改（FnMusicLyricsEditor）** — 配合运行在 NAS 上的[歌词编辑应用](https://github.com/kuilei0926/FnMusicLyricsEditor)（端口 38200）在歌曲信息编辑页直接读写歌词；仅非中继（5ddd.com）连接可用，需设置密钥
 
 ### 界面与适配
 
@@ -210,7 +212,13 @@ flutter build apk --release --split-per-abi
 
 本项目基于上游 [NagoMusic](https://github.com/Keduoli03/NagoMusic) 项目的开源协议发布。
 
+音乐数据匹配功能移植自 [Lyrico](https://github.com/Replica0110/Lyrico)（[Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)）：
+- 数据源插件运行引擎（QuickJS）与宿主 API、插件格式（`manifest.json` + `source.js`）均移植自 Lyrico；
+- 数据源插件（网易云 / QQ / 酷狗 / 苹果 / 汽水等）为 Lyrico 项目提供的第三方搜索源；
+- 歌词格式（逐字 / 增强逐字 / 逐行 / TTML，含翻译、罗马音）对齐 Lyrico 的 `LrcDocumentFormat`。
+
 ## 致谢
 
 - [NagoMusic](https://github.com/Keduoli03/NagoMusic) — 本项目的基础
-- [HyperNotification](https://github.com/limczhh/HyperNotification) — 焦点通知 / 灵动岛 API 及 Shizuku 绕过白名单实现等移植来源）
+- [Lyrico](https://github.com/Replica0110/Lyrico) — 音乐数据匹配 / 数据源插件引擎 / 歌词格式（Apache-2.0）
+- [HyperLyric](https://github.com/limczhh/HyperLyric) — 焦点通知 / 灵动岛 API 及 Shizuku 绕过白名单实现等移植来源

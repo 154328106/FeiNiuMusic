@@ -5,9 +5,9 @@ import '../../app/services/feiniu/favorite_service.dart';
 import '../../app/services/player_service.dart';
 import '../../app/state/song_state.dart';
 import '../../pages/library/playlists_page.dart' show showAddToPlaylistDialog;
+import '../../app/router/app_router.dart';
 import '../feedback/app_toast.dart';
 import 'multi_select_bottom_bar.dart';
-
 /// 歌曲列表页多选通用能力。
 ///
 /// 为歌曲/收藏/最近播放/歌手详情/专辑详情/风格详情等页面提供：
@@ -145,6 +145,43 @@ mixin SongMultiSelectMixin<T extends StatefulWidget>
     await onMultiSelectDone?.call();
   }
 
+  /// 批量匹配数据：用 Lyrico 数据源插件为选中的歌曲匹配信息并回传 NAS。
+  Future<void> matchSelectedSongs() async {
+    final songs = selectedSongs;
+    if (songs.isEmpty) return;
+    if (!mounted) return;
+
+    // 批量匹配会并发请求第三方平台并批量回写 NAS 元数据，尚未经过大量测试。
+    // 进入前弹窗确认，避免误操作大规模改动曲库。
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        icon: const Icon(Icons.warning_amber_rounded),
+        title: const Text('批量匹配警告'),
+        content: const Text(
+          '此功能尚处于实验阶段，未经大量测试。\n\n'
+          '批量匹配会同时处理所选歌曲，并可能批量修改 NAS 上的曲目信息'
+          '（标题 / 歌手 / 专辑 / 年份 / 封面 / 歌词）。\n\n'
+          '建议先在少量歌曲上试用，确认结果符合预期后再全量使用。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('继续'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final nav = Navigator.of(context);
+    nav.pushNamed(AppRoutes.batchMatch, arguments: songs);
+  }
+
   /// 构建多选底部操作栏。
   ///
   /// [includeFavorite] 为 false 时隐藏「添加到收藏」（收藏页已收藏）；
@@ -164,6 +201,11 @@ mixin SongMultiSelectMixin<T extends StatefulWidget>
         icon: Icons.playlist_add,
         label: '添加到歌单',
         onTap: empty ? null : () => addSelectedToPlaylist(),
+      ),
+      MultiSelectAction(
+        icon: Icons.travel_explore_rounded,
+        label: '批量匹配',
+        onTap: empty ? null : () => matchSelectedSongs(),
       ),
       if (includeFavorite)
         MultiSelectAction(

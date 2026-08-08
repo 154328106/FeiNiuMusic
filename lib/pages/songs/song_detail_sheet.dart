@@ -229,7 +229,7 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
             ),
             AppListTile(
               leading: const Icon(Icons.edit_outlined),
-              title: '编辑歌曲',
+              title: '编辑歌曲信息',
               onTap: () async {
                 final nav = Navigator.of(context);
                 nav.pop(); // 关闭详情 sheet

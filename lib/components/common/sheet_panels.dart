@@ -26,13 +26,14 @@ class AppSheetPanel extends StatelessWidget {
         ? Colors.white70
         : const Color.fromARGB(255, 100, 100, 100);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: cardColor,
+    return Material(
+      color: cardColor,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(miuix ? 30 : 22),
         ),
       ),
+      clipBehavior: Clip.antiAlias,
       child: SafeArea(
         top: false,
         child: Column(

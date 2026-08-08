@@ -138,10 +138,19 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                   AppSettingTile(
                     title: '歌词设置',
-                    subtitle: '状态栏 / 车载蓝牙 / 通知歌词灵动岛',
+                    subtitle: '控制歌词的呈现方式',
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () =>
                         Navigator.pushNamed(context, AppRoutes.lyricsSettings),
+                  ),
+                  AppSettingTile(
+                    title: '元数据匹配',
+                    subtitle: '匹配源维护',
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => Navigator.pushNamed(
+                      context,
+                      AppRoutes.metadataMatchSettings,
+                    ),
                   ),
                   AppSettingTile(
                     title: '启动设置',

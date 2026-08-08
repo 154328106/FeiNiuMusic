@@ -19,7 +19,10 @@ import 'app/services/feiniu/account_store.dart';
 import 'app/services/feiniu/api_client.dart';
 import 'app/services/feiniu/auth_service.dart';
 import 'app/services/feiniu/fn_connection_probe_service.dart';
+import 'app/services/plugin/plugin_service.dart';
 import 'app/state/settings_island_lyric.dart';
+import 'app/state/settings_lyric_companion.dart';
+import 'app/state/settings_match.dart';
 import 'app/state/settings_state.dart';
 
 Future<void> main() async {
@@ -85,6 +88,11 @@ Future<void> main() async {
   // 默认关闭不打扰。
   await IslandLyricSettings.ensureLoaded();
   IslandLyricService.start();
+  // 数据源匹配设置 + 配套编辑服务（FnMusicLyricsEditor）设置：启动时加载，
+  // 并把并发上限同步到 PluginService。
+  await MatchSettings.ensureLoaded();
+  PluginService.instance.concurrencyLimit = MatchSettings.concurrency.value;
+  await LyricCompanionSettings.ensureLoaded();
   await AppBackgroundSettings.ensureLoaded();
   await AppFnConnectionSettings.ensureLoaded();
   // 已保存账号列表初始化：迁移/校正当前账号，并注册 401 token 同步回调。

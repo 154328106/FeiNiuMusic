@@ -7,7 +7,6 @@ import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/feiniu/api_models.dart';
 import '../../app/services/feiniu/track_service.dart';
 import '../../app/services/player_service.dart';
-import '../../app/state/settings_state.dart';
 import '../../app/state/song_state.dart';
 import '../../app/theme/app_styles.dart';
 import '../../components/index.dart';
@@ -37,6 +36,7 @@ class _SearchPageState extends State<SearchPage> {
     super.initState();
     _category = widget.initialCategory;
   }
+
   String _query = '';
   bool _searching = false;
   int _searchToken = 0;
@@ -65,7 +65,9 @@ class _SearchPageState extends State<SearchPage> {
     }
 
     final token = ++_searchToken;
-    setState(() { _searching = true; });
+    setState(() {
+      _searching = true;
+    });
 
     try {
       // 并行请求三个搜索接口
@@ -105,7 +107,8 @@ class _SearchPageState extends State<SearchPage> {
     }
   }
 
-  bool _hasResults() => _songs.isNotEmpty || _albums.isNotEmpty || _artists.isNotEmpty;
+  bool _hasResults() =>
+      _songs.isNotEmpty || _albums.isNotEmpty || _artists.isNotEmpty;
 
   /// 拉取「已加载页之后」的第 [page] 页搜索结果（供填充播放使用）。
   /// 当前 _songs 已是第 1 页，填充从第 2 页起。
@@ -126,11 +129,7 @@ class _SearchPageState extends State<SearchPage> {
   /// 播放搜索结果：首屏 50 首不足队列上限时，自动分页拉取更多搜索结果填充。
   void _playSong(int index) {
     if (_songs.isEmpty) return;
-    _player.playQueueFilledToLimit(
-      _songs,
-      index,
-      fetchMore: _fetchSearchPage,
-    );
+    _player.playQueueFilledToLimit(_songs, index, fetchMore: _fetchSearchPage);
   }
 
   @override
@@ -159,10 +158,12 @@ class _SearchPageState extends State<SearchPage> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               child: TextField(
                 controller: _controller,
-                // TV 模式自动聚焦搜索框，遥控器可直接输入。
-                autofocus: AppLayoutSettings.tvMode.value,
+                // 进入搜索页自动聚焦，可直接输入。
+                autofocus: true,
                 onChanged: (value) {
-                  setState(() { _query = value; });
+                  setState(() {
+                    _query = value;
+                  });
                   _runSearch();
                 },
                 textInputAction: TextInputAction.search,
@@ -183,10 +184,22 @@ class _SearchPageState extends State<SearchPage> {
                         ),
                   filled: true,
                   fillColor: theme.appPanelColor,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
                   border: const OutlineInputBorder(
                     borderRadius: BorderRadius.all(Radius.circular(20)),
                     borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: const BorderRadius.all(Radius.circular(20)),
+                    borderSide: BorderSide(
+                      color: theme.colorScheme.outlineVariant.withValues(
+                        alpha: 0.6,
+                      ),
+                      width: 1,
+                    ),
                   ),
                 ),
                 onSubmitted: (_) => _runSearch(),
@@ -207,9 +220,7 @@ class _SearchPageState extends State<SearchPage> {
               ),
             ),
             const SizedBox(height: 4),
-            Expanded(
-              child: _buildResults(theme, isDark),
-            ),
+            Expanded(child: _buildResults(theme, isDark)),
           ],
         ),
       ),
@@ -223,11 +234,18 @@ class _SearchPageState extends State<SearchPage> {
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: ChoiceChip(
-        label: Text(label, style: TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w500,
-          color: selected ? theme.colorScheme.onPrimary : (isDark ? Colors.white70 : const Color.fromARGB(255, 80, 80, 80)),
-        )),
+        label: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            color: selected
+                ? theme.colorScheme.onPrimary
+                : (isDark
+                      ? Colors.white70
+                      : const Color.fromARGB(255, 80, 80, 80)),
+          ),
+        ),
         selected: selected,
         onSelected: (_) => setState(() => _category = category),
         showCheckmark: false,
@@ -244,9 +262,14 @@ class _SearchPageState extends State<SearchPage> {
 
     if (q.isEmpty) {
       return Center(
-        child: Text('请输入关键字进行搜索', style: TextStyle(
-          color: isDark ? Colors.white70 : const Color.fromARGB(255, 110, 110, 110),
-        )),
+        child: Text(
+          '请输入关键字进行搜索',
+          style: TextStyle(
+            color: isDark
+                ? Colors.white70
+                : const Color.fromARGB(255, 110, 110, 110),
+          ),
+        ),
       );
     }
 
@@ -256,20 +279,30 @@ class _SearchPageState extends State<SearchPage> {
 
     if (!_hasResults()) {
       return Center(
-        child: Text('没有匹配的结果', style: TextStyle(
-          color: isDark ? Colors.white70 : const Color.fromARGB(255, 110, 110, 110),
-        )),
+        child: Text(
+          '没有匹配的结果',
+          style: TextStyle(
+            color: isDark
+                ? Colors.white70
+                : const Color.fromARGB(255, 110, 110, 110),
+          ),
+        ),
       );
     }
 
     return ListView(
       padding: EdgeInsets.only(
         top: 4,
-        bottom: AppPageScaffold.scrollableBottomPadding(context, showMiniPlayer: true),
+        bottom: AppPageScaffold.scrollableBottomPadding(
+          context,
+          showMiniPlayer: true,
+        ),
       ),
       children: [
         // 歌曲结果
-        if (_songs.isNotEmpty && (_category == SearchCategory.all || _category == SearchCategory.song))
+        if (_songs.isNotEmpty &&
+            (_category == SearchCategory.all ||
+                _category == SearchCategory.song))
           _SectionCard(
             title: '歌曲',
             child: Column(
@@ -278,8 +311,16 @@ class _SearchPageState extends State<SearchPage> {
                 final song = entry.value;
                 return ListTile(
                   leading: ArtworkWidget(song: song, size: 48, borderRadius: 6),
-                  title: Text(song.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  subtitle: Text(_artistNames(song.artist), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  title: Text(
+                    song.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    _artistNames(song.artist),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   onTap: () => _playSong(i),
                   onLongPress: () {
                     showModalBottomSheet<void>(
@@ -295,12 +336,15 @@ class _SearchPageState extends State<SearchPage> {
           ),
 
         // 专辑结果
-        if (_albums.isNotEmpty && (_category == SearchCategory.all || _category == SearchCategory.album))
+        if (_albums.isNotEmpty &&
+            (_category == SearchCategory.all ||
+                _category == SearchCategory.album))
           _SectionCard(
             title: '专辑',
             child: Column(
               children: _albums.map((album) {
-                final coverUrl = album.coverId != null && album.coverId!.isNotEmpty
+                final coverUrl =
+                    album.coverId != null && album.coverId!.isNotEmpty
                     ? _api.coverUrl(album.coverId!, size: 48)
                     : null;
                 return ListTile(
@@ -317,8 +361,14 @@ class _SearchPageState extends State<SearchPage> {
                           ),
                         )
                       : _albumPlaceholder(theme),
-                  title: Text(album.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  subtitle: album.trackCount != null ? Text('${album.trackCount} 首') : null,
+                  title: Text(
+                    album.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: album.trackCount != null
+                      ? Text('${album.trackCount} 首')
+                      : null,
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
                       builder: (_) => AlbumDetailPage(
@@ -333,12 +383,15 @@ class _SearchPageState extends State<SearchPage> {
           ),
 
         // 歌手结果
-        if (_artists.isNotEmpty && (_category == SearchCategory.all || _category == SearchCategory.artist))
+        if (_artists.isNotEmpty &&
+            (_category == SearchCategory.all ||
+                _category == SearchCategory.artist))
           _SectionCard(
             title: '歌手',
             child: Column(
               children: _artists.map((artist) {
-                final coverUrl = artist.coverId != null && artist.coverId!.isNotEmpty
+                final coverUrl =
+                    artist.coverId != null && artist.coverId!.isNotEmpty
                     ? _api.coverUrl(artist.coverId!, size: 48)
                     : null;
                 return ListTile(
@@ -350,13 +403,28 @@ class _SearchPageState extends State<SearchPage> {
                             headers: FeiNiuApiClient.imageAuthHeaders(),
                           )
                         : null,
-                    child: coverUrl == null ? Text(artist.name.isNotEmpty ? artist.name.characters.first : '?') : null,
+                    child: coverUrl == null
+                        ? Text(
+                            artist.name.isNotEmpty
+                                ? artist.name.characters.first
+                                : '?',
+                          )
+                        : null,
                   ),
-                  title: Text(artist.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  subtitle: artist.trackCount != null ? Text('${artist.trackCount} 首') : null,
+                  title: Text(
+                    artist.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: artist.trackCount != null
+                      ? Text('${artist.trackCount} 首')
+                      : null,
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (_) => ArtistDetailPage(artistName: artist.name, artistGuid: artist.guid),
+                      builder: (_) => ArtistDetailPage(
+                        artistName: artist.name,
+                        artistGuid: artist.guid,
+                      ),
                     ),
                   ),
                 );
@@ -387,7 +455,10 @@ class _SearchPageState extends State<SearchPage> {
         color: theme.cardColor,
         borderRadius: BorderRadius.circular(6),
       ),
-      child: Icon(Icons.album_rounded, color: theme.colorScheme.primary.withValues(alpha: 0.4)),
+      child: Icon(
+        Icons.album_rounded,
+        color: theme.colorScheme.primary.withValues(alpha: 0.4),
+      ),
     );
   }
 }
@@ -407,7 +478,12 @@ class _SectionCard extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: Text(title, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            child: Text(
+              title,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
           child,
         ],

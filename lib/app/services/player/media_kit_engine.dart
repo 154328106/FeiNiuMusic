@@ -36,15 +36,15 @@ class MediaKitEngine implements PlayerEngine {
   @override
   Future<void> init() async {
     if (_player != null || _disposed) return;
-    // debug 构建下开启 mpv trace 日志，抓真实报错（如原始流 demux/解码失败的
-    // 具体原因）；release 构建用默认 error 级别，避免日志刷屏。
+    // 默认 error 级别：mpv trace 会在每个音频帧打 demux/缓存日志（即便未播放
+    // 也会刷屏，拖慢低端设备）。需要诊断 media_kit 加载/解码问题时再临时开 trace。
     final player = mk.Player(
-      configuration: kDebugMode
-          ? const mk.PlayerConfiguration(logLevel: mk.MPVLogLevel.trace)
-          : const mk.PlayerConfiguration(),
+      configuration: const mk.PlayerConfiguration(
+        logLevel: mk.MPVLogLevel.error,
+      ),
     );
     _player = player;
-    // 订阅 mpv 原生日志：诊断加载/解码失败的具体原因。
+    // 订阅 mpv 原生日志：仅保留错误级别，诊断加载/解码失败的具体原因。
     player.stream.log.listen((log) {
       if (kDebugMode) {
         debugPrint('[mpv:${log.prefix}] ${log.text}');

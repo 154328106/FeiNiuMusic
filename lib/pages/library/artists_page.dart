@@ -389,12 +389,15 @@ class _ArtistsPageState extends State<ArtistsPage>
             selected: false,
             multiSelect: false,
             isHighlighted: false,
-            onTap: () {
-              Navigator.of(context).push(
+            onTap: () async {
+              await Navigator.of(context).push(
                 buildAppPageRoute(
                   (_) => ArtistDetailPage(artistName: g.name, artistGuid: g.artist.guid),
                 ),
               );
+              // 返回后强制刷新（编辑可能改了名称/封面，重写 ApiCacheManager 缓存）
+              if (!mounted) return;
+              _load(forceRefresh: true);
             },
             onLongPress: () {},
           );

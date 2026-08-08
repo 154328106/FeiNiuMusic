@@ -477,8 +477,8 @@ class _AlbumsPageState extends State<AlbumsPage>
                   final g = _groups.value[index];
                   return InkWell(
                     borderRadius: BorderRadius.circular(16),
-                    onTap: () {
-                      Navigator.of(context).push(
+                    onTap: () async {
+                      await Navigator.of(context).push(
                         buildAppPageRoute(
                           (_) => AlbumDetailPage(
                             albumName: g.name,
@@ -486,6 +486,9 @@ class _AlbumsPageState extends State<AlbumsPage>
                           ),
                         ),
                       );
+                      // 返回后强制刷新（编辑可能改了名称/封面，重写 ApiCacheManager 缓存）
+                      if (!mounted) return;
+                      _load(forceRefresh: true);
                     },
                     onLongPress: () {},
                     child: Padding(

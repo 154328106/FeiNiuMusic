@@ -6,15 +6,18 @@ import 'package:lpinyin/lpinyin.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
 import '../../app/router/app_page_route.dart';
+import '../../app/services/companion/metadata_companion_service.dart';
 import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/feiniu/cue_service.dart';
 import '../../app/services/feiniu/track_service.dart';
 import '../../app/services/player_service.dart';
 
+import '../../app/state/settings_lyric_companion.dart';
 import '../../app/state/settings_playback_state.dart';
 import '../../app/state/song_state.dart';
 import '../../components/index.dart';
 import '../songs/song_detail_sheet.dart';
+import 'artist_album_edit_page.dart';
 
 List<String> splitArtists(String raw) {
   final text = raw.trim();
@@ -123,6 +126,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
   @override
   List<SongEntity> get multiSelectSongs => _songs.value;
 
+  late String _artistName = widget.artistName;
   late final _loading = createSignal(true);
   late final _songs = createSignal<List<SongEntity>>([]);
   late final _albumsExpanded = createSignal(true);
@@ -180,6 +184,25 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
     return full;
   }
 
+  /// 打开歌手编辑页；保存后刷新名称与歌曲列表（新 coverId 内嵌于重拉的歌曲）。
+  Future<void> _openEdit() async {
+    final guid = widget.artistGuid;
+    if (guid == null) return;
+    final result = await Navigator.of(context).push<String>(
+      buildAppPageRoute(
+        (_) => ArtistAlbumEditPage(
+          kind: EntityEditKind.artist,
+          guid: guid,
+          name: _artistName,
+          coverId: _artistCoverIdFor(_songs.value, guid),
+        ),
+      ),
+    );
+    if (!mounted || result == null) return;
+    setState(() => _artistName = result);
+    _load();
+  }
+
   Future<void> _load() async {
     _isRefreshing.value = true;
     _loading.value = true;
@@ -231,13 +254,14 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return AppNavigationModeBuilder(
       builder: (context, useBottomNavigation) => AppPageScaffold(
         extendBodyBehindAppBar: false,
         useSafeArea: false,
         showMiniPlayer: !isMultiSelecting,
         appBar: AppTopBar(
-          title: isMultiSelecting ? '已选 $selectedCount 首' : widget.artistName,
+          title: isMultiSelecting ? '已选 $selectedCount 首' : _artistName,
           leading: isMultiSelecting
               ? IconButton(
                   icon: const Icon(Icons.close_rounded),
@@ -257,6 +281,25 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
                   MultiSelectToggleButton(enabled: true, onTap: exitMultiSelect),
                 ]
               : [
+                  if (widget.artistGuid != null)
+                    ValueListenableBuilder<bool>(
+                      valueListenable: LyricCompanionSettings.enabled,
+                      builder: (context, enabled, _) {
+                        final available =
+                            enabled && !FeiNiuApiClient.instance.relayMode;
+                        return IconButton(
+                          tooltip: available ? '编辑' : '需先启用配套编辑服务（设置 → 元数据匹配）',
+                          icon: Icon(
+                            Icons.edit_outlined,
+                            color: available
+                                ? null
+                                : theme.colorScheme.onSurfaceVariant
+                                    .withValues(alpha: 0.4),
+                          ),
+                          onPressed: available ? _openEdit : null,
+                        );
+                      },
+                    ),
                   MultiSelectToggleButton(
                     enabled: false,
                     onTap: toggleMultiSelect,
@@ -287,7 +330,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
                       if (representative != null)
                         _ArtistHeaderAvatar(
                           coverId: _artistCoverIdFor(songs, widget.artistGuid),
-                          name: widget.artistName,
+                          name: _artistName,
                           size: 110,
                           fallback: representative,
                         )
@@ -295,9 +338,9 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
                         CircleAvatar(
                           radius: 55,
                           child: Text(
-                            widget.artistName.isEmpty
+                            _artistName.isEmpty
                                 ? '?'
-                                : widget.artistName.substring(0, 1),
+                                : _artistName.substring(0, 1),
                             style: const TextStyle(fontSize: 36),
                           ),
                         ),
@@ -307,7 +350,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              widget.artistName,
+                              _artistName,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
@@ -585,6 +628,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage>
   @override
   List<SongEntity> get multiSelectSongs => _songs.value;
 
+  late String _albumName = widget.albumName;
   late final _loading = createSignal(true);
   late final _songs = createSignal<List<SongEntity>>([]);
   late final _showCovers = createSignal(true);
@@ -626,6 +670,25 @@ class _AlbumDetailPageState extends State<AlbumDetailPage>
     }
     if (full.length > cap) full.removeRange(cap, full.length);
     return full;
+  }
+
+  /// 打开专辑编辑页；保存后刷新名称与歌曲列表（新 album.coverId 内嵌于重拉的歌曲）。
+  Future<void> _openEdit() async {
+    final guid = widget.albumGuid;
+    if (guid == null) return;
+    final result = await Navigator.of(context).push<String>(
+      buildAppPageRoute(
+        (_) => ArtistAlbumEditPage(
+          kind: EntityEditKind.album,
+          guid: guid,
+          name: _albumName,
+          coverId: _songs.value.firstOrNull?.albumCoverId,
+        ),
+      ),
+    );
+    if (!mounted || result == null) return;
+    setState(() => _albumName = result);
+    _load();
   }
 
   Future<void> _load() async {
@@ -721,13 +784,14 @@ class _AlbumDetailPageState extends State<AlbumDetailPage>
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return AppNavigationModeBuilder(
       builder: (context, useBottomNavigation) => AppPageScaffold(
         extendBodyBehindAppBar: false,
         useSafeArea: false,
         showMiniPlayer: !isMultiSelecting,
         appBar: AppTopBar(
-          title: isMultiSelecting ? '已选 $selectedCount 首' : widget.albumName,
+          title: isMultiSelecting ? '已选 $selectedCount 首' : _albumName,
           leading: isMultiSelecting
               ? IconButton(
                   icon: const Icon(Icons.close_rounded),
@@ -747,6 +811,25 @@ class _AlbumDetailPageState extends State<AlbumDetailPage>
                   MultiSelectToggleButton(enabled: true, onTap: exitMultiSelect),
                 ]
               : [
+                  if (widget.albumGuid != null)
+                    ValueListenableBuilder<bool>(
+                      valueListenable: LyricCompanionSettings.enabled,
+                      builder: (context, enabled, _) {
+                        final available =
+                            enabled && !FeiNiuApiClient.instance.relayMode;
+                        return IconButton(
+                          tooltip: available ? '编辑' : '需先启用配套编辑服务（设置 → 元数据匹配）',
+                          icon: Icon(
+                            Icons.edit_outlined,
+                            color: available
+                                ? null
+                                : theme.colorScheme.onSurfaceVariant
+                                    .withValues(alpha: 0.4),
+                          ),
+                          onPressed: available ? _openEdit : null,
+                        );
+                      },
+                    ),
                   IconButton(
                     tooltip: '更多',
                     icon: const Icon(Icons.more_vert_rounded),
@@ -794,18 +877,10 @@ class _AlbumDetailPageState extends State<AlbumDetailPage>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       if (representative != null)
-                        ArtworkWidget(
-                          song: representative,
+                        _AlbumHeaderCover(
+                          coverId: representative.albumCoverId,
                           size: 110,
-                          borderRadius: 12,
-                          placeholder: Container(
-                            width: 110,
-                            height: 110,
-                            decoration: BoxDecoration(
-                              color: theme.cardColor,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
+                          fallback: representative,
                         )
                       else
                         Container(
@@ -822,7 +897,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              widget.albumName,
+                              _albumName,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
@@ -1091,6 +1166,69 @@ class _AlbumGroup {
 
 /// 歌手头像：有歌手自身 coverId 时显示歌手图片，否则回退到代表性歌曲封面，
 /// 再不行显示首字母占位。头像为圆形（对齐歌手列表的 _ArtistAvatar）。
+/// 专辑封面头部：有专辑自身 coverId 时显示专辑图片，否则回退到代表性歌曲封面。
+/// 圆角矩形（对齐专辑列表封面样式）。
+class _AlbumHeaderCover extends StatelessWidget {
+  final String? coverId;
+  final double size;
+  final SongEntity fallback;
+
+  const _AlbumHeaderCover({
+    required this.coverId,
+    required this.size,
+    required this.fallback,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final borderRadius = BorderRadius.circular(12);
+
+    // 专辑自身图片
+    if (coverId != null && coverId!.isNotEmpty) {
+      final coverUrl = FeiNiuApiClient.instance.coverUrl(
+        coverId!,
+        size: (size * MediaQuery.devicePixelRatioOf(context)).round().clamp(120, 800),
+      );
+      return ClipRRect(
+        borderRadius: borderRadius,
+        child: CachedNetworkImage(
+          imageUrl: coverUrl,
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          httpHeaders: FeiNiuApiClient.imageAuthHeaders(),
+          errorWidget: (_, _, _) => Container(
+            width: size,
+            height: size,
+            color: theme.cardColor,
+          ),
+          placeholder: (_, _) => Container(
+            width: size,
+            height: size,
+            color: theme.cardColor,
+          ),
+        ),
+      );
+    }
+
+    // 无专辑图片：用代表性歌曲封面（原 ArtworkWidget 行为）
+    return ArtworkWidget(
+      song: fallback,
+      size: size,
+      borderRadius: 12,
+      placeholder: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: theme.cardColor,
+          borderRadius: borderRadius,
+        ),
+      ),
+    );
+  }
+}
+
 class _ArtistHeaderAvatar extends StatelessWidget {
   final String? coverId;
   final String name;

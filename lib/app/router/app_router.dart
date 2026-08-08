@@ -23,12 +23,17 @@ import '../../pages/settings/settings_page.dart';
 import '../../pages/settings/version_info_page.dart';
 import '../../pages/settings/volume_settings_page.dart';
 import '../../pages/settings/launch_settings_page.dart';
+import '../../pages/settings/data_source_page.dart';
+import '../../pages/settings/match_settings_page.dart';
+import '../../pages/settings/metadata_match_settings_page.dart';
 import '../../pages/library/albums_page.dart';
 import '../../pages/library/artists_page.dart';
 import '../../pages/library/playlists_page.dart';
 import '../../pages/library/genres_page.dart';
 import '../../pages/search/search_page.dart';
+import '../../pages/songs/batch_match_page.dart';
 import '../../app/state/settings_state.dart';
+import '../../app/state/song_state.dart';
 import '../../app/utils/primary_shell_scope.dart';
 import '../../components/layout/modern_navigation_bar.dart';
 
@@ -61,6 +66,10 @@ class AppRoutes {
   static const favorites = '/favorites';
   static const search = '/search';
   static const profile = '/profile';
+  static const batchMatch = '/songs/batch-match';
+  static const dataSourceSettings = '/settings/data-sources';
+  static const matchSettings = '/settings/match';
+  static const metadataMatchSettings = '/settings/metadata-match';
 }
 
 class AppRouter {
@@ -101,6 +110,13 @@ class AppRouter {
     AppRoutes.profile: (_) => const ProfilePage(),
     AppRoutes.recent: (_) => const RecentPlaybackPage(),
     AppRoutes.favorites: (_) => const FavoritePage(),
+    AppRoutes.batchMatch: (context) => BatchMatchPage(
+      songs: (ModalRoute.of(context)?.settings.arguments as List<dynamic>? ?? const [])
+          .cast<SongEntity>(),
+    ),
+    AppRoutes.dataSourceSettings: (_) => const DataSourcePage(),
+    AppRoutes.matchSettings: (_) => const MatchSettingsPage(),
+    AppRoutes.metadataMatchSettings: (_) => const MetadataMatchSettingsPage(),
   };
 }
 

@@ -1,6 +1,9 @@
 plugins {
     id("com.android.application")
     id("kotlin-android")
+    // 数据源插件宿主（QuickJsHostApi/PluginJsonParser 等）使用 kotlinx-serialization
+    // 序列化插件请求/响应 JSON（Lyrico 同款）。
+    id("org.jetbrains.kotlin.plugin.serialization")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
@@ -30,6 +33,16 @@ android {
         // Shizuku 特权服务：主工程含 AIDL（IPrivilegedService/IPrivilegedLogCallback），
         // 需显式开启 AIDL 编译，否则生成的 Stub 接口不可用。
         aidl = true
+    }
+
+    // 数据源插件（Lyrico 搜索源）JS 引擎：quickjs-ng 0.14.0 原生编译。
+    // 源码在 src/main/cpp/，JNI 桥 quickjs_bridge.cpp 与 Kotlin
+    // com.feiniu.music.match.QuickJsNative 对接（Lyrico，Apache-2.0）。
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     kotlinOptions {
@@ -141,6 +154,11 @@ dependencies {
     // api 自带 rikka.sui.Sui（"API of Shizuku and Sui"），无需单独引入 sui。
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+    // 数据源插件宿主：QuickJsHostApi 用 OkHttp 同步执行插件 Platform.http.*
+    // （Lyrico 同款，Apache-2.0）。
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // 数据源插件宿主：QuickJsHostApi/PluginJsonParser 的 JSON 序列化（Lyrico 同款）。
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 }
 
 flutter {

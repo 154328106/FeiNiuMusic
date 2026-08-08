@@ -631,6 +631,21 @@ class FeiNiuApiClient {
     return response.data ?? const FeiNiuPageData(list: [], total: 0);
   }
 
+  /// 获取专辑全量列表（无分页，供编辑歌曲的专辑解析使用）。
+  ///
+  /// 响应 `data.list` 直接为专辑数组（与 `/album/list` 的 FeiNiuPageData
+  /// 不同，没有 total 分页字段）。
+  Future<List<FeiNiuAlbum>> getAlbumListAll() async {
+    final data = await _get('/album/list-all');
+    final body = data['data'];
+    final rawList = (body is Map<String, dynamic>) ? body['list'] : null;
+    final list = (rawList as List<dynamic>?)
+            ?.map((e) => FeiNiuAlbum.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        const [];
+    return list;
+  }
+
   // endregion
 
   // region 7. 专辑详情
@@ -684,6 +699,29 @@ class FeiNiuApiClient {
             .toList() ??
         const [];
     return list;
+  }
+
+  /// 创建歌手（不存在时自动新建），返回新歌手对象。
+  ///
+  /// body: `{"name": "...", "coverId": null}`。服务端返回创建后的歌手
+  /// （含 guid）。失败时抛异常（携带服务器 msg）。
+  Future<FeiNiuArtist> createArtist(String name, {String? coverId}) async {
+    final data = await _post(
+      '/artist/create',
+      data: {'name': name, 'coverId': coverId},
+    );
+    final parsed = FeiNiuResponse.fromJson(
+      data,
+      (d) => FeiNiuArtist.fromJson(d as Map<String, dynamic>),
+    );
+    if (!parsed.isSuccess) {
+      throw Exception(parsed.msg.isNotEmpty ? parsed.msg : '创建歌手失败');
+    }
+    final artist = parsed.data;
+    if (artist == null || artist.guid.isEmpty) {
+      throw Exception('创建歌手失败：服务端未返回歌手信息');
+    }
+    return artist;
   }
 
   // endregion

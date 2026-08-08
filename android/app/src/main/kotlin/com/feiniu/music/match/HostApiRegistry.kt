@@ -1,0 +1,62 @@
+package com.feiniu.music.match
+
+import androidx.annotation.Keep
+
+/**
+ * 插件协议 / 宿主 API 版本常量（移植自 Lyrico，Apache-2.0）。
+ */
+object HostApiRegistry {
+    const val MIN_PLUGIN_PROTOCOL_VERSION = 1
+    const val PLUGIN_PROTOCOL_VERSION = 4
+    const val MIN_PLATFORM_API_VERSION = 1
+    const val PLATFORM_API_VERSION = 3
+
+    fun supportsPluginApiVersion(apiVersion: Int): Boolean =
+        apiVersion in MIN_PLUGIN_PROTOCOL_VERSION..PLUGIN_PROTOCOL_VERSION
+
+    fun supportsHostApiVersion(minHostApiVersion: Int): Boolean =
+        minHostApiVersion in MIN_PLATFORM_API_VERSION..PLATFORM_API_VERSION
+
+    val SUPPORTED_HOST_APIS = setOf(
+        "app.info",
+        "app.userAgent",
+        "runtime.info",
+        "cache.get",
+        "cache.set",
+        "cache.remove",
+        "cache.clear",
+        "crypto.md5",
+        "crypto.aesEcbPkcs5EncryptBase64",
+        "crypto.aesEcbPkcs5EncryptHex",
+        "crypto.aesEcbPkcs5DecryptBase64ToText",
+        "base64.encodeText",
+        "base64.decodeText",
+        "base64.dropBytes",
+        "base64.decodeBytes",
+        "base64.encodeBytes",
+        "base64.encodeUrlText",
+        "base64.decodeUrlText",
+        "base64.encodeUrlBytes",
+        "base64.decodeUrlBytes",
+        "base64.toUrl",
+        "base64.fromUrl",
+        "bytes.xor",
+        "bytes.xorBase64",
+        "compression.inflateBytesToText",
+        "compression.inflateBase64ToText",
+        "http.getText",
+        "http.postText",
+        "http.postBytes",
+        "http.get",
+        "http.post",
+        "http.getBytes",
+        "http.postBytesResponse",
+        "log.debug",
+        "log.warn",
+        "log.error",
+        "xml.getRootAttributes",
+        "xml.findElements",
+        "xml.replaceChildrenByAttr",
+        "xml.removeElements"
+    )
+}

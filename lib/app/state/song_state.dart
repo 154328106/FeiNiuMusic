@@ -69,6 +69,20 @@ class SongEntity {
     }
   }
 
+  /// 解析全部 artist 的 guid 列表（供批量匹配回退原歌手用）。
+  List<String> get artistGuids {
+    try {
+      final list = jsonDecode(artist) as List<dynamic>;
+      return list
+          .map((e) => (e as Map<String, dynamic>)['guid'] as String?)
+          .whereType<String>()
+          .where((g) => g.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
   /// 解析第一个 artist 的 coverId（歌手自身图片）。
   ///
   /// artist JSON 由 [FeiNiuTrackService] 写入，携带 `coverId` 字段
@@ -147,6 +161,17 @@ class SongEntity {
     try {
       final map = jsonDecode(album!) as Map<String, dynamic>;
       return map['guid'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 解析 album JSON 获取专辑 coverId（track 的 album JSON 内嵌 coverId）。
+  String? get albumCoverId {
+    if (album == null) return null;
+    try {
+      final map = jsonDecode(album!) as Map<String, dynamic>;
+      return map['coverId'] as String?;
     } catch (_) {
       return null;
     }

@@ -23,6 +23,8 @@ plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
     id("com.android.application") version "8.11.1" apply false
     id("org.jetbrains.kotlin.android") version "2.2.20" apply false
+    // kotlinx-serialization 编译器插件（数据源插件宿主用，版本与 Kotlin 对齐）。
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.2.20" apply false
 }
 
 include(":app")
