@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
@@ -9,6 +11,7 @@ import '../../app/state/settings_layout_state.dart';
 import '../../app/state/settings_playback_state.dart';
 import '../../app/state/song_state.dart';
 import '../../app/theme/app_styles.dart';
+import '../../app/utils/api_cache_manager.dart';
 import '../library/library_detail_pages.dart';
 import '../songs/song_detail_sheet.dart';
 
@@ -140,6 +143,30 @@ class _RecentPlaybackPageState extends State<RecentPlaybackPage>
 
   Future<void> _loadHistory() async {
     _loading.value = true;
+    const scope = 'recent-playback';
+    const key = 'history-page1';
+    // 断网兜底：先读本地持久缓存立即渲染，再后台刷新最新数据。
+    try {
+      final cachedJson = await ApiCacheManager.instance.getPersisted(scope, key);
+      if (cachedJson != null && mounted) {
+        try {
+          final cached = jsonDecode(cachedJson) as Map<String, dynamic>;
+          final songs = (cached['songs'] as List)
+              .map((e) => SongEntity.fromMap(e as Map<String, dynamic>))
+              .toList();
+          _currentPage = 1;
+          _total = cached['total'] as int? ?? songs.length;
+          _hasMore = songs.length < _total;
+          _allSongs.value = songs;
+          _applyFilter();
+          _loading.value = false; // 缓存命中先渲染，网络刷新在后台完成
+        } catch (e) {
+          debugPrint('[RecentPlaybackPage] cache parse error: $e');
+        }
+      }
+    } catch (e) {
+      debugPrint('[RecentPlaybackPage] cache read error: $e');
+    }
     try {
       final pageData = await _api.getPlayHistory(page: 1, size: _pageSize);
       final songs = pageData.list
@@ -151,6 +178,18 @@ class _RecentPlaybackPageState extends State<RecentPlaybackPage>
         _hasMore = songs.length < _total;
         _allSongs.value = songs;
         _applyFilter();
+      }
+      try {
+        await ApiCacheManager.instance.set(
+          scope: scope,
+          key: key,
+          jsonData: jsonEncode({
+            'total': pageData.total,
+            'songs': songs.map((s) => s.toMap()).toList(),
+          }),
+        );
+      } catch (e) {
+        debugPrint('[RecentPlaybackPage] cache write error: $e');
       }
     } catch (e) {
       debugPrint('[RecentPlaybackPage] load error: $e');

@@ -22,11 +22,14 @@ class ApiCacheManager {
   final SongDao _dao = SongDao.instance;
 
   /// 存 JSON 到两层缓存。
+  ///
+  /// [ttlMs] 默认 null = 永久缓存（与读路径 ignoreTtl 一致：数据永久保留，
+  /// 除非用户清空缓存或页面下拉刷新覆盖）。传非空值才按时间淘汰。
   Future<void> set({
     required String scope,
     required String key,
     required String jsonData,
-    int ttlMs = 300000,
+    int? ttlMs,
   }) async {
     _memory.set(scope, key, jsonData, ttlMs: ttlMs);
     await _dao.cacheApiResponse(_compositeKey(scope, key), jsonData, ttlMs: ttlMs);
@@ -62,7 +65,7 @@ class ApiCacheManager {
     required T Function(String json) fromJson,
     required String Function(T data) toJson,
     required void Function(T? data) fetchCallback,
-    int ttlMs = 300000,
+    int? ttlMs,
   }) async {
     // 1. 检查 SQLite 持久化缓存
     try {
@@ -102,7 +105,7 @@ class ApiCacheManager {
     String key,
     Future<T> Function() fetch,
     String Function(T) toJson,
-    int ttlMs,
+    int? ttlMs,
     void Function(T? data) fetchCallback,
   ) async {
     try {
@@ -125,7 +128,7 @@ class ApiCacheManager {
     required String key,
     required Future<T> Function() fetch,
     required String Function(T data) toJson,
-    int ttlMs = 300000,
+    int? ttlMs,
   }) async {
     final freshData = await fetch();
     final json = toJson(freshData);

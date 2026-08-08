@@ -10,6 +10,9 @@ class SongDao {
   SongDao._();
 
   static const String cacheVersionScope = 'song_library';
+  /// API 缓存的永久 TTL 哨兵值：ttl_ms 存 -1 表示永久（不清空、不按时间淘汰），
+  /// 语义对齐「数据永久缓存，除非清空缓存或下次刷新」。
+  static const int kCacheTtlPermanent = -1;
   static const int _maxIdsPerQuery = 500;
   static List<SongEntity>? _cachedAll;
   static Future<List<SongEntity>>? _cachedAllFuture;
@@ -122,7 +125,7 @@ class SongDao {
   Future<void> cacheApiResponse(
     String key,
     String json, {
-    int ttlMs = 300000,
+    int? ttlMs,
   }) async {
     final db = await DbHelper.instance.database;
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -130,7 +133,8 @@ class SongDao {
       'cache_key': key,
       'json_data': json,
       'cached_at_ms': now,
-      'ttl_ms': ttlMs,
+      // null → 永久（ttl_ms 存 -1）；显式传值则存实际 TTL
+      'ttl_ms': ttlMs ?? kCacheTtlPermanent,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
@@ -152,7 +156,8 @@ class SongDao {
     final now = DateTime.now().millisecondsSinceEpoch;
     final rows = await db.query(
       DbConstants.tableApiCache,
-      where: 'cache_key = ? AND (cached_at_ms + ttl_ms) > ?',
+      // 永久项（ttl_ms = -1）不按时间过期
+      where: 'cache_key = ? AND (ttl_ms < 0 OR (cached_at_ms + ttl_ms) > ?)',
       whereArgs: [key, now],
       limit: 1,
     );
@@ -165,7 +170,8 @@ class SongDao {
     final now = DateTime.now().millisecondsSinceEpoch;
     await db.delete(
       DbConstants.tableApiCache,
-      where: '(cached_at_ms + ttl_ms) < ?',
+      // 永久项（ttl_ms = -1）保留，只清有 TTL 且已过期的
+      where: 'ttl_ms >= 0 AND (cached_at_ms + ttl_ms) < ?',
       whereArgs: [now],
     );
   }

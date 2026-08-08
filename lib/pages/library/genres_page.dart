@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +14,7 @@ import '../../app/services/player_service.dart';
 import '../../app/state/settings_layout_state.dart';
 import '../../app/state/song_state.dart';
 import '../../app/tv/tv_layout.dart';
+import '../../app/utils/api_cache_manager.dart';
 import '../../components/index.dart';
 import '../songs/song_detail_sheet.dart';
 
@@ -114,10 +116,32 @@ class _GenresPageState extends State<GenresPage> with SignalsMixin {
   /// 并发拉取每个风格的第一首歌曲封面，存入 [_genreCovers]。
   ///
   /// 卡片圆心叠加的专辑封面即来自此映射；单个风格失败不影响其余。
+  /// 封面映射整体走持久缓存（genreGUID → coverId）：断网时直接读缓存渲染，
+  /// 已尝试过的风格（无论有无封面）不再重复请求。
   Future<void> _fetchFirstSongCovers(List<FeiNiuGenre> genres) async {
     if (genres.isEmpty || !mounted) return;
+    const scope = 'genres';
+    const key = 'covers';
+    // 断网兜底：先读已缓存的封面映射立即渲染，再对缺失风格后台拉取。
+    try {
+      final cachedJson = await ApiCacheManager.instance.getPersisted(scope, key);
+      if (cachedJson != null) {
+        final cached = (jsonDecode(cachedJson) as Map<String, dynamic>)
+            .map((k, v) => MapEntry(k, v as String?));
+        final map = Map<String, String?>.from(_genreCovers.value)
+          ..addAll(cached);
+        _genreCovers.value = map;
+      }
+    } catch (e) {
+      debugPrint('[GenresPage] covers cache read error: $e');
+    }
+    // 只请求映射里还没有的风格（已含 null 表示已尝试过，避免重复请求）
+    final missing = genres
+        .where((g) => !_genreCovers.value.containsKey(g.guid))
+        .toList();
+    if (missing.isEmpty || !mounted) return;
     final results = await Future.wait(
-      genres.map((g) async {
+      missing.map((g) async {
         try {
           final pageData = await _api.getGenreTracks(
             genreGUID: g.guid,
@@ -137,6 +161,16 @@ class _GenresPageState extends State<GenresPage> with SignalsMixin {
       map[r.guid] = r.coverId;
     }
     _genreCovers.value = map;
+    // 写回持久缓存（永久，与列表缓存一致）
+    try {
+      await ApiCacheManager.instance.set(
+        scope: scope,
+        key: key,
+        jsonData: jsonEncode(map),
+      );
+    } catch (e) {
+      debugPrint('[GenresPage] covers cache write error: $e');
+    }
   }
 
   Future<void> _init() async {
@@ -177,8 +211,31 @@ class _GenresPageState extends State<GenresPage> with SignalsMixin {
 
   Future<void> _load() async {
     _loading.value = true;
+    final sort = '${_sortKey.value},${_ascending.value ? 'asc' : 'desc'}';
+    const scope = 'genres';
+    final key = 'list-$sort';
+    // 断网兜底：先读本地持久缓存立即渲染，再后台刷新最新数据。
     try {
-      final sort = '${_sortKey.value},${_ascending.value ? 'asc' : 'desc'}';
+      final cachedJson = await ApiCacheManager.instance.getPersisted(scope, key);
+      if (cachedJson != null && mounted) {
+        try {
+          final cached = jsonDecode(cachedJson) as List;
+          final genres = cached
+              .map((e) => FeiNiuGenre.fromJson(e as Map<String, dynamic>))
+              .toList();
+          _currentPage = 1;
+          _total = genres.length;
+          _hasMore = false;
+          _genres.value = genres;
+          _loading.value = false; // 缓存命中先渲染，网络刷新在后台完成
+        } catch (e) {
+          debugPrint('[GenresPage] cache parse error: $e');
+        }
+      }
+    } catch (e) {
+      debugPrint('[GenresPage] cache read error: $e');
+    }
+    try {
       final pageData = await _api.getGenreList(
         page: 1,
         size: _pageSize,
@@ -190,6 +247,15 @@ class _GenresPageState extends State<GenresPage> with SignalsMixin {
         _hasMore = pageData.list.length < _total;
         _genres.value = pageData.list;
         unawaited(_fetchFirstSongCovers(pageData.list));
+      }
+      try {
+        await ApiCacheManager.instance.set(
+          scope: scope,
+          key: key,
+          jsonData: jsonEncode(pageData.list.map((g) => g.toJson()).toList()),
+        );
+      } catch (e) {
+        debugPrint('[GenresPage] cache write error: $e');
       }
     } catch (e) {
       debugPrint('[GenresPage] load error: $e');
