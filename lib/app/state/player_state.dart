@@ -73,6 +73,9 @@ class AppPlayerState {
   final ValueNotifier<EngineKind> decoderEngine =
       ValueNotifier(EngineKind.justAudio);
 
+  /// 是否正在 DLNA 投屏（遥控模式）。投屏时播放页控件改为遥控投屏设备。
+  final ValueNotifier<bool> isCasting = ValueNotifier(false);
+
   // Signals (for reactive state management)
   final positionSignal = signal(Duration.zero);
   final durationSignal = signal<Duration?>(null);
@@ -87,6 +90,7 @@ class AppPlayerState {
   final sleepTimerDisplayTextSignal = signal<String?>(null);
   final sleepUntilSongEndSignal = signal(false);
   final decoderEngineSignal = signal(EngineKind.justAudio);
+  final isCastingSignal = signal(false);
 
   void _initListeners() {
     position.addListener(() => positionSignal.value = position.value);
@@ -114,6 +118,9 @@ class AppPlayerState {
     decoderEngine.addListener(() {
       decoderEngineSignal.value = decoderEngine.value;
     });
+    isCasting.addListener(() {
+      isCastingSignal.value = isCasting.value;
+    });
   }
   
   void dispose() {
@@ -130,5 +137,6 @@ class AppPlayerState {
     sleepTimerDisplayText.dispose();
     sleepUntilSongEnd.dispose();
     decoderEngine.dispose();
+    isCasting.dispose();
   }
 }

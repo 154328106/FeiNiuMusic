@@ -175,6 +175,13 @@ class _SettingsPageState extends State<SettingsPage> {
                       AppRoutes.transcodeSettings,
                     ),
                   ),
+                  AppSettingTile(
+                    title: '投屏（DLNA）',
+                    subtitle: '将音乐推送到局域网 DLNA 设备',
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () =>
+                        Navigator.pushNamed(context, AppRoutes.dlnaSettings),
+                  ),
                 ],
               ),
               const SizedBox(height: 16),

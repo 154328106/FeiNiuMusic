@@ -248,6 +248,32 @@ class FeiNiuTranscodeService {
 
   Future<void> quitForIds(Iterable<String> ids) => _quitIds(ids);
 
+  /// 获取某首歌的 **MP3 转码 HLS** 绝对地址（供 DLNA 投屏使用）。
+  ///
+  /// 渲染器通常无法解码 FLAC/DSF/APE 等无损格式，投屏时优先转码成 MP3。
+  /// - 转码成功 → 按 `songId|mp3` 缓存（TTL）并登记活动会话，返回绝对 URL；
+  /// - 网络异常 / 服务器未返回地址 → 返回 null（调用方退直连）。
+  Future<String?> transcodeMp3UrlFor(SongEntity song) async {
+    try {
+      final key = _cacheKey(song.id, 'mp3');
+      final hit = _cache[key];
+      if (hit != null && hit.isValid()) {
+        _activeIds.add(song.id);
+        return hit.url;
+      }
+      // mp3 不带 bitrate（带 bitrate 会显著劣化音质）。
+      final rel = await _api.trackTranscode(song.id, codec: 'mp3', channel: 2);
+      if (rel == null) return null;
+      final url = _api.resolveHlsUrl(rel);
+      _cache[key] = _CachedHls(url, DateTime.now().add(_ttl));
+      _activeIds.add(song.id);
+      return url;
+    } catch (_) {
+      // 任何失败 → 返回 null，由调用方退直连，不阻塞投屏。
+      return null;
+    }
+  }
+
   Future<void> quitAll() => _quitIds(_activeIds.toList());
 
   /// 当前歌是否正在走服务器转码（有活动转码会话）。

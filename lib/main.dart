@@ -104,6 +104,8 @@ Future<void> main() async {
   await AccountStore.instance.init();
   await PlayerStyleSettings.ensureLoaded();
   await AppLaunchNavigationSettings.ensureLoaded();
+  // DLNA 投屏设置（播放页投屏按钮据此显示/隐藏）
+  await DlnaCastSettings.ensureLoaded();
   // 初始化自动重连服务（监听网络变化 + API 失败）
   FnAutoReconnectService.instance.init();
   // 迁移歌曲缓存到系统标准缓存目录后，启动时顺手清理旧版 app-support 目录中的

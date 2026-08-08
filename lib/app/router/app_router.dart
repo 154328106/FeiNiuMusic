@@ -27,6 +27,7 @@ import '../../pages/settings/transcode_settings_page.dart';
 import '../../pages/settings/data_source_page.dart';
 import '../../pages/settings/match_settings_page.dart';
 import '../../pages/settings/metadata_match_settings_page.dart';
+import '../../pages/settings/dlna_settings_page.dart';
 import '../../pages/library/albums_page.dart';
 import '../../pages/library/artists_page.dart';
 import '../../pages/library/playlists_page.dart';
@@ -72,6 +73,7 @@ class AppRoutes {
   static const matchSettings = '/settings/match';
   static const metadataMatchSettings = '/settings/metadata-match';
   static const transcodeSettings = '/settings/transcode';
+  static const dlnaSettings = '/settings/dlna';
 }
 
 class AppRouter {
@@ -120,6 +122,7 @@ class AppRouter {
     AppRoutes.matchSettings: (_) => const MatchSettingsPage(),
     AppRoutes.metadataMatchSettings: (_) => const MetadataMatchSettingsPage(),
     AppRoutes.transcodeSettings: (_) => const TranscodeSettingsPage(),
+    AppRoutes.dlnaSettings: (_) => const DlnaSettingsPage(),
   };
 }
 

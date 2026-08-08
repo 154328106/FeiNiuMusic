@@ -13,6 +13,7 @@ import 'package:signals/signals.dart';
 
 import 'db/dao/song_dao.dart';
 import 'audio/stream_cache_service.dart';
+import 'cast/dlna_cast_service.dart';
 import 'feiniu/api_client.dart';
 import 'feiniu/api_models.dart';
 import 'feiniu/auth_service.dart';
@@ -131,6 +132,9 @@ class PlayerService with WidgetsBindingObserver {
   ValueNotifier<bool> get sleepUntilSongEnd => _state.sleepUntilSongEnd;
   ValueNotifier<EngineKind> get decoderEngine => _state.decoderEngine;
 
+  /// 是否正在 DLNA 投屏（遥控模式）。投屏时 UI 据此把播放控制转到投屏设备。
+  ValueNotifier<bool> get isCasting => _state.isCasting;
+
   /// 当前播放速度倍率（0.1–5.0，1.0 为正常）。UI 经此读取/监听。
   ValueNotifier<double> get speed => AppPlaybackSpeedSettings.speed;
 
@@ -151,6 +155,7 @@ class PlayerService with WidgetsBindingObserver {
       _state.sleepTimerDisplayTextSignal;
   Signal<bool> get sleepUntilSongEndSignal => _state.sleepUntilSongEndSignal;
   Signal<EngineKind> get decoderEngineSignal => _state.decoderEngineSignal;
+  Signal<bool> get isCastingSignal => _state.isCastingSignal;
 
   StreamSubscription<AudioInterruptionEvent>? _interruptionSub;
   StreamSubscription<void>? _becomingNoisySub;
@@ -175,6 +180,10 @@ class PlayerService with WidgetsBindingObserver {
   Timer? _snapshotTimer;
   int _prefetchTriggeredIndex = -1;
   bool _recoveringCurrentSource = false;
+
+  /// 投屏断开后需要在本机续播的逻辑歌曲（投屏切歌时本机引擎停在旧歌，
+  /// 断开后据此重载到正确的歌曲再播放）。
+  SongEntity? _castResumeSong;
 
   /// roam 追加请求串行化：>0 表示有请求进行中或待处理
   int _roamAppendQueuedCount = 0;
@@ -323,8 +332,55 @@ class PlayerService with WidgetsBindingObserver {
     } finally {
       _restoringState = false;
     }
+    _registerCastHooks();
     _emitSnapshot(force: true);
     _debugLog('init completed');
+  }
+
+  /// 注册 DLNA 投屏钩子：开始投屏时暂停本机、断开时恢复本机续播。
+  void _registerCastHooks() {
+    final cast = DlnaCastService.instance;
+    cast.onCastStart = () {
+      _debugLog('cast start -> pause local engine');
+      isCasting.value = true;
+      // 记录投屏起始歌曲：投屏切歌后本机引擎停在旧歌，断开时据此重载续播。
+      _castResumeSong = currentSong.value;
+      unawaited(_pausePlayback());
+    };
+    cast.onCastProgress = (position, playing) {
+      // 把投屏设备的位置/状态同步到本机 UI 状态（进度条/播放按钮）。
+      this.position.value = position;
+      isPlaying.value = playing;
+      _emitSnapshot(force: true);
+    };
+    cast.onCastDisconnect = () {
+      _debugLog('cast disconnect -> resume local playback');
+      isCasting.value = false;
+      final resume = _castResumeSong;
+      _castResumeSong = null;
+      // 无歌曲则不动。投屏期间切过歌时，本机引擎仍停在投屏起始歌曲，
+      // 需先重载到当前逻辑歌曲再续播。
+      if (currentSong.value == null) return;
+      unawaited(() async {
+        try {
+          final target = currentSong.value;
+          if (resume != null &&
+              target != null &&
+              resume.id != target.id) {
+            await _reloadQueue(
+              queue.value,
+              queue.value.indexWhere((s) => s.id == target.id),
+              play: false,
+            );
+          }
+          await _startPlayback();
+        } catch (e) {
+          if (kDebugMode) {
+            debugPrint('PlayerService cast disconnect resume failed: $e');
+          }
+        }
+      }());
+    };
   }
 
   /// 订阅一个引擎的归一化流。每个处理器开头用 `identical(engine, _activeEngine)`
@@ -1641,6 +1697,19 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   Future<void> togglePlayPause() async {
+    if (isCasting.value) {
+      // 投屏遥控模式：由投屏设备当前状态决定播放/暂停。
+      final cast = DlnaCastService.instance;
+      if (isPlaying.value) {
+        await cast.pause();
+        isPlaying.value = false;
+      } else {
+        await cast.play();
+        isPlaying.value = true;
+      }
+      _emitSnapshot(force: true);
+      return;
+    }
     if (_activeEngine.playing) {
       await _pausePlayback();
     } else {
@@ -1649,6 +1718,11 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   Future<void> play() async {
+    if (isCasting.value) {
+      // 投屏遥控模式：转发到投屏设备
+      await DlnaCastService.instance.play();
+      return;
+    }
     await _startPlayback();
   }
 
@@ -1673,10 +1747,24 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   Future<void> pause() async {
+    if (isCasting.value) {
+      await DlnaCastService.instance.pause();
+      return;
+    }
     await _pausePlayback();
   }
 
   Future<void> next() async {
+    if (isCasting.value) {
+      // 投屏遥控模式：先在逻辑队列前进到下一首，再把新歌推送到投屏设备。
+      await _advanceLogicalIndexOnly();
+      final song = currentSong.value;
+      if (song != null) {
+        _castResumeSong = song;
+        await DlnaCastService.instance.loadSong(song);
+      }
+      return;
+    }
     _clearRestoreSession();
     final list = queue.value;
     final idx = currentIndex.value;
@@ -1711,6 +1799,24 @@ class PlayerService with WidgetsBindingObserver {
       return;
     }
     await _advanceToLogicalIndex(targetIdx);
+  }
+
+  /// 仅推进逻辑队列（不启动/改变本机引擎播放）。投屏切歌用：先更新
+  /// 当前歌曲（UI/队列状态），再把新歌推送到投屏设备。
+  Future<void> _advanceLogicalIndexOnly() async {
+    final list = queue.value;
+    final idx = currentIndex.value;
+    if (list.isEmpty || idx < 0) return;
+    var targetIdx = idx + 1;
+    if (targetIdx >= list.length) {
+      if (playbackMode.value == PlaybackMode.loop) {
+        targetIdx = 0;
+      } else {
+        return; // 无下一首且不循环：停在当前
+      }
+    }
+    _activateSong(targetIdx);
+    _emitSnapshot(force: true);
   }
 
   /// 漫游队列扩展：请求 roam-next 把下一首追加到队尾（每次只追加一首）。
@@ -1898,6 +2004,23 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   Future<void> previous() async {
+    if (isCasting.value) {
+      // 投屏遥控模式：先在逻辑队列后退到上一首，再把新歌推送到投屏设备。
+      final list = queue.value;
+      final idx = currentIndex.value;
+      if (list.isEmpty || idx < 0) return;
+      final targetIdx = idx == 0
+          ? (playbackMode.value == PlaybackMode.loop ? list.length - 1 : 0)
+          : idx - 1;
+      _activateSong(targetIdx);
+      _emitSnapshot(force: true);
+      final song = currentSong.value;
+      if (song != null) {
+        _castResumeSong = song;
+        await DlnaCastService.instance.loadSong(song);
+      }
+      return;
+    }
     _clearRestoreSession();
     final list = queue.value;
     final idx = currentIndex.value;
@@ -1933,6 +2056,13 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   Future<void> seek(Duration position) async {
+    if (isCasting.value) {
+      // 投屏遥控模式：转发 seek 到投屏设备，并同步本地 UI 位置
+      await DlnaCastService.instance.seek(position);
+      this.position.value = position;
+      _emitSnapshot(force: true);
+      return;
+    }
     _clearRestoreSession();
     _seekSeq++;
     final currentSeq = _seekSeq;

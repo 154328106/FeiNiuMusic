@@ -3,6 +3,7 @@ import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
 import '../../../app/state/settings_state.dart';
 import '../../../app/state/song_state.dart';
+import 'cast_button.dart';
 
 class PlayerHeader extends StatelessWidget {
   final Signal<SongEntity?> songSignal;
@@ -57,6 +58,8 @@ class PlayerHeader extends StatelessWidget {
                   ],
                 ),
               ),
+              // 右上角 DLNA 投屏按钮（仅 Android 显示）
+              CastButton(songSignal: songSignal),
             ],
           ),
         );

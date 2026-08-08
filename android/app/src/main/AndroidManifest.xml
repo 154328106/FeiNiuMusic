@@ -4,6 +4,12 @@
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- DLNA 投屏（media_cast_dlna / jUPnP）：SSDP 组播发现需要 WiFi 状态
+         与组播锁权限。插件 manifest 已自带，此处显式声明保证合并一致。 -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- Android 13+ 本地网络发现：SSDP 组播需 NEARBY_WIFI_DEVICES 运行时权限。 -->
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Android 16「实时动态」提升通知权限：setRequestPromotedOngoing(true)
          请求把 ongoing 通知提升为状态栏胶囊/灵动岛卡片时，系统会校验本权限。
@@ -136,6 +142,12 @@
             android:enabled="true"
             android:exported="true"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+        <!-- DLNA 投屏：jUPnP 的 Android UPnP 服务（SSDP 组播发现 + SOAP 控制）。
+             插件 manifest 已自带，此处显式声明保证与 permission 合并一致。 -->
+        <service
+            android:name="org.jupnp.android.AndroidUpnpServiceImpl"
+            android:exported="false"
+            tools:ignore="Instantiatable" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
@@ -159,4 +171,16 @@
          Play / Google TV 据此将应用识别为 TV 应用并允许 Leanback 启动器入口。 -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <!-- media_cast_dlna 插件 manifest 无条件声明 ACCESS_FINE/COARSE_LOCATION（Android 10
+         时代 SSDP 组播发现需要）。本项目在 API 33+ 用 NEARBY_WIFI_DEVICES 替代位置权限；
+         位置权限仅在 API 29-32（Android 10-12）的 SSDP 发现需要，故移除插件声明并在此
+         限定 maxSdkVersion=32 重新声明，避免 Play 商店把所有版本都归为位置权限应用。 -->
+    <uses-permission
+        android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="32"
+        tools:node="replace" />
+    <uses-permission
+        android:name="android.permission.ACCESS_COARSE_LOCATION"
+        android:maxSdkVersion="32"
+        tools:node="replace" />
 </manifest>
