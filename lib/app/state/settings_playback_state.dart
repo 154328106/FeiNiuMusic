@@ -269,8 +269,10 @@ class AppPlaybackQueueSettings {
   static Future<void> _doLoad() async {
     final prefs = await SharedPreferences.getInstance();
     final stored = prefs.getInt(_prefsMaxQueueLength);
-    maxQueueLength.value = (stored ?? defaultMaxQueueLength)
-        .clamp(minQueueLimit, maxQueueLimit);
+    maxQueueLength.value = (stored ?? defaultMaxQueueLength).clamp(
+      minQueueLimit,
+      maxQueueLimit,
+    );
   }
 
   static Future<void> setMaxQueueLength(int value) async {
@@ -286,8 +288,9 @@ class AppLaunchNavigationSettings {
   static const String _prefsAutoOpenPlayerOnLaunch =
       'app_auto_open_player_on_launch';
 
-  static final ValueNotifier<bool> autoOpenPlayerOnLaunch =
-      ValueNotifier(false);
+  static final ValueNotifier<bool> autoOpenPlayerOnLaunch = ValueNotifier(
+    false,
+  );
 
   /// 本次 session 是否已处理过「启动自动打开播放界面」。
   ///
@@ -338,6 +341,39 @@ class AppLaunchNavigationSettings {
     _loading = null;
     autoOpenPlayerOnLaunch.value = false;
     _hasHandledNavigationThisSession = false;
+  }
+}
+
+/// 「不与其他应用一起播放」（音频焦点）。
+///
+/// 关闭（默认）时与其他应用混播：Android 用 `gainTransientMayDuck`（启动时把
+/// 其他应用压低音量而不暂停），iOS 附加 `mixWithOthers`。
+/// 开启后独占音频焦点（`gain`）：启动播放会暂停其他应用的音频。
+/// 受设备系统影响可能不生效（如 Hyper OS 声音助手「允许多声音」开启会使本开关失效）。
+class AppPlaybackAudioFocusSettings {
+  static const String _prefsExclusive = 'player_exclusive_audio_focus';
+
+  static final ValueNotifier<bool> exclusiveFocus = ValueNotifier(false);
+
+  static Future<void>? _loading;
+
+  static Future<void> ensureLoaded() => _loading ??= _doLoad();
+
+  static Future<void> _doLoad() async {
+    final prefs = await SharedPreferences.getInstance();
+    exclusiveFocus.value = prefs.getBool(_prefsExclusive) ?? false;
+  }
+
+  static Future<void> setExclusiveFocus(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsExclusive, enabled);
+    exclusiveFocus.value = enabled;
+  }
+
+  /// 测试专用：重置内存状态（清空懒加载缓存），供测试 setUp 复用。
+  static void resetForTest() {
+    _loading = null;
+    exclusiveFocus.value = false;
   }
 }
 

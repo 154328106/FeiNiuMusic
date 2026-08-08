@@ -221,6 +221,13 @@ class IslandLyricNotification(private val context: Context) {
         }
         extras.putBundle("miui.focus.pics", picsBundle)
 
+        // 外发光光圈效果（参考 HyperIsland IslandOuterGlowHook 的注入方式）：
+        // 通知 extras 的 miui.effect.src / miui.bigIsland.effect.src 触发
+        // 悬浮/大岛光圈。普通应用可直接 put（HyperIsland IslandDispatcherNotifier
+        // 同样是直接 put）。能否渲染取决于具体 HyperOS 版本。
+        extras.putString("miui.effect.src", "outer_glow")
+        extras.putString("miui.bigIsland.effect.src", "outer_glow")
+
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setOnlyAlertOnce(true)
@@ -239,13 +246,6 @@ class IslandLyricNotification(private val context: Context) {
             )
             .setContentText(uiState.notificationTitleRight)
             .addExtras(extras)
-
-        // 通知卡片大图标 = 封面（与实时通知一致）；无封面时退回默认（小图标）。
-        // 注意：此处仅为通知栏卡片显示封面，与上面 miui.focus.pic_album
-        // （供灵动岛渲染）互不冲突。
-        if (albumIcon != null) {
-            builder.setLargeIcon(albumIcon)
-        }
 
         val notification = builder.build()
         // 常驻通知：不可手动滑动清除，仅由 stop/暂停逻辑取消

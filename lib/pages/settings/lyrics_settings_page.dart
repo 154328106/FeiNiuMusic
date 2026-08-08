@@ -227,7 +227,8 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
   ///
   /// 按设备能力（[IslandCapabilities]）隐藏开关：
   /// - 实时通知需 [IslandCapabilities.liveEnabled]（Android 16+）；
-  /// - 焦点通知需 [IslandCapabilities.focusEnabled]（HyperOS 3 + 支持岛 + 权限）；
+  /// - 焦点通知需 [IslandCapabilities.focusEnabled]（HyperOS 2/OS2+ 焦点协议 +
+  ///   权限开启）。
   /// - 两种模式都不可用时返回空（整个区块隐藏）。
   List<Widget> _buildIslandSection() {
     final caps = _capabilities.value;
@@ -243,8 +244,7 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
             title: '灵动岛歌词',
             subtitle: '播放有歌词的歌曲时，在系统灵动岛显示当前歌词行'
                 '（实时通知需 Android 16+，HyperOS 需 3.0.300+，'
-                'ColorOS/OneUI/AOSP 社区支持；焦点通知需 HyperOS 3.0 + '
-                'Android 15+）',
+                'ColorOS/OneUI/AOSP 社区支持；焦点通知需 HyperOS 2/OS2+）',
             value: enabled,
             onChanged: (value) {
               IslandLyricSettings.setEnabled(value);
@@ -310,9 +310,9 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
                                   '走系统实时通知接口上岛。支持小米 '
                                   'HyperOS（3.0.300+，已验证）、ColorOS、'
                                   'OneUI、AOSP（社区支持），需 Android 16+'
-                              : '焦点通知（小米超级岛）：走 MIUI 焦点通知上岛，'
-                                  '需 HyperOS 3.0 + Android 15+。'
-                                  '需将本应用加入系统焦点通知白名单'
+                              : '焦点通知：走 MIUI 焦点通知上岛。HyperOS '
+                                  '2/OS2 起支持（OS2 与 OS3 模板不同，OS3 '
+                                  '为超级岛），需将本应用加入系统焦点通知白名单'
                                   '（或开启下方 Shizuku 绕过）',
                           style: Theme.of(context)
                               .textTheme

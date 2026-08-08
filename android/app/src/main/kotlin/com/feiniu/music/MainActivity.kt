@@ -239,7 +239,7 @@ class MainActivity : AudioServiceActivity() {
                 // 查询当前 OS 的灵动岛 / 焦点通知能力，供设置页按设备能力隐藏开关：
                 // - supportIsland: persist.sys.feature.island（是否支持岛）
                 // - focusProtocol: notification_focus_protocol（1=OS1, 2=OS2, 3=OS3，
-                //   仅 OS3 支持岛）
+                //   OS2/OS3 均支持焦点通知，模板不同）
                 // - focusPermission: canShowFocus（应用焦点通知权限是否开启）
                 "queryCapabilities" -> {
                     result.success(queryIslandCapabilities())
@@ -375,9 +375,9 @@ class MainActivity : AudioServiceActivity() {
      * - supportIsland: 反射读取 `persist.sys.feature.island`，是否支持岛功能；
      * - focusProtocol: `notification_focus_protocol` 系统设置，1=OS1 焦点通知模板、
      *   2=OS2 焦点通知模板、3=OS3 小米超级岛通知模板。OS2 与 OS3 模板不同，
-     *   且只在 OS3 版本上支持岛；
+     *   且只在 OS3 版本上支持岛（岛渲染为 OS3 特有，但 OS2 同样支持焦点通知）；
      * - focusPermission: `canShowFocus`（content provider 调用，耗时操作），
-     *   当前应用焦点通知权限是否开启。权限关闭时通知不会以岛形式展示。
+     *   当前应用焦点通知权限是否开启。权限关闭时通知不会以焦点通知/岛形式展示。
      *
      * 任一探测失败按「不支持」处理（安全降级，隐藏对应开关）。
      */
@@ -400,8 +400,10 @@ class MainActivity : AudioServiceActivity() {
         result["focusPermission"] = focusPermission
         // Android 版本号：实时通知（实况通知）需 Android 16+，供 Flutter 侧判定
         result["androidSdk"] = Build.VERSION.SDK_INT
-        // HyperOS 3.0（OS3）+ 支持岛 + 应用焦点通知权限开启 → 焦点通知可用
-        result["focusEnabled"] = supportIsland && focusProtocol >= 3 && focusPermission
+        // 焦点通知可用：focusProtocol>=2（OS2/OS3 均支持焦点通知，模板不同）+
+        // 应用焦点通知权限开启。岛渲染（supportIsland）是 OS3 特有能力，但
+        // OS2 同样能渲染焦点通知，不作为焦点通知可用性的前提。
+        result["focusEnabled"] = focusProtocol >= 2 && focusPermission
         return result
     }
 

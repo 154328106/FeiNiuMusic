@@ -266,9 +266,13 @@ class PlayerService with WidgetsBindingObserver {
     await AppCacheSettings.ensureLoaded();
     await AppLaunchPlaybackSettings.ensureLoaded();
     await AppPlaybackQueueSettings.ensureLoaded();
+    await AppPlaybackAudioFocusSettings.ensureLoaded();
     final session = await AudioSession.instance;
     _audioSession = session;
-    await session.configure(const AudioSessionConfiguration.music());
+    await _applyAudioSessionConfiguration();
+    AppPlaybackAudioFocusSettings.exclusiveFocus.addListener(
+      _handleExclusiveFocusChanged,
+    );
     _interruptionSub = session.interruptionEventStream.listen(
       _handleAudioInterruption,
     );
@@ -2467,9 +2471,9 @@ class PlayerService with WidgetsBindingObserver {
     final stateConfirmed = engine.playing
         ? Future<void>.value()
         : engine.playbackStateStream
-            .firstWhere((s) => s.playing)
-            .timeout(const Duration(seconds: 5))
-            .then((_) {}, onError: (_) {});
+              .firstWhere((s) => s.playing)
+              .timeout(const Duration(seconds: 5))
+              .then((_) {}, onError: (_) {});
     try {
       // play() 的 Future 可能永不完成（平台激活竞态）：短超时等待，超时
       // 不视为失败——播放请求已发出，是否在播由 stateConfirmed 确认。
@@ -2639,6 +2643,42 @@ class PlayerService with WidgetsBindingObserver {
       }
       return !active;
     }
+  }
+
+  /// 按「不与其他应用一起播放」开关构建并应用音频会话配置。
+  ///
+  /// 关闭（默认）：与其他应用一起播放——Android 用 `gainTransientMayDuck`
+  /// 请求音频焦点（启动时压低其他应用音量而非暂停，不会独占），iOS 附加
+  /// `mixWithOthers`。
+  /// 开启：独占焦点 `gain`——启动播放会暂停其他应用的音频。
+  /// 配置为全局默认值，just_audio 的 play()/media_kit 引擎都会沿用；
+  /// 开启后切歌/续播仍保持独占（不重复调用 configure）。
+  Future<void> _applyAudioSessionConfiguration() async {
+    final session = _audioSession ?? await AudioSession.instance;
+    _audioSession = session;
+    final exclusive = AppPlaybackAudioFocusSettings.exclusiveFocus.value;
+    final config = exclusive
+        ? const AudioSessionConfiguration.music()
+        : const AudioSessionConfiguration.music().copyWith(
+            avAudioSessionCategoryOptions:
+                AVAudioSessionCategoryOptions.mixWithOthers,
+            androidAudioFocusGainType:
+                AndroidAudioFocusGainType.gainTransientMayDuck,
+          );
+    try {
+      await session.configure(config);
+      _debugLog('audioSession configure exclusive=$exclusive');
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('PlayerService audio session configure failed: $e');
+      }
+    }
+  }
+
+  void _handleExclusiveFocusChanged() {
+    // 配置为全局默认值，无需重取焦点：当前播放会沿用它，
+    // 下次播放/切歌由各引擎用新配置请求焦点。
+    unawaited(_applyAudioSessionConfiguration());
   }
 
   PlaybackMode? _playbackModeFromString(String? value) {
@@ -3196,6 +3236,9 @@ class PlayerService with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     AppPlaybackVolumeSettings.volume.removeListener(_handleAppVolumeChanged);
     AppPlaybackSpeedSettings.speed.removeListener(_handlePlaybackSpeedChanged);
+    AppPlaybackAudioFocusSettings.exclusiveFocus.removeListener(
+      _handleExclusiveFocusChanged,
+    );
     cancelSleepTimer();
     _silenceWatchTimer?.cancel();
     _silenceWatchTimer = null;

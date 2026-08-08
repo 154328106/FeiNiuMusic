@@ -36,4 +36,17 @@ void main() {
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getDouble('player_playback_speed'), 0.1);
   });
+
+  test('exclusive audio focus defaults off, loads and saves', () async {
+    SharedPreferences.setMockInitialValues({});
+
+    await AppPlaybackAudioFocusSettings.ensureLoaded();
+    expect(AppPlaybackAudioFocusSettings.exclusiveFocus.value, false);
+
+    await AppPlaybackAudioFocusSettings.setExclusiveFocus(true);
+    expect(AppPlaybackAudioFocusSettings.exclusiveFocus.value, true);
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('player_exclusive_audio_focus'), true);
+  });
 }

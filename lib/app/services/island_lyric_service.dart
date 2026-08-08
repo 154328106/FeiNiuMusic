@@ -73,12 +73,13 @@ class IslandLyricService {
 
   /// 灵动岛 / 焦点通知能力探测结果。
   ///
-  /// - [supportIsland]：`persist.sys.feature.island`，当前 OS 是否支持岛功能；
+  /// - [supportIsland]：`persist.sys.feature.island`，当前 OS 是否支持岛功能
+  ///   （岛渲染为 OS3 特有能力）；
   /// - [focusProtocol]：`notification_focus_protocol`，1=OS1 焦点通知模板、
-  ///   2=OS2 焦点通知模板、3=OS3 小米超级岛通知模板（仅 OS3 支持岛）；
+  ///   2=OS2 焦点通知模板、3=OS3 小米超级岛通知模板；
   /// - [focusPermission]：`canShowFocus`，当前应用焦点通知权限是否开启；
-  /// - [focusEnabled]：[supportIsland] && [focusProtocol]>=3 && [focusPermission]，
-  ///   即当前设备上「焦点通知」模式是否可用。
+  /// - [focusEnabled]：[focusProtocol]>=2（OS2/OS3 均支持焦点通知）&&
+  ///   [focusPermission]，即当前设备上「焦点通知」模式是否可用。
   ///
   /// 探测失败按「不支持」处理（安全降级，隐藏对应开关）。
   static IslandCapabilities? _capabilities;
@@ -755,13 +756,13 @@ class IslandCapabilities {
   /// 当前 OS 是否支持岛功能（`persist.sys.feature.island`）。
   final bool supportIsland;
 
-  /// 焦点通知协议版本：1=OS1、2=OS2、3=OS3 小米超级岛（仅 OS3 支持岛）。
+  /// 焦点通知协议版本：1=OS1、2=OS2、3=OS3 小米超级岛（OS2/OS3 均支持焦点通知）。
   final int focusProtocol;
 
   /// 当前应用焦点通知权限是否开启（`canShowFocus`）。
   final bool focusPermission;
 
-  /// 当前设备上「焦点通知」模式是否可用（支持岛 && 协议>=3 && 权限开启）。
+  /// 当前设备上「焦点通知」模式是否可用（focusProtocol>=2 且权限开启）。
   final bool focusEnabled;
 
   /// Android 版本号（SDK_INT）：实时通知（实况通知）需 Android 16（API 36+）。
@@ -782,7 +783,7 @@ class IslandCapabilities {
       focusProtocol: focusProtocol,
       focusPermission: focusPermission,
       focusEnabled: readBool(raw['focusEnabled']) ||
-          (supportIsland && focusProtocol >= 3 && focusPermission),
+          (focusProtocol >= 2 && focusPermission),
       androidSdk: readInt(raw['androidSdk']),
     );
   }

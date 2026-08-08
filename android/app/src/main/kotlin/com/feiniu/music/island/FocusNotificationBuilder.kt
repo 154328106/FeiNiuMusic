@@ -9,6 +9,13 @@ import org.json.JSONObject
  * JSON 在系统灵动岛渲染歌词卡片。无需 root / Shizuku —— 焦点通知通过普通
  * NotificationManager.notify() 即可发送，HyperOS 识别 mFocusNotification +
  * miui.focus.param 后在灵动岛展示。
+ *
+ * `outEffectSrc = "outer_glow"` 外发光光圈效果，参考 InstallerX-Revived
+ * MiIslandNotificationBuilder（GPL-3.0）与 HyperIsland（GPL-3.0）的
+ * injectIslandAppearance。三处注入：param_v2 顶层（悬浮特效）、param_island
+ * 内（大岛光效）、通知 extras 的 miui.effect.src / miui.bigIsland.effect.src
+ * （见 IslandLyricNotification.notifyFocus）。该字段为未公开参数，能否渲染
+ * 取决于具体 HyperOS 版本。
  */
 class FocusNotificationBuilder(
     private val uiState: IslandUiState,
@@ -25,6 +32,11 @@ class FocusNotificationBuilder(
         paramV2.put("updatable", true)
         paramV2.put("reopen", "reopen")
         paramV2.put("isShowNotification", uiState.focusShowNotification)
+        // 外发光光圈效果（参考 InstallerX-Revived MiIslandNotificationBuilder 与
+        // HyperIsland injectIslandAppearance）：param_v2 顶层 outEffectSrc 控制
+        // 悬浮特效。大岛光效在 param_island 内另有 outEffectSrc，通知 extras
+        // 另有 miui.effect.src / miui.bigIsland.effect.src（见 notifyFocus）。
+        paramV2.put("outEffectSrc", "outer_glow")
 
         // 1. 灵动岛区域 (param_island)
         paramV2.put("param_island", buildParamIsland())
@@ -56,6 +68,9 @@ class FocusNotificationBuilder(
         if (uiState.highlightColorEnabled) {
             json.put("highlightColor", getColorHex(uiState.color))
         }
+        // 大岛外发光光圈：param_island 内也注入 outEffectSrc（参考 HyperIsland
+        // injectIslandAppearance，与 param_v2 顶层的悬浮特效叠加）。
+        json.put("outEffectSrc", "outer_glow")
         json.put("bigIslandArea", buildBigIslandArea())
         json.put("smallIslandArea", buildSmallIslandArea())
         return json

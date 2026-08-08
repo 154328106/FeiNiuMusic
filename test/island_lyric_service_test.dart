@@ -572,19 +572,30 @@ void main() {
         'androidSdk': 35,
       });
       expect(caps.liveEnabled, isFalse, reason: 'Android 15 不支持实时通知');
-      expect(caps.focusEnabled, isTrue, reason: '焦点通知需 HyperOS 3 + 岛 + 权限，与 Android 版本无关');
+      expect(caps.focusEnabled, isTrue, reason: '焦点通知需 HyperOS 2/OS2+ + 权限，与 Android 版本无关');
     });
 
-    test('协议 <3 或不支持岛时焦点通知不可用', () {
-      final noIsland = IslandCapabilities.fromMap({
+    test('OS1 协议不支持、权限未开、缺字段按不可用兜底', () {
+      final os1 = IslandCapabilities.fromMap({
         'supportIsland': false,
-        'focusProtocol': 3,
+        'focusProtocol': 1,
         'focusPermission': true,
         'focusEnabled': false,
         'androidSdk': 36,
       });
-      expect(noIsland.focusEnabled, isFalse, reason: '不支持岛则焦点通知不可用');
+      expect(os1.focusEnabled, isFalse, reason: 'OS1 为旧版焦点模板，不支持');
 
+      final noPerm = IslandCapabilities.fromMap({
+        'supportIsland': true,
+        'focusProtocol': 3,
+        'focusPermission': false,
+        'focusEnabled': false,
+        'androidSdk': 36,
+      });
+      expect(noPerm.focusEnabled, isFalse, reason: '焦点通知权限未开启则不可用');
+    });
+
+    test('OS2 协议（focusProtocol=2）也支持焦点通知', () {
       final os2 = IslandCapabilities.fromMap({
         'supportIsland': true,
         'focusProtocol': 2,
@@ -592,7 +603,17 @@ void main() {
         'focusEnabled': false,
         'androidSdk': 36,
       });
-      expect(os2.focusEnabled, isFalse, reason: 'OS2 协议不支持岛，焦点通知不可用');
+      expect(os2.focusEnabled, isTrue, reason: 'OS2 支持焦点通知（模板与 OS3 不同），只要协议>=2 且权限开启');
+
+      // 协议>=2 时是否支持岛不影响焦点通知可用性
+      final os2NoIsland = IslandCapabilities.fromMap({
+        'supportIsland': false,
+        'focusProtocol': 2,
+        'focusPermission': true,
+        'focusEnabled': false,
+        'androidSdk': 36,
+      });
+      expect(os2NoIsland.focusEnabled, isTrue, reason: 'OS2 无岛渲染也能用焦点通知');
     });
 
     test('缺字段 / 探测失败按不支持兜底', () {

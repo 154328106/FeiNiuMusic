@@ -36,18 +36,18 @@
 | 模式 | 说明 | 要求 | 支持机型 |
 | :--- | :--- | :--- | :--- |
 | **实时通知（实况通知）** | 走系统标准实时通知接口上岛，无 root / Shizuku | Android 16+；HyperOS 需 3.0.300+ | 小米 HyperOS（3.0.300，已验证）；ColorOS、OneUI、AOSP（社区支持） |
-| **焦点通知（小米超级岛）** | 走 MIUI 焦点通知上岛，系统灵动岛渲染歌词卡片 | HyperOS 3.0 + Android 15+ | HyperOS 设备（需 Root 或 Shizuku） |
+| **焦点通知** | 走 MIUI 焦点通知上岛，系统渲染歌词卡片（OS2 模板与 OS3 超级岛模板不同） | HyperOS 2/OS2 起支持 | HyperOS 设备（需加入焦点通知白名单，或开启 Shizuku 绕过） |
 
 - **Shizuku 绕过白名单** — 未加入系统焦点通知白名单的应用，可通过授权 Shizuku 并开启「Shizuku 绕过白名单」临时绕过限制：发送焦点通知时短暂拦截 XMSF 网络，使系统无法向小米服务端校验白名单。注意可能导致耗电增加或消息延迟。
 
-> 低于 Android 16 或 HyperOS 3.0 的系统不支持原生动态歌词。
+> 低于 Android 16 或 HyperOS 2 的系统不支持原生动态歌词（实时通知需 Android 16+；焦点通知需 HyperOS 2/OS2+）。
 
 ### 按设备能力自动隐藏开关
 
 设置页会根据当前设备的能力自动显示/隐藏通知类型开关（对齐小米焦点通知官方文档）：
 
 - **实时通知** 仅在 Android 16+（API 36+）设备上显示；
-- **焦点通知** 仅当设备支持岛（`persist.sys.feature.island`）+ 焦点通知协议版本 ≥ 3（`notification_focus_protocol`，即 HyperOS 3 / OS3）+ 应用焦点通知权限已开启（`canShowFocus`）时显示；
+- **焦点通知** 当焦点通知协议版本 ≥ 2（`notification_focus_protocol`，OS2 / OS3，两版模板不同）+ 应用焦点通知权限已开启（`canShowFocus`）时显示（OS3 的岛渲染能力 `persist.sys.feature.island` 不影响焦点通知可用性）；
 - 两种模式都不可用的设备（如旧版 Android / 非小米且非 Android 16）不显示「通知歌词灵动岛」区块；
 - 已保存的通知类型在设备上不可用时，自动回退到可用的默认类型（优先实时通知）。
 

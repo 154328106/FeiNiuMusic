@@ -19,6 +19,7 @@ class _PlayerControlsSettingsPageState
     PlayerBottomActionSettings.ensureLoaded();
     MiniPlayerInfoSettings.ensureLoaded();
     AppPlaybackQueueSettings.ensureLoaded();
+    AppPlaybackAudioFocusSettings.ensureLoaded();
   }
 
   _BottomActionConfig _actionConfigByKey(String key) {
@@ -60,8 +61,10 @@ class _PlayerControlsSettingsPageState
 
   @override
   Widget build(BuildContext context) {
-    final bottomPadding =
-        AppPageScaffold.scrollableBottomPadding(context, showMiniPlayer: false);
+    final bottomPadding = AppPageScaffold.scrollableBottomPadding(
+      context,
+      showMiniPlayer: false,
+    );
     return AppPageScaffold(
       extendBodyBehindAppBar: true,
       appBar: const AppTopBar(
@@ -102,12 +105,29 @@ class _PlayerControlsSettingsPageState
                     max: AppPlaybackQueueSettings.maxQueueLimit.toDouble(),
                     divisions:
                         (AppPlaybackQueueSettings.maxQueueLimit -
-                                AppPlaybackQueueSettings.minQueueLimit) ~/
-                            10,
+                            AppPlaybackQueueSettings.minQueueLimit) ~/
+                        10,
                     valueText: '$limit 首',
                     onChanged: (value) {
                       AppPlaybackQueueSettings.setMaxQueueLength(value.round());
                     },
+                  );
+                },
+              ),
+              ValueListenableBuilder<bool>(
+                valueListenable: AppPlaybackAudioFocusSettings.exclusiveFocus,
+                builder: (context, enabled, _) {
+                  return AppSettingTile(
+                    title: '不与其他应用一起播放',
+                    subtitle:
+                        '开启后将不会与其他应用一起播放，注意此功能可能受你的设备系统影响而不起作用，'
+                        '如 Hyper OS 中在声音助手中开启允许多声音选项会导致此开启状态失效',
+                    trailing: Switch.adaptive(
+                      value: enabled,
+                      onChanged: (value) {
+                        AppPlaybackAudioFocusSettings.setExclusiveFocus(value);
+                      },
+                    ),
                   );
                 },
               ),
