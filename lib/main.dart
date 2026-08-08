@@ -75,6 +75,9 @@ Future<void> main() async {
   // 读 shouldAutoPlayOnAppLaunch）之前确定，否则首次启动引导页勾选的
   // 「进入应用自动播放」可能在本次启动就被自动播放（应等下次启动生效）。
   await AppOnboardingSettings.ensureLoaded();
+  // 转码设置须在 PlayerService（MediaNotificationService.init）之前加载：
+  // 启动恢复自动播放时 _sourceForSong 会同步读转码开关，未加载会读到默认关。
+  await AppTranscodeSettings.ensureLoaded();
   await AuthService.instance.init();
   await MediaNotificationService.init();
   // 切歌通知监听：PlayerService 已构造（MediaNotificationService.init 内），

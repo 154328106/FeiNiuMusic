@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:feiniu_music/app/services/feiniu/fn_connection_probe_service.dart';
 import 'package:feiniu_music/app/services/feiniu/fn_models.dart';
 import 'package:feiniu_music/app/state/settings_fn_state.dart';
 
@@ -100,4 +101,100 @@ void main() {
       ]);
     },
   );
+
+  test('disabled groups default empty', () async {
+    SharedPreferences.setMockInitialValues({});
+    await AppFnConnectionSettings.ensureLoaded();
+    expect(AppFnConnectionSettings.disabledGroups.value, isEmpty);
+  });
+
+  test('setGroupDisabled persists and updates notifier', () async {
+    SharedPreferences.setMockInitialValues({});
+    await AppFnConnectionSettings.ensureLoaded();
+
+    await AppFnConnectionSettings.setGroupDisabled(
+      ProbeCandidateGroup.relay,
+      true,
+    );
+    expect(
+      AppFnConnectionSettings.disabledGroups.value,
+      contains(ProbeCandidateGroup.relay),
+    );
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getStringList('fn_disabled_groups'), ['relay']);
+  });
+
+  test('setGroupDisabled re-enables removes from set and prefs', () async {
+    SharedPreferences.setMockInitialValues({
+      'fn_disabled_groups': ['relay', 'internal'],
+    });
+    await AppFnConnectionSettings.ensureLoaded();
+
+    await AppFnConnectionSettings.setGroupDisabled(
+      ProbeCandidateGroup.relay,
+      false,
+    );
+    expect(
+      AppFnConnectionSettings.disabledGroups.value,
+      isNot(contains(ProbeCandidateGroup.relay)),
+    );
+    expect(
+      AppFnConnectionSettings.disabledGroups.value,
+      contains(ProbeCandidateGroup.internal),
+    );
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getStringList('fn_disabled_groups'), ['internal']);
+  });
+
+  test('disabled groups survive reload (persisted)', () async {
+    SharedPreferences.setMockInitialValues({
+      'fn_disabled_groups': ['publicIPv4'],
+    });
+    await AppFnConnectionSettings.ensureLoaded();
+    expect(
+      AppFnConnectionSettings.disabledGroups.value,
+      contains(ProbeCandidateGroup.publicIPv4),
+    );
+
+    // 模拟重启：重置懒加载后重新读
+    AppFnConnectionSettings.resetForTest();
+    await AppFnConnectionSettings.ensureLoaded();
+    expect(
+      AppFnConnectionSettings.disabledGroups.value,
+      contains(ProbeCandidateGroup.publicIPv4),
+    );
+  });
+
+  test('effectiveOrder removes disabled groups, keeps order', () async {
+    SharedPreferences.setMockInitialValues({});
+    await AppFnConnectionSettings.ensureLoaded();
+
+    await AppFnConnectionSettings.setGroupDisabled(
+      ProbeCandidateGroup.relay,
+      true,
+    );
+    await AppFnConnectionSettings.setGroupDisabled(
+      ProbeCandidateGroup.internal,
+      true,
+    );
+
+    final effective = FnConnectionProbeService.effectiveOrder(
+      kDefaultConnectionOrder,
+    );
+    expect(effective, [
+      ProbeCandidateGroup.publicIPv6,
+      ProbeCandidateGroup.publicIPv4,
+    ]);
+  });
+
+  test('effectiveOrder no disabled groups → order unchanged', () async {
+    SharedPreferences.setMockInitialValues({});
+    await AppFnConnectionSettings.ensureLoaded();
+    expect(
+      FnConnectionProbeService.effectiveOrder(kDefaultConnectionOrder),
+      kDefaultConnectionOrder,
+    );
+  });
 }

@@ -556,13 +556,20 @@ class FeiNiuApiClient {
   ///
   /// 默认请求 FLAC（无损）；FLAC 帧超过解码器能力时由上层降级为
   /// `codec: 'mp3'` 重新请求。转码失败 / 服务器未返回地址时返回 null。
-  Future<String?> trackTranscode(String guid, {String codec = 'flac'}) async {
+  ///
+  /// [bitrate] 只在非空且大于 0 时写入 output——**仅 flac 带 bitrate**（320），
+  /// mp3/opus 不带（带 bitrate 会显著劣化音质）。
+  Future<String?> trackTranscode(
+    String guid, {
+    String codec = 'flac',
+    int? bitrate,
+    int channel = 2,
+  }) async {
+    final output = <String, dynamic>{'codec': codec, 'channel': channel};
+    if (bitrate != null && bitrate > 0) output['bitrate'] = bitrate;
     final data = await _post(
       '/track/transcode',
-      data: {
-        'guid': guid,
-        'output': {'codec': codec, 'bitrate': 320, 'channel': 2},
-      },
+      data: {'guid': guid, 'output': output},
     );
     final body = data['data'];
     if (body is Map<String, dynamic>) {
@@ -570,6 +577,11 @@ class FeiNiuApiClient {
       if (url is String && url.isNotEmpty) return url;
     }
     return null;
+  }
+
+  /// 释放服务器端转码会话（切歌/停止/退出时调用）。best-effort，失败忽略。
+  Future<void> trackTranscodeQuit(String guid) async {
+    await _post('/track/transcode/quit', data: {'guid': guid});
   }
 
   /// 拼接 HLS 绝对地址：服务器返回相对路径（以 /music/api/v1 开头）时

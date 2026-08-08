@@ -57,6 +57,20 @@ class PlayerService with WidgetsBindingObserver {
   /// 之后任意逻辑索引都能算出所在引擎与同引擎连续段（run）。
   List<EngineKind> _engineKinds = [];
 
+  /// 与逻辑队列平行的「是否转码单例」标记：true 的索引是转码歌曲，
+  /// 必须**独立成 run（size 1）**，播放到才发转码请求（最多 1 个活动会话）。
+  /// 与 [_engineKinds] 同步赋值（[_computeEngineKinds] 一起返回）。
+  List<bool> _engineTranscodeFlags = [];
+
+  /// 转码全部失败的歌曲 id（会话内）。转码 HLS 播放失败（非 flac→mp3 降级
+  /// 能救回的）后标记，不再对这首歌重转码，回退直连（防死循环）。
+  final Set<String> _transcodeFailedSongIds = {};
+
+  /// 当前正在播的转码 HLS 地址 + 其 codec：该歌播完时后台拼接下载成完整
+  /// 文件（`StreamCacheService.cacheTranscodedSong`），第二次起零流量。
+  String? _activeTranscodeHlsUrl;
+  String? _activeTranscodeCodec;
+
   /// 当前引擎 run 在逻辑队列中的起始索引。引擎 currentIndexStream 给的是
   /// 引擎内（run 内）索引，映射回逻辑索引需加该偏移。
   int _activeRunStart = 0;
@@ -71,6 +85,11 @@ class PlayerService with WidgetsBindingObserver {
   /// （_mediaKitEscalateSongIds）与无声看门狗（_silenceWatchEscalatedSongIds）
   /// 逻辑；切歌后新歌曲 id 不命中即失效。
   final Map<String, EngineKind> _forcedEngineKinds = {};
+
+  /// 用户在歌曲信息面板转码格式里选了「直连」的歌曲 id（会话级）。这些歌
+  /// 强制不转码、直接播放原始流（_computeEngineKinds / _sourceForSong 跳过
+  /// 转码分支），回到默认引擎路由。
+  final Set<String> _forceDirectSongIds = {};
 
   /// media_kit 连续解码失败的歌曲 id（会话内）。第二次失败即跳过该歌
   /// （前进/回卷），避免媒体损坏时无限重试刷屏。
@@ -114,6 +133,9 @@ class PlayerService with WidgetsBindingObserver {
 
   /// 当前播放速度倍率（0.1–5.0，1.0 为正常）。UI 经此读取/监听。
   ValueNotifier<double> get speed => AppPlaybackSpeedSettings.speed;
+
+  /// 该歌是否被用户在转码格式里选了「直连」（会话级强制不转码）。
+  bool isTranscodeDirect(String songId) => _forceDirectSongIds.contains(songId);
 
   Signal<Duration> get positionSignal => _state.positionSignal;
   Signal<Duration?> get durationSignal => _state.durationSignal;
@@ -446,6 +468,19 @@ class PlayerService with WidgetsBindingObserver {
   Future<void> _handleEngineCompleted(PlayerEngine engine) async {
     if (!identical(engine, _activeEngine)) return;
     if (playbackMode.value == PlaybackMode.single) return; // 引擎自行重复
+    // 当前歌播完：若它是转码 HLS，后台把全部分片拼接下载成完整文件，
+    // 第二次重播命中本地零流量。fire-and-forget，不阻塞切歌。
+    final activeHls = _activeTranscodeHlsUrl;
+    final activeCodec = _activeTranscodeCodec;
+    if (activeHls != null && activeCodec != null) {
+      final curSong = currentSong.value;
+      if (curSong != null) {
+        StreamCacheService.instance
+            .cacheTranscodedSong(curSong.id, activeCodec, activeHls);
+      }
+    }
+    _activeTranscodeHlsUrl = null;
+    _activeTranscodeCodec = null;
     final list = queue.value;
     final idx = currentIndex.value;
     if (idx < 0 || list.isEmpty) return;
@@ -474,20 +509,28 @@ class PlayerService with WidgetsBindingObserver {
     await _advanceToLogicalIndex(idx + 1);
   }
 
-  /// 前进到逻辑索引 [logicalIndex]：同引擎 run 内无缝 next；跨 run 切换引擎。
+  /// 前进到逻辑索引 [logicalIndex]：同 run 内无缝 next；跨 run 切换引擎。
   Future<void> _advanceToLogicalIndex(int logicalIndex) async {
     final list = queue.value;
     if (logicalIndex < 0 || logicalIndex >= list.length) return;
     final cur = currentIndex.value;
     final wasPlaying = isPlaying.value;
-    if (cur >= 0 &&
-        cur < _engineKinds.length &&
-        logicalIndex < _engineKinds.length &&
-        _engineKinds[logicalIndex] == _engineKinds[cur]) {
-      await _activeEngine.seekToNext();
-    } else {
-      await _activateLogicalIndex(logicalIndex);
+    // 同 run 判定用 _runBounds 覆盖范围（转码歌是单例 run，相邻两首转码歌
+    // 引擎相同但不在同一 run，必须走重新激活而不是 seekToNext）。
+    if (cur >= 0 && cur < list.length) {
+      final bounds = _runBounds(logicalIndex);
+      final sameRun = cur >= bounds.start && cur <= bounds.end;
+      if (sameRun) {
+        await _activeEngine.seekToNext();
+        if (wasPlaying && !_activeEngine.playing) {
+          try {
+            await _activeEngine.play();
+          } catch (_) {}
+        }
+        return;
+      }
     }
+    await _activateLogicalIndex(logicalIndex);
     if (wasPlaying && !_activeEngine.playing) {
       try {
         await _activeEngine.play();
@@ -495,21 +538,37 @@ class PlayerService with WidgetsBindingObserver {
     }
   }
 
-  /// 计算队列中每个逻辑索引所属引擎（并发解析格式）。
-  /// 已升级到 media_kit 的歌曲（FLAC 帧超限）强制走 media_kit。
-  Future<List<EngineKind>> _computeEngineKinds(List<SongEntity> songs) async {
-    return Future.wait(
+  /// 计算队列中每个逻辑索引所属引擎（并发解析格式）与转码标记。
+  ///
+  /// 返回 `(kinds, transcodeFlags)`：
+  /// - 已升级到 media_kit 的歌曲（FLAC 帧超限）强制走 media_kit；
+  /// - 用户手动指定解码器 → 照旧；
+  /// - **需要转码的歌 → 强制 justAudio + flag=true**（转码 HLS 只能
+  ///   ExoPlayer 播，且每首独立成 run）；
+  /// - 其余 → `routeForSong` 默认路由，flag=false。
+  Future<({List<EngineKind> kinds, List<bool> transcodeFlags})>
+      _computeEngineKinds(List<SongEntity> songs) async {
+    final results = await Future.wait(
       songs.map((s) async {
         if (_mediaKitEscalateSongIds.contains(s.id)) {
           _debugLog('engineKind ${s.title} -> mediaKit (escalated)');
-          return EngineKind.mediaKit;
+          return (kind: EngineKind.mediaKit, transcode: false);
         }
         // 用户手动指定的解码器（歌曲信息面板点解码 tag 切换）。放在 escalate
         // 之后：自动升级（解码失败/无声）仍优先，手动切换失败由现有兜底接管。
         final forced = _forcedEngineKinds[s.id];
         if (forced != null) {
           _debugLog('engineKind ${s.title} -> ${forced.name} (manual)');
-          return forced;
+          return (kind: forced, transcode: false);
+        }
+        // 转码歌强制 just_audio（HLS 只能 ExoPlayer 播）。转码失败标记后
+        // 回落到下方 routeForSong（DSF→mediaKit 直连，FLAC→justAudio 直连）。
+        // 用户在面板选「直连」的歌（_forceDirectSongIds）跳过转码分支。
+        if (!_forceDirectSongIds.contains(s.id) &&
+            !_transcodeFailedSongIds.contains(s.id) &&
+            await FeiNiuTranscodeService.instance.shouldTranscode(s)) {
+          _debugLog('engineKind ${s.title} -> justAudio (transcode)');
+          return (kind: EngineKind.justAudio, transcode: true);
         }
         final kind = await routeForSong(s);
         // 只打印走 media_kit 的异常路由（正常 just_audio 不刷屏），用于
@@ -520,22 +579,50 @@ class PlayerService with WidgetsBindingObserver {
             '[PlayerService] engineKind ${s.title} fmt=$fmt -> mediaKit',
           );
         }
-        return kind;
+        return (kind: kind, transcode: false);
       }),
     );
+    return (
+      kinds: results.map((r) => r.kind).toList(growable: false),
+      transcodeFlags: results.map((r) => r.transcode).toList(growable: false),
+    );
+  }
+
+  /// 把 [_computeEngineKinds] 的返回同时写入引擎类型与转码标记两列。
+  void _applyEngineKinds(
+    ({List<EngineKind> kinds, List<bool> transcodeFlags}) computed,
+  ) {
+    _engineKinds = computed.kinds;
+    _engineTranscodeFlags = computed.transcodeFlags;
   }
 
   /// 计算逻辑索引 [logicalIndex] 所在同引擎连续段（run）。
   ({int start, int end, int localIndex, EngineKind kind}) _runBounds(
     int logicalIndex, {
     List<EngineKind>? kinds,
+    List<bool>? transcodeFlags,
   }) {
     final k = kinds ?? _engineKinds;
+    final tc = transcodeFlags ?? _engineTranscodeFlags;
     final kind = k[logicalIndex];
+    // 转码歌曲独立成单例 run（size 1）：just_audio 一次 setAudioSources 会
+    // 预载整 run，若把多首转码歌并入同 run，会并行打爆转码会话。单例保证
+    // 每次激活只对当前这一首转码，且相邻同引擎歌不并入。
+    if (logicalIndex < tc.length && tc[logicalIndex]) {
+      return (start: logicalIndex, end: logicalIndex, localIndex: 0, kind: kind);
+    }
     var s = logicalIndex;
-    while (s > 0 && k[s - 1] == kind) s--;
+    while (s > 0 &&
+        k[s - 1] == kind &&
+        !(s - 1 < tc.length && tc[s - 1])) {
+      s--;
+    }
     var e = logicalIndex;
-    while (e < k.length - 1 && k[e + 1] == kind) e++;
+    while (e < k.length - 1 &&
+        k[e + 1] == kind &&
+        !(e + 1 < tc.length && tc[e + 1])) {
+      e++;
+    }
     return (start: s, end: e, localIndex: logicalIndex - s, kind: kind);
   }
 
@@ -598,13 +685,26 @@ class PlayerService with WidgetsBindingObserver {
       }
       return;
     }
+    // 转码会话释放：切歌前先 quit 掉**非当前歌**的转码会话，保证服务端
+    // 始终 ≤1 个活动转码会话（播放到哪首才给哪首转码）。当前歌的会话保留
+    // 到本 run 加载完成（_sourceForSong 命中缓存直接复用）。fire-and-forget
+    // 不阻塞加载。
+    final newId = list[logicalIndex].id;
+    final toQuit = FeiNiuTranscodeService.instance.activeTranscodeIds
+        .where((id) => id != newId)
+        .toList();
+    if (toQuit.isNotEmpty) {
+      unawaited(FeiNiuTranscodeService.instance.quitForIds(toQuit));
+    }
     // 从进入锁这一刻起就设置期望索引：切换引擎时旧引擎（如正在播上一首的
     // just_audio）可能广播 currentIndex 过渡事件（pause/准备释放时），
     // currentIndexStream 监听器用 _pendingLoadLogicalIndex 过滤它们。必须
     // 在 pause 旧引擎之前设置，否则「song changed to 旧歌」会先于加载发生。
     _pendingLoadLogicalIndex = logicalIndex;
     // 引擎路由始终在锁内用当前队列重算（不依赖锁外的赋值/长度缓存）。
-    _engineKinds = await _computeEngineKinds(list);
+    final computed = await _computeEngineKinds(list);
+    _engineKinds = computed.kinds;
+    _engineTranscodeFlags = computed.transcodeFlags;
     final bounds = _runBounds(logicalIndex);
     final targetKind = bounds.kind;
     final target = _engineFor(targetKind);
@@ -909,7 +1009,7 @@ class PlayerService with WidgetsBindingObserver {
     _applyLogicalQueue(playable, actualIndex);
 
     // 双引擎架构：计算引擎路由，只加载当前 run 到对应引擎。
-    _engineKinds = await _computeEngineKinds(playable);
+    _applyEngineKinds(await _computeEngineKinds(playable));
 
     Future<bool> loadCurrentRunOnce() async {
       try {
@@ -1177,6 +1277,8 @@ class PlayerService with WidgetsBindingObserver {
     queueExtender = null;
     _isExtendingQueue = false;
     roamId = null;
+    // 释放全部服务器转码会话（fire-and-forget，不阻塞停止流程）。
+    unawaited(FeiNiuTranscodeService.instance.quitAll());
     _stopBackgroundAudioKeepAlive();
     _statsFlushTimer?.cancel();
     await _statsService.flush();
@@ -1221,7 +1323,7 @@ class PlayerService with WidgetsBindingObserver {
 
     _applyLogicalQueue(playable, actualIndex);
 
-    _engineKinds = await _computeEngineKinds(playable);
+    _applyEngineKinds(await _computeEngineKinds(playable));
     try {
       await _activateLogicalIndex(
         actualIndex,
@@ -1320,12 +1422,46 @@ class PlayerService with WidgetsBindingObserver {
           ? position.value
           : Duration.zero;
 
+      // 转码歌（just_audio 播 HLS）解析失败：优先降级音质，而非直接升级/跳过。
+      // - 生效 codec 是 flac 且未降级 → 降级 mp3 重新转码（flac→mp3→直连）。
+      // - 已是 mp3/opus 或已降级仍失败 → 完全失败：标记退直连（不重转码，
+      //   防死循环）。
+      if (!isMediaKitError &&
+          FeiNiuTranscodeService.instance.activeTranscodeIds
+              .contains(failedSong.id)) {
+        final codec =
+            FeiNiuTranscodeService.instance.effectiveCodecFor(failedSong.id);
+        if (codec == 'flac' &&
+            !FeiNiuTranscodeService.instance.isDowngradedToMp3(
+              failedSong.id,
+            )) {
+          _debugLog(
+            'transcode ${failedSong.title} flac decode failed -> downgrade mp3',
+          );
+          FeiNiuTranscodeService.instance.markDowngradeToMp3(failedSong.id);
+          _quitTranscodeFor(failedSong.id);
+          _applyEngineKinds(await _computeEngineKinds(list));
+          await _activateLogicalIndex(
+            failedIndex,
+            initialPosition: seekPos > Duration.zero ? seekPos : null,
+          );
+          if (wasPlaying) {
+            await _startPlayback();
+          }
+          return;
+        }
+        _transcodeFailedSongIds.add(failedSong.id);
+        _quitTranscodeFor(failedSong.id);
+        // 落回下方分支：isFlacTooLarge/isSystemDecoderFail 走 media_kit 直连，
+        // 普通 just_audio 失败走直连，DSF 等回落 routeForSong → mediaKit 直连。
+      }
+
       if (isFlacTooLarge || isSystemDecoderFail) {
         // FLAC 帧超限 / 系统解码器失败 → 升级 media_kit（FFmpeg 软解，
         // 无 32KB 限制、无设备解码器差异）。
         _mediaKitEscalateSongIds.add(failedSong.id);
-        FeiNiuTranscodeService.instance.invalidate(failedSong.id);
-        _engineKinds = await _computeEngineKinds(list);
+        _quitTranscodeFor(failedSong.id);
+        _applyEngineKinds(await _computeEngineKinds(list));
         await _activateLogicalIndex(
           failedIndex,
           initialPosition: seekPos > Duration.zero ? seekPos : null,
@@ -1349,8 +1485,8 @@ class PlayerService with WidgetsBindingObserver {
           return;
         }
         _mediaKitFailedSongIds.add(failedSong.id);
-        FeiNiuTranscodeService.instance.invalidate(failedSong.id);
-        _engineKinds = await _computeEngineKinds(list);
+        _quitTranscodeFor(failedSong.id);
+        _applyEngineKinds(await _computeEngineKinds(list));
         await _activateLogicalIndex(
           failedIndex,
           initialPosition: seekPos > Duration.zero ? seekPos : null,
@@ -1364,8 +1500,8 @@ class PlayerService with WidgetsBindingObserver {
       // just_audio 其他错误：通用恢复——失效缓存、重载当前 run。
       _invalidateResolvedSource(failedSong);
       await _resolvePlayableUri(failedSong, forceRefresh: true);
-      FeiNiuTranscodeService.instance.invalidate(failedSong.id);
-      _engineKinds = await _computeEngineKinds(list);
+      _quitTranscodeFor(failedSong.id);
+      _applyEngineKinds(await _computeEngineKinds(list));
       _applyLogicalQueue(list, failedIndex);
       await _activateLogicalIndex(
         failedIndex,
@@ -1383,6 +1519,19 @@ class PlayerService with WidgetsBindingObserver {
     } finally {
       _recoveringCurrentSource = false;
     }
+  }
+
+  /// 清除某首歌的转码状态并释放服务器转码会话（播放出错强制刷新时调用）。
+  /// 会话内保留失败/降级标记，避免死循环重试。
+  ///
+  /// 只有该歌**确实登记了活动转码会话**（activeTranscodeIds）才发 quit POST，
+  /// 避免对未转码的歌（如 just_audio 直连 DSF 解码失败）空发 quit 请求。
+  void _quitTranscodeFor(String songId) {
+    final svc = FeiNiuTranscodeService.instance;
+    if (svc.activeTranscodeIds.contains(songId)) {
+      unawaited(svc.quitFor(songId));
+    }
+    svc.invalidate(songId);
   }
 
   /// media_kit 连续失败后跳过该歌：前进到下一首；队尾则按 loop 回卷/停止。
@@ -1474,7 +1623,7 @@ class PlayerService with WidgetsBindingObserver {
       // 仅该歌升级 media_kit 重播（复用 FLAC 帧超限升级路径）。
       _mediaKitEscalateSongIds.add(song.id);
       FeiNiuTranscodeService.instance.invalidate(song.id);
-      _engineKinds = await _computeEngineKinds(queue.value);
+      _applyEngineKinds(await _computeEngineKinds(queue.value));
       await _activateLogicalIndex(
         currentIndex.value,
         initialPosition: seekPos > Duration.zero ? seekPos : null,
@@ -1648,18 +1797,29 @@ class PlayerService with WidgetsBindingObserver {
       // 引擎感知的追加：先更新逻辑队列与引擎路由；若追加的歌曲与当前 run
       // 同引擎，增量插入当前引擎（避免整段重建），否则只更新逻辑状态——
       // 真正播到边界时由逻辑层切换引擎加载。
-      final appendedKind = await routeForSong(nextTrack);
+      final nextTranscodes =
+          !_forceDirectSongIds.contains(nextTrack.id) &&
+          !_transcodeFailedSongIds.contains(nextTrack.id) &&
+          await FeiNiuTranscodeService.instance.shouldTranscode(nextTrack);
+      final appendedKind = nextTranscodes
+          ? EngineKind.justAudio
+          : await routeForSong(nextTrack);
       final curKind =
           currentIndex.value >= 0 && currentIndex.value < _engineKinds.length
           ? _engineKinds[currentIndex.value]
           : EngineKind.justAudio;
       queue.value = allSongs;
       if (_engineKinds.length != baseQueue.length) {
-        _engineKinds = await _computeEngineKinds(baseQueue);
+        _applyEngineKinds(await _computeEngineKinds(baseQueue));
       }
       _engineKinds = [..._engineKinds, appendedKind];
+      _engineTranscodeFlags = [..._engineTranscodeFlags, nextTranscodes];
 
-      if (identical(_activeEngine.kind, curKind) && appendedKind == curKind) {
+      // 转码歌不入当前 run 的物理增量插入：它是独立单例 run，播放到它时由
+      // _activateLogicalIndex 重新激活加载（单首转码）。
+      if (!nextTranscodes &&
+          identical(_activeEngine.kind, curKind) &&
+          appendedKind == curKind) {
         try {
           final item = await _resolveEngineItem(nextTrack, appendedKind);
           await _activeEngine.insertItem(_activeEngine.sequenceLength, item);
@@ -1756,9 +1916,11 @@ class PlayerService with WidgetsBindingObserver {
     }
     final wasPlaying = _activeEngine.playing;
     final prev = idx - 1;
-    if (prev >= _activeRunStart &&
-        prev < _engineKinds.length &&
-        _engineKinds[prev] == _activeEngine.kind) {
+    // 同 run 判定用 _runBounds 覆盖范围（转码歌是单例 run，prev 虽同引擎但
+    // 不在当前 run 时必须走重新激活，不能 seekToPrevious 跨到别首转码歌）。
+    final bounds = _runBounds(idx);
+    final sameRun = prev >= bounds.start && prev <= bounds.end;
+    if (sameRun) {
       await _activeEngine.seekToPrevious();
     } else {
       await _activateLogicalIndex(prev);
@@ -1806,12 +1968,15 @@ class PlayerService with WidgetsBindingObserver {
     final list = queue.value;
     if (index < 0 || index >= list.length) return;
     if (index >= _engineKinds.length) {
-      _engineKinds = await _computeEngineKinds(list);
+      _applyEngineKinds(await _computeEngineKinds(list));
     }
-    // 同 run → 引擎内索引；跨 run → 激活新 run。
-    if (index >= _activeRunStart &&
-        index < _activeRunStart + _activeEngine.sequenceLength &&
-        _engineKinds[index] == _activeEngine.kind) {
+    // 同 run → 引擎内索引；跨 run → 激活新 run（转码歌为单例 run，
+    // 命中 _runBounds 仅当恰好是当前正在播的这首，否则走激活）。
+    final bounds = _runBounds(index);
+    final cur = currentIndex.value;
+    final sameRun = cur >= 0 && cur >= bounds.start && cur <= bounds.end;
+    if (sameRun && index >= _activeRunStart &&
+        index < _activeRunStart + _activeEngine.sequenceLength) {
       await _activeEngine.skipToIndex(index - _activeRunStart);
     } else {
       await _activateLogicalIndex(index);
@@ -1856,7 +2021,7 @@ class PlayerService with WidgetsBindingObserver {
     // 插入的歌曲可能路由到另一引擎：更新逻辑队列 + 引擎路由，
     // 重建当前 run 即可（同 run 内增量插入由 loadQueue 处理）。
     _applyLogicalQueue(nextQueue, idx);
-    _engineKinds = await _computeEngineKinds(nextQueue);
+    _applyEngineKinds(await _computeEngineKinds(nextQueue));
     try {
       final wasPlaying = isPlaying.value;
       final pos = position.value;
@@ -1917,7 +2082,7 @@ class PlayerService with WidgetsBindingObserver {
     // 插入的歌曲可能路由到另一引擎：更新逻辑队列 + 引擎路由，
     // 重建当前 run 即可。
     _applyLogicalQueue(nextQueue, idx);
-    _engineKinds = await _computeEngineKinds(nextQueue);
+    _applyEngineKinds(await _computeEngineKinds(nextQueue));
     try {
       final wasPlaying = isPlaying.value;
       final pos = position.value;
@@ -2053,7 +2218,52 @@ class PlayerService with WidgetsBindingObserver {
     _forcedEngineKinds[song.id] = kind;
     // 清除转码/格式缓存，让新引擎按原始格式重新解析（media_kit 直连原始流）。
     FeiNiuTranscodeService.instance.invalidate(song.id);
-    _engineKinds = await _computeEngineKinds(queue.value);
+    _applyEngineKinds(await _computeEngineKinds(queue.value));
+    await _activateLogicalIndex(
+      idx,
+      initialPosition: seekPos > Duration.zero ? seekPos : null,
+    );
+    if (wasPlaying) await _startPlayback();
+  }
+
+  /// 切换转码格式（歌曲面板转码 tag 点击）：设置格式 → 清除该歌的转码缓存
+  /// 与失败/降级标记 → 重算路由 → 重新激活当前歌，立即用新格式重新转码。
+  Future<void> setTranscodeFormat(TranscodeFormat format) async {
+    await AppTranscodeSettings.setFormat(format);
+    final song = currentSong.value;
+    final idx = currentIndex.value;
+    if (song == null || idx < 0) return;
+    _debugLog('setTranscodeFormat ${song.title} -> ${format.name}');
+    // 取消「直连」覆盖（该歌恢复按设置转码）。
+    _forceDirectSongIds.remove(song.id);
+    // 清除该歌的转码缓存/降级标记/失败标记，允许按新格式重新转码。
+    FeiNiuTranscodeService.instance.invalidate(song.id);
+    FeiNiuTranscodeService.instance.clearDowngradeFor(song.id);
+    _transcodeFailedSongIds.remove(song.id);
+    final seekPos = position.value;
+    final wasPlaying = isPlaying.value;
+    _applyEngineKinds(await _computeEngineKinds(queue.value));
+    await _activateLogicalIndex(
+      idx,
+      initialPosition: seekPos > Duration.zero ? seekPos : null,
+    );
+    if (wasPlaying) await _startPlayback();
+  }
+
+  /// 歌曲面板转码格式选「直连」：该歌本会话强制直连原始流（不转码），
+  /// 回到默认引擎路由（FLAC→just_audio，DSF→media_kit）。
+  Future<void> setTranscodeDirect() async {
+    final song = currentSong.value;
+    final idx = currentIndex.value;
+    if (song == null || idx < 0) return;
+    _debugLog('setTranscodeDirect ${song.title}');
+    _forceDirectSongIds.add(song.id);
+    FeiNiuTranscodeService.instance.invalidate(song.id);
+    FeiNiuTranscodeService.instance.clearDowngradeFor(song.id);
+    _transcodeFailedSongIds.remove(song.id);
+    final seekPos = position.value;
+    final wasPlaying = isPlaying.value;
+    _applyEngineKinds(await _computeEngineKinds(queue.value));
     await _activateLogicalIndex(
       idx,
       initialPosition: seekPos > Duration.zero ? seekPos : null,
@@ -2162,7 +2372,7 @@ class PlayerService with WidgetsBindingObserver {
     // 就地移动音频源（同 run 内），避免重建整个播放管线（避免当前播放卡顿）。
     // 先同步逻辑队列，让 _indexSub 在 currentIndexStream 变化时能取到最新顺序。
     queue.value = oldQueue;
-    _engineKinds = await _computeEngineKinds(oldQueue);
+    _applyEngineKinds(await _computeEngineKinds(oldQueue));
     _emitSnapshot(force: true);
     // 移动跨引擎边界时无法就地移动（引擎物理队列不同源），走全量重建。
     final crossesEngine =
@@ -2405,7 +2615,7 @@ class PlayerService with WidgetsBindingObserver {
   ) async {
     try {
       // 双引擎架构：按 run 加载恢复的当前曲所在引擎。
-      _engineKinds = await _computeEngineKinds(session.queue);
+      _applyEngineKinds(await _computeEngineKinds(session.queue));
       // 构建源期间用户可能已开始新的播放：放弃 apply，避免 setAudioSources
       // 覆盖用户刚选的队列。
       if (_queueGeneration != 0) {
@@ -2910,7 +3120,7 @@ class PlayerService with WidgetsBindingObserver {
     queue.value = allSongs;
 
     // 重建引擎路由并重载当前 run（保持位置/播放态）。
-    _engineKinds = await _computeEngineKinds(allSongs);
+    _applyEngineKinds(await _computeEngineKinds(allSongs));
     try {
       await _activateLogicalIndex(newCurrentIdx, initialPosition: pos);
       if (wasPlaying && !_activeEngine.playing) {
@@ -3193,11 +3403,12 @@ class PlayerService with WidgetsBindingObserver {
       // 同一镜像各缓存一份），直接直连流，由下方 ClippingAudioSource 裁剪。
       final isCue = song.isCue;
 
-      // 本地不支持的格式（DSF/APE/WMA…）与 FLAC 由 media_kit 引擎处理
-      // （见 _mediaForSong / _activateLogicalIndex），just_audio 只播
-      // MP3/AAC/Opus 等可直接解码的格式，这里直接走缓存/直连。
+      // 命中优先级（转码歌）：
+      // 1. 原始完整缓存 → 本地文件（零带宽，最高优先）
+      // 2. 转码完整缓存（tc_<id>_<codec>.mp4）→ 本地文件（零流量）
+      // 3. 转码 HLS 在线（m3u8 → ExoPlayer 播 fMP4）
+      // 4. 流式缓存源 / 直连（现有兜底）
       if (!isCue && StreamCacheService.instance.isEnabled) {
-        // 缓存命中 → 直接用本地文件（拖动进度条秒播）
         final complete = await StreamCacheService.instance.completeFileFor(
           song.id,
           song: song,
@@ -3205,6 +3416,20 @@ class PlayerService with WidgetsBindingObserver {
         if (complete != null) {
           return AudioSource.file(complete.path);
         }
+      }
+
+      // 转码歌：优先命中转码完整缓存（本地文件零流量），否则在线 HLS。
+      // 转码失败/未启用时返回 null 落回下方现有路径。转码独立于下载缓存开关
+      // （即使下载缓存关闭也走转码）。面板选「直连」的歌跳过转码。
+      // **CUE 曲也走转码**：服务器按 guid 返回裁切好的单曲 HLS，无需裁剪；
+      // 转码失败才落回下方 CUE 直连 + ClippingAudioSource 裁剪。
+      if (!_forceDirectSongIds.contains(song.id) &&
+          !_transcodeFailedSongIds.contains(song.id)) {
+        final hls = await _transcodedSourceFor(song);
+        if (hls != null) return hls;
+      }
+
+      if (!isCue && StreamCacheService.instance.isEnabled) {
         // 未缓存 → 缓存源（播放时边播边下载，缓存命中后次次秒播）
         return StreamCacheService.instance.sourceForSong(song);
       }
@@ -3232,8 +3457,61 @@ class PlayerService with WidgetsBindingObserver {
     return AudioSource.file(rawUri);
   }
 
+  /// 构建转码歌的播放源：
+  /// 1. 转码完整缓存（`tc_<id>_<codec>.mp4`）→ `AudioSource.file`（零流量）
+  /// 2. 否则转码 HLS 在线（`transcodeHlsUrlFor` → m3u8 → ExoPlayer），并
+  ///    在返回后登记「播完后台拼接下载」。
+  ///
+  /// 返回 null 表示：不转码（`shouldTranscode` false，走直连）或**转码请求
+  /// 失败**（此时标记 `_transcodeFailedSongIds`，下次路由回落直连，避免
+  /// DSF/APE 等原 media_kit 格式在 just_audio 上解码失败 → 无限重试转码）。
+  Future<AudioSource?> _transcodedSourceFor(SongEntity song) async {
+    final svc = FeiNiuTranscodeService.instance;
+    final codec = svc.effectiveCodecFor(song.id);
+
+    // 1) 转码完整缓存命中 → 本地文件零流量。
+    final cached = await StreamCacheService.instance
+        .transcodeCompleteFileFor(song.id, codec);
+    if (cached != null) {
+      if (kDebugMode) {
+        debugPrint(
+          '[PlayerService] transcode ${song.title} -> LOCAL ${cached.path}',
+        );
+      }
+      return AudioSource.file(cached.path);
+    }
+
+    // 2) 需要转码判定：不转 → 直接直连（不标记，正常回落）。
+    if (!await svc.shouldTranscode(song)) return null;
+
+    // 3) 在线 HLS。
+    final hlsUrl = await svc.transcodeHlsUrlFor(song);
+    if (hlsUrl == null) {
+      // 需要转码但转码请求失败 → 标记失败，本会话不再重试转码（回落
+      // routeForSong：DSF→mediaKit 直连，普通→just_audio 直连）。
+      _transcodeFailedSongIds.add(song.id);
+      if (kDebugMode) {
+        debugPrint('[PlayerService] transcode ${song.title} FAILED -> direct');
+      }
+      return null;
+    }
+    if (kDebugMode) {
+      debugPrint('[PlayerService] transcode ${song.title} -> HLS $hlsUrl');
+    }
+    // 记录转码 HLS 地址：播完该歌时后台拼接下载成完整文件（第二次起零流量）。
+    // 不在构建源时立即下载，避免首次播放双倍带宽。
+    _activeTranscodeHlsUrl = hlsUrl;
+    _activeTranscodeCodec = codec;
+    return AudioSource.uri(
+      Uri.parse(hlsUrl),
+      headers: FeiNiuApiClient.imageAuthHeaders(),
+    );
+  }
+
   Future<void> dispose() async {
     WidgetsBinding.instance.removeObserver(this);
+    // 释放全部服务器转码会话（fire-and-forget）。
+    unawaited(FeiNiuTranscodeService.instance.quitAll());
     AppPlaybackVolumeSettings.volume.removeListener(_handleAppVolumeChanged);
     AppPlaybackSpeedSettings.speed.removeListener(_handlePlaybackSpeedChanged);
     AppPlaybackAudioFocusSettings.exclusiveFocus.removeListener(

@@ -1,8 +1,10 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:feiniu_music/app/services/feiniu/api_client.dart';
 import 'package:feiniu_music/app/services/feiniu/transcode_service.dart';
+import 'package:feiniu_music/app/state/settings_transcode_state.dart';
 import 'package:feiniu_music/app/state/song_state.dart';
 
 /// 构造一个用拦截器短路返回指定响应体的 Dio（不真正发网络请求）。
@@ -436,6 +438,205 @@ void main() {
       expect(codec, 'eac3');
       expect(format, 'm4a');
       expect(metadataCalls, 1, reason: 'codec+format 应共享同一次 metadata 请求');
+    });
+  });
+
+  group('shouldTranscode + transcodeHlsUrlFor', () {
+    setUp(() {
+      SharedPreferences.setMockInitialValues({});
+      AppTranscodeSettings.resetForTest();
+    });
+
+    test('master 关闭 → 不转码', () async {
+      await AppTranscodeSettings.setEnabled(false);
+      final song = _song('id-t0', format: 'flac');
+      expect(await FeiNiuTranscodeService.instance.shouldTranscode(song), isFalse);
+    });
+
+    test('全部转码=开 → 无条件转码（免 size，含小文件）', () async {
+      await AppTranscodeSettings.setEnabled(true);
+      await AppTranscodeSettings.setTranscodeAll(true);
+      // 源格式 dsf（media_kit 系）≠ 转码格式 flac → 转码
+      final song = _song('id-t1', format: 'dsf');
+      expect(await FeiNiuTranscodeService.instance.shouldTranscode(song), isTrue);
+    });
+
+    test('源格式 == 转码格式 → 不转码（flac 源 + flac 转码是纯浪费）', () async {
+      await AppTranscodeSettings.setEnabled(true);
+      await AppTranscodeSettings.setTranscodeAll(true);
+      await AppTranscodeSettings.setFormat(TranscodeFormat.flac);
+      final song = _song('id-t1b', format: 'flac');
+      expect(
+        await FeiNiuTranscodeService.instance.shouldTranscode(song),
+        isFalse,
+        reason: 'flac 源 + flac 转码无收益，应直连播放',
+      );
+      // mp3 源 + mp3 转码同理
+      await AppTranscodeSettings.setFormat(TranscodeFormat.mp3);
+      final mp3 = _song('id-t1c', format: 'mp3');
+      expect(await FeiNiuTranscodeService.instance.shouldTranscode(mp3), isFalse);
+    });
+
+    test('全部转码=关 → 仅超阈值转码；未识别大小不转', () async {
+      await AppTranscodeSettings.setEnabled(true);
+      await AppTranscodeSettings.setTranscodeAll(false);
+      await AppTranscodeSettings.setThresholdMb(80);
+      FeiNiuApiClient.instance.setDioForTest(
+        _mockDio((o) {
+          // id-t3 未识别大小（metadata 不带 size）；id-t2 由 song.fileSize 提供
+          final hasSize = (o.queryParameters['guid'] ?? '') == 'id-t2' ||
+              (o.path.contains('id-t2'));
+          return {
+            'code': 0,
+            'data': {
+              'audioSpec': {
+                'format': 'dsf',
+                if (hasSize) 'size': 100 * 1024 * 1024,
+              },
+            },
+          };
+        }),
+      );
+      final big = SongEntity(
+        id: 'id-t2',
+        title: 't',
+        artist: '[{"name":"a"}]',
+        format: 'dsf',
+        fileSize: 100 * 1024 * 1024,
+      );
+      expect(await FeiNiuTranscodeService.instance.shouldTranscode(big), isTrue);
+      final small = _song('id-t3', format: 'dsf'); // fileSize 空
+      expect(
+        await FeiNiuTranscodeService.instance.shouldTranscode(small),
+        isFalse,
+        reason: '未识别大小不转码',
+      );
+    });
+
+    test('CUE 曲也走转码（服务器返回裁切好的单曲 HLS）', () async {
+      await AppTranscodeSettings.setEnabled(true);
+      await AppTranscodeSettings.setTranscodeAll(true);
+      final song = SongEntity(
+        id: 'id-t4',
+        title: 't',
+        artist: '[{"name":"a"}]',
+        format: 'dsf',
+        isCue: true,
+      );
+      expect(await FeiNiuTranscodeService.instance.shouldTranscode(song), isTrue);
+    });
+
+    test('flac → 请求带 bitrate:320；mp3/opus → 不带 bitrate', () async {
+      Map<String, dynamic>? lastOutput;
+      FeiNiuApiClient.instance.setDioForTest(
+        _mockDio((o) {
+          if (o.path.contains('transcode')) {
+            final data = o.data as Map<String, dynamic>;
+            lastOutput = data['output'] as Map<String, dynamic>;
+          }
+          return {
+            'code': 0,
+            'data': {
+              'audioSpec': {'format': 'dsf'},
+              'url': '/music/api/v1/track/hls/t5/preset.m3u8',
+            },
+          };
+        }),
+      );
+      await AppTranscodeSettings.setEnabled(true);
+      await AppTranscodeSettings.setTranscodeAll(true);
+
+      // flac（源 dsf，需转码；验证带 bitrate:320）
+      await AppTranscodeSettings.setFormat(TranscodeFormat.flac);
+      await FeiNiuTranscodeService.instance.transcodeHlsUrlFor(
+        _song('id-t5', format: 'dsf'),
+      );
+      expect(lastOutput, {'codec': 'flac', 'channel': 2, 'bitrate': 320});
+
+      // mp3（不带 bitrate）
+      await AppTranscodeSettings.setFormat(TranscodeFormat.mp3);
+      await FeiNiuTranscodeService.instance.transcodeHlsUrlFor(
+        _song('id-t6', format: 'flac'),
+      );
+      expect(lastOutput, {'codec': 'mp3', 'channel': 2});
+
+      // opus（不带 bitrate）
+      await AppTranscodeSettings.setFormat(TranscodeFormat.opus);
+      await FeiNiuTranscodeService.instance.transcodeHlsUrlFor(
+        _song('id-t7', format: 'flac'),
+      );
+      expect(lastOutput, {'codec': 'opus', 'channel': 2});
+    });
+
+    test('降级到 mp3 后：codec 用 mp3，缓存按格式分 key', () async {
+      FeiNiuTranscodeService.instance.clearCacheForTest();
+      await AppTranscodeSettings.setEnabled(true);
+      await AppTranscodeSettings.setTranscodeAll(true);
+      await AppTranscodeSettings.setFormat(TranscodeFormat.flac);
+      FeiNiuTranscodeService.instance.markDowngradeToMp3('id-d1');
+      expect(FeiNiuTranscodeService.instance.effectiveCodecFor('id-d1'), 'mp3');
+      expect(FeiNiuTranscodeService.instance.isDowngradedToMp3('id-d1'), isTrue);
+      expect(
+        FeiNiuTranscodeService.instance.effectiveCodecFor('id-other'),
+        'flac',
+        reason: '未降级歌仍用设置格式',
+      );
+    });
+
+    test('transcodeHlsUrlFor 失败（网络异常）→ 返回 null 不抛异常', () async {
+      FeiNiuApiClient.instance.setDioForTest(
+        _mockDio(
+          (o) => {},
+          error: (o) =>
+              DioException(requestOptions: o, type: DioExceptionType.connectionError),
+        ),
+      );
+      await AppTranscodeSettings.setEnabled(true);
+      await AppTranscodeSettings.setTranscodeAll(true);
+      final url = await FeiNiuTranscodeService.instance.transcodeHlsUrlFor(
+        _song('id-t8', format: 'dsf'),
+      );
+      expect(url, isNull, reason: '转码失败应回退直连，不抛异常');
+    });
+
+    test('quitFor 释放会话并清缓存', () async {
+      FeiNiuTranscodeService.instance.clearCacheForTest();
+      await AppTranscodeSettings.setEnabled(true);
+      await AppTranscodeSettings.setTranscodeAll(true);
+      final quitIds = <String>[];
+      FeiNiuApiClient.instance.setDioForTest(
+        _mockDio((o) {
+          if (o.path.contains('transcode/quit')) {
+            final data = o.data as Map<String, dynamic>;
+            quitIds.add(data['guid'] as String);
+          }
+          return {
+            'code': 0,
+            'data': {
+              'audioSpec': {'format': 'flac'},
+              'url': '/music/api/v1/track/hls/id-q/preset.m3u8',
+            },
+          };
+        }),
+      );
+      await FeiNiuTranscodeService.instance.transcodeHlsUrlFor(
+        _song('id-q', format: 'dsf'),
+      );
+      expect(
+        FeiNiuTranscodeService.instance.activeTranscodeIds,
+        contains('id-q'),
+      );
+      await FeiNiuTranscodeService.instance.quitFor('id-q');
+      expect(
+        FeiNiuTranscodeService.instance.activeTranscodeIds,
+        isNot(contains('id-q')),
+      );
+      expect(quitIds, contains('id-q'));
+      expect(
+        FeiNiuTranscodeService.instance.cachedHlsUrlFor('id-q'),
+        isNull,
+        reason: 'quit 后清掉缓存',
+      );
     });
   });
 }

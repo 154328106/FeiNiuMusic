@@ -107,6 +107,7 @@ class FeiNiuTrackService {
       sampleRate: track.audioSpec?.sampleRate,
       format: track.audioSpec?.format,
       codec: track.audioSpec?.codec,
+      fileSize: track.audioSpec?.size,
       isFavorite: track.isFavorite,
       coverId: track.coverId,
       audioSpec: specText,

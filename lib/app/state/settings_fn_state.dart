@@ -12,6 +12,7 @@ import '../services/feiniu/fn_models.dart';
 class AppFnConnectionSettings {
   static const String _prefsConnectionOrder = 'fn_connection_order';
   static const String _prefsConnectionPreference = 'fn_connection_preference';
+  static const String _prefsDisabledGroups = 'fn_disabled_groups';
   static const String _prefsLastFnId = 'fn_last_fnid';
   static const String _prefsConnectionUrl = 'fn_connection_url';
   static const String _prefsConnectionMethod = 'fn_connection_method';
@@ -25,6 +26,14 @@ class AppFnConnectionSettings {
   /// 当前连接优先级顺序（可拖拽自定义）
   static final ValueNotifier<List<ProbeCandidateGroup>> connectionOrder =
       ValueNotifier(List.of(kDefaultConnectionOrder));
+
+  /// **已禁用的分组**（本会话不再探测，且设置页候选链路列表隐藏）。
+  ///
+  /// 用户可在「FN Connect → 连接优先级」里对每个分组开/关。持久化到
+  /// SharedPreferences（按枚举 name 存字符串列表）。探测服务构造候选时
+  /// 过滤掉这些分组（见 `FnConnectionProbeService._effectiveOrder`）。
+  static final ValueNotifier<Set<ProbeCandidateGroup>> disabledGroups =
+      ValueNotifier(<ProbeCandidateGroup>{});
 
   /// 上次使用的 FNID（用于启动时自动探测）
   static String? lastFnId;
@@ -71,6 +80,7 @@ class AppFnConnectionSettings {
   static void resetForTest() {
     _loading = null;
     connectionOrder.value = List.of(kDefaultConnectionOrder);
+    disabledGroups.value = <ProbeCandidateGroup>{};
     accessCode = null;
   }
 
@@ -103,6 +113,21 @@ class AppFnConnectionSettings {
 
     // 上次 FNID
     lastFnId = prefs.getString(_prefsLastFnId);
+
+    // 已禁用分组
+    final storedDisabled = prefs.getStringList(_prefsDisabledGroups);
+    if (storedDisabled != null) {
+      final disabled = <ProbeCandidateGroup>{};
+      for (final name in storedDisabled) {
+        for (final group in ProbeCandidateGroup.values) {
+          if (group.name == name) {
+            disabled.add(group);
+            break;
+          }
+        }
+      }
+      disabledGroups.value = disabled;
+    }
 
     // 上次连接信息（用于显示）
     final savedUrl = prefs.getString(_prefsConnectionUrl);
@@ -153,6 +178,26 @@ class AppFnConnectionSettings {
       }
     }
     return result;
+  }
+
+  /// 启用/禁用某个连接分组并持久化。禁用后本会话不再探测该分组
+  /// （探测服务过滤），设置页候选链路列表也隐藏该分组。
+  static Future<void> setGroupDisabled(
+    ProbeCandidateGroup group,
+    bool disabled,
+  ) async {
+    final next = Set<ProbeCandidateGroup>.from(disabledGroups.value);
+    if (disabled) {
+      next.add(group);
+    } else {
+      next.remove(group);
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      _prefsDisabledGroups,
+      next.map((g) => g.name).toList(),
+    );
+    disabledGroups.value = next;
   }
 
   /// 保存本次探测结果（FNID + 连接 URL + 连接方式 + 候选链路列表）

@@ -7,4 +7,5 @@ export 'settings_onboarding_state.dart';
 export 'settings_playback_state.dart';
 export 'settings_player_style_state.dart';
 export 'settings_theme_state.dart';
+export 'settings_transcode_state.dart';
 export 'settings_volume_schedule_state.dart';

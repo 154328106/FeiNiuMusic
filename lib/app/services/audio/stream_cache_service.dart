@@ -237,6 +237,96 @@ class StreamCacheService {
     return null;
   }
 
+  /// 转码缓存文件基础名（`tc_<safeId>_<codec>.mp4`）。
+  ///
+  /// 与原始流缓存（`<safeId>.<ext>`）区分；带 codec，flac/mp3 转码是两个
+  /// 不同文件，不会串。
+  String _transcodeFileBase(String songId, String codec) {
+    final base = _dir?.path ?? '';
+    return p.join(base, 'tc_${safeCacheName(songId)}_$codec');
+  }
+
+  /// 转码完整缓存文件（存在则返回，供播放走 `AudioSource.file` 零流量秒播）。
+  ///
+  /// 与 [completeFileFor] 同为轻量路径：只解析目录、查 `existsSync()`，
+  /// 不触发扫描/淘汰。未命中返回 null（播放器回退转码 HLS 在线）。
+  Future<File?> transcodeCompleteFileFor(String songId, String codec) async {
+    if (!isEnabled) return null;
+    await _resolveDir();
+    final file = File('${_transcodeFileBase(songId, codec)}.mp4');
+    if (await file.exists()) return file;
+    return null;
+  }
+
+  /// 后台把转码 HLS 流（m3u8 的 init.mp4 + 各 m4s 分片）下载拼接成单个
+  /// 完整文件（fire-and-forget，不阻塞播放）。
+  ///
+  /// 首次播放转码 HLS 完成后调用；第二次起命中本地 [transcodeCompleteFileFor]
+  /// 零流量。失败静默忽略（保留半截文件在 `.part`，下次重试前清理）。
+  void cacheTranscodedSong(String songId, String codec, String hlsUrl) {
+    if (!isEnabled) return;
+    unawaited(_cacheTranscodedSongAsync(songId, codec, hlsUrl));
+  }
+
+  Future<void> _cacheTranscodedSongAsync(
+    String songId,
+    String codec,
+    String hlsUrl,
+  ) async {
+    try {
+      await _ensureDir();
+      final finalFile = File('${_transcodeFileBase(songId, codec)}.mp4');
+      if (await finalFile.exists()) return; // 已缓存
+      final partFile = File('${finalFile.path}.part');
+      final raf = await partFile.open(mode: FileMode.write);
+      try {
+        final m3u8 = await FeiNiuApiClient.instance.fetchM3u8Text(hlsUrl);
+        if (m3u8 == null) return;
+        for (final uri in _parseTranscodeM3u8(m3u8, hlsUrl)) {
+          final bytes = await FeiNiuApiClient.instance.fetchBytes(uri);
+          if (bytes == null) return; // 任一失败 → 不写半截完整文件
+          await raf.writeFrom(bytes);
+        }
+        await raf.close();
+        await partFile.rename(finalFile.path);
+        unawaited(evictIfNeeded());
+      } catch (_) {
+        try {
+          await raf.close();
+        } catch (_) {}
+        try {
+          if (await partFile.exists()) await partFile.delete();
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  /// 解析转码 VOD m3u8 的分片顺序（init.mp4 + 各 media segment），并解析为
+  /// 绝对地址（相对路径按 m3u8 所在目录拼接）。忽略字节范围（#EXT-X-BYTERANGE）
+  /// 与变体列表（本服务端输出固定 fMP4 VOD）。
+  static List<String> _parseTranscodeM3u8(String m3u8, String baseUrl) {
+    final lines = m3u8.split('\n').map((l) => l.trim()).toList();
+    final uris = <String>[];
+    // init 段：#EXT-X-MAP:URI="..."
+    final mapMatch = RegExp(r'#EXT-X-MAP:\s*URI="([^"]+)"').firstMatch(m3u8);
+    if (mapMatch != null) uris.add(mapMatch.group(1)!);
+    // media 段：每个 #EXTINF 之后的第一个非空、非注释行
+    for (var i = 0; i < lines.length; i++) {
+      if (!lines[i].startsWith('#EXTINF:')) continue;
+      for (var j = i + 1; j < lines.length; j++) {
+        final l = lines[j];
+        if (l.isEmpty || l.startsWith('#')) continue;
+        uris.add(l);
+        break;
+      }
+    }
+    final base = Uri.parse(baseUrl);
+    return uris.map((u) {
+      final uri = Uri.parse(u);
+      return uri.hasScheme ? u : base.resolve(u).toString();
+    }).toList();
+  }
+
   /// 获取（或创建）某首歌的缓存源。播放器与预缓存器共享同一实例。
   Future<StreamAudioCacheSource> sourceForSong(SongEntity song) async {
     final existing = _sources[song.id];
@@ -279,11 +369,29 @@ class StreamCacheService {
       final f = File(_cacheFileFor(songId, ext).path);
       if (!candidates.contains(f)) candidates.add(f);
     }
+    // 转码缓存（tc_<id>_<codec>.mp4 及其 .part）也一并清除
+    candidates.addAll(await _transcodeFilesFor(songId));
     for (final f in candidates) {
       try {
         if (await f.exists()) await f.delete();
       } catch (_) {}
     }
+  }
+
+  /// 某首歌的全部转码缓存文件（`tc_<safeId>_<codec>.mp4` / `.part` / 各 codec）。
+  Future<List<File>> _transcodeFilesFor(String songId) async {
+    final files = <File>[];
+    try {
+      await _resolveDir();
+      final dir = _dir!;
+      final prefix = 'tc_${safeCacheName(songId)}_';
+      await for (final entity in dir.list(followLinks: false)) {
+        if (entity is! File) continue;
+        final name = p.basename(entity.path);
+        if (name.startsWith(prefix)) files.add(entity);
+      }
+    } catch (_) {}
+    return files;
   }
 
   /// 预缓存一首歌（fire-and-forget 后台下载）。

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../app/router/app_page_route.dart';
 import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/feiniu/favorite_service.dart';
+import '../../app/services/feiniu/transcode_service.dart';
 import '../../app/services/player/player_engine.dart';
 import '../../app/services/player_service.dart';
 import '../../app/state/settings_state.dart';
@@ -110,6 +111,29 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
     final nav = Navigator.of(this.context);
     nav.pop();
     await PlayerService.instance.setDecoderEngine(selected);
+  }
+
+  /// 点击转码格式 tag：弹出「直连 / FLAC / MP3 / OPUS」四选一。选定后切换当前
+  /// 歌曲的转码格式（直连=强制不转码）并关掉面板（重载期间避免拖其他控件）。
+  Future<void> _showTranscodeFormatPicker(BuildContext context) async {
+    final selected = await showModalBottomSheet<Object?>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _TranscodeFormatPickerSheet(
+        songId: widget.song.id,
+        current: AppTranscodeSettings.format.value,
+      ),
+    );
+    // null = 关闭面板（未选择）
+    if (selected == null || !mounted) return;
+    final nav = Navigator.of(this.context);
+    nav.pop();
+    if (selected == _TranscodeChoice.direct) {
+      await PlayerService.instance.setTranscodeDirect();
+    } else {
+      await PlayerService.instance.setTranscodeFormat(selected as TranscodeFormat);
+    }
   }
 
   @override
@@ -313,13 +337,24 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                 leading: const Icon(Icons.info_outline),
                 title: '音频规格',
                 subtitle: song.audioSpec,
-                // 解码器 tag 属于播放控制：仅播放器界面打开时显示，点击可切换。
+                // 转码格式 tag + 解码器 tag 属于播放控制：仅播放器界面打开时显示，
+                // 点击可切换。转码 tag 显示当前转码格式（FLAC/MP3/OPUS）或「直连」。
                 trailing: widget.showPlayerControls
                     ? ValueListenableBuilder<EngineKind>(
                         valueListenable: PlayerService.instance.decoderEngine,
-                        builder: (context, engine, _) => _DecoderTag(
-                          engine: engine,
-                          onTap: () => _showDecoderPicker(context, engine),
+                        builder: (context, engine, _) => Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _TranscodeTag(
+                              songId: song.id,
+                              onTap: () => _showTranscodeFormatPicker(context),
+                            ),
+                            const SizedBox(width: 6),
+                            _DecoderTag(
+                              engine: engine,
+                              onTap: () => _showDecoderPicker(context, engine),
+                            ),
+                          ],
                         ),
                       )
                     : null,
@@ -663,3 +698,149 @@ class _DecoderPickerSheet extends StatelessWidget {
     );
   }
 }
+
+/// 转码格式标签：显示当前歌曲由服务器转码的格式（FLAC/MP3/OPUS）；未转码
+/// 显示「直连」。可点击弹出转码格式选择。
+class _TranscodeTag extends StatelessWidget {
+  final String songId;
+  final VoidCallback? onTap;
+  const _TranscodeTag({required this.songId, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final svc = FeiNiuTranscodeService.instance;
+    final transcoding = svc.isTranscoding(songId);
+    final label = transcoding ? svc.activeTranscodeLabel(songId) ?? '转码' : '直连';
+    final color = transcoding
+        ? const Color(0xFFB08000) // 琥珀：转码中
+        : const Color(0xFF607D8B); // 蓝灰：直连
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: color.withValues(alpha: 0.4)),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: color,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 转码格式四选一选择面板：直连 / FLAC 无损 / MP3 / OPUS。选定后切换当前歌曲
+/// 转码格式（直连 = 本歌强制不转码，返回 null）。
+class _TranscodeFormatPickerSheet extends StatelessWidget {
+  final String songId;
+  final TranscodeFormat current;
+
+  const _TranscodeFormatPickerSheet({
+    required this.songId,
+    required this.current,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final cardColor = theme.scaffoldBackgroundColor;
+    final secondaryTextColor = isDark
+        ? Colors.white70
+        : const Color.fromARGB(255, 100, 100, 100);
+
+    const labels = {
+      TranscodeFormat.flac: ('FLAC 无损', '无损转码，文件较大'),
+      TranscodeFormat.mp3: ('MP3', '有损转码'),
+      TranscodeFormat.opus: ('OPUS', '有损转码（体积小）'),
+    };
+    const color = Color(0xFFB08000);
+    const directColor = Color(0xFF607D8B);
+
+    Widget tile(
+      Object? choice,
+      String title,
+      String subtitle, {
+      required bool selected,
+      required Color accent,
+    }) {
+      return AppListTile(
+        leading: Icon(
+          selected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+          color: selected ? accent : secondaryTextColor,
+        ),
+        title: title,
+        titleColor: selected ? accent : null,
+        subtitle: subtitle,
+        onTap: () => Navigator.of(context).pop(choice),
+      );
+    }
+
+    final isDirect = PlayerService.instance.isTranscodeDirect(songId);
+
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Center(
+              child: Container(
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                width: 32,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.grey[800] : Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                '选择转码格式',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+            ),
+            tile(
+              _TranscodeChoice.direct,
+              '直连',
+              '本曲直接播放原始文件（不转码）',
+              selected: isDirect,
+              accent: directColor,
+            ),
+            for (final fmt in TranscodeFormat.values)
+              tile(
+                fmt,
+                labels[fmt]!.$1,
+                labels[fmt]!.$2,
+                selected: !isDirect && fmt == current,
+                accent: color,
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 转码选择面板的「直连」哨兵（与关闭面板返回 null 区分）。
+enum _TranscodeChoice { direct }

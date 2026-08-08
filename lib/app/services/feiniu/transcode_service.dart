@@ -1,19 +1,26 @@
 import 'package:flutter/foundation.dart';
 
+import '../../state/settings_transcode_state.dart';
 import '../../state/song_state.dart';
 import 'api_client.dart';
 
-/// 服务器转码服务（单例）
+/// 服务器转码服务（单例）。
 ///
-/// 保留的功能：**格式解析**（`resolvedFormatFor` / `resolvedFormatForSync`，
-/// 判断某首歌是否需要 media_kit）与黑名单判定（`isMediaKitFormat`）。
+/// 功能：
+/// - **格式解析**（`resolvedFormatFor` / `resolvedCodecFor` / `resolvedSizeFor`）：
+///   判断某首歌是否需 media_kit、文件大小是否超阈值（大文件转码判定）。
+/// - **转码 HLS**（`transcodeHlsUrlFor`）：对需转码的歌请求服务器转码，返回
+///   m3u8 绝对地址，按 `songId|codec` 缓存（TTL），并跟踪活动会话
+///   （`activeTranscodeIds`）供切歌/停止时 quit 释放。
+/// - **降级**（`markDowngradeToMp3`）：flac 转码 ExoPlayer 解析失败时降级 mp3
+///   重新转码。
 ///
-/// 转码 HLS（`hlsUrlForFlac`）当前已不再被播放器调用——media_kit 直连原始
-/// 流（mpv FFmpeg 原生解码 DSF/APE/WMA…），转码链路保留仅供测试与未来
-/// 回退。
+/// 说明：**转码 HLS 只喂 just_audio**（ExoPlayer）。media_kit 的 mpv FFmpeg
+/// 音频库（`media_kit_libs_audio`）未编入 hls demuxer，播不了 fMP4 HLS。
 ///
 /// 历史流程：DSF/DSD/WMA/APE/DTS/AIFF 等（ExoPlayer 无法解码）统一转成
-/// FLAC HLS（`codec: 'flac'`）交给 media_kit 解码。现已改为直连原始流。
+/// FLAC HLS（`codec: 'flac'`）交给 media_kit 解码。现已改为 media_kit 直连
+/// 原始流，`hlsUrlForFlac` 保留仅供测试。
 class FeiNiuTranscodeService {
   FeiNiuTranscodeService._();
 
@@ -70,10 +77,24 @@ class FeiNiuTranscodeService {
   static const Duration _ttl = Duration(minutes: 30);
 
   FeiNiuApiClient _api = FeiNiuApiClient.instance;
+
+  /// 转码 HLS 地址缓存，key = `songId|codec`（按格式分 key，改格式不串缓存）。
   final Map<String, _CachedHls> _cache = {};
   final Map<String, Future<Map<String, dynamic>?>> _formatInflight = {};
   final Map<String, String> _formats = {};
   final Map<String, String> _codecs = {};
+
+  /// 会话内已解析的文件大小（字节）。
+  final Map<String, int> _sizes = {};
+
+  /// 当前活动转码会话（服务端正在转码的 guid）。
+  final Set<String> _activeIds = {};
+
+  /// 已降级到 mp3 的歌（flac 转码解析失败后，本会话不再尝试 flac）。
+  final Set<String> _downgradedToMp3 = {};
+
+  /// 活动转码会话 id（只读视图，供 PlayerService quit 释放）。
+  Set<String> get activeTranscodeIds => Set.unmodifiable(_activeIds);
 
   /// 该格式是否需要在服务器侧转码。
   bool isTranscodeNeeded(String? format) {
@@ -93,8 +114,8 @@ class FeiNiuTranscodeService {
     final cached = _formats[song.id];
     if (cached != null) return cached;
 
-    // 与 resolvedCodecFor 共享同一次 metadata 请求：拉取时同时提取并缓存
-    // format 与 codec，避免各发一次网络请求。
+    // 与 resolvedCodecFor / resolvedSizeFor 共享同一次 metadata 请求：拉取时
+    // 同时提取并缓存 format / codec / size，避免各发一次网络请求。
     final spec = await _resolveSpec(song);
     if (spec == null) return null;
     final format = _extractFormat(spec)?.trim();
@@ -102,6 +123,7 @@ class FeiNiuTranscodeService {
       _formats[song.id] = format;
     }
     _cacheCodecFromSpec(song.id, spec);
+    _cacheSizeFromSpec(song.id, spec);
     return format;
   }
 
@@ -125,7 +147,135 @@ class FeiNiuTranscodeService {
       _codecs[song.id] = codec;
     }
     _cacheFormatFromSpec(song.id, spec);
+    _cacheSizeFromSpec(song.id, spec);
     return codec;
+  }
+
+  /// 获取某首歌的**文件大小**（字节）。优先 `song.fileSize`（列表接口已带则
+  /// 直接用，零网络开销）；为空时先查会话内 size 缓存，未命中再请求
+  /// `/track/metadata` 确认。
+  ///
+  /// 返回 null 表示无法确认大小（「仅大文件」模式下不转码）。
+  Future<int?> resolvedSizeFor(SongEntity song) async {
+    if (song.fileSize != null && song.fileSize! > 0) return song.fileSize;
+    final cached = _sizes[song.id];
+    if (cached != null) return cached;
+    final spec = await _resolveSpec(song);
+    if (spec == null) return null;
+    final size = _extractSize(spec);
+    if (size != null && size > 0) _sizes[song.id] = size;
+    return size;
+  }
+
+  /// 这首歌是否应走服务器转码。
+  ///
+  /// - `开启转码` 关 → 不转（直连）
+  /// - **源格式 == 生效转码格式 → 不转（直连）**：flac 源 + 转码 flac 是纯浪费
+  ///   （无损→无损大小不变，ExoPlayer 直连即播）；mp3/opus 源同理。
+  /// - `全部转码` 开 → 转（免 size，含 DSF/APE/WMA 等无损）
+  /// - `全部转码` 关 → 仅超过阈值转；**未识别大小的文件不转**
+  ///
+  /// CUE 曲目也参与转码（服务器按 guid 返回**裁切好的单曲 HLS**，客户端无需
+  /// 再裁剪）；CUE 整轨文件往往很大，转码后明显更小。
+  Future<bool> shouldTranscode(SongEntity song) async {
+    if (!AppTranscodeSettings.enabled.value) return false;
+    // 源格式与生效转码格式一致（flac→flac / mp3→mp3 / opus→opus）→ 无转码收益，
+    // 直接直连播放。已降级到 mp3 的歌若源本就是 mp3 也跳过。
+    final source = (song.format ?? '').trim().toLowerCase();
+    if (source.isNotEmpty && source == effectiveCodecFor(song.id)) return false;
+    if (AppTranscodeSettings.transcodeAll.value) return true;
+    final size = await resolvedSizeFor(song);
+    if (size == null || size <= 0) return false;
+    return size > AppTranscodeSettings.thresholdMb.value * 1024 * 1024;
+  }
+
+  /// 当前生效的转码 codec：降级到 mp3 的歌恒为 `mp3`，否则取设置格式。
+  String effectiveCodecFor(String songId) {
+    if (_downgradedToMp3.contains(songId)) return 'mp3';
+    return AppTranscodeSettings.format.value.name;
+  }
+
+  bool isDowngradedToMp3(String songId) => _downgradedToMp3.contains(songId);
+
+  /// 标记某歌降级到 mp3（flac 转码 ExoPlayer 解析失败后调用）：清除该歌
+  /// 的 flac 转码缓存，下次请求强制转码成 mp3。
+  void markDowngradeToMp3(String songId) {
+    _downgradedToMp3.add(songId);
+    _removeCacheFor(songId);
+  }
+
+  /// 清除某歌的降级标记（切换转码格式时调用，允许按新格式重新转码）。
+  void clearDowngradeFor(String songId) {
+    _downgradedToMp3.remove(songId);
+  }
+
+  /// 获取某首歌的**转码 HLS** 播放绝对地址（按当前生效 codec）。
+  ///
+  /// - 不应转码（`shouldTranscode` false）→ 返回 null；
+  /// - 转码成功 → 缓存（TTL，按 `songId|codec`）并登记活动会话，返回绝对 URL；
+  /// - 网络异常 / 服务器未返回地址 → **catch 全部异常返回 null**（调用方退直连）。
+  Future<String?> transcodeHlsUrlFor(SongEntity song) async {
+    try {
+      if (!await shouldTranscode(song)) return null;
+      final codec = effectiveCodecFor(song.id);
+      final key = _cacheKey(song.id, codec);
+      final hit = _cache[key];
+      if (hit != null && hit.isValid()) {
+        _activeIds.add(song.id);
+        return hit.url;
+      }
+      // 只有 flac 带 bitrate（320）；mp3/opus 不带——带 bitrate 会劣化音质。
+      final int? bitrate = codec == 'flac' ? 320 : null;
+      final rel = await _api.trackTranscode(
+        song.id,
+        codec: codec,
+        bitrate: bitrate,
+        channel: 2,
+      );
+      if (rel == null) return null;
+      final url = _api.resolveHlsUrl(rel);
+      _cache[key] = _CachedHls(url, DateTime.now().add(_ttl));
+      _activeIds.add(song.id);
+      return url;
+    } catch (_) {
+      // 任何失败（转码请求异常等）→ 返回 null，由调用方退直连，不阻塞播放。
+      return null;
+    }
+  }
+
+  /// 释放服务器端转码会话（切歌/停止/退出时调用）。best-effort，失败忽略。
+  Future<void> quitFor(String songId) => _quitIds([songId]);
+
+  Future<void> quitForIds(Iterable<String> ids) => _quitIds(ids);
+
+  Future<void> quitAll() => _quitIds(_activeIds.toList());
+
+  /// 当前歌是否正在走服务器转码（有活动转码会话）。
+  /// 供歌曲面板显示转码 tag；无活动会话 → 直连。
+  bool isTranscoding(String songId) => _activeIds.contains(songId);
+
+  /// 当前歌的**生效转码格式名**（大写，如 FLAC / MP3 / OPUS）。
+  ///
+  /// 仅当该歌正在转码（[isTranscoding]）时有意义；降级到 mp3 的歌返回 MP3。
+  String? activeTranscodeLabel(String songId) {
+    if (!_activeIds.contains(songId)) return null;
+    final codec = effectiveCodecFor(songId);
+    return codec.toUpperCase();
+  }
+
+  Future<void> _quitIds(Iterable<String> ids) async {
+    final unique = ids.toSet();
+    for (final id in unique) {
+      _activeIds.remove(id);
+      _removeCacheFor(id);
+    }
+    for (final id in unique) {
+      try {
+        await _api.trackTranscodeQuit(id);
+      } catch (_) {
+        // 释放失败忽略（服务端有超时兜底）。
+      }
+    }
   }
 
   /// 拉取一次 metadata。并发调用去重：复用同一个在途 Future。
@@ -160,31 +310,32 @@ class FeiNiuTranscodeService {
     }
   }
 
+  void _cacheSizeFromSpec(String songId, Map<String, dynamic> spec) {
+    final size = _extractSize(spec);
+    if (size != null && size > 0) _sizes[songId] = size;
+  }
+
   /// 获取某首歌的 **FLAC HLS** 播放绝对地址。
   ///
-  /// ⚠️ 当前播放器已不再调用（media_kit 直连原始流），保留仅供测试与未来
-  /// 回退。
+  /// ⚠️ 当前播放器已不再调用（media_kit 直连原始流，转码走 `transcodeHlsUrlFor`），
+  /// 保留仅供测试。
   ///
   /// - 非 media_kit 格式（flac/mp3/aac/…，或 metadata 无法确认）→ 返回 null；
   /// - 转码成功 → 缓存（TTL）并返回绝对 URL；
   /// - 网络异常 / 服务器未返回地址 → 抛异常，由调用方回退直连。
-  ///
-  /// 仅对黑名单格式（DSF/APE/WMA…）请求 FLAC 转码——无损优先、不降级 MP3。
-  /// 普通 FLAC 不转码（just_audio 直连播放）。当 [force] 为 true 时（该歌
-  /// 已由 PlayerService 升级到 media_kit，如 just_audio 解码 FLAC 帧超限），
-  /// 无视格式强制请求 FLAC 转码。
   Future<String?> hlsUrlForFlac(SongEntity song, {bool force = false}) async {
     final format = await resolvedFormatFor(song);
     if (!force && !isMediaKitFormat(format ?? '')) return null;
 
-    final hit = _cache[song.id];
+    final key = _cacheKey(song.id, 'flac');
+    final hit = _cache[key];
     if (hit != null && hit.isValid()) return hit.url;
 
-    final rel = await _api.trackTranscode(song.id, codec: 'flac');
+    final rel = await _api.trackTranscode(song.id, codec: 'flac', bitrate: 320);
     if (rel == null) return null;
 
     final url = _api.resolveHlsUrl(rel);
-    _cache[song.id] = _CachedHls(url, DateTime.now().add(_ttl));
+    _cache[key] = _CachedHls(url, DateTime.now().add(_ttl));
     return url;
   }
 
@@ -198,17 +349,31 @@ class FeiNiuTranscodeService {
 
   /// 读取已缓存的转码 HLS 地址（不发起网络请求）。未缓存/已过期返回 null。
   String? cachedHlsUrlFor(String songId) {
-    final hit = _cache[songId];
-    if (hit != null && hit.isValid()) return hit.url;
+    for (final entry in _cache.entries) {
+      if (entry.key.startsWith('$songId|') && entry.value.isValid()) {
+        return entry.value.url;
+      }
+    }
     return null;
   }
 
-  /// 清除某首歌的转码缓存（播放出错强制刷新时调用）。
+  /// 清除某首歌的转码/解析缓存（播放出错强制刷新时调用）。
+  ///
+  /// 注意：**不**清除降级标记（`_downgradedToMp3`）——降级是本会话的决策，
+  /// 与升级到 media_kit（`_mediaKitEscalateSongIds`）同级、会话内保留。
   void invalidate(String songId) {
-    _cache.remove(songId);
+    _removeCacheFor(songId);
     _formatInflight.remove(songId);
     _formats.remove(songId);
     _codecs.remove(songId);
+    _sizes.remove(songId);
+    _activeIds.remove(songId);
+  }
+
+  String _cacheKey(String songId, String codec) => '$songId|$codec';
+
+  void _removeCacheFor(String songId) {
+    _cache.removeWhere((key, _) => key.startsWith('$songId|'));
   }
 
   /// 从 metadata 响应中提取格式（`data.audioSpec.format` 或
@@ -251,6 +416,32 @@ class FeiNiuTranscodeService {
     return null;
   }
 
+  /// 从 metadata 响应中提取文件大小（字节）：`audioSpec.size` 或
+  /// `track.audioSpec.size`。镜像 [_extractFormat]。
+  int? _extractSize(Map<String, dynamic>? meta) {
+    int? pick(Map<String, dynamic> spec) {
+      final size = spec['size'];
+      if (size is num && size > 0) return size.toInt();
+      return null;
+    }
+
+    if (meta == null) return null;
+    final audioSpec = meta['audioSpec'];
+    if (audioSpec is Map<String, dynamic>) {
+      final size = pick(audioSpec);
+      if (size != null) return size;
+    }
+    final track = meta['track'];
+    if (track is Map<String, dynamic>) {
+      final trackSpec = track['audioSpec'];
+      if (trackSpec is Map<String, dynamic>) {
+        final size = pick(trackSpec);
+        if (size != null) return size;
+      }
+    }
+    return null;
+  }
+
   @visibleForTesting
   void setApiForTest(FeiNiuApiClient api) => _api = api;
 
@@ -260,6 +451,9 @@ class FeiNiuTranscodeService {
     _formatInflight.clear();
     _formats.clear();
     _codecs.clear();
+    _sizes.clear();
+    _activeIds.clear();
+    _downgradedToMp3.clear();
   }
 
   @visibleForTesting
@@ -269,6 +463,9 @@ class FeiNiuTranscodeService {
     _formatInflight.clear();
     _formats.clear();
     _codecs.clear();
+    _sizes.clear();
+    _activeIds.clear();
+    _downgradedToMp3.clear();
   }
 }
 

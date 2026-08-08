@@ -271,17 +271,50 @@ class _FnConnectSettingsPageState extends State<FnConnectSettingsPage> {
                     itemCount: order.length,
                     itemBuilder: (context, index) {
                       final group = order[index];
-                      return AppSettingTile(
-                        key: ValueKey('conn_order_${group.name}'),
-                        title: group.title,
-                        subtitle: group.subtitle,
-                        trailing: ReorderableDragStartListener(
-                          index: index,
-                          child: const Padding(
-                            padding: EdgeInsets.only(left: 8),
-                            child: Icon(Icons.drag_handle_rounded),
-                          ),
-                        ),
+                      return ValueListenableBuilder<Set<ProbeCandidateGroup>>(
+                        valueListenable:
+                            AppFnConnectionSettings.disabledGroups,
+                        builder: (context, disabled, _) {
+                          final isDisabled = disabled.contains(group);
+                          return AppSettingTile(
+                            key: ValueKey('conn_order_${group.name}'),
+                            title: group.title,
+                            subtitle: isDisabled
+                                ? '已禁用，不再探测此分组'
+                                : group.subtitle,
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Switch.adaptive(
+                                  value: !isDisabled,
+                                  onChanged: (value) {
+                                    if (FnConnectionProbeService
+                                        .instance
+                                        .isProbing
+                                        .value) {
+                                      FnConnectionProbeService.instance
+                                          .cancel();
+                                    }
+                                    AppFnConnectionSettings
+                                        .setGroupDisabled(
+                                          group,
+                                          !value,
+                                        );
+                                  },
+                                ),
+                                ReorderableDragStartListener(
+                                  index: index,
+                                  child: const Padding(
+                                    padding: EdgeInsets.only(left: 8),
+                                    child: Icon(
+                                      Icons.drag_handle_rounded,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
                       );
                     },
                   );
@@ -367,12 +400,16 @@ class _FnConnectSettingsPageState extends State<FnConnectSettingsPage> {
                     );
                   }
 
-                  // 按分组排序并分组显示（可达组在前，组间按用户优先级排序）
+                  // 按分组排序并分组显示（可达组在前，组间按用户优先级排序）。
+                  // 已禁用分组整体隐藏（即使探测结果里还有残留条目）。
                   final userOrder =
                       AppFnConnectionSettings.connectionOrder.value;
+                  final disabled =
+                      AppFnConnectionSettings.disabledGroups.value;
                   final grouped =
                       <ProbeCandidateGroup, List<ProbeCandidateResult>>{};
                   for (final r in results) {
+                    if (disabled.contains(r.group)) continue;
                     grouped.putIfAbsent(r.group, () => []).add(r);
                   }
                   final sortedGroups = grouped.entries.toList()

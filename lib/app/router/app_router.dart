@@ -23,6 +23,7 @@ import '../../pages/settings/settings_page.dart';
 import '../../pages/settings/version_info_page.dart';
 import '../../pages/settings/volume_settings_page.dart';
 import '../../pages/settings/launch_settings_page.dart';
+import '../../pages/settings/transcode_settings_page.dart';
 import '../../pages/settings/data_source_page.dart';
 import '../../pages/settings/match_settings_page.dart';
 import '../../pages/settings/metadata_match_settings_page.dart';
@@ -70,6 +71,7 @@ class AppRoutes {
   static const dataSourceSettings = '/settings/data-sources';
   static const matchSettings = '/settings/match';
   static const metadataMatchSettings = '/settings/metadata-match';
+  static const transcodeSettings = '/settings/transcode';
 }
 
 class AppRouter {
@@ -117,6 +119,7 @@ class AppRouter {
     AppRoutes.dataSourceSettings: (_) => const DataSourcePage(),
     AppRoutes.matchSettings: (_) => const MatchSettingsPage(),
     AppRoutes.metadataMatchSettings: (_) => const MetadataMatchSettingsPage(),
+    AppRoutes.transcodeSettings: (_) => const TranscodeSettingsPage(),
   };
 }
 

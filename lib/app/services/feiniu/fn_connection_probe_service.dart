@@ -104,6 +104,25 @@ class FnConnectionProbeService {
   /// 是否正在探测中
   final ValueNotifier<bool> isProbing = ValueNotifier(false);
 
+  /// 过滤掉已禁用分组的连接优先级顺序。
+  ///
+  /// 所有探测路径（probeSmart / 缓存升级 / 全量分层 / probeAllCandidates）都经
+  /// [buildProbeCandidateSpecs] 构造候选，这里统一过滤，保证「禁用的分组不再
+  /// 探测」在所有入口生效（启动 / 登录 / 自动重连 / 设置页手动探测）。
+  ///
+  /// [order] 为空时读 [AppFnConnectionSettings.connectionOrder]。保留顺序与去重。
+  static List<ProbeCandidateGroup> effectiveOrder(
+    List<ProbeCandidateGroup>? order,
+  ) {
+    final base = order ?? AppFnConnectionSettings.connectionOrder.value;
+    final disabled = AppFnConnectionSettings.disabledGroups.value;
+    if (disabled.isEmpty) return List.of(base);
+    return [
+      for (final g in base)
+        if (!disabled.contains(g)) g,
+    ];
+  }
+
   /// 独立 Dio 实例，不与主 API 客户端共享配置
   final Dio _probeDio = Dio(
     BaseOptions(
@@ -214,7 +233,9 @@ class FnConnectionProbeService {
     bool cachedIsRelay = false,
     List<ProbeCandidateGroup>? order,
   }) async {
-    final effOrder = order ?? AppFnConnectionSettings.connectionOrder.value;
+    final effOrder = effectiveOrder(
+      order ?? AppFnConnectionSettings.connectionOrder.value,
+    );
 
     isProbing.value = true;
     _cancelToken = CancelToken();
@@ -496,7 +517,9 @@ class FnConnectionProbeService {
       final candidates = buildProbeCandidateSpecs(
         fnId: fnId,
         params: params,
-        order: order ?? AppFnConnectionSettings.connectionOrder.value,
+        order: effectiveOrder(
+          order ?? AppFnConnectionSettings.connectionOrder.value,
+        ),
       );
 
       // 并行探测所有候选（默认所有候选中继模式共 4 条以上，并行可加速）
@@ -629,7 +652,7 @@ class FnConnectionProbeService {
     final candidates = buildProbeCandidateSpecs(
       fnId: fnId,
       params: params,
-      order: order,
+      order: effectiveOrder(order),
     );
 
     final ProbeBestReachableResult probeResult =

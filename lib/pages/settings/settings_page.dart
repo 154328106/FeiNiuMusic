@@ -166,6 +166,15 @@ class _SettingsPageState extends State<SettingsPage> {
                     onTap: () =>
                         Navigator.pushNamed(context, AppRoutes.cacheSettings),
                   ),
+                  AppSettingTile(
+                    title: '转码设置',
+                    subtitle: '大文件/无损文件服务器转码播放',
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => Navigator.pushNamed(
+                      context,
+                      AppRoutes.transcodeSettings,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 16),
