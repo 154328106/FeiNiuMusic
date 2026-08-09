@@ -140,7 +140,13 @@ class _ArtistAlbumEditPageState extends State<ArtistAlbumEditPage> {
 
     setState(() => _searching = true);
     try {
-      final covers = await SongMatchService.instance.searchCovers(keyword);
+      // 歌手 → search_type=1，专辑 → search_type=2（QQ 音乐数据源支持）
+      final searchType = switch (widget.kind) {
+        EntityEditKind.artist => 1,
+        EntityEditKind.album => 2,
+      };
+      final covers = await SongMatchService.instance
+          .searchCovers(keyword, searchType: searchType);
       if (!mounted) return;
       if (covers.isEmpty) {
         AppToast.show(context, '未搜索到封面，请检查数据源插件', type: ToastType.error);

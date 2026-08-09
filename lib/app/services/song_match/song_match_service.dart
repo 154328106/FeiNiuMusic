@@ -113,12 +113,21 @@ class SongMatchService {
   }
 
   /// 搜索封面候选（聚合所有插件的 searchCovers）。
+  ///
+  /// [searchType] 规范取值：0=歌曲，1=歌手，2=专辑（QQ/网易云插件内部
+  /// 会转换为各自平台的搜索类型；其余插件忽略该参数）。
   Future<List<SongMatchResult>> searchCovers(
     String keyword, {
     int page = 1,
     int pageSize = 10,
+    int searchType = 0,
   }) {
-    return _pluginService.searchCovers(keyword, page: page, pageSize: pageSize);
+    return _pluginService.searchCovers(
+      keyword,
+      page: page,
+      pageSize: pageSize,
+      searchType: searchType,
+    );
   }
 
   /// 构造搜索关键词。

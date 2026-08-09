@@ -101,10 +101,14 @@ class PluginService {
   }
 
   /// 搜索封面（聚合所有已启用且含 searchCovers 能力的插件）。
+  ///
+  /// [searchType] 透传给插件（QQ 音乐：0=歌曲 1=歌手 2=专辑，默认 0），
+  /// 用于按实体类型搜索封面；不支持的插件忽略该参数。
   Future<List<SongMatchResult>> searchCovers(
     String keyword, {
     int page = 1,
     int pageSize = 5,
+    int searchType = 0,
   }) async {
     final plugins = await PluginStore.instance.getPlugins();
     final candidates = plugins
@@ -119,6 +123,7 @@ class PluginService {
           'keyword': keyword,
           'page': page,
           'pageSize': pageSize,
+          'search_type': searchType,
           'config': plugin.config,
         });
         return parseSongResults(
