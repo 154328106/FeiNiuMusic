@@ -78,12 +78,12 @@ class _TranscodeSettingsPageState extends State<TranscodeSettingsPage> {
                                         .toDouble(),
                                     max: AppTranscodeSettings.maxThresholdMb
                                         .toDouble(),
-                                    // 每格 20MB：刻度清晰（与缓存上限滑块一致的有刻度观感）
+                                    // 每格 5MB
                                     divisions: (AppTranscodeSettings
                                                 .maxThresholdMb -
                                             AppTranscodeSettings
                                                 .minThresholdMb) ~/
-                                        20,
+                                        5,
                                     valueText: '$thresholdMb MB',
                                     onChanged: (value) {
                                       AppTranscodeSettings.setThresholdMb(
@@ -128,7 +128,7 @@ class _TranscodeSettingsPageState extends State<TranscodeSettingsPage> {
 
   Widget _buildFormatTile(BuildContext context, TranscodeFormat format) {
     const labels = {
-      TranscodeFormat.flac: 'FLAC 无损',
+      TranscodeFormat.flac: 'FLAC',
       TranscodeFormat.mp3: 'MP3',
       TranscodeFormat.opus: 'OPUS',
     };

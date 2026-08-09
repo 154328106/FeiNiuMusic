@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../app/services/companion/companion_error.dart';
 import '../../app/services/companion/metadata_companion_service.dart';
 import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/plugin/plugin_result_parser.dart';
@@ -18,8 +19,8 @@ import '../songs/song_edit_page.dart';
 
 /// 歌手/专辑编辑页：修改名称 + 封面图（本地上传或联网搜索）。
 ///
-/// 写入走 FnMusicLyricsEditor 配套服务（`/cover` 写封面、`/entity` 改名），
-/// 仅非中继直连 + 已启用配套编辑服务（[LyricCompanionSettings.enabled]）时可用。
+/// 写入走 FnMusicEnhance 服务端增强（`/cover` 写封面、`/entity` 改名），
+/// 仅非中继直连 + 已启用服务端增强（[LyricCompanionSettings.enabled]）时可用。
 /// 保存成功返回新名称（null = 未修改名称）。
 class ArtistAlbumEditPage extends StatefulWidget {
   final EntityEditKind kind;
@@ -203,9 +204,9 @@ class _ArtistAlbumEditPageState extends State<ArtistAlbumEditPage> {
     if (_saving) return;
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
-    // 配套服务可用性门槛：未启用配套编辑服务（未配置密钥）时禁用
+    // 服务端增强可用性门槛：未启用时禁用
     if (!LyricCompanionSettings.enabled.value) {
-      AppToast.show(context, '请先在设置 → 元数据匹配启用配套编辑服务', type: ToastType.error);
+      AppToast.show(context, '请先在设置 → 元数据匹配启用服务端增强', type: ToastType.error);
       return;
     }
     if (!_companion.available) {
@@ -242,7 +243,11 @@ class _ArtistAlbumEditPageState extends State<ArtistAlbumEditPage> {
     } catch (e) {
       debugPrint('[ArtistAlbumEditPage] save error: $e');
       if (mounted) {
-        AppToast.show(context, '保存失败：$e', type: ToastType.error);
+        AppToast.show(
+          context,
+          '保存失败：${friendlyCompanionError(e)}',
+          type: ToastType.error,
+        );
       }
     } finally {
       if (mounted) setState(() => _saving = false);

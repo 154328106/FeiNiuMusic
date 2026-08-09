@@ -41,7 +41,7 @@ class _DlnaSettingsPageState extends State<DlnaSettingsPage> {
                 builder: (context, enabled, _) {
                   return AppSettingTile(
                     title: '启用 DLNA 投屏',
-                    subtitle: '将音乐推送到局域网内的 DLNA 设备（电视/音响）',
+                    subtitle: '将音乐推送到局域网内的 DLNA 设备',
                     trailing: Switch.adaptive(
                       value: enabled,
                       onChanged: (value) {

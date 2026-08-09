@@ -766,7 +766,7 @@ class _TranscodeFormatPickerSheet extends StatelessWidget {
         : const Color.fromARGB(255, 100, 100, 100);
 
     const labels = {
-      TranscodeFormat.flac: ('FLAC 无损', '无损转码，文件较大'),
+      TranscodeFormat.flac: ('FLAC', '无损转码，文件较大'),
       TranscodeFormat.mp3: ('MP3', '有损转码'),
       TranscodeFormat.opus: ('OPUS', '有损转码（体积小）'),
     };
