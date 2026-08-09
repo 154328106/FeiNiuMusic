@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../app/router/app_router.dart';
 import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/lyrics/lyric_companion_service.dart';
+import '../../app/state/settings_lyric_auto_search.dart';
 import '../../app/state/settings_lyric_companion.dart';
 import '../../components/index.dart';
 
@@ -36,6 +37,7 @@ class _MetadataMatchSettingsPageState extends State<MetadataMatchSettingsPage> {
   void initState() {
     super.initState();
     LyricCompanionSettings.ensureLoaded();
+    LyricAutoSearchSettings.ensureLoaded();
     _probeCompanion();
   }
 
@@ -102,6 +104,42 @@ class _MetadataMatchSettingsPageState extends State<MetadataMatchSettingsPage> {
                   context,
                   AppRoutes.matchSettings,
                 ),
+              ),
+              const Divider(height: 1),
+              ValueListenableBuilder<bool>(
+                valueListenable: LyricAutoSearchSettings.enabled,
+                builder: (context, enabled, _) {
+                  return Column(
+                    children: [
+                      AppSettingSwitchTile(
+                        title: '播放无歌词音乐时自动搜索',
+                        subtitle: enabled
+                            ? '播放时自动通过数据源插件搜索并应用歌词'
+                            : '播放时遇到无歌词歌曲自动搜索歌词',
+                        value: enabled,
+                        onChanged: (value) =>
+                            LyricAutoSearchSettings.setEnabled(value),
+                      ),
+                      if (enabled) ...[
+                        const Divider(height: 1),
+                        ValueListenableBuilder<bool>(
+                          valueListenable: LyricAutoSearchSettings.writeBack,
+                          builder: (context, writeBack, _) {
+                            return AppSettingSwitchTile(
+                              title: '搜索到后自动回写到 NAS',
+                              subtitle: writeBack
+                                  ? '命中歌词同步写入服务端增强，其他设备可用'
+                                  : '仅本地使用，不回写到 NAS',
+                              value: writeBack,
+                              onChanged: (value) =>
+                                  LyricAutoSearchSettings.setWriteBack(value),
+                            );
+                          },
+                        ),
+                      ],
+                    ],
+                  );
+                },
               ),
             ],
           ),
