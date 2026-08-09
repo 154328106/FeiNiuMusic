@@ -1,7 +1,11 @@
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../app/router/app_page_route.dart';
+import '../../app/router/app_router.dart';
 import '../../app/services/db/dao/song_dao.dart';
+import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/player_service.dart';
 import '../../app/services/stats_service.dart';
 import '../../app/state/song_state.dart';
@@ -67,6 +71,10 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
     }
     final activeDays = thisMonth.where((s) => s.listenMs > 0).length;
 
+    // 歌手名 → 真实歌手头像 coverId（来自服务器 /artist/list-all）。
+    // 歌手头像不能用歌曲封面（那是专辑图），必须用歌手自己的头像。
+    final artistCovers = await _fetchArtistCovers();
+
     // Pull a wider set of top songs to aggregate artists/albums from.
     final topStats = await _statsService.fetchTopSongs(limit: 60);
     final songs = await _songDao.fetchByIds(
@@ -86,8 +94,11 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
       final album = albumName.isEmpty ? '未知专辑' : albumName;
       (albumAcc[album] ??= _AggAccum(album, song)).add(stat);
     }
-    List<_AggRow> rank(Map<String, _AggAccum> acc) {
-      final list = acc.values.map((e) => e.toRow()).toList()
+    List<_AggRow> rank(
+      Map<String, _AggAccum> acc, {
+      Map<String, String>? covers,
+    }) {
+      final list = acc.values.map((e) => e.toRow(coverId: covers?[e.name])).toList()
         ..sort((a, b) {
           final c = b.playCount.compareTo(a.playCount);
           return c != 0 ? c : b.listenMs.compareTo(a.listenMs);
@@ -103,10 +114,30 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
         ..addAll(dayMap);
       _activeDaysThisMonth = activeDays;
       _topSongs = topSongs.take(20).toList();
-      _topArtists = rank(artistAcc);
+      _topArtists = rank(artistAcc, covers: artistCovers);
       _topAlbums = rank(albumAcc);
       _loading = false;
     });
+  }
+
+  /// 拉取歌手头像映射：歌手名 → coverId。
+  ///
+  /// 通过 [FeiNiuApiClient.getArtistListAll] 拉取服务器歌手列表拿到各歌手
+  /// 真实 coverId。失败返回空映射（歌手头像用歌曲封面兜底）。
+  Future<Map<String, String>> _fetchArtistCovers() async {
+    final result = <String, String>{};
+    try {
+      final artists = await FeiNiuApiClient.instance.getArtistListAll();
+      for (final a in artists) {
+        final cid = a.coverId;
+        if (cid != null && cid.isNotEmpty && a.name.isNotEmpty) {
+          result[a.name] = cid;
+        }
+      }
+    } catch (_) {
+      // 拉取失败不阻塞统计页
+    }
+    return result;
   }
 
   // ---- formatting helpers ----
@@ -194,6 +225,11 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
         child: ListView(
           padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
           children: [
+            // 年度报告入口：仅开发版（debug）显示，正式版隐藏（先发布埋点收集数据）。
+            if (kDebugMode) ...[
+              _buildReportEntry(context),
+              const SizedBox(height: 16),
+            ],
             _buildOverview(context),
             const SizedBox(height: 16),
             _buildTrend(context),
@@ -205,6 +241,64 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
                 child: Center(child: CircularProgressIndicator()),
               ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReportEntry(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: InkWell(
+        onTap: () =>
+            Navigator.pushNamed(context, AppRoutes.listeningReport),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 12, 16),
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Theme.of(context).colorScheme.primary,
+                      Theme.of(context).colorScheme.tertiary,
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(
+                  Icons.auto_awesome_rounded,
+                  color: Theme.of(context).colorScheme.onPrimary,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '听歌报告',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '生成你的年度音乐报告',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded),
+            ],
+          ),
         ),
       ),
     );
@@ -353,12 +447,21 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
         return MediaListTile(
           leading: _RankedArtwork(
             rank: i + 1,
-            child: ArtworkWidget(
-              song: row.sample,
-              size: 44,
-              borderRadius: isAlbum ? 8 : 999,
-              placeholder: _SquarePlaceholder(label: row.name),
-            ),
+            child: isAlbum
+                ? ArtworkWidget(
+                    song: row.sample,
+                    size: 44,
+                    borderRadius: 8,
+                    placeholder: _SquarePlaceholder(label: row.name),
+                  )
+                // 歌手行：优先用服务器返回的真实歌手头像（coverId），
+                // 找不到才回退到歌曲封面（与歌手详情页一致）。
+                : _ArtistCoverTile(
+                    coverId: row.coverId,
+                    size: 44,
+                    fallback: row.sample,
+                    placeholder: _SquarePlaceholder(label: row.name),
+                  ),
           ),
           title: row.name,
           subtitle: '${row.playCount} 次播放',
@@ -728,6 +831,56 @@ class _SquarePlaceholder extends StatelessWidget {
   }
 }
 
+/// 歌手行头像：优先用歌手自身图片（artist JSON 里的 coverId），
+/// 找不到才回退到该歌手参与的第一首歌封面（与歌手详情页同款逻辑）。
+class _ArtistCoverTile extends StatelessWidget {
+  final String? coverId;
+  final double size;
+  final SongEntity fallback;
+  final Widget placeholder;
+
+  const _ArtistCoverTile({
+    required this.coverId,
+    required this.size,
+    required this.fallback,
+    required this.placeholder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = size / 2;
+
+    if (coverId != null && coverId!.isNotEmpty) {
+      final coverUrl = FeiNiuApiClient.instance.coverUrl(
+        coverId!,
+        size: (size * MediaQuery.devicePixelRatioOf(context)).round().clamp(120, 800),
+      );
+      return ClipOval(
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: CachedNetworkImage(
+            imageUrl: coverUrl,
+            httpHeaders: FeiNiuApiClient.imageAuthHeaders(),
+            fit: BoxFit.cover,
+            placeholder: (context, url) => placeholder,
+            errorWidget: (context, url, error) => placeholder,
+          ),
+        ),
+      );
+    }
+
+    return ClipOval(
+      child: ArtworkWidget(
+        song: fallback,
+        size: size,
+        borderRadius: radius,
+        placeholder: placeholder,
+      ),
+    );
+  }
+}
+
 class _EmptyHint extends StatelessWidget {
   final String text;
 
@@ -757,11 +910,15 @@ class _AggRow {
   final int listenMs;
   final SongEntity sample;
 
+  /// 真实歌手头像 coverId（来自服务器 /artist/list-all）。
+  final String? coverId;
+
   const _AggRow({
     required this.name,
     required this.playCount,
     required this.listenMs,
     required this.sample,
+    this.coverId,
   });
 }
 
@@ -778,10 +935,11 @@ class _AggAccum {
     listenMs += stat.listenMs;
   }
 
-  _AggRow toRow() => _AggRow(
+  _AggRow toRow({String? coverId}) => _AggRow(
     name: name,
     playCount: playCount,
     listenMs: listenMs,
     sample: sample,
+    coverId: coverId,
   );
 }

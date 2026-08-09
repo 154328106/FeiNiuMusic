@@ -19,6 +19,8 @@ import '../../pages/settings/player_appearance_settings_page.dart';
 import '../../pages/settings/cache_settings_page.dart';
 import '../../pages/settings/fn_connect_settings_page.dart';
 import '../../pages/settings/listening_stats_page.dart';
+import '../../pages/settings/backup_restore_page.dart';
+import '../../pages/report/listening_report_page.dart';
 import '../../pages/settings/settings_page.dart';
 import '../../pages/settings/version_info_page.dart';
 import '../../pages/settings/volume_settings_page.dart';
@@ -56,6 +58,8 @@ class AppRoutes {
   static const playerAppearanceSettings = '/settings/player-appearance';
   static const cacheSettings = '/settings/cache';
   static const listeningStats = '/settings/listening-stats';
+  static const listeningReport = '/settings/listening-report';
+  static const backupRestore = '/settings/backup-restore';
   static const versionInfo = '/settings/version-info';
   static const volumeScheduleSettings = '/settings/volume-schedule';
   static const fnConnectSettings = '/settings/fn-connect';
@@ -100,6 +104,8 @@ class AppRouter {
         const PlayerAppearanceSettingsPage(),
     AppRoutes.cacheSettings: (_) => const CacheSettingsPage(),
     AppRoutes.listeningStats: (_) => const ListeningStatsPage(),
+    AppRoutes.listeningReport: (_) => const ListeningReportPage(),
+    AppRoutes.backupRestore: (_) => const BackupRestorePage(),
     AppRoutes.versionInfo: (_) => const VersionInfoPage(),
     AppRoutes.volumeScheduleSettings: (_) => const VolumeSettingsPage(),
     AppRoutes.fnConnectSettings: (_) => const FnConnectSettingsPage(),

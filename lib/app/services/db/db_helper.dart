@@ -171,6 +171,31 @@ CREATE TABLE IF NOT EXISTS ${DbConstants.tableApiCache} (
   ttl_ms INTEGER NOT NULL
 )
 ''');
+        // 版本 16：听歌报告原始事件（从独立库 feiniu_report.db 迁回主库，
+        // 让听歌统计数据统一在一个库里，便于备份/还原）。
+        await db.execute('''
+CREATE TABLE IF NOT EXISTS ${DbConstants.tableReportEvents} (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  dayKey TEXT NOT NULL,
+  hour INTEGER NOT NULL,
+  songId TEXT NOT NULL,
+  songTitle TEXT NOT NULL,
+  artistsJson TEXT,
+  albumJson TEXT,
+  coverId TEXT,
+  durationMs INTEGER,
+  playMs INTEGER NOT NULL,
+  completed INTEGER NOT NULL,
+  sessionStartMs INTEGER NOT NULL,
+  sessionEndMs INTEGER NOT NULL
+)
+''');
+        await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_report_events_day ON ${DbConstants.tableReportEvents}(dayKey)',
+        );
+        await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_report_events_song ON ${DbConstants.tableReportEvents}(songId)',
+        );
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -326,6 +351,34 @@ CREATE TABLE IF NOT EXISTS ${DbConstants.tableApiCache} (
           // 引入 audioSpec.codec 路由（EAC3/ALAC 无声兜底）时，SongEntity.toMap()
           // 新增 codec 列写入；旧库缺列会使 upsertSongs / stats 事务回滚。
           await _addSongColumnIfMissing(db, 'codec', 'TEXT');
+        }
+        if (oldVersion < 16) {
+          // 听歌报告原始事件迁回主库（此前独立在 feiniu_report.db，见
+          // report_db_helper.dart，此版本起删除该独立库）。老安装的独立库
+          // 数据不自动搬运——报告功能尚未发布，无历史数据包袱。
+          await db.execute('''
+CREATE TABLE IF NOT EXISTS ${DbConstants.tableReportEvents} (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  dayKey TEXT NOT NULL,
+  hour INTEGER NOT NULL,
+  songId TEXT NOT NULL,
+  songTitle TEXT NOT NULL,
+  artistsJson TEXT,
+  albumJson TEXT,
+  coverId TEXT,
+  durationMs INTEGER,
+  playMs INTEGER NOT NULL,
+  completed INTEGER NOT NULL,
+  sessionStartMs INTEGER NOT NULL,
+  sessionEndMs INTEGER NOT NULL
+)
+''');
+          await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_report_events_day ON ${DbConstants.tableReportEvents}(dayKey)',
+          );
+          await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_report_events_song ON ${DbConstants.tableReportEvents}(songId)',
+          );
         }
       },
     );

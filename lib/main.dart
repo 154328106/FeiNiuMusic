@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app/app.dart';
 import 'app/services/audio/stream_cache_service.dart';
+import 'app/services/backup/backup_service.dart';
 import 'app/services/debug_log_service.dart';
 import 'app/services/fn_auto_reconnect_service.dart';
 import 'app/services/island_lyric_service.dart';
@@ -111,6 +112,9 @@ Future<void> main() async {
   // 迁移歌曲缓存到系统标准缓存目录后，启动时顺手清理旧版 app-support 目录中的
   // 缓存（仅首次运行执行一次，见 StreamCacheService.cleanupLegacyDirOnce）。
   unawaited(StreamCacheService.instance.cleanupLegacyDirOnce());
+  // 自动备份：每天首次打开 App 时静默备份到已配置的 WebDAV 目标。
+  // fire-and-forget，失败不阻塞启动。
+  unawaited(BackupService.instance.maybeAutoBackupOnLaunch());
   runApp(const FeiNiuMusicApp());
   // Fire-and-forget warm-ups that run in parallel with the first frame so
   // per-page initState calls don't have to pay for these cold starts:

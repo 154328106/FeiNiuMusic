@@ -25,6 +25,7 @@ import 'player/media_kit_engine.dart';
 import 'player/playback_router.dart';
 import 'player/player_engine.dart';
 import 'stats_service.dart';
+import 'listening_recorder_service.dart';
 import 'volume_schedule_service.dart';
 import '../state/settings_state.dart';
 import '../state/song_state.dart';
@@ -114,6 +115,7 @@ class PlayerService with WidgetsBindingObserver {
 
   final SongDao _songDao = SongDao.instance;
   final StatsService _statsService = StatsService.instance;
+  final ListeningRecorderService _recorder = ListeningRecorderService.instance;
   AudioSession? _audioSession;
   Timer? _statsFlushTimer;
 
@@ -272,6 +274,7 @@ class PlayerService with WidgetsBindingObserver {
       _syncPositionFromPlayer();
       _persistPlaybackStateNow();
       _statsService.flush();
+      _recorder.onLifecyclePause();
       if (isPlaying.value) {
         _startBackgroundAudioKeepAlive();
       }
@@ -282,6 +285,7 @@ class PlayerService with WidgetsBindingObserver {
       _syncPositionFromPlayer();
       _persistPlaybackStateNow();
       _statsService.flush();
+      _recorder.onLifecyclePause();
     }
   }
 
@@ -546,6 +550,7 @@ class PlayerService with WidgetsBindingObserver {
   Future<void> _handleEngineCompleted(PlayerEngine engine) async {
     if (!identical(engine, _activeEngine)) return;
     if (playbackMode.value == PlaybackMode.single) return; // 引擎自行重复
+    _recorder.markCompleted(); // 完整播完：报告埋点标记 completed=1
     // 当前歌播完：若它是转码 HLS，后台把全部分片拼接下载成完整文件，
     // 第二次重播命中本地零流量。fire-and-forget，不阻塞切歌。
     final activeHls = _activeTranscodeHlsUrl;
@@ -2694,6 +2699,7 @@ class PlayerService with WidgetsBindingObserver {
     );
     snapshot.value = nextSnapshot;
     _statsService.onSnapshot(nextSnapshot);
+    _recorder.onSnapshot(nextSnapshot);
     _schedulePersistPlaybackState();
     // 定期刷写统计到数据库（每 15s），确保 app 被杀时数据不丢
     _statsFlushTimer?.cancel();
