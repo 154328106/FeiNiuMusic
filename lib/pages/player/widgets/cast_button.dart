@@ -16,7 +16,7 @@ import '../../../components/feedback/app_toast.dart';
 /// 播放页右上角 DLNA 投屏按钮。
 ///
 /// - 未投屏：`Icons.cast`，点开设备列表底部面板；
-/// - 投屏中：`Icons.cast_connected`（高亮），点开面板可切换设备或断开。
+/// - 投屏中：`Icons.cast_connected`（主色高亮），点开面板可切换设备或断开。
 /// 仅 Android 平台显示（media_cast_dlna 不支持 iOS）。
 class CastButton extends StatelessWidget {
   final Signal<SongEntity?> songSignal;
@@ -149,9 +149,11 @@ class _CastDeviceSheetState extends State<_CastDeviceSheet> {
 
     return SafeArea(
       child: Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        decoration: BoxDecoration(
+          // 用主题的 surfaceContainerHigh（M3 底部面板标准表面色），
+          // 深色模式下自动适配，不硬编码白色。
+          color: scheme.surfaceContainerHigh,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         ),
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
         constraints: BoxConstraints(

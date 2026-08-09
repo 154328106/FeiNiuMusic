@@ -103,10 +103,11 @@ class _PlayerControlsSettingsPageState
                     value: limit.toDouble(),
                     min: AppPlaybackQueueSettings.minQueueLimit.toDouble(),
                     max: AppPlaybackQueueSettings.maxQueueLimit.toDouble(),
+                    // 每格 50 首：刻度清晰（与缓存上限滑块一致的有刻度观感）
                     divisions:
                         (AppPlaybackQueueSettings.maxQueueLimit -
                             AppPlaybackQueueSettings.minQueueLimit) ~/
-                        10,
+                        50,
                     valueText: '$limit 首',
                     onChanged: (value) {
                       AppPlaybackQueueSettings.setMaxQueueLength(value.round());

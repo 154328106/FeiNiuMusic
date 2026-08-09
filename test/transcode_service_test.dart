@@ -461,6 +461,21 @@ void main() {
       expect(await FeiNiuTranscodeService.instance.shouldTranscode(song), isTrue);
     });
 
+    test('configuredTranscodeLabel：配置转码显示格式；直连情况显示 null', () async {
+      await AppTranscodeSettings.setEnabled(true);
+      await AppTranscodeSettings.setTranscodeAll(true);
+      await AppTranscodeSettings.setFormat(TranscodeFormat.mp3);
+      final svc = FeiNiuTranscodeService.instance;
+      // dsf 源 + mp3 转码 → MP3
+      expect(svc.configuredTranscodeLabel(_song('id-l1', format: 'dsf')), 'MP3');
+      // 源格式 == 转码格式（flac 源 + mp3 转码，不相等 → MP3；flac+flac → null）
+      await AppTranscodeSettings.setFormat(TranscodeFormat.flac);
+      expect(svc.configuredTranscodeLabel(_song('id-l2', format: 'flac')), isNull);
+      // 未开启转码 → null
+      await AppTranscodeSettings.setEnabled(false);
+      expect(svc.configuredTranscodeLabel(_song('id-l3', format: 'dsf')), isNull);
+    });
+
     test('源格式 == 转码格式 → 不转码（flac 源 + flac 转码是纯浪费）', () async {
       await AppTranscodeSettings.setEnabled(true);
       await AppTranscodeSettings.setTranscodeAll(true);

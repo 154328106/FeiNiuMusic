@@ -11,9 +11,9 @@ void main() {
     DlnaCastSettings.resetForTest();
   });
 
-  test('默认启用投屏', () async {
+  test('默认关闭投屏', () async {
     await DlnaCastSettings.ensureLoaded();
-    expect(DlnaCastSettings.enabled.value, isTrue);
+    expect(DlnaCastSettings.enabled.value, isFalse);
   });
 
   test('setEnabled 持久化并更新状态', () async {

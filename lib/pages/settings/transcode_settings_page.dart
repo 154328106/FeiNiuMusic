@@ -41,49 +41,82 @@ class _TranscodeSettingsPageState extends State<TranscodeSettingsPage> {
               ValueListenableBuilder<bool>(
                 valueListenable: AppTranscodeSettings.enabled,
                 builder: (context, enabled, _) {
-                  return AppSettingSwitchTile(
-                    title: '开启转码',
-                    subtitle: '关闭时全部直接播放（不转码）；开启后大文件/无损文件先经服务器转码再播放',
-                    value: enabled,
-                    onChanged: AppTranscodeSettings.setEnabled,
+                  // 联动：关闭「开启转码」→ 下方全部隐藏（全部转码/大小/格式）；
+                  // 开启后显示，且「全部转码=开」时隐藏大小滑块（忽略阈值）。
+                  final children = <Widget>[
+                    AppSettingSwitchTile(
+                      title: '开启转码',
+                      subtitle: '关闭时全部直接播放；开启后大文件/无损先经服务器转码',
+                      value: enabled,
+                      onChanged: AppTranscodeSettings.setEnabled,
+                    ),
+                  ];
+                  if (enabled) {
+                    children.add(
+                      ValueListenableBuilder<bool>(
+                        valueListenable: AppTranscodeSettings.transcodeAll,
+                        builder: (context, transcodeAll, _) {
+                          final sub = <Widget>[
+                            AppSettingSwitchTile(
+                              title: '全部转码',
+                              subtitle: '开启 = 所有文件都转码（含无损，忽略大小阈值）；关闭 = 仅大文件转码',
+                              value: transcodeAll,
+                              onChanged: AppTranscodeSettings.setTranscodeAll,
+                            ),
+                          ];
+                          if (!transcodeAll) {
+                            sub.add(
+                              ValueListenableBuilder<int>(
+                                valueListenable:
+                                    AppTranscodeSettings.thresholdMb,
+                                builder: (context, thresholdMb, _) {
+                                  return AppSettingSlider(
+                                    title: '转码文件大小',
+                                    description: '超过该大小的文件转码，未识别大小的文件不转码',
+                                    value: thresholdMb.toDouble(),
+                                    min: AppTranscodeSettings.minThresholdMb
+                                        .toDouble(),
+                                    max: AppTranscodeSettings.maxThresholdMb
+                                        .toDouble(),
+                                    // 每格 20MB：刻度清晰（与缓存上限滑块一致的有刻度观感）
+                                    divisions: (AppTranscodeSettings
+                                                .maxThresholdMb -
+                                            AppTranscodeSettings
+                                                .minThresholdMb) ~/
+                                        20,
+                                    valueText: '$thresholdMb MB',
+                                    onChanged: (value) {
+                                      AppTranscodeSettings.setThresholdMb(
+                                        value.round(),
+                                      );
+                                    },
+                                  );
+                                },
+                              ),
+                            );
+                          }
+                          return Column(
+                            key: const ValueKey('transcode_sub_options'),
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: sub,
+                          );
+                        },
+                      ),
+                    );
+                    children.add(
+                      ValueListenableBuilder<TranscodeFormat>(
+                        valueListenable: AppTranscodeSettings.format,
+                        builder: (context, format, _) {
+                          return _buildFormatTile(context, format);
+                        },
+                      ),
+                    );
+                  }
+                  return Column(
+                    key: const ValueKey('transcode_main'),
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: children,
                   );
-                },
-              ),
-              ValueListenableBuilder<bool>(
-                valueListenable: AppTranscodeSettings.transcodeAll,
-                builder: (context, transcodeAll, _) {
-                  return AppSettingSwitchTile(
-                    title: '全部转码',
-                    subtitle: '开启 = 所有文件都转码（含 DSF/APE/WMA 等无损，忽略大小阈值）；关闭 = 仅超过下方阈值的文件转码',
-                    value: transcodeAll,
-                    onChanged: AppTranscodeSettings.setTranscodeAll,
-                  );
-                },
-              ),
-              ValueListenableBuilder<int>(
-                valueListenable: AppTranscodeSettings.thresholdMb,
-                builder: (context, thresholdMb, _) {
-                  return AppSettingSlider(
-                    title: '转码文件大小',
-                    description:
-                        '仅「全部转码」关闭时生效：超过该大小的文件转码；未识别大小的文件不转码',
-                    value: thresholdMb.toDouble(),
-                    min: AppTranscodeSettings.minThresholdMb.toDouble(),
-                    max: AppTranscodeSettings.maxThresholdMb.toDouble(),
-                    divisions: (AppTranscodeSettings.maxThresholdMb -
-                            AppTranscodeSettings.minThresholdMb) ~/
-                        10,
-                    valueText: '$thresholdMb MB',
-                    onChanged: (value) {
-                      AppTranscodeSettings.setThresholdMb(value.round());
-                    },
-                  );
-                },
-              ),
-              ValueListenableBuilder<TranscodeFormat>(
-                valueListenable: AppTranscodeSettings.format,
-                builder: (context, format, _) {
-                  return _buildFormatTile(context, format);
                 },
               ),
             ],

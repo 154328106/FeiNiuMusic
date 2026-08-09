@@ -195,6 +195,28 @@ class FeiNiuTranscodeService {
     return AppTranscodeSettings.format.value.name;
   }
 
+  /// 某首歌**配置上应走**的转码格式名（大写，如 FLAC/MP3/OPUS），供歌曲面板
+  /// tag 显示。同步计算（不查网络/会话）：
+  /// - 未开启转码 / 源格式==转码格式（flac→flac 直连）→ null（直连）；
+  /// - 已降级到 mp3 → MP3；
+  /// - `全部转码` 开 → 生效格式；
+  /// - `全部转码` 关 → 歌曲自带 fileSize 且超阈值 → 生效格式；否则 null
+  ///   （文件大小未知时需异步 resolvedSizeFor 才能判定 → 面板显示直连）。
+  String? configuredTranscodeLabel(SongEntity song) {
+    if (!AppTranscodeSettings.enabled.value) return null;
+    final source = (song.format ?? '').trim().toLowerCase();
+    if (source.isNotEmpty && source == effectiveCodecFor(song.id)) return null;
+    if (AppTranscodeSettings.transcodeAll.value) {
+      return effectiveCodecFor(song.id).toUpperCase();
+    }
+    // 「全部转码」关：有 fileSize 且超阈值 → 转；否则按不转（直连）显示。
+    final size = song.fileSize;
+    if (size == null || size <= 0) return null;
+    final threshold = AppTranscodeSettings.thresholdMb.value * 1024 * 1024;
+    if (size <= threshold) return null;
+    return effectiveCodecFor(song.id).toUpperCase();
+  }
+
   bool isDowngradedToMp3(String songId) => _downgradedToMp3.contains(songId);
 
   /// 标记某歌降级到 mp3（flac 转码 ExoPlayer 解析失败后调用）：清除该歌

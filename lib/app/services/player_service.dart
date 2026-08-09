@@ -141,6 +141,10 @@ class PlayerService with WidgetsBindingObserver {
   /// 该歌是否被用户在转码格式里选了「直连」（会话级强制不转码）。
   bool isTranscodeDirect(String songId) => _forceDirectSongIds.contains(songId);
 
+  /// 该歌转码是否已完全失败（会话内不再尝试转码，回落直连）。
+  bool isTranscodeFailed(String songId) =>
+      _transcodeFailedSongIds.contains(songId);
+
   Signal<Duration> get positionSignal => _state.positionSignal;
   Signal<Duration?> get durationSignal => _state.durationSignal;
   Signal<Duration> get bufferedPositionSignal => _state.bufferedPositionSignal;
@@ -180,10 +184,6 @@ class PlayerService with WidgetsBindingObserver {
   Timer? _snapshotTimer;
   int _prefetchTriggeredIndex = -1;
   bool _recoveringCurrentSource = false;
-
-  /// 投屏断开后需要在本机续播的逻辑歌曲（投屏切歌时本机引擎停在旧歌，
-  /// 断开后据此重载到正确的歌曲再播放）。
-  SongEntity? _castResumeSong;
 
   /// roam 追加请求串行化：>0 表示有请求进行中或待处理
   int _roamAppendQueuedCount = 0;
@@ -259,7 +259,10 @@ class PlayerService with WidgetsBindingObserver {
       _stopBackgroundAudioKeepAlive();
       // 后台期间 Timer 挂起，resume 立即重检定时音量（时间窗可能已跨越）。
       VolumeScheduleService.instance.checkNow();
-      if (isPlaying.value) {
+      // 投屏遥控模式：isPlaying 是投屏设备的播放状态，本机引擎并未在播。
+      // 若这里按 isPlaying 恢复本机，会把「电视在播」误当成「手机在播」，
+      // 后台切回时手机突然出声（和电视同时播）。投屏期间一律不恢复本机。
+      if (isPlaying.value && !isCasting.value) {
         unawaited(_ensureAudiblePlayback());
       }
       return;
@@ -343,8 +346,6 @@ class PlayerService with WidgetsBindingObserver {
     cast.onCastStart = () {
       _debugLog('cast start -> pause local engine');
       isCasting.value = true;
-      // 记录投屏起始歌曲：投屏切歌后本机引擎停在旧歌，断开时据此重载续播。
-      _castResumeSong = currentSong.value;
       unawaited(_pausePlayback());
     };
     cast.onCastProgress = (position, playing) {
@@ -352,27 +353,34 @@ class PlayerService with WidgetsBindingObserver {
       this.position.value = position;
       isPlaying.value = playing;
       _emitSnapshot(force: true);
+      // 随机/漫游模式：投屏播放接近末尾时**提前预填**队列（对齐非投屏路径
+      // _maybePrefetchByRemaining 的提前量），避免播完后才发请求导致间隙。
+      _maybePrefetchCastQueue();
+    };
+    cast.onCastCompleted = () {
+      // 投屏设备播完当前歌曲：推进逻辑队列（含随机/漫游自动填充），
+      // 把下一首推送到投屏设备。
+      unawaited(_advanceCastToNext());
     };
     cast.onCastDisconnect = () {
       _debugLog('cast disconnect -> resume local playback');
       isCasting.value = false;
-      final resume = _castResumeSong;
-      _castResumeSong = null;
-      // 无歌曲则不动。投屏期间切过歌时，本机引擎仍停在投屏起始歌曲，
-      // 需先重载到当前逻辑歌曲再续播。
+      // 无歌曲则不动。
       if (currentSong.value == null) return;
       unawaited(() async {
         try {
           final target = currentSong.value;
-          if (resume != null &&
-              target != null &&
-              resume.id != target.id) {
-            await _reloadQueue(
-              queue.value,
-              queue.value.indexWhere((s) => s.id == target.id),
-              play: false,
-            );
-          }
+          // 从投屏设备断点续播：onCastProgress 已把 position.value 同步成
+          // 电视当前播放位置，重载本机引擎时作为 initialPosition 传入，保证
+          // 断开后手机从电视的进度接着播（无论投屏期间是否切过歌）。
+          final resumePosition = position.value;
+          final targetIdx = queue.value.indexWhere((s) => s.id == target!.id);
+          await _reloadQueue(
+            queue.value,
+            targetIdx,
+            play: false,
+            initialPosition: resumePosition,
+          );
           await _startPlayback();
         } catch (e) {
           if (kDebugMode) {
@@ -394,6 +402,9 @@ class PlayerService with WidgetsBindingObserver {
     if (!_wiredEngines.add(engine)) return;
     engine.positionStream.listen((value) {
       if (!identical(engine, _activeEngine)) return;
+      // 投屏遥控模式：位置由投屏设备轮询驱动，忽略本机引擎的位置事件
+      // （投屏续播/预填会重载引擎队列，可能广播 position=0 把进度条打回起点）。
+      if (isCasting.value) return;
       if (_isSeeking) {
         // End the seek freeze early once the player reports a position near the
         // requested target, instead of blanking the progress bar for a fixed
@@ -415,6 +426,8 @@ class PlayerService with WidgetsBindingObserver {
     });
     engine.durationStream.listen((value) {
       if (!identical(engine, _activeEngine)) return;
+      // 投屏遥控模式：时长沿用投屏起始歌曲，忽略引擎的时长事件。
+      if (isCasting.value) return;
       duration.value = value;
       final song = currentSong.value;
       final ms = value?.inMilliseconds ?? 0;
@@ -425,11 +438,16 @@ class PlayerService with WidgetsBindingObserver {
     });
     engine.bufferedPositionStream.listen((value) {
       if (!identical(engine, _activeEngine)) return;
+      // 投屏遥控模式：忽略本机引擎的缓冲进度。
+      if (isCasting.value) return;
       bufferedPosition.value = value;
       _emitSnapshot(force: true);
     });
     engine.playbackStateStream.listen((state) {
       if (!identical(engine, _activeEngine)) return;
+      // 投屏遥控模式：播放/暂停状态由投屏设备轮询驱动，忽略本机引擎事件
+      // （引擎暂停/重载会广播 playing=false 覆盖投屏设备的播放状态）。
+      if (isCasting.value) return;
       final wasPlaying = isPlaying.value;
       isPlaying.value = state.playing;
       // 加载中（loading/buffering）视为加载态，驱动播放按钮转圈
@@ -465,6 +483,10 @@ class PlayerService with WidgetsBindingObserver {
     engine.currentIndexStream.listen((idx) {
       if (!identical(engine, _activeEngine)) return;
       if (idx == null) return;
+      // 投屏遥控模式：本机引擎暂停，其索引全是旧队列的噪音（投屏续播/预填
+      // 会 insertItem/重载引擎队列，触发 currentIndex=0 广播把 UI 打回第一首）。
+      // 投屏期间手机当前歌曲完全由投屏流程驱动，忽略引擎索引事件。
+      if (isCasting.value) return;
       // 恢复期间（_restoringState=true）忽略所有 indexStream 过渡事件：
       // preload=false 的 setAudioSources 在 just_audio 上会走 _IdleAudioPlayer，
       // 它异步广播 sequenceState.currentIndex=0（seed 值）——但当前歌曲已由
@@ -1063,6 +1085,24 @@ class PlayerService with WidgetsBindingObserver {
       'playQueue size=${playable.length} startIndex=$startIndex actualIndex=$actualIndex song=${playable[actualIndex].title}',
     );
     _applyLogicalQueue(playable, actualIndex);
+
+    // 投屏遥控模式：点漫游/新队列 = 更新逻辑队列 + 把起始歌曲推送到投屏设备。
+    // 不加载/不启动本机引擎（本机已暂停），避免手机和电视各播各的。
+    if (isCasting.value) {
+      // 应用目标模式（漫游 shuffle / 默认 loop），让队列续播语义与本机一致。
+      final targetMode = mode ?? PlaybackMode.loop;
+      if (playbackMode.value != targetMode || mode != null) {
+        playbackMode.value = targetMode;
+      }
+      _schedulePersistPlaybackState();
+      _activateSong(actualIndex);
+      _emitSnapshot(force: true);
+      final song = currentSong.value;
+      if (song != null) {
+        await DlnaCastService.instance.loadSong(song);
+      }
+      return;
+    }
 
     // 双引擎架构：计算引擎路由，只加载当前 run 到对应引擎。
     _applyEngineKinds(await _computeEngineKinds(playable));
@@ -1756,13 +1796,9 @@ class PlayerService with WidgetsBindingObserver {
 
   Future<void> next() async {
     if (isCasting.value) {
-      // 投屏遥控模式：先在逻辑队列前进到下一首，再把新歌推送到投屏设备。
-      await _advanceLogicalIndexOnly();
-      final song = currentSong.value;
-      if (song != null) {
-        _castResumeSong = song;
-        await DlnaCastService.instance.loadSong(song);
-      }
+      // 投屏遥控模式：先在逻辑队列前进到下一首（随机/漫游自动填充），
+      // 再把新歌推送到投屏设备。
+      await _advanceCastToNext();
       return;
     }
     _clearRestoreSession();
@@ -1801,22 +1837,76 @@ class PlayerService with WidgetsBindingObserver {
     await _advanceToLogicalIndex(targetIdx);
   }
 
-  /// 仅推进逻辑队列（不启动/改变本机引擎播放）。投屏切歌用：先更新
-  /// 当前歌曲（UI/队列状态），再把新歌推送到投屏设备。
-  Future<void> _advanceLogicalIndexOnly() async {
+  /// 投屏设备播完当前歌曲后的续播：推进逻辑队列（随机/漫游模式自动填充），
+  /// 把下一首推送到投屏设备。
+  Future<void> _advanceCastToNext() async {
+    // 随机/漫游模式：队尾无下一首时先追加，保证队列不枯竭。
     final list = queue.value;
     final idx = currentIndex.value;
     if (list.isEmpty || idx < 0) return;
-    var targetIdx = idx + 1;
-    if (targetIdx >= list.length) {
+    if (playbackMode.value == PlaybackMode.shuffle && idx >= list.length - 1) {
+      // 漫游链：roam-next 追加；本地随机（playShuffle）：queueExtender 追加。
+      if (roamActive) {
+        await _extendRoamQueue();
+      } else {
+        await _autoExtendQueue();
+      }
+    }
+    var targetIdx = currentIndex.value + 1;
+    if (targetIdx >= queue.value.length) {
       if (playbackMode.value == PlaybackMode.loop) {
         targetIdx = 0;
       } else {
-        return; // 无下一首且不循环：停在当前
+        return; // 无可播下一首
       }
     }
     _activateSong(targetIdx);
     _emitSnapshot(force: true);
+    final song = currentSong.value;
+    if (song != null) {
+      await DlnaCastService.instance.loadSong(song);
+    }
+  }
+
+  /// 投屏播放接近末尾时提前预填随机/漫游队列（避免播完后才发请求导致间隙）。
+  ///
+  /// 投屏时本机引擎暂停，currentIndexStream 不会触发预填；这里在位置轮询
+  /// 里当剩余时间 < 30s 且队列快到队尾时，提前追加下一首（与本地播放的
+  /// _maybePrefetchByRemaining 提前量一致）。
+  bool _castPrefetchInFlight = false;
+
+  void _maybePrefetchCastQueue() {
+    if (playbackMode.value != PlaybackMode.shuffle) return;
+    if (_castPrefetchInFlight) return;
+    final list = queue.value;
+    final idx = currentIndex.value;
+    if (list.isEmpty || idx < 0) return;
+    // 剩余 < 30s 或已在最后一首 → 预填
+    final durationSec = duration.value?.inSeconds ?? 0;
+    final positionSec = position.value.inSeconds;
+    final nearEnd =
+        (durationSec > 0 && positionSec >= durationSec - 30) ||
+        idx >= list.length - 1;
+    if (!nearEnd) return;
+    // 队尾已有下一首则无需预填（只要不是最后一首就有 next）
+    if (idx < list.length - 1) return;
+
+    _castPrefetchInFlight = true;
+    unawaited(() async {
+      try {
+        if (roamActive) {
+          await _extendRoamQueue();
+        } else {
+          await _autoExtendQueue();
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('PlayerService cast prefetch failed: $e');
+        }
+      } finally {
+        _castPrefetchInFlight = false;
+      }
+    }());
   }
 
   /// 漫游队列扩展：请求 roam-next 把下一首追加到队尾（每次只追加一首）。
@@ -2016,7 +2106,6 @@ class PlayerService with WidgetsBindingObserver {
       _emitSnapshot(force: true);
       final song = currentSong.value;
       if (song != null) {
-        _castResumeSong = song;
         await DlnaCastService.instance.loadSong(song);
       }
       return;
@@ -2094,6 +2183,18 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   Future<void> skipToIndex(int index) async {
+    if (isCasting.value) {
+      // 投屏遥控模式：点队列歌曲 = 逻辑切歌 + 推送到投屏设备。
+      final list = queue.value;
+      if (index < 0 || index >= list.length) return;
+      _activateSong(index);
+      _emitSnapshot(force: true);
+      final song = currentSong.value;
+      if (song != null) {
+        await DlnaCastService.instance.loadSong(song);
+      }
+      return;
+    }
     _clearRestoreSession();
     final list = queue.value;
     if (index < 0 || index >= list.length) return;
@@ -2869,6 +2970,8 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   Future<void> _resumeAfterAudioInterruption() async {
+    // 投屏遥控模式：本机引擎不在播，音频中断恢复不应让手机出声。
+    if (isCasting.value) return;
     try {
       final active = await _setAudioSessionActive(true);
       if (!active) return;
@@ -2910,6 +3013,8 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   Future<void> _ensureAudiblePlayback() async {
+    // 投屏遥控模式：本机引擎不在播（在投屏设备上），不恢复本机出声。
+    if (isCasting.value) return;
     if (!isPlaying.value || currentSong.value == null) return;
     try {
       await _setAudioSessionActive(true);

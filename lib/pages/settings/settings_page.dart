@@ -144,8 +144,8 @@ class _SettingsPageState extends State<SettingsPage> {
                         Navigator.pushNamed(context, AppRoutes.lyricsSettings),
                   ),
                   AppSettingTile(
-                    title: '元数据匹配',
-                    subtitle: '匹配源维护',
+                    title: '元数据管理',
+                    subtitle: '音乐元数据维护',
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () => Navigator.pushNamed(
                       context,
@@ -176,7 +176,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ),
                   AppSettingTile(
-                    title: '投屏（DLNA）',
+                    title: 'DLNA',
                     subtitle: '将音乐推送到局域网 DLNA 设备',
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () =>

@@ -121,8 +121,7 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (_) => _TranscodeFormatPickerSheet(
-        songId: widget.song.id,
-        current: AppTranscodeSettings.format.value,
+        song: widget.song,
       ),
     );
     // null = 关闭面板（未选择）
@@ -346,7 +345,7 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             _TranscodeTag(
-                              songId: song.id,
+                              song: song,
                               onTap: () => _showTranscodeFormatPicker(context),
                             ),
                             const SizedBox(width: 6),
@@ -699,19 +698,28 @@ class _DecoderPickerSheet extends StatelessWidget {
   }
 }
 
-/// 转码格式标签：显示当前歌曲由服务器转码的格式（FLAC/MP3/OPUS）；未转码
-/// 显示「直连」。可点击弹出转码格式选择。
+/// 转码格式标签：显示当前歌曲**配置上会走**的转码格式（FLAC/MP3/OPUS）；
+/// 配置为直连（未开启转码 / 源格式==转码格式 / 本曲被强制直连 / 转码已失败）
+/// 时显示「直连」。可点击弹出转码格式选择。
 class _TranscodeTag extends StatelessWidget {
-  final String songId;
+  final SongEntity song;
   final VoidCallback? onTap;
-  const _TranscodeTag({required this.songId, this.onTap});
+  const _TranscodeTag({required this.song, this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final svc = FeiNiuTranscodeService.instance;
-    final transcoding = svc.isTranscoding(songId);
-    final label = transcoding ? svc.activeTranscodeLabel(songId) ?? '转码' : '直连';
-    final color = transcoding
+    final player = PlayerService.instance;
+    // 本曲被强制直连 / 转码已失败 → 直连
+    final forcedDirect = player.isTranscodeDirect(song.id);
+    final failed = player.isTranscodeFailed(song.id);
+    // 按配置应转码的格式（同步，不依赖短暂的活动会话）
+    final configured = forcedDirect || failed
+        ? null
+        : svc.configuredTranscodeLabel(song);
+    final isTranscoding = configured != null;
+    final label = configured ?? '直连';
+    final color = isTranscoding
         ? const Color(0xFFB08000) // 琥珀：转码中
         : const Color(0xFF607D8B); // 蓝灰：直连
     return InkWell(
@@ -738,15 +746,15 @@ class _TranscodeTag extends StatelessWidget {
 }
 
 /// 转码格式四选一选择面板：直连 / FLAC 无损 / MP3 / OPUS。选定后切换当前歌曲
-/// 转码格式（直连 = 本歌强制不转码，返回 null）。
+/// 转码格式（直连 = 本歌强制不转码，返回 `_TranscodeChoice.direct`）。
+///
+/// 高亮与转码 tag 同源（`FeiNiuTranscodeService.configuredTranscodeLabel` +
+/// 强制直连/失败标记）：本歌实际直连（未开启 / 源格式==转码格式 / 超阈值判定
+/// 不转 / 被强制直连 / 转码已失败）就高亮「直连」，否则高亮实际生效格式——
+/// **不再高亮全局设置格式**（避免 tag 直连、选择器却选中全局 mp3 的不一致）。
 class _TranscodeFormatPickerSheet extends StatelessWidget {
-  final String songId;
-  final TranscodeFormat current;
-
-  const _TranscodeFormatPickerSheet({
-    required this.songId,
-    required this.current,
-  });
+  final SongEntity song;
+  const _TranscodeFormatPickerSheet({required this.song});
 
   @override
   Widget build(BuildContext context) {
@@ -784,7 +792,22 @@ class _TranscodeFormatPickerSheet extends StatelessWidget {
       );
     }
 
-    final isDirect = PlayerService.instance.isTranscodeDirect(songId);
+    final player = PlayerService.instance;
+    final svc = FeiNiuTranscodeService.instance;
+    final forcedDirect = player.isTranscodeDirect(song.id);
+    final failed = player.isTranscodeFailed(song.id);
+    // 本歌实际生效的转码格式：null = 直连
+    final actualFormat = forcedDirect || failed
+        ? null
+        : svc.configuredTranscodeLabel(song);
+    final isDirect = actualFormat == null;
+    TranscodeFormat? selectedFormat;
+    if (!isDirect) {
+      selectedFormat = TranscodeFormat.values.firstWhere(
+        (f) => f.name.toUpperCase() == actualFormat,
+        orElse: () => TranscodeFormat.flac,
+      );
+    }
 
     return Container(
       width: double.infinity,
@@ -822,7 +845,7 @@ class _TranscodeFormatPickerSheet extends StatelessWidget {
             tile(
               _TranscodeChoice.direct,
               '直连',
-              '本曲直接播放原始文件（不转码）',
+              '本曲直接播放原始文件',
               selected: isDirect,
               accent: directColor,
             ),
@@ -831,7 +854,7 @@ class _TranscodeFormatPickerSheet extends StatelessWidget {
                 fmt,
                 labels[fmt]!.$1,
                 labels[fmt]!.$2,
-                selected: !isDirect && fmt == current,
+                selected: !isDirect && fmt == selectedFormat,
                 accent: color,
               ),
             const SizedBox(height: 8),

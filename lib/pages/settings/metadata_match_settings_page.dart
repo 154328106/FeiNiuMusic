@@ -79,7 +79,7 @@ class _MetadataMatchSettingsPageState extends State<MetadataMatchSettingsPage> {
             children: [
               AppSettingTile(
                 title: '数据源维护',
-                subtitle: 'Lyrico 数据源插件：导入 / 启用 / 配置 / 卸载',
+                subtitle: 'Lyrico 数据源插件管理',
                 leading: const Icon(Icons.extension_outlined),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Navigator.pushNamed(
@@ -169,28 +169,33 @@ class _MetadataMatchSettingsPageState extends State<MetadataMatchSettingsPage> {
       ValueListenableBuilder<bool>(
         valueListenable: LyricCompanionSettings.enabled,
         builder: (context, enabled, _) {
-          return AppSettingSwitchTile(
-            title: '配套编辑服务',
-            subtitle: enabled
-                ? '已开启：可修改歌词、编辑歌手/专辑'
-                : '开启后支持歌词修改与歌手/专辑编辑',
-            value: enabled,
-            onChanged: (value) => _setCompanionEnabled(value),
-          );
-        },
-      ),
-      // 密钥入口：服务可达时始终显示（不依赖开启状态），
-      // 避免开启失败（密钥错误）时无法修改密钥的死锁。
-      ValueListenableBuilder<String>(
-        valueListenable: LyricCompanionSettings.apiKey,
-        builder: (context, apiKey, _) {
-          return AppSettingTile(
-            title: '服务密钥',
-            subtitle: apiKey.isEmpty
-                ? '未设置（X-API-Key）'
-                : '已设置',
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: _inputApiKey,
+          return Column(
+            children: [
+              AppSettingSwitchTile(
+                title: '配套编辑服务',
+                subtitle: enabled
+                    ? '已开启：可修改歌词、编辑歌手/专辑'
+                    : '开启后支持歌词修改与歌手/专辑编辑',
+                value: enabled,
+                onChanged: (value) => _setCompanionEnabled(value),
+              ),
+              // 服务密钥：仅在开启时显示；关闭后隐藏（对齐转码/高斯模糊/定时
+              // 音量设置页的联动隐藏逻辑）。
+              if (enabled)
+                ValueListenableBuilder<String>(
+                  valueListenable: LyricCompanionSettings.apiKey,
+                  builder: (context, apiKey, _) {
+                    return AppSettingTile(
+                      title: '服务密钥',
+                      subtitle: apiKey.isEmpty
+                          ? '未设置（X-API-Key）'
+                          : '已设置',
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: _inputApiKey,
+                    );
+                  },
+                ),
+            ],
           );
         },
       ),

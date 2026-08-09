@@ -162,6 +162,41 @@ seg1.m4s
         await upstream.close(force: true);
       }
     });
+
+    test('封面资源经 /r/<token> 匿名代理', () async {
+      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final upstreamPort = upstream.port;
+      upstream.listen((request) {
+        request.response.headers.contentType = ContentType('image', 'jpeg');
+        request.response.add(utf8.encode('fake-cover-bytes'));
+        request.response.close();
+      });
+
+      try {
+        final resUrl = await MediaStreamProxy.instance.registerResource(
+          'http://127.0.0.1:$upstreamPort/cover.jpg',
+          headers: {'Cookie': 'music-token=xyz'},
+        );
+        expect(resUrl, isNotNull);
+        expect(resUrl, contains('/r/'));
+
+        final client = HttpClient();
+        try {
+          final req = await client.getUrl(Uri.parse(resUrl!));
+          final resp = await req.close();
+          final bytes = await resp.fold<List<int>>(
+            <int>[],
+            (acc, chunk) => acc..addAll(chunk),
+          );
+          expect(resp.statusCode, 200);
+          expect(utf8.decode(bytes), 'fake-cover-bytes');
+        } finally {
+          client.close(force: true);
+        }
+      } finally {
+        await upstream.close(force: true);
+      }
+    });
   });
 
   group('DlnaCastService URL 解析', () {

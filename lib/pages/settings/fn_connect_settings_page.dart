@@ -271,21 +271,23 @@ class _FnConnectSettingsPageState extends State<FnConnectSettingsPage> {
                     itemCount: order.length,
                     itemBuilder: (context, index) {
                       final group = order[index];
-                      return ValueListenableBuilder<Set<ProbeCandidateGroup>>(
-                        valueListenable:
-                            AppFnConnectionSettings.disabledGroups,
-                        builder: (context, disabled, _) {
-                          final isDisabled = disabled.contains(group);
-                          return AppSettingTile(
-                            key: ValueKey('conn_order_${group.name}'),
-                            title: group.title,
-                            subtitle: isDisabled
-                                ? '已禁用，不再探测此分组'
-                                : group.subtitle,
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Switch.adaptive(
+                      // ReorderableListView 要求每个 item 的**顶层 widget 带唯一
+                      // key**（拖动重排/渲染识别依据）。disabledGroups 的
+                      // ValueListenableBuilder 放在 item 内部（只包 Switch），
+                      // 避免把 key 埋进内部导致列表渲染异常。
+                      return AppSettingTile(
+                        key: ValueKey('conn_order_${group.name}'),
+                        title: group.title,
+                        subtitle: group.subtitle,
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ValueListenableBuilder<Set<ProbeCandidateGroup>>(
+                              valueListenable:
+                                  AppFnConnectionSettings.disabledGroups,
+                              builder: (context, disabled, _) {
+                                final isDisabled = disabled.contains(group);
+                                return Switch.adaptive(
                                   value: !isDisabled,
                                   onChanged: (value) {
                                     if (FnConnectionProbeService
@@ -295,26 +297,23 @@ class _FnConnectSettingsPageState extends State<FnConnectSettingsPage> {
                                       FnConnectionProbeService.instance
                                           .cancel();
                                     }
-                                    AppFnConnectionSettings
-                                        .setGroupDisabled(
-                                          group,
-                                          !value,
-                                        );
+                                    AppFnConnectionSettings.setGroupDisabled(
+                                      group,
+                                      !value,
+                                    );
                                   },
-                                ),
-                                ReorderableDragStartListener(
-                                  index: index,
-                                  child: const Padding(
-                                    padding: EdgeInsets.only(left: 8),
-                                    child: Icon(
-                                      Icons.drag_handle_rounded,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                                );
+                              },
                             ),
-                          );
-                        },
+                            ReorderableDragStartListener(
+                              index: index,
+                              child: const Padding(
+                                padding: EdgeInsets.only(left: 8),
+                                child: Icon(Icons.drag_handle_rounded),
+                              ),
+                            ),
+                          ],
+                        ),
                       );
                     },
                   );

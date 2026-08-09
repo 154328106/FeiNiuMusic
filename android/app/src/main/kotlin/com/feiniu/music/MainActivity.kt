@@ -15,6 +15,7 @@ import android.os.Environment
 import android.os.Build
 import android.provider.MediaStore
 import android.provider.Settings
+import android.view.KeyEvent
 import androidx.core.app.NotificationCompat
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -43,12 +44,28 @@ class MainActivity : AudioServiceActivity() {
     private val islandLyricChannelName = "com.feiniu.music/island_lyric"
     private val islandShizukuChannelName = "com.feiniu.music/island_lyric_shizuku"
     private val matchPluginChannelName = "com.feiniu.music/match_plugin"
+    private val castVolumeChannelName = "com.feiniu.music/cast_volume"
     private val notificationId = 10010
     private val notificationChannelId = "meizu_lyric_channel"
     private var flagShowTicker: Int? = null
     private var flagUpdateTicker: Int? = null
     private var lyriconProvider: LyriconProvider? = null
     private var lyriconEnabled = false
+    private var castVolumeChannel: MethodChannel? = null
+    private var castVolumeActive = false
+
+    /**
+     * 投屏时拦截物理音量键，转发到 Flutter 侧遥控投屏设备音量。
+     * 返回 true 表示已消费（不再走系统音量）；false 交回系统默认行为。
+     */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (castVolumeActive && (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
+            val delta = if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) 1 else -1
+            castVolumeChannel?.invokeMethod("volumeDelta", delta)
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -337,6 +354,23 @@ class MainActivity : AudioServiceActivity() {
                     }
                 }
                 else -> result.notImplemented()
+            }
+        }
+
+        // DLNA 投屏音量键透传通道：Flutter 侧设置「投屏激活」标志，原生层在
+        // onKeyDown 拦截物理音量键并回调 volumeDelta（+1 / -1），由 Flutter 遥控
+        // 投屏设备音量。投屏时手机音量条不再调节本机媒体音量。
+        val castChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            castVolumeChannelName
+        )
+        castVolumeChannel = castChannel
+        castChannel.setMethodCallHandler { call, _ ->
+            when (call.method) {
+                "setActive" -> {
+                    castVolumeActive = call.argument<Boolean>("active") ?: false
+                }
+                else -> {}
             }
         }
     }

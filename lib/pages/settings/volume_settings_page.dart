@@ -58,16 +58,22 @@ class _VolumeSettingsPageState extends State<VolumeSettingsPage> {
           ValueListenableBuilder<bool>(
             valueListenable: AppVolumeScheduleSettings.enabled,
             builder: (context, enabled, _) {
-              return AppSettingSwitchTile(
-                title: '定时音量',
-                subtitle: '在指定时间段内自动按设定音量输出',
-                value: enabled,
-                onChanged: AppVolumeScheduleSettings.setEnabled,
+              return Column(
+                children: [
+                  AppSettingSwitchTile(
+                    title: '定时音量',
+                    subtitle: '在指定时间段内自动按设定音量输出',
+                    value: enabled,
+                    onChanged: AppVolumeScheduleSettings.setEnabled,
+                  ),
+                  const SizedBox(height: 16),
+                  // 关闭「定时音量」→ 隐藏下方「时间段」区块（避免显示无效的
+                  // 时间段管理，对齐转码/高斯模糊设置页的联动隐藏逻辑）。
+                  if (enabled) _buildPeriodSection(context) else const SizedBox.shrink(),
+                ],
               );
             },
           ),
-          const SizedBox(height: 16),
-          _buildPeriodSection(context),
         ],
       ),
     );

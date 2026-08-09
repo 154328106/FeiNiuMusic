@@ -264,11 +264,6 @@ class _CacheSettingsPageState extends State<CacheSettingsPage>
                   trailing: const Icon(Icons.data_usage_outlined),
                   onTap: _loading.value ? null : _clearApiCache,
                 ),
-              ],
-            ),
-            AppSettingSection(
-              title: '音频缓存',
-              children: [
                 AppSettingTile(
                   title: '音乐缓存',
                   subtitle: _loading.value
@@ -278,6 +273,11 @@ class _CacheSettingsPageState extends State<CacheSettingsPage>
                   trailing: const Icon(Icons.audiotrack_outlined),
                   onTap: _loading.value ? null : _clearStreamCache,
                 ),
+              ],
+            ),
+            AppSettingSection(
+              title: '缓存设置',
+              children: [
                 ValueListenableBuilder<int>(
                   valueListenable: AppCacheSettings.cacheLimitMb,
                   builder: (_, limitMb, _) => AppSettingSlider(

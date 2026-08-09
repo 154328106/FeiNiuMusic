@@ -31,6 +31,11 @@ class MediaStreamProxy {
   String _upstreamUrl = '';
   Map<String, String> _upstreamHeaders = const {};
 
+  /// 额外资源注册表（封面图等）：token → 上游地址 + 认证头。
+  /// 与主媒体流分离：主媒体流经 `/m/<token>`，资源经 `/r/<resourceToken>`。
+  final Map<String, ({String url, Map<String, String> headers})> _resources =
+      {};
+
   /// 测试专用：强制代理基址使用回环地址（避免测试环境连接到真实 LAN IP）。
   @visibleForTesting
   static bool forceLoopbackBase = false;
@@ -93,6 +98,23 @@ class MediaStreamProxy {
     _upstreamHeaders = const {};
   }
 
+  /// 注册一条额外资源（封面图等），返回渲染器可用的匿名 URL（`/r/<resToken>`）。
+  Future<String?> registerResource(
+    String upstreamUrl, {
+    Map<String, String> headers = const {},
+  }) async {
+    final base = await start();
+    if (base == null || _token == null) return null;
+    final resToken = _generateToken();
+    _resources[resToken] = (url: upstreamUrl, headers: headers);
+    return '$base/r/$resToken';
+  }
+
+  /// 清空全部额外资源（断开投屏时调用）。
+  void unregisterResources() {
+    _resources.clear();
+  }
+
   /// 停止代理服务（幂等）。断开投屏并释放端口。
   Future<void> stop() async {
     final server = _server;
@@ -101,6 +123,7 @@ class MediaStreamProxy {
     _proxyBase = '';
     _upstreamUrl = '';
     _upstreamHeaders = const {};
+    _resources.clear();
     if (server != null) {
       try {
         await server.close(force: true);
@@ -111,6 +134,20 @@ class MediaStreamProxy {
   Future<void> _handle(HttpRequest request) async {
     try {
       final pathSegments = request.uri.pathSegments;
+      // 路由 /r/<resToken>：额外资源（封面图等），按注册的认证头转发。
+      if (pathSegments.isNotEmpty && pathSegments[0] == 'r') {
+        if (pathSegments.length < 2) {
+          _respondNotFound(request);
+          return;
+        }
+        final res = _resources[pathSegments[1]];
+        if (res == null) {
+          _respondNotFound(request);
+          return;
+        }
+        await _forward(request, res.url, res.headers);
+        return;
+      }
       // 路由：/m/<token>[/...]?u=<目标URL>
       if (pathSegments.length < 2 ||
           pathSegments[0] != 'm' ||

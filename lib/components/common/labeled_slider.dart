@@ -14,7 +14,6 @@ class LabeledSlider extends StatelessWidget {
     this.tickCount,
     this.valueText,
     this.description,
-    this.titleWidth = 90,
     this.titleFontSize = 15,
     this.padding,
   });
@@ -30,7 +29,6 @@ class LabeledSlider extends StatelessWidget {
   final String? description;
   final ValueChanged<double> onChanged;
   final ValueChanged<double>? onChangeEnd;
-  final double titleWidth;
   final double titleFontSize;
   final EdgeInsetsGeometry? padding;
 
@@ -61,15 +59,18 @@ class LabeledSlider extends StatelessWidget {
         children: [
           Row(
             children: [
-              SizedBox(
-                width: titleWidth,
+              // 标题占满可用宽度（与设置项左对齐），不固定宽度 → 长标题也不换行、
+              // 不因 titleWidth 与其他选项错位；valueText 靠右。
+              Expanded(
                 child: Text(
                   title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: titleFontSize),
                 ),
               ),
-              const Spacer(),
-              if (displayValue != null)
+              if (displayValue != null) ...[
+                const SizedBox(width: 8),
                 Text(
                   displayValue,
                   style: TextStyle(
@@ -77,6 +78,7 @@ class LabeledSlider extends StatelessWidget {
                     color: colors.onSurfaceVariant,
                   ),
                 ),
+              ],
             ],
           ),
           const SizedBox(height: 6),

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:media_cast_dlna/media_cast_dlna.dart';
 
 import '../../state/settings_cast_state.dart';
@@ -40,6 +41,18 @@ class DlnaCastService {
 
   final MediaCastDlnaApi _api = MediaCastDlnaApi();
 
+  /// Android 原生音量键透传通道：投屏时原生层拦截物理音量键，回调
+  /// `volumeDelta(+1/-1)`，这里遥控投屏设备音量；Dart 侧通过 `setActive`
+  /// 通知原生层「投屏中，音量键应拦截」。
+  static const MethodChannel _volumeChannel = MethodChannel(
+    'com.feiniu.music/cast_volume',
+  );
+  bool _volumeHandlerRegistered = false;
+
+  /// 当前投屏设备的音量（0-100，投屏遥控用）。-1 表示未知。
+  int _castVolumeLevel = -1;
+  static const int _volumeStep = 5;
+
   MediaCastDlnaDiscoveryEvents? _events;
 
   /// 最近一次发现的设备快照（按 UDN 去重）。
@@ -60,6 +73,11 @@ class DlnaCastService {
   /// 播放页 UI）。参数为（position, playing）。
   void Function(Duration position, bool playing)? onCastProgress;
 
+  /// 投屏设备播完当前歌曲的回调（由 [PlayerService] 注册，推进逻辑队列并
+  /// 推送下一首到投屏设备）。投屏设备播完本机引擎不会收到 completed 事件，
+  /// 由位置轮询检测位置到达末尾后触发。
+  void Function()? onCastCompleted;
+
   /// 投屏会话是否已建立。以「已连接设备」为准，不依赖 [state]——
   /// 投屏期间打开面板搜索其他设备会把 state 切到 discovering，但投屏会话
   /// 仍在继续，遥控逻辑必须保持生效。
@@ -78,6 +96,25 @@ class DlnaCastService {
   final ValueNotifier<bool> castPlaying = ValueNotifier(false);
 
   Timer? _positionPollTimer;
+
+  /// 上一帧轮询的投屏设备位置（秒）。用于播完检测（位置到达时长且不再前进）。
+  int _lastPollPositionSeconds = -1;
+  bool _castCompletedNotified = false;
+
+  /// 当前投屏歌曲的预期时长（秒）。很多渲染器对 HLS 报 duration 为 0 或占位值，
+  /// 用歌曲自身已知时长兜底做播完检测。
+  int _castExpectedDurationSec = 0;
+
+  /// 连续轮询失败次数。电视端退出/关机后渲染器可能完全不可达（getPlaybackInfo
+  /// 抛异常），连续失败 N 次后视为投屏失效并断开（手机端不再显示投屏）。
+  int _castPollFailures = 0;
+  static const int _castPollFailureThreshold = 5;
+
+  /// 连续观察到「stopped/noMediaPresent」的帧数。用户中途停止电视端时渲染器
+  /// 会停在 stopped；但换源/缓冲等瞬态也可能出现 stopped 帧，连续 N 帧才
+  /// 判定为用户停止并断开，避免误断。
+  int _consecutiveStoppedFrames = 0;
+  static const int _stopConfirmFrames = 3;
 
   StreamSubscription<DlnaDevice>? _foundSub;
   StreamSubscription<DeviceUdn>? _lostSub;
@@ -107,6 +144,58 @@ class DlnaCastService {
       _serviceInitialized = false;
       _initFuture = null;
       rethrow;
+    }
+  }
+
+  /// 注册音量键透传通道处理器（幂等）。原生 onKeyDown 拦截音量键后回调
+  /// `volumeDelta(+1/-1)`，这里把音量调节转发到投屏设备。
+  void _ensureVolumeChannel() {
+    if (_volumeHandlerRegistered) return;
+    _volumeHandlerRegistered = true;
+    _volumeChannel.setMethodCallHandler((call) async {
+      if (call.method == 'volumeDelta') {
+        final delta = (call.arguments as num?)?.toInt() ?? 0;
+        if (delta != 0) {
+          await _adjustCastVolume(delta);
+        }
+      }
+      return null;
+    });
+  }
+
+  /// 通知原生层「投屏中，物理音量键应拦截并回调」。投屏结束时置 false，
+  /// 让音量键恢复控制本机媒体音量。
+  Future<void> _setNativeVolumeCapture(bool active) async {
+    if (!kIsWeb) {
+      try {
+        await _volumeChannel.invokeMethod('setActive', {'active': active});
+      } catch (_) {
+        // 非 Android 或通道不可用时静默忽略
+      }
+    }
+  }
+
+  /// 按步进调节投屏设备音量（音量键回调）。
+  Future<void> _adjustCastVolume(int delta) async {
+    final device = currentDevice.value;
+    if (device == null) return;
+    final step = delta * _volumeStep;
+    if (_castVolumeLevel < 0) {
+      // 尚未同步过设备音量：先查询一次
+      try {
+        final info = await _api.getVolumeInfo(device.udn);
+        _castVolumeLevel = info.level.percentage;
+      } catch (_) {
+        return;
+      }
+    }
+    final next = (_castVolumeLevel + step).clamp(0, 100);
+    if (next == _castVolumeLevel) return;
+    _castVolumeLevel = next;
+    try {
+      await _api.setVolume(device.udn, VolumeLevel(percentage: next));
+    } catch (e) {
+      if (kDebugMode) debugPrint('[DlnaCastService] volume adjust failed: $e');
     }
   }
 
@@ -226,6 +315,8 @@ class DlnaCastService {
         }
         return false;
       }
+      // 封面图经代理换签为匿名 URL（渲染器直接拉取展示）
+      final coverProxyUrl = await _resolveCastCover(song);
 
       final metadata = AudioMetadata(
         title: song.title.trim().isEmpty ? '未知歌曲' : song.title.trim(),
@@ -235,6 +326,9 @@ class DlnaCastService {
         album: song.albumDisplayName.trim().isEmpty
             ? null
             : song.albumDisplayName.trim(),
+        albumArtUri: coverProxyUrl == null
+            ? null
+            : Url(value: coverProxyUrl),
         duration: song.durationMs != null && song.durationMs! > 0
             ? TimeDuration(seconds: (song.durationMs! / 1000).round())
             : null,
@@ -251,7 +345,18 @@ class DlnaCastService {
       state.value = DlnaCastState.casting;
       castPosition.value = Duration.zero;
       castPlaying.value = true;
+      _castVolumeLevel = -1; // 下次音量键先查询设备当前音量
+      _castExpectedDurationSec =
+          (song.durationMs != null && song.durationMs! > 0)
+          ? (song.durationMs! / 1000).round()
+          : 0;
+      _lastPollPositionSeconds = -1;
+      _castCompletedNotified = false;
+      _castPollFailures = 0;
+      _consecutiveStoppedFrames = 0;
       _startPositionPoll();
+      _ensureVolumeChannel();
+      unawaited(_setNativeVolumeCapture(true));
       onCastStart?.call();
       if (kDebugMode) {
         debugPrint('[DlnaCastService] cast ${song.title} -> ${device.friendlyName}');
@@ -286,6 +391,18 @@ class DlnaCastService {
     final stream = FeiNiuApiClient.instance.streamUrl(song.id);
     return MediaStreamProxy.instance.registerMedia(
       stream,
+      headers: FeiNiuApiClient.imageAuthHeaders(),
+    );
+  }
+
+  /// 解析歌曲封面图经代理换签的匿名 URL（DLNA 渲染器直接拉取展示）。
+  /// 封面 URL 同样需要 Cookie 认证，故经代理注入。无封面返回 null。
+  Future<String?> _resolveCastCover(SongEntity song) async {
+    final coverId = song.coverId;
+    if (coverId == null || coverId.isEmpty) return null;
+    final coverUrl = FeiNiuApiClient.instance.coverUrl(coverId, size: 512);
+    return MediaStreamProxy.instance.registerResource(
+      coverUrl,
       headers: FeiNiuApiClient.imageAuthHeaders(),
     );
   }
@@ -353,8 +470,12 @@ class DlnaCastService {
   Future<void> loadSong(SongEntity song) async {
     final device = currentDevice.value;
     if (device == null) return;
+    // 上一首的封面资源已不再需要，先清空避免泄漏（媒体流走 registerMedia，
+    // 不受 _resources 影响）。
+    MediaStreamProxy.instance.unregisterResources();
     final proxyUrl = await _resolveCastUrl(song);
     if (proxyUrl == null) return;
+    final coverProxyUrl = await _resolveCastCover(song);
     try {
       await _api.setMediaUri(
         device.udn,
@@ -364,9 +485,21 @@ class DlnaCastService {
           artist: song.artistDisplayName.trim().isEmpty
               ? null
               : song.artistDisplayName.trim(),
+          albumArtUri: coverProxyUrl == null
+              ? null
+              : Url(value: coverProxyUrl),
         ),
       );
       await _api.play(device.udn);
+      // 更新投屏歌曲预期时长与播完检测状态
+      _castExpectedDurationSec =
+          (song.durationMs != null && song.durationMs! > 0)
+          ? (song.durationMs! / 1000).round()
+          : 0;
+      _lastPollPositionSeconds = -1;
+      _castCompletedNotified = false;
+      _castPollFailures = 0;
+      castPosition.value = Duration.zero;
     } catch (e) {
       if (kDebugMode) debugPrint('[DlnaCastService] loadSong failed: $e');
     }
@@ -382,6 +515,13 @@ class DlnaCastService {
     _stopPositionPoll();
     castPosition.value = Duration.zero;
     castPlaying.value = false;
+    _castVolumeLevel = -1;
+    _castExpectedDurationSec = 0;
+    _lastPollPositionSeconds = -1;
+    _castCompletedNotified = false;
+    _castPollFailures = 0;
+    _consecutiveStoppedFrames = 0;
+    unawaited(_setNativeVolumeCapture(false));
     try {
       await stop();
     } catch (_) {}
@@ -397,6 +537,14 @@ class DlnaCastService {
   }
 
   /// 投屏期间周期轮询设备播放位置与状态，驱动播放页进度条。
+  ///
+  /// 同时承担**播完/停止检测**——投屏是本机推单曲，渲染器播完会停住或归零，
+  /// 本机引擎不在播（无 completed 事件），只能靠轮询感知：
+  /// - 位置连续两帧到达末尾 → 播完 → 续播下一首；
+  /// - 位置从接近末尾骤降到 0 附近 → 渲染器播完归零 → 续播下一首；
+  /// - 渲染器 `stopped`/`noMediaPresent` 且上次位置接近末尾 → 自然播完 → 续播；
+  /// - 渲染器 `stopped`/`noMediaPresent` 且上次位置在歌曲中途 → 用户停止/退出
+  ///   → 断开投屏（手机端不再显示投屏）。
   void _startPositionPoll() {
     _positionPollTimer?.cancel();
     _positionPollTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
@@ -405,7 +553,13 @@ class DlnaCastService {
       try {
         final info = await _api.getPlaybackInfo(device.udn);
         if (currentDevice.value == null) return; // 已断开
-        castPosition.value = Duration(seconds: info.position.seconds);
+        final posSec = info.position.seconds;
+        // 渲染器对 HLS 常报 duration=0/占位，退化为歌曲自身已知时长。
+        final effectiveDur = info.duration.seconds > 0
+            ? info.duration.seconds
+            : _castExpectedDurationSec;
+
+        castPosition.value = Duration(seconds: posSec);
         switch (info.state) {
           case TransportState.playing:
             castPlaying.value = true;
@@ -414,14 +568,88 @@ class DlnaCastService {
           case TransportState.stopped:
           case TransportState.transitioning:
           case TransportState.noMediaPresent:
-            // 保持当前展示，不做断言
+            // 状态具体含义在下方播完/停止检测里处理
             break;
         }
         onCastProgress?.call(castPosition.value, castPlaying.value);
+
+        final prevPos = _lastPollPositionSeconds;
+        _lastPollPositionSeconds = posSec;
+
+        // ---- 播完 / 停止检测 ----
+        final reachedEnd = effectiveDur > 0 && posSec >= effectiveDur;
+        final wasNearEnd =
+            effectiveDur > 0 && prevPos >= effectiveDur * 0.9;
+
+        var completed = false;
+        if (reachedEnd) {
+          // 1) 位置连续两帧到达末尾 → 播完
+          if (!_castCompletedNotified && prevPos >= effectiveDur) {
+            completed = true;
+          }
+        } else if (posSec <= 5 &&
+            wasNearEnd &&
+            prevPos > posSec + 30 &&
+            effectiveDur > 0) {
+          // 2) 位置从接近末尾骤降到 0 附近 → 渲染器播完归零
+          completed = true;
+        } else if (info.state == TransportState.stopped ||
+            info.state == TransportState.noMediaPresent) {
+          // 3) 渲染器停止/无媒体：
+          //    - 上次位置接近末尾 → 自然播完 → 续播下一首；
+          //    - 上次位置中途 → 用户停止/退出电视端 → 连续 N 帧确认后断开
+          //      （换源/缓冲等瞬态 stopped 帧不误断）。
+          if (wasNearEnd && prevPos >= 0) {
+            completed = true;
+          } else if (prevPos >= 0) {
+            _consecutiveStoppedFrames++;
+            if (_consecutiveStoppedFrames >= _stopConfirmFrames) {
+              _handleCastStopped();
+              return;
+            }
+          } else {
+            _consecutiveStoppedFrames = 0;
+          }
+        }
+
+        // 非 stopped 状态帧清零连续停止计数
+        if (info.state != TransportState.stopped &&
+            info.state != TransportState.noMediaPresent) {
+          _consecutiveStoppedFrames = 0;
+        }
+
+        if (completed) {
+          if (!_castCompletedNotified) {
+            _castCompletedNotified = true;
+            onCastCompleted?.call();
+          }
+        } else {
+          _castCompletedNotified = false;
+        }
+        // 轮询成功：重置连续失败计数
+        _castPollFailures = 0;
       } catch (_) {
-        // 轮询失败静默忽略（设备可能短暂不可达）
+        // 轮询失败（设备短暂不可达）。连续失败超过阈值视为电视端退出/关机，
+        // 断开投屏让手机端回到本机播放。
+        _castPollFailures++;
+        if (_castPollFailures >= _castPollFailureThreshold) {
+          if (kDebugMode) {
+            debugPrint(
+              '[DlnaCastService] renderer unreachable after '
+              '$_castPollFailures polls -> disconnect',
+            );
+          }
+          unawaited(disconnect(reason: null));
+        }
       }
     });
+  }
+
+  /// 渲染器在歌曲中途停止（用户停止/退出电视端）→ 断开投屏。
+  /// 触发 `onCastDisconnect` 恢复本机、清 `isCasting`，手机端不再显示投屏。
+  void _handleCastStopped() {
+    if (kDebugMode) debugPrint('[DlnaCastService] renderer stopped mid-song');
+    unawaited(disconnect(reason: null));
   }
 
   void _stopPositionPoll() {

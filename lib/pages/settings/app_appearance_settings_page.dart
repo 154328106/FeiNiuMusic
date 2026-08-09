@@ -349,7 +349,7 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                 builder: (context, enabled, _) {
                   return AppSettingSwitchTile(
                     title: 'TV 模式',
-                    subtitle: '强制 TV 布局与遥控器操作（其他设备请勿开启）',
+                    subtitle: '强制 TV 布局与遥控器操作',
                     value: enabled,
                     onChanged: (value) {
                       AppLayoutSettings.setForceTvMode(value);
@@ -583,21 +583,22 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
               ValueListenableBuilder<bool>(
                 valueListenable: AppBackgroundSettings.panelBlurEnabled,
                 builder: (context, blurEnabled, _) {
+                  // 关闭「高斯模糊」→ 隐藏下方「模糊强度」滑块（避免显示无效的
+                  // 「已关闭」控件，对齐转码设置页的联动隐藏逻辑）。
+                  if (!blurEnabled) return const SizedBox.shrink();
                   return ValueListenableBuilder<double>(
                     valueListenable: AppBackgroundSettings.panelBlurStrength,
                     builder: (context, value, _) {
-                      final effective =
-                          blurEnabled ? value : 0.0;
                       return AppSettingSlider(
                         title: '模糊强度',
                         description: '0 = 无模糊，32 = 最强模糊',
-                        value: effective,
+                        value: value,
                         min: 0,
                         max: 32,
                         divisions: 32,
-                        valueText: !blurEnabled
-                            ? '已关闭'
-                            : (value == 0 ? '关闭' : value.toStringAsFixed(0)),
+                        valueText: value == 0
+                            ? '关闭'
+                            : value.toStringAsFixed(0),
                         onChanged: (next) {
                           AppBackgroundSettings.setPanelBlur(next);
                         },
