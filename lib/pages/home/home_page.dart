@@ -707,26 +707,30 @@ class _HomePageState extends State<HomePage>
               heroSong: heroSong,
               onPlayRoam: _playRoam,
               onRefreshRoam: _refreshRoam,
-              shortcutItems: const [
+              shortcutItems: [
                 HomeShortcutItem(
                   icon: Icons.music_note_rounded,
                   label: '歌曲',
-                  accent: Color(0xFF3B82F6),
+                  accent: const Color(0xFF3B82F6),
+                  onTap: _openSongsPage,
                 ),
                 HomeShortcutItem(
                   icon: Icons.people_rounded,
                   label: '歌手',
-                  accent: Color(0xFF14B8A6),
+                  accent: const Color(0xFF14B8A6),
+                  onTap: _openArtistsPage,
                 ),
                 HomeShortcutItem(
                   icon: Icons.album_rounded,
                   label: '专辑',
-                  accent: Color(0xFFA855F7),
+                  accent: const Color(0xFFA855F7),
+                  onTap: _openAlbumsPage,
                 ),
                 HomeShortcutItem(
                   icon: Icons.music_video_rounded,
                   label: '风格',
-                  accent: Color(0xFFF97316),
+                  accent: const Color(0xFFF97316),
+                  onTap: _openGenresPage,
                 ),
               ],
               recentSongs: _recentSongs.value,

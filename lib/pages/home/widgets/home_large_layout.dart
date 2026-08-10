@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
 import '../../../app/services/feiniu/api_client.dart';
 import '../../../app/services/feiniu/api_models.dart';
@@ -290,13 +291,19 @@ class _LargeScrollableSongList extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final artworkSize = 48.0;
+    final isTv = AppLayoutSettings.tvMode.value;
     return ListView.separated(
+      // TV：加大预建范围，保证方向键能遍历到视口外的行（不会因行未 build
+      // 而找不到下一焦点目标，误跳出列表跳到下方专辑）。
+      scrollCacheExtent: isTv
+          ? const ScrollCacheExtent.pixels(600)
+          : const ScrollCacheExtent.pixels(0),
       padding: const EdgeInsets.symmetric(vertical: 4),
       itemCount: songs.length,
       separatorBuilder: (_, _) => const SizedBox(height: 2),
       itemBuilder: (context, i) {
         final song = songs[i];
-        return Material(
+        final row = Material(
           color: Colors.transparent,
           child: InkWell(
             borderRadius: BorderRadius.circular(12),
@@ -354,6 +361,17 @@ class _LargeScrollableSongList extends StatelessWidget {
             ),
           ),
         );
+        // TV：整行可聚焦（焦点环 + Enter 播放）；onLongPress 保留在手势层，
+        // 与 Touch 设备行为一致。TvFocusable 屏蔽行内 InkWell 的焦点节点，
+        // 保证方向键遍历时每行是唯一焦点目标。
+        if (isTv) {
+          return TvFocusable(
+            borderRadius: BorderRadius.circular(12),
+            onActivate: () => onTap(song),
+            child: row,
+          );
+        }
+        return row;
       },
     );
   }

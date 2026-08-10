@@ -47,11 +47,9 @@ class HomeHeroBanner extends StatelessWidget {
     final isTv = AppLayoutSettings.tvMode.value;
     final isTablet = AppLayoutSettings.effectiveTabletMode && !isTv;
     final useLarge = isTv || isTablet;
-    Widget bannerChild = AspectRatio(
-      aspectRatio: aspectRatio ?? (useLarge ? 12 / 5 : 16 / 9),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
+    final bannerStack = Stack(
+      fit: StackFit.expand,
+      children: [
           // 封面铺满
           if (coverId != null && coverId.isNotEmpty)
             CachedNetworkImage(
@@ -170,13 +168,15 @@ class HomeHeroBanner extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
+      );
     final Widget banner = ClipRRect(
       borderRadius: BorderRadius.circular(isTv ? 28 : 24),
       child: height != null
-          ? SizedBox(height: height, child: bannerChild)
-          : bannerChild,
+          ? SizedBox(height: height, child: bannerStack)
+          : AspectRatio(
+              aspectRatio: aspectRatio ?? (useLarge ? 12 / 5 : 16 / 9),
+              child: bannerStack,
+            ),
     );
 
     if (!useLarge) return banner;

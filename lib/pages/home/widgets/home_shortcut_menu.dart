@@ -82,6 +82,9 @@ class _ShortcutItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = item.accent;
     final iconSize = 44.0;
+    // 四宫格项是 Material + InkWell：本身可聚焦（Material 自带焦点环 +
+    // 主题 focusColor 高亮），聚焦范围即完整卡片。不再包 TvFocusable
+    // 缩放/描边，避免聚焦范围只剩图标一小块、右侧空白。
     return Material(
       color: scheme.surfaceContainerLow,
       borderRadius: BorderRadius.circular(16),
