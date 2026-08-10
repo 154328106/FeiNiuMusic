@@ -41,7 +41,18 @@ function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_features(${TARGET} PUBLIC cxx_std_17)
   target_compile_options(${TARGET} PRIVATE /W4 /WX /wd"4100")
   target_compile_options(${TARGET} PRIVATE /EHsc)
+  # 强制 MSVC 将源码按 UTF-8 解析。中文区系统默认代码页（如 936/GBK）会误读
+  # UTF-8 无 BOM 的插件源（如 connectivity_plus），触发 C4819 警告并在 /WX
+  # 下升级为错误 C2220 导致构建失败。
+  target_compile_options(${TARGET} PRIVATE /utf-8)
+  # /FS：并发编译多个 .cpp 写同一 .pdb 时串行化写入，避免 C1041
+  # （cannot open program database）。多核并行构建 Debug 版时必需。
+  target_compile_options(${TARGET} PRIVATE /FS)
   target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
+  # 静默 <experimental/coroutine> 弃用错误（STL1011）。permission_handler_windows
+  # 等插件用 /await + <experimental/coroutine>：本地 VS2022 只是警告，但
+  # GitHub Actions windows-latest 的 MSVC 14.51+ 将其升级为硬错误，需该宏压制。
+  target_compile_definitions(${TARGET} PRIVATE "_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS")
   target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")
 endfunction()
 
