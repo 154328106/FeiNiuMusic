@@ -111,3 +111,7 @@ secrets.*
 .env
 .env.*
 *.env
+
+# 源码打包压缩包
+*.7z
+*.zip

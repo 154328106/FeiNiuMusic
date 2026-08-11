@@ -59,8 +59,8 @@
 - **搜索** — 全局搜索歌曲、专辑、歌手
 - **收藏与管理** — 收藏歌曲、创建/编辑歌单
 - **文件夹视图** — 按 NAS 文件系统目录层级浏览音乐（配合服务端增强应用）：目录树 + 面包屑导航、排序（文件名/创建时间/时长/大小）、随机播放、分页加载更多、CUE 整轨按曲目拆分展示、递归搜索当前目录树、平铺视图（一键展示当前目录及子文件夹全部歌曲）、长按歌曲详情与多选管理
-- **数据匹配（Lyrico 数据源）** — 导入 [Lyrico](https://github.com/Replica0110/Lyrico) 搜索源插件（zip），在歌曲信息编辑页**一键匹配**歌曲信息（标题/歌手/专辑/封面），或歌曲页多选后**批量匹配**并回传 NAS；设置页可维护数据源（导入/启用/配置/卸载）与匹配偏好（歌词模式/简繁转换/过滤规则/并发）；更多数据源插件见 [Lyrico-Plugins](https://github.com/Replica0110/Lyrico-Plugins)
-- **服务端增强（FnMusicEnhance）** — 配合运行在 NAS 上的[增强应用](https://github.com/kuilei0926/FnMusicEnhance)（端口 38200）：歌词修改（歌曲信息编辑页直接读写歌词）、歌手/专辑编辑（改名 + 封面写入）、文件夹视图；设置页可检测连接状态（区分「未安装」与「已安装但不可达」），认证使用飞牛音乐登录 token，无需单独配置密钥
+- **数据匹配（服务端增强数据源）** — 配合运行在 NAS 上的 [FnMusicEnhance](https://github.com/kuilei0926/FnMusicEnhance)（端口 38200）提供多平台歌曲信息/歌词/封面搜索（网易云 / QQ / 酷狗 / 汽水 / Apple）：在歌曲信息编辑页**一键匹配**歌曲信息，或歌曲页多选后**批量匹配**（服务端全自动写入歌手/歌词/专辑/封面）；支持**批量刷新**（全部歌曲信息 / 歌手图片 / 专辑图片，替换封面时删除旧图）；歌词支持**逐字（卡拉OK）**渲染（QQ/酷狗/汽水逐字源）；设置页可维护搜索平台（启用 / 排序，由客户端决定，服务端按客户端排序分组）与匹配偏好（歌词模式 / 简繁转换 / 过滤规则 / 并发）
+- **服务端增强（FnMusicEnhance）** — 配合运行在 NAS 上的[增强应用](https://github.com/kuilei0926/FnMusicEnhance)（端口 38200）：歌词修改（歌曲信息编辑页直接读写歌词）、歌手/专辑编辑（改名 + 封面写入）、文件夹视图、数据源搜索 / 批量匹配 / 批量刷新；设置页可检测连接状态（区分「未安装」与「已安装但不可达」），认证使用飞牛音乐登录 token，无需单独配置密钥
 
 ### 界面与适配
 
@@ -81,7 +81,8 @@
 
 ## 适用平台
 
-- Android（手机 / 平板 / Android TV / Android Auto 车机）
+- **Android**（手机 / 平板 / Android TV / Android Auto 车机）—— 完整能力：播放、媒体通知 / 灵动岛歌词 / 状态栏歌词等系统级功能
+- **Windows 桌面端** —— 联网能力：数据匹配 / 批量匹配 / 批量刷新 / 文件夹视图 / 歌词读写等服务端增强功能（需配合 NAS 上的 FnMusicEnhance）
 
 ## Android Auto 支持
 
@@ -167,6 +168,14 @@ flutter analyze          # 静态分析
 flutter build apk --release --split-per-abi
 ```
 
+### 构建 Windows 桌面版
+
+```bash
+flutter build windows --release
+```
+
+> Windows 桌面版支持数据匹配 / 批量匹配 / 批量刷新 / 文件夹视图等服务端增强能力（需 NAS 上运行 FnMusicEnhance），媒体通知 / 灵动岛等系统级功能仍为 Android 专属。
+
 构建产物位于 `build/app/outputs/flutter-apk/`，按 CPU 架构（arm64-v8a / armeabi-v7a / x86_64）拆分。
 
 ## 鸿蒙 / iQOO / VIVO 音乐兼容包（非官方）
@@ -215,12 +224,12 @@ flutter build apk --release --split-per-abi
 本项目基于上游 [NagoMusic](https://github.com/Keduoli03/NagoMusic) 项目的开源协议发布。
 
 音乐数据匹配功能移植自 [Lyrico](https://github.com/Replica0110/Lyrico)（[Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)）：
-- 数据源插件运行引擎（QuickJS）与宿主 API、插件格式（`manifest.json` + `source.js`）均移植自 Lyrico；
-- 数据源插件（网易云 / QQ / 酷狗 / 苹果 / 汽水等）为 Lyrico 项目提供的第三方搜索源；
-- 歌词格式（逐字 / 增强逐字 / 逐行 / TTML，含翻译、罗马音）对齐 Lyrico 的 `LrcDocumentFormat`。
+- 歌词格式（逐字 / 增强逐字 / 逐行 / TTML，含翻译、罗马音）对齐 Lyrico 的 `LrcDocumentFormat`；
+- 后端数据源搜索逻辑移植自 [musicdl](https://github.com/CharlesPikachu/musicdl)（在 FnMusicEnhance 中实现）。
 
 ## 致谢
 
 - [NagoMusic](https://github.com/Keduoli03/NagoMusic) — 本项目的基础
-- [Lyrico](https://github.com/Replica0110/Lyrico) — 音乐数据匹配 / 数据源插件引擎 / 歌词格式（Apache-2.0）
+- [Lyrico](https://github.com/Replica0110/Lyrico) — 音乐数据匹配 / 歌词格式（Apache-2.0）
+- [musicdl](https://github.com/CharlesPikachu/musicdl) — 后端数据源搜索代码来源
 - [HyperLyric](https://github.com/limczhh/HyperLyric) — 焦点通知 / 灵动岛 API 及 Shizuku 绕过白名单实现等移植来源

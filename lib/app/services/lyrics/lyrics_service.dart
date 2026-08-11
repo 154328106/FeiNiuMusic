@@ -11,7 +11,6 @@ import '../../state/settings_lyric_auto_search.dart';
 import '../../state/settings_lyric_companion.dart';
 import '../../state/song_state.dart';
 import '../song_match/song_match_service.dart';
-import '../plugin/plugin_service.dart';
 import 'lyric_companion_service.dart';
 import 'lyrics_parser.dart';
 import 'lyrics_repository.dart';
@@ -226,11 +225,11 @@ class LyricsService {
       if (seq != _loadSeq) return;
 
       if (lrc == null || lrc.trim().isEmpty) {
-        // 无歌词：若开启「播放无歌词音乐时自动搜索」，通过数据源插件搜索。
-        // 插件（原生 QuickJS）仅 Android 支持，非 Android 直接跳过。
+        // 无歌词：若开启「播放无歌词音乐时自动搜索」，通过服务端增强数据源搜索。
+        // 需后端（FnMusicEnhance）可达。
         var searched = lrc;
         if (LyricAutoSearchSettings.enabled.value &&
-            PluginService.pluginSupportedOnPlatform) {
+            SongMatchService.instance.available) {
           searched = await _searchLyricForSong(song);
           if (seq != _loadSeq) return;
         }

@@ -115,6 +115,7 @@ class FeiNiuTrackService {
       discNumber: track.discNo,
       updatedAt: track.updatedAt,
       isCue: track.isCue,
+      isAudioFileDeleted: track.isAudioFileDeleted,
     );
   }
 

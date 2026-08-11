@@ -12,6 +12,18 @@ int? _toInt(dynamic value) {
   return null;
 }
 
+/// 兼容 bool 字段：布尔值 / 0/1 / "0"/"1"/"true"/"false"。
+bool _toBool(dynamic value) {
+  if (value == null) return false;
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  if (value is String) {
+    final t = value.trim().toLowerCase();
+    if (t == '1' || t == 'true' || t == 'yes') return true;
+  }
+  return false;
+}
+
 /// API 响应统一封装
 class FeiNiuResponse<T> {
   final int code;
@@ -216,6 +228,7 @@ class FeiNiuTrack {
   final FeiNiuAudioSpec? audioSpec;
   final String? isrc;
   final List<FeiNiuGenre> genres;
+  final bool isAudioFileDeleted;
 
   const FeiNiuTrack({
     required this.guid,
@@ -235,6 +248,7 @@ class FeiNiuTrack {
     this.audioSpec,
     this.isrc,
     this.genres = const [],
+    this.isAudioFileDeleted = false,
   });
 
   factory FeiNiuTrack.fromJson(Map<String, dynamic> json) {
@@ -266,6 +280,14 @@ class FeiNiuTrack {
               ?.map((e) => FeiNiuGenre.fromJson(e as Map<String, dynamic>))
               .toList() ??
           [],
+      // 失效歌曲（音频文件已删除）：飞牛歌单曲目接口不返回删除标记，用
+      // accessStatus 判断（0=音频正常可播放，3=音频文件失效/缺失）；同时
+      // 宽容解析旧字段名以防个别接口仍返回。
+      isAudioFileDeleted: _toBool(json['audioFileDeleted']) ||
+          _toBool(json['isAudioFileDeleted']) ||
+          _toBool(json['audio_file_deleted']) ||
+          json['accessStatus'] == 3 ||
+          json['accessStatus'] == '3',
     );
   }
 

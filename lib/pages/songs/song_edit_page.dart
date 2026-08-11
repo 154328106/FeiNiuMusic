@@ -6,6 +6,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -14,8 +15,8 @@ import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/feiniu/api_models.dart';
 import '../../app/services/lyrics/lyric_companion_service.dart';
 import '../../app/services/companion/companion_error.dart';
-import '../../app/services/plugin/plugin_result_parser.dart';
-import '../../app/services/plugin/plugin_service.dart';
+import '../../app/services/song_match/backend_match_client.dart';
+import '../../app/services/song_match/song_match_models.dart';
 import '../../app/services/song_match/song_match_scorer.dart';
 import '../../app/services/song_match/song_match_service.dart';
 import '../../app/state/settings_lyric_companion.dart';
@@ -99,6 +100,10 @@ class _SongEditPageState extends State<SongEditPage> {
   /// 歌词是否被修改过（只有修改时才随主保存按钮写入服务端增强）。
   bool _lyricsDirty = false;
 
+  /// 歌词能否编辑写入：需开启服务端增强且连接可达（读取歌词不依赖它）。
+  bool get _canEditLyrics =>
+      LyricCompanionSettings.enabled.value && _companionConnected;
+
   @override
   void initState() {
     super.initState();
@@ -132,6 +137,8 @@ class _SongEditPageState extends State<SongEditPage> {
 
   /// 拉取歌曲完整元数据填充表单。
   Future<void> _load() async {
+    // 歌词修改开关：确保已加载（避免误判「未启用服务端增强」）
+    await LyricCompanionSettings.ensureLoaded();
     try {
       final data = await _api.trackMetadata(widget.song.id);
       if (!mounted) return;
@@ -158,16 +165,18 @@ class _SongEditPageState extends State<SongEditPage> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
-    // 歌词修改已开启时：先探测服务端增强连接，已连接才读取歌词。
-    if (mounted && LyricCompanionSettings.enabled.value) {
+    // 歌词读取用飞牛原接口（getLyricText），不依赖服务端增强；同时探测
+    // 增强连接以决定能否编辑（写入需要增强插件）。
+    if (mounted) {
       await _maybeLoadLyrics();
     }
   }
 
-  /// 歌词修改开启时调用：先检查服务端增强是否可达，已连接才读取歌词。
+  /// 读取歌词（飞牛原接口）+ 探测服务端增强连接。
   ///
-  /// 未连接时置 `_companionConnected = false`，歌词编辑区显示未连接提示
-  /// 并禁用编辑（而不是误报「未获取到歌词」）。
+  /// 读取用 `FeiNiuApiClient.getLyricText`（/music/api/v1/lyric/list 原接口），
+  /// 不依赖增强插件；[_companionConnected] 仅用于判断能否**编辑写入**
+  /// （写入走服务端增强，未开启/未连接时歌词框只读）。
   Future<void> _maybeLoadLyrics() async {
     if (_lyricsLoading) return;
     setState(() => _companionProbing = true);
@@ -177,9 +186,7 @@ class _SongEditPageState extends State<SongEditPage> {
       _companionProbing = false;
       _companionConnected = connected;
     });
-    if (connected) {
-      await _loadLyrics();
-    }
+    await _loadLyrics();
   }
 
   /// 当前显示的封面 coverId（未换图时用服务端原值）。
@@ -252,7 +259,7 @@ class _SongEditPageState extends State<SongEditPage> {
               },
             ),
             // 「联网搜索封面」依赖数据源插件（原生 QuickJS），非 Android 隐藏。
-            if (PluginService.pluginSupportedOnPlatform)
+            if (SongMatchService.instance.available)
               ListTile(
                 leading: const Icon(Icons.travel_explore_rounded),
                 title: const Text('联网搜索封面'),
@@ -339,9 +346,21 @@ class _SongEditPageState extends State<SongEditPage> {
       final response = await dio.get<Uint8List>(url);
       final bytes = response.data;
       if (bytes == null || bytes.isEmpty) return null;
+      // 平台封面可能是 webp 等格式，转成 JPEG 再保存（上传封面时避免格式被拒）
+      var out = bytes;
+      try {
+        final jpeg = await FlutterImageCompress.compressWithList(
+          bytes,
+          quality: 92,
+          format: CompressFormat.jpeg,
+        );
+        if (jpeg.isNotEmpty) out = Uint8List.fromList(jpeg);
+      } catch (_) {
+        // 转码失败用原字节（PNG/JPEG 也能直接用）
+      }
       final dir = await getTemporaryDirectory();
       final file = File('${dir.path}/cover_${DateTime.now().millisecondsSinceEpoch}.jpg');
-      await file.writeAsBytes(bytes);
+      await file.writeAsBytes(out);
       return file.path;
     } catch (e) {
       debugPrint('[SongEditPage] download cover error: $e');
@@ -593,8 +612,8 @@ class _SongEditPageState extends State<SongEditPage> {
 
       await _api.updateTrackMetadata(body);
 
-      // 歌词修改过则随保存统一写入服务端增强（未修改跳过）。
-      if (_lyricsDirty && LyricCompanionSettings.enabled.value) {
+      // 歌词修改过且可编辑（增强开启 + 连接）则随保存统一写入（未修改跳过）。
+      if (_lyricsDirty && _canEditLyrics) {
         await _saveLyrics();
       }
 
@@ -651,7 +670,7 @@ class _SongEditPageState extends State<SongEditPage> {
         actions: [
           // 「匹配设置」是数据源插件流程（歌词偏好/元数据处理），
           // 依赖原生 QuickJS，非 Android 隐藏。
-          if (PluginService.pluginSupportedOnPlatform)
+          if (SongMatchService.instance.available)
             IconButton(
               tooltip: '匹配设置',
               icon: const Icon(Icons.settings_outlined),
@@ -997,7 +1016,7 @@ class _SongEditPageState extends State<SongEditPage> {
           ),
           const SizedBox(height: 12),
           // 「匹配歌曲信息」依赖数据源插件（原生 QuickJS），非 Android 隐藏。
-          if (PluginService.pluginSupportedOnPlatform)
+          if (SongMatchService.instance.available)
             OutlinedButton.icon(
               onPressed: _matching ? null : _matchSongInfo,
               icon: _matching
@@ -1121,23 +1140,20 @@ class _SongEditPageState extends State<SongEditPage> {
             ],
           ),
           const SizedBox(height: 8),
-          if (!LyricCompanionSettings.enabled.value)
-            _buildLyricDisabledHint(context)
-          else if (_companionProbing)
+          if (_companionProbing)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 32),
               child: Center(child: CircularProgressIndicator()),
             )
-          else if (!_companionConnected)
-            _buildLyricNotConnectedHint(context)
           else if (_lyricsLoading)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 32),
               child: Center(child: CircularProgressIndicator()),
             )
-          else
+          else ...[
             TextField(
               controller: _lyricsController,
+              enabled: _canEditLyrics,
               maxLines: 10,
               minLines: 6,
               style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
@@ -1149,102 +1165,28 @@ class _SongEditPageState extends State<SongEditPage> {
                 border: OutlineInputBorder(),
               ),
             ),
+            if (!_canEditLyrics) ...[
+              const SizedBox(height: 8),
+              InkWell(
+                onTap: _openLyricCompanionSettings,
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Text(
+                    LyricCompanionSettings.enabled.value
+                        ? '未连接增强插件，仅可查看歌词。点击重试'
+                        : '未启用服务端增强，仅可查看歌词。点击开启',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: LyricCompanionSettings.enabled.value
+                          ? theme.colorScheme.error
+                          : theme.colorScheme.primary,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
         ],
-      ),
-    );
-  }
-
-  /// 歌词修改未开启时的提示（引导开启服务端增强）。
-  Widget _buildLyricDisabledHint(BuildContext context) {
-    final theme = Theme.of(context);
-    return InkWell(
-      onTap: () => _openLyricCompanionSettings(),
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHighest
-              .withValues(alpha: 0.4),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          children: [
-            Icon(
-              Icons.tune_rounded,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '启用「服务端增强」后可在此读取 / 编辑 / 保存歌词（需 NAS 上运行 FnMusicEnhance）',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '点击前往元数据匹配开启',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.primary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 服务端增强已开启但未连接时的提示（禁用歌词编辑，可点击前往重试）。
-  Widget _buildLyricNotConnectedHint(BuildContext context) {
-    final theme = Theme.of(context);
-    // 曾检测到过 → 已安装但当前不可达；否则 → 未安装。
-    final installed = LyricCompanionService.instance.everConnected;
-    return InkWell(
-      onTap: () => _openLyricCompanionSettings(),
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHighest.withValues(
-            alpha: 0.4,
-          ),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          children: [
-            Icon(
-              Icons.link_off_rounded,
-              color: theme.colorScheme.error,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              installed
-                  ? '已连接到增强插件但当前不可达，暂时无法编辑歌词'
-                  : '未检测到增强插件（FnMusicEnhance），暂时无法编辑歌词',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              installed
-                  ? '请确认 FnMusicEnhance 正在运行，且端口 ${LyricCompanionService.port} 已开放'
-                  : '请先安装 / 配置 FnMusicEnhance（需运行在 NAS 上）',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '点击前往元数据匹配检查连接',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.primary,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -1267,7 +1209,7 @@ class _SongEditPageState extends State<SongEditPage> {
         _lyricsDirty = false;
       });
       if (content.isEmpty) {
-        AppToast.show(context, '该歌曲暂无歌词，可直接输入编辑');
+        AppToast.show(context, '该歌曲暂无歌词');
       }
     } catch (e) {
       debugPrint('[SongEditPage] load lyrics error: $e');
@@ -2019,12 +1961,13 @@ class _MatchCandidateSheetState extends State<_MatchCandidateSheet> {
     super.dispose();
   }
 
-  /// 重算综合列表（tab 0 用）。
+  /// 重算综合列表（tab 0 用，按歌曲名+歌手相似度降序）。
   void _recomputeMerged() {
     final sourceOrder = _grouped.groups.map((g) => g.pluginId).toList();
     _merged = SongMatchScorer.mergeRanked(
       _grouped.groups.map((g) => g.results).toList(),
       sourceOrder: sourceOrder,
+      keyword: _searchController.text.trim(),
     );
   }
 

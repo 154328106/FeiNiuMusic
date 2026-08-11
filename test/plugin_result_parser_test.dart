@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:feiniu_music/app/services/plugin/plugin_result_parser.dart';
+import 'package:feiniu_music/app/services/song_match/song_match_models.dart';
 import 'package:feiniu_music/app/state/settings_match.dart';
 
 void main() {

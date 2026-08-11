@@ -3,8 +3,11 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/router/app_router.dart';
 import '../../app/services/lyrics/lyric_companion_service.dart';
+import '../../app/services/song_match/backend_match_client.dart';
+import '../../app/services/song_match/match_source_state.dart';
 import '../../app/state/settings_lyric_auto_search.dart';
 import '../../app/state/settings_lyric_companion.dart';
+import '../../app/state/settings_match.dart';
 import '../../components/index.dart';
 
 /// 元数据匹配设置入口页。
@@ -88,7 +91,7 @@ class _MetadataMatchSettingsPageState extends State<MetadataMatchSettingsPage> {
             children: [
               AppSettingTile(
                 title: '数据源维护',
-                subtitle: 'Lyrico 数据源插件管理',
+                subtitle: '选择搜索平台并排序',
                 leading: const Icon(Icons.extension_outlined),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Navigator.pushNamed(
@@ -121,7 +124,7 @@ class _MetadataMatchSettingsPageState extends State<MetadataMatchSettingsPage> {
                       AppSettingSwitchTile(
                         title: '播放无歌词音乐时自动搜索',
                         subtitle: enabled
-                            ? '播放时自动通过数据源插件搜索并应用歌词'
+                            ? '播放时自动通过数据源搜索并应用歌词'
                             : '播放时遇到无歌词歌曲自动搜索歌词',
                         value: enabled,
                         onChanged: (value) =>
@@ -155,9 +158,150 @@ class _MetadataMatchSettingsPageState extends State<MetadataMatchSettingsPage> {
             title: '服务端增强',
             children: _buildCompanionSection(context),
           ),
+          const SizedBox(height: 16),
+          AppSettingSection(
+            title: '批量操作',
+            children: [
+              AppSettingTile(
+                title: '批量刷新所有歌曲信息',
+                subtitle: '遍历全部歌曲，搜索并自动写入标题/歌手/专辑等',
+                leading: const Icon(Icons.refresh_rounded),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _confirmAndRun(
+                  '批量刷新所有歌曲信息',
+                  '将遍历音乐库全部歌曲，逐一联网搜索并自动写入标题/歌手/'
+                  '专辑/封面/歌词等（填充模式）。该操作未经过大量验证，耗时较长，'
+                  '可能产生不符合预期的修改。是否继续？',
+                  _refreshAllSongs,
+                ),
+              ),
+              const Divider(height: 1),
+              AppSettingTile(
+                title: '批量刷新所有歌手图片',
+                subtitle: '遍历全部歌手，搜索并替换头像（删除旧图）',
+                leading: const Icon(Icons.badge_outlined),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _confirmAndRun(
+                  '批量刷新所有歌手图片',
+                  '将遍历全部歌手，逐一联网搜索头像并替换（删除旧封面文件）。'
+                  '该操作未经过大量验证，耗时较长。是否继续？',
+                  _refreshArtistCovers,
+                ),
+              ),
+              const Divider(height: 1),
+              AppSettingTile(
+                title: '批量刷新所有专辑图片',
+                subtitle: '遍历全部专辑，搜索并替换封面（删除旧图）',
+                leading: const Icon(Icons.album_outlined),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _confirmAndRun(
+                  '批量刷新所有专辑图片',
+                  '将遍历全部专辑，逐一联网搜索封面并替换（删除旧封面文件）。'
+                  '该操作未经过大量验证，耗时较长。是否继续？',
+                  _refreshAlbumCovers,
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
+  }
+
+  /// 高危操作确认 + 执行（提示未经过大量验证）。
+  Future<void> _confirmAndRun(
+    String title,
+    String message,
+    Future<void> Function() action,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('继续'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await action();
+  }
+
+  /// 批量刷新所有歌曲信息。
+  Future<void> _refreshAllSongs() async {
+    await _runRefresh(
+      '歌曲信息刷新',
+      () => BackendMatchClient.instance.refreshAllSongs(
+        sources: MatchSourceState.instance.enabledIdsInOrder,
+        wants: const ['title', 'artist', 'album', 'cover', 'lyrics'],
+        writeMode: 'fill',
+        lyricOptions: {
+          'convert': switch (MatchSettings.chineseConvert.value) {
+            ChineseTextConvert.simplifiedToTraditional => 'simplifiedToTraditional',
+            ChineseTextConvert.traditionalToSimplified => 'traditionalToSimplified',
+            ChineseTextConvert.none => 'none',
+          },
+          'removeBlankLines': MatchSettings.removeBlankLines.value,
+          'filterRules': MatchSettings.filterRules.value,
+        },
+      ),
+    );
+  }
+
+  /// 批量刷新所有歌手图片。
+  Future<void> _refreshArtistCovers() async {
+    await _runRefresh(
+      '歌手图片刷新',
+      () => BackendMatchClient.instance.refreshArtistCovers(
+        sources: MatchSourceState.instance.enabledIdsInOrder,
+      ),
+    );
+  }
+
+  /// 批量刷新所有专辑图片。
+  Future<void> _refreshAlbumCovers() async {
+    await _runRefresh(
+      '专辑图片刷新',
+      () => BackendMatchClient.instance.refreshAlbumCovers(
+        sources: MatchSourceState.instance.enabledIdsInOrder,
+      ),
+    );
+  }
+
+  /// 执行批量刷新并展示结果（后端长时间处理，无超时提示）。
+  Future<void> _runRefresh(
+    String label,
+    Future<RefreshBatchResult> Function() call,
+  ) async {
+    if (!BackendMatchClient.instance.available) {
+      AppToast.show(context, '服务端增强不可达，无法批量刷新',
+          type: ToastType.error);
+      return;
+    }
+    try {
+      final result = await call();
+      if (!mounted) return;
+      AppToast.show(
+        context,
+        '$label完成：成功 ${result.success}，失败 ${result.failed}'
+        '（共 ${result.total}）',
+        type: result.failed > 0 ? ToastType.error : ToastType.success,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      AppToast.show(context, '$label失败：$e', type: ToastType.error);
+    }
   }
 
   /// 服务端增强（FnMusicEnhance）区块。

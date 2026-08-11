@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
-import '../../app/services/plugin/plugin_service.dart';
 import '../../app/state/settings_match.dart';
 import '../../components/index.dart';
 
@@ -9,7 +8,7 @@ import '../../components/index.dart';
 ///
 /// - 歌词偏好：模式 / 罗马音 / 翻译 / 仅下载翻译；
 /// - 元数据处理：简繁转换 / 移除空行 / 非歌词内容过滤规则 / 艺术家分隔符；
-/// - 并发：批量匹配 / 插件搜索并发上限。
+/// - 并发：批量匹配并发上限。
 class MatchSettingsPage extends StatefulWidget {
   const MatchSettingsPage({super.key});
 
@@ -45,7 +44,6 @@ class _MatchSettingsPageState extends State<MatchSettingsPage>
 
   Future<void> _applyConcurrency(int value) async {
     await MatchSettings.setConcurrency(value);
-    PluginService.instance.concurrencyLimit = value;
   }
 
   @override
@@ -327,7 +325,7 @@ class _MatchSettingsPageState extends State<MatchSettingsPage>
           max: 8,
           divisions: 7,
           valueText: '$concurrency',
-          description: '批量匹配 / 插件搜索同时请求数',
+          description: '批量匹配同时请求数',
           onChanged: (v) => _applyConcurrency(v.toInt()),
         );
       },

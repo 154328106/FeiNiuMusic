@@ -2,8 +2,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:dio/dio.dart';
 
-import '../feiniu/api_client.dart';
 import '../companion/companion_error.dart';
+import '../feiniu/api_client.dart';
+import 'lyrics_repository.dart';
 
 /// FnMusicEnhance 服务端增强歌词服务。
 ///
@@ -182,6 +183,8 @@ class LyricCompanionService {
     if (verify.isEmpty) {
       throw Exception('写入后读取验证失败');
     }
+    // 同步更新本地歌词缓存，避免播放时 loadLrc 读到旧歌词
+    await LyricsRepository().saveLrcToCache(guid, verify, overwrite: true);
   }
 
   Map<String, String> _authHeaders() {

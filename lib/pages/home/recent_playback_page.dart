@@ -426,30 +426,39 @@ class _RecentPlaybackPageState extends State<RecentPlaybackPage>
 
                   final songs = _songs.value;
                   if (songs.isEmpty) {
-                    return Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
+                    return RefreshIndicator(
+                      onRefresh: _loadHistory,
+                      child: ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
                         children: [
-                          Icon(
-                            Icons.history_rounded,
-                            size: 64,
-                            color: scheme.primary,
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            '还没有播放记录',
-                            style: TextStyle(color: scheme.onSurfaceVariant),
+                          const SizedBox(height: 160),
+                          Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.history_rounded,
+                                  size: 64,
+                                  color: scheme.primary,
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  '还没有播放记录',
+                                  style: TextStyle(
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ),
                     );
                   }
 
-                  return RefreshIndicator(
-                    onRefresh: _loadHistory,
-                    child: Column(
-                      children: [
-                        Container(
+                  return Column(
+                    children: [
+                      Container(
                           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                           child: Row(
                             children: [
@@ -479,9 +488,12 @@ class _RecentPlaybackPageState extends State<RecentPlaybackPage>
                           ),
                         ),
                         Expanded(
-                          child: ListView.builder(
-                            controller: _scrollController,
-                            padding: EdgeInsets.fromLTRB(16, 0, 16, 160),
+                          child: RefreshIndicator(
+                            onRefresh: _loadHistory,
+                            child: ListView.builder(
+                              controller: _scrollController,
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              padding: EdgeInsets.fromLTRB(16, 0, 16, 160),
                             itemCount:
                                 songs.length + (_loadingMore.value ? 1 : 0),
                             itemBuilder: (context, index) {
@@ -566,9 +578,9 @@ class _RecentPlaybackPageState extends State<RecentPlaybackPage>
                             },
                           ),
                         ),
-                        if (isMultiSelecting) buildMultiSelectBar(),
+                      ),
+                      if (isMultiSelecting) buildMultiSelectBar(),
                       ],
-                    ),
                   );
                 },
               ),

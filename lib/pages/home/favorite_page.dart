@@ -516,19 +516,26 @@ class _FavoritePageState extends State<FavoritePage>
 
                   final songs = _songs.value;
                   if (songs.isEmpty) {
-                    return Center(
-                      child: Text(
-                        '还没有收藏歌曲',
-                        style: TextStyle(color: scheme.onSurfaceVariant),
+                    return RefreshIndicator(
+                      onRefresh: () => _load(forceRefresh: true),
+                      child: ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        children: [
+                          const SizedBox(height: 160),
+                          Center(
+                            child: Text(
+                              '还没有收藏歌曲',
+                              style: TextStyle(color: scheme.onSurfaceVariant),
+                            ),
+                          ),
+                        ],
                       ),
                     );
                   }
 
-                  return RefreshIndicator(
-                    onRefresh: () => _load(forceRefresh: true),
-                    child: Column(
-                      children: [
-                        Container(
+                  return Column(
+                    children: [
+                      Container(
                           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                           child: Row(
                             children: [
@@ -558,9 +565,12 @@ class _FavoritePageState extends State<FavoritePage>
                           ),
                         ),
                         Expanded(
-                          child: ListView.builder(
-                            controller: _scrollController,
-                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 160),
+                          child: RefreshIndicator(
+                            onRefresh: () => _load(forceRefresh: true),
+                            child: ListView.builder(
+                              controller: _scrollController,
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 160),
                             itemCount:
                                 songs.length + (_loadingMore.value ? 1 : 0),
                             itemBuilder: (context, index) {
@@ -645,13 +655,13 @@ class _FavoritePageState extends State<FavoritePage>
                             },
                           ),
                         ),
-                        if (isMultiSelecting)
+                      ),
+                      if (isMultiSelecting)
                           buildMultiSelectBar(
                             includeFavorite: false,
                             includeRemoveFavorite: true,
                           ),
                       ],
-                    ),
                   );
                 },
               ),

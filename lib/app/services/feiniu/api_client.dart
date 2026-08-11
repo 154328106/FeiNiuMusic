@@ -1126,21 +1126,35 @@ class FeiNiuApiClient {
 
   /// 清除歌单内无效歌曲（曲目已被删除/失效）。
   ///
-  /// `GET /playlist/purge-track-count?guid=...`，返回 `data.total` 表示清除的
-  /// 无效歌曲数。接口失败时抛异常。
+  /// 先 `GET /playlist/purge-track-count?guid=...` 取待清除数量（用于结果提示），
+  /// 再 `POST /playlist/purge-track`（body `{"guid": ...}`）真正执行清除。
+  /// 返回清除的无效歌曲数。
   Future<int> purgeInvalidTracks(String playlistGuid) async {
-    final data = await _get(
-      '/playlist/purge-track-count',
-      queryParameters: {'guid': playlistGuid},
+    // 1) 先取待清除数量；数量接口失败不阻塞后续清除。
+    int count = 0;
+    try {
+      final countData = await _get(
+        '/playlist/purge-track-count',
+        queryParameters: {'guid': playlistGuid},
+      );
+      final countResp = FeiNiuResponse.fromJson(
+        countData,
+        (d) => (d as Map<String, dynamic>)['total'] as int? ?? 0,
+      );
+      if (countResp.isSuccess) count = countResp.data ?? 0;
+    } catch (_) {
+      count = 0;
+    }
+    // 2) 真正执行清除（仅调 count 接口不会删除任何歌曲）。
+    final data = await _post(
+      '/playlist/purge-track',
+      data: {'guid': playlistGuid},
     );
-    final response = FeiNiuResponse.fromJson(
-      data,
-      (d) => (d as Map<String, dynamic>)['total'] as int? ?? 0,
-    );
+    final response = FeiNiuResponse.fromJson(data, null);
     if (!response.isSuccess) {
       throw Exception(response.msg.isNotEmpty ? response.msg : '清除无效歌曲失败');
     }
-    return response.data ?? 0;
+    return count;
   }
 
   Future<void> editPlaylist({

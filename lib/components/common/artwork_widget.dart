@@ -146,6 +146,42 @@ class _ArtworkWidgetState extends State<ArtworkWidget> with SignalsMixin {
       child = placeholder;
     }
 
+    // 失效歌曲（音频文件已删除）：封面叠加灰色遮罩 + 「已失效」标记
+    if (widget.song.isAudioFileDeleted) {
+      return SizedBox(
+        width: size,
+        height: size,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            child,
+            ColoredBox(color: Colors.black.withValues(alpha: 0.45)),
+            Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.error_outline_rounded,
+                    size: size * 0.30,
+                    color: Colors.white,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '已失效',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: size * 0.16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return SizedBox(width: size, height: size, child: child);
   }
 }

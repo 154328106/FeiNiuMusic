@@ -26,7 +26,7 @@ import '../../pages/settings/version_info_page.dart';
 import '../../pages/settings/volume_settings_page.dart';
 import '../../pages/settings/launch_settings_page.dart';
 import '../../pages/settings/transcode_settings_page.dart';
-import '../../pages/settings/data_source_page.dart';
+import '../../pages/settings/search_source_page.dart';
 import '../../pages/settings/match_settings_page.dart';
 import '../../pages/settings/metadata_match_settings_page.dart';
 import '../../pages/settings/dlna_settings_page.dart';
@@ -127,7 +127,7 @@ class AppRouter {
       songs: (ModalRoute.of(context)?.settings.arguments as List<dynamic>? ?? const [])
           .cast<SongEntity>(),
     ),
-    AppRoutes.dataSourceSettings: (_) => const DataSourcePage(),
+    AppRoutes.dataSourceSettings: (_) => const SearchSourcePage(),
     AppRoutes.matchSettings: (_) => const MatchSettingsPage(),
     AppRoutes.metadataMatchSettings: (_) => const MetadataMatchSettingsPage(),
     AppRoutes.transcodeSettings: (_) => const TranscodeSettingsPage(),

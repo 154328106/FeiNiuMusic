@@ -2,16 +2,16 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:feiniu_music/app/services/plugin/plugin_service.dart';
+import 'package:feiniu_music/app/utils/map_concurrent.dart';
 
 void main() {
-  group('PluginService.mapConcurrent', () {
+  group('mapConcurrent', () {
     test('并发上限限制：同时执行数不超过 limit', () async {
       var concurrent = 0;
       var peakConcurrent = 0;
       final items = List.generate(10, (i) => i);
 
-      final results = await PluginService.mapConcurrent<int, int>(
+      final results = await mapConcurrent<int, int>(
         items,
         3,
         (item) async {
@@ -30,7 +30,7 @@ void main() {
     });
 
     test('空列表：立即返回空', () async {
-      final results = await PluginService.mapConcurrent<int, int>(
+      final results = await mapConcurrent<int, int>(
         const [],
         3,
         (item) async => item,
@@ -41,7 +41,7 @@ void main() {
     test('limit 大于列表长度：全部并行，全部完成', () async {
       var concurrent = 0;
       var peakConcurrent = 0;
-      final results = await PluginService.mapConcurrent<int, int>(
+      final results = await mapConcurrent<int, int>(
         List.generate(5, (i) => i),
         10, // limit 超过元素数
         (item) async {
@@ -58,7 +58,7 @@ void main() {
 
     test('action 抛异常：向上传播', () async {
       await expectLater(
-        PluginService.mapConcurrent<int, int>(
+        mapConcurrent<int, int>(
           [1, 2, 3],
           2,
           (item) async {
@@ -72,7 +72,7 @@ void main() {
 
     test('并发顺序不阻塞进度（结果数量完整）', () async {
       final items = List.generate(8, (i) => i);
-      final results = await PluginService.mapConcurrent<int, int>(
+      final results = await mapConcurrent<int, int>(
         items,
         4,
         (item) async {

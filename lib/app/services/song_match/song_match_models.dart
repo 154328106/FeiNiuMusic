@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import '../../state/settings_match.dart';
 
-/// 插件搜索结果（映射 Lyrico SongSearchResult，见 PluginJsonParser.kt）。
+/// 搜索结果（映射 Lyrico SongSearchResult，见 PluginJsonParser.kt）。
 class SongMatchResult {
   final String id;
   final String pluginId;
@@ -206,9 +206,15 @@ class LyricMatchResult {
     required bool includeRomanization,
     required bool includeTranslation,
   }) {
-    if (onlyTranslation) return _renderPlain(onlyTranslation: true, includeRomanization: false, includeTranslation: true);
+    if (onlyTranslation) {
+      return _renderPlain(
+          onlyTranslation: true,
+          includeRomanization: false,
+          includeTranslation: true);
+    }
     final base = _linesToVerbatimLrc(original);
-    return _appendLinkedLines(base, includeRomanization, includeTranslation, verbatim: true);
+    return _appendLinkedLines(
+        base, includeRomanization, includeTranslation, verbatim: true);
   }
 
   /// 增强逐字 LRC + 翻译/罗马音合并。
@@ -217,9 +223,15 @@ class LyricMatchResult {
     required bool includeRomanization,
     required bool includeTranslation,
   }) {
-    if (onlyTranslation) return _renderPlain(onlyTranslation: true, includeRomanization: false, includeTranslation: true);
+    if (onlyTranslation) {
+      return _renderPlain(
+          onlyTranslation: true,
+          includeRomanization: false,
+          includeTranslation: true);
+    }
     final base = _linesToEnhancedLrc(original);
-    return _appendLinkedLines(base, includeRomanization, includeTranslation, verbatim: false);
+    return _appendLinkedLines(
+        base, includeRomanization, includeTranslation, verbatim: false);
   }
 
   /// 把翻译/罗马音按行时间戳追加到逐字/增强输出后（Lyrico 按原文行合并）。
@@ -439,7 +451,7 @@ class LyricLine {
   });
 }
 
-/// 解析插件 `searchSongs` 返回的原始 JSON（Lyrico PluginJsonParser 语义）。
+/// 解析搜索结果的原始 JSON（Lyrico PluginJsonParser 语义）。
 List<SongMatchResult> parseSongResults(
   String rawJson,
   String pluginId,
@@ -450,7 +462,8 @@ List<SongMatchResult> parseSongResults(
   final root = jsonDecode(rawJson);
   final items = switch (root) {
     List list => list,
-    Map map => _firstList(map.cast<String, dynamic>(), ['items', 'results', 'songs', 'data']),
+    Map map => _firstList(
+        map.cast<String, dynamic>(), ['items', 'results', 'songs', 'data']),
     _ => <dynamic>[],
   };
   if (items == null) return [];
@@ -460,7 +473,8 @@ List<SongMatchResult> parseSongResults(
   for (final element in items) {
     if (element is! Map) continue;
     final obj = element.cast<String, dynamic>();
-    final coverUrl = _firstString(obj, ['picUrl', 'coverUrl', 'cover_url', 'artworkUrl']);
+    final coverUrl =
+        _firstString(obj, ['picUrl', 'coverUrl', 'cover_url', 'artworkUrl']);
     final id = _firstString(obj, ['id', 'songId', 'trackId']);
     if (id.isEmpty && requireId) {
       continue;
@@ -475,7 +489,8 @@ List<SongMatchResult> parseSongResults(
     final album = _firstString(obj, ['album', 'albumName']);
     final date = _firstString(obj, ['year', 'date', 'releaseDate', 'release_date']);
     final duration = _firstInt(obj, ['duration', 'durationMs', 'duration_ms']);
-    final trackNumber = _firstString(obj, ['trackNumber', 'trackerNumber', 'track_number']);
+    final trackNumber =
+        _firstString(obj, ['trackNumber', 'trackerNumber', 'track_number']);
     final discNumber = _firstString(obj, ['discNumber', 'disc_number', 'disc']);
     final fields = _stringMap(obj['fields'] ?? obj['metadata']);
     final internal = _stringMap(obj['internal']);
@@ -500,76 +515,11 @@ List<SongMatchResult> parseSongResults(
   return results;
 }
 
-/// 解析插件 `getLyrics` 返回的候选（API 4：数组；API 1-3：单对象/字符串）。
-List<LyricMatchResult> parseLyricsCandidates(
-  String rawJson,
-  String pluginId,
-  String pluginName, {
-  required Map<String, String> fallbackSong,
-}) {
-  if (rawJson.isEmpty) return [];
-  final root = jsonDecode(rawJson);
-
-  // API 4：直接数组或 items/results/candidates 包装；
-  // API 1-3：裸字符串（整段 LRC）作为单候选。
-  final items = switch (root) {
-    List list => list,
-    Map map => _firstList(map.cast<String, dynamic>(), ['items', 'results', 'candidates']) ?? [map],
-    String s when s.isNotEmpty => [s],
-    _ => <dynamic>[],
-  };
-
-  final results = <LyricMatchResult>[];
-  for (final element in items) {
-    if (element is! Map) {
-      // 裸字符串（整段 LRC）→ 单候选
-      if (element is String && element.isNotEmpty) {
-        results.add(LyricMatchResult(
-          pluginId: pluginId,
-          pluginName: pluginName,
-          type: 'rawPlainLrc',
-          tags: {
-            'ti': fallbackSong['title'] ?? '',
-            'ar': fallbackSong['artist'] ?? '',
-          },
-          rawPlainLrc: element,
-        ));
-      }
-      continue;
-    }
-    final obj = element.cast<String, dynamic>();
-    final type = obj['type']?.toString() ?? 'structured';
-    final tags = _stringMap(obj['tags']);
-
-    if (type == 'structured') {
-      results.add(LyricMatchResult(
-        pluginId: pluginId,
-        pluginName: pluginName,
-        type: 'structured',
-        tags: tags,
-        original: _parseLines(obj['original']),
-        translated: _parseLines(obj['translated']),
-        romanization: _parseLines(obj['romanization']),
-      ));
-    } else {
-      results.add(LyricMatchResult(
-        pluginId: pluginId,
-        pluginName: pluginName,
-        type: type,
-        tags: tags,
-        rawPlainLrc: obj['rawPlainLrc']?.toString() ?? '',
-        rawVerbatimLrc: obj['rawVerbatimLrc']?.toString() ?? '',
-        rawEnhancedLrc: obj['rawEnhancedLrc']?.toString() ?? '',
-        rawTtml: obj['rawTtml']?.toString() ?? '',
-        rawMultiPersonEnhancedLrc:
-            obj['rawMultiPersonEnhancedLrc']?.toString() ?? '',
-      ));
-    }
-  }
-  return results;
-}
-
-List<LyricLine> _parseLines(dynamic raw) {
+/// 解析 structured 行列表（Lyrico PluginJsonParser 语义）。
+///
+/// 每行格式：`[startMs, endMs, "文本"]` 或
+/// `[startMs, endMs, [[ws, we, "字"], ...]]`（逐词）。
+List<LyricLine> parseStructuredLines(dynamic raw) {
   if (raw is! List) return [];
   final lines = <LyricLine>[];
   for (final line in raw) {
@@ -607,6 +557,78 @@ List<LyricLine> _parseLines(dynamic raw) {
     ));
   }
   return lines;
+}
+
+/// 解析歌词候选原始 JSON（Lyrico PluginJsonParser 语义，API 4 数组 / 1-3 单对象/字符串）。
+///
+/// 由后端歌词接口或插件返回；结构化歌词行经 [parseStructuredLines] 解析。
+List<LyricMatchResult> parseLyricsCandidates(
+  String rawJson,
+  String pluginId,
+  String pluginName, {
+  required Map<String, String> fallbackSong,
+}) {
+  if (rawJson.isEmpty) return [];
+  final root = jsonDecode(rawJson);
+
+  // API 4：直接数组或 items/results/candidates 包装；
+  // API 1-3：裸字符串（整段 LRC）作为单候选。
+  final items = switch (root) {
+    List list => list,
+    Map map =>
+      _firstList(map.cast<String, dynamic>(), ['items', 'results', 'candidates']) ??
+          [map],
+    String s when s.isNotEmpty => [s],
+    _ => <dynamic>[],
+  };
+
+  final results = <LyricMatchResult>[];
+  for (final element in items) {
+    if (element is! Map) {
+      // 裸字符串（整段 LRC）→ 单候选
+      if (element is String && element.isNotEmpty) {
+        results.add(LyricMatchResult(
+          pluginId: pluginId,
+          pluginName: pluginName,
+          type: 'rawPlainLrc',
+          tags: {
+            'ti': fallbackSong['title'] ?? '',
+            'ar': fallbackSong['artist'] ?? '',
+          },
+          rawPlainLrc: element,
+        ));
+      }
+      continue;
+    }
+    final obj = element.cast<String, dynamic>();
+    final type = obj['type']?.toString() ?? 'structured';
+    final tags = _stringMap(obj['tags']);
+
+    if (type == 'structured') {
+      results.add(LyricMatchResult(
+        pluginId: pluginId,
+        pluginName: pluginName,
+        type: 'structured',
+        tags: tags,
+        original: parseStructuredLines(obj['original']),
+        translated: parseStructuredLines(obj['translated']),
+        romanization: parseStructuredLines(obj['romanization']),
+      ));
+    } else {
+      results.add(LyricMatchResult(
+        pluginId: pluginId,
+        pluginName: pluginName,
+        type: type,
+        tags: tags,
+        rawPlainLrc: obj['rawPlainLrc']?.toString() ?? '',
+        rawVerbatimLrc: obj['rawVerbatimLrc']?.toString() ?? '',
+        rawEnhancedLrc: obj['rawEnhancedLrc']?.toString() ?? '',
+        rawTtml: obj['rawTtml']?.toString() ?? '',
+        rawMultiPersonEnhancedLrc: obj['rawMultiPersonEnhancedLrc']?.toString() ?? '',
+      ));
+    }
+  }
+  return results;
 }
 
 String _firstString(Map<String, dynamic> obj, List<String> keys) {

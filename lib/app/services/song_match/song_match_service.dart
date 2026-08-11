@@ -6,8 +6,9 @@ import '../../state/settings_match.dart';
 import '../companion/metadata_companion_service.dart';
 import '../feiniu/api_client.dart';
 import '../feiniu/api_models.dart';
-import '../plugin/plugin_result_parser.dart';
-import '../plugin/plugin_service.dart';
+import 'backend_match_client.dart';
+import 'match_source_state.dart';
+import 'song_match_models.dart';
 
 /// 可匹配的字段（用户可在批量匹配确认页选择应用哪些）。
 enum MatchField {
@@ -94,36 +95,44 @@ class SongMatchPatch {
   bool get hasCover => coverBytes != null || (coverUrl?.isNotEmpty ?? false);
 }
 
-/// 歌曲匹配服务：把 Lyrico 插件搜索候选转换为可应用到歌曲的补丁。
+/// 歌曲匹配服务：把后端搜索候选转换为可应用到歌曲的补丁。
 class SongMatchService {
   SongMatchService._internal();
 
   static final SongMatchService instance = SongMatchService._internal();
 
-  final PluginService _pluginService = PluginService.instance;
+  final BackendMatchClient _backend = BackendMatchClient.instance;
   final FeiNiuApiClient _api = FeiNiuApiClient.instance;
 
-  /// 搜索匹配候选（聚合所有插件的 searchSongs），**按源分组**返回。
+  /// 当前是否可用（已配置服务端增强地址 + 已登录）。
+  bool get available => _backend.available;
+
+  /// 搜索匹配候选（后端多平台搜索），**按客户端启用的平台顺序**分组返回。
   Future<GroupedSongResults> searchCandidates(
     String keyword, {
     int page = 1,
     int pageSize = 20,
   }) {
-    return _pluginService.searchSongs(keyword, page: page, pageSize: pageSize);
+    return _backend.searchSongs(
+      keyword: keyword,
+      sources: MatchSourceState.instance.enabledIdsInOrder,
+      page: page,
+      pageSize: pageSize,
+    );
   }
 
-  /// 搜索封面候选（聚合所有插件的 searchCovers）。
+  /// 搜索封面候选（后端多平台搜索）。
   ///
-  /// [searchType] 规范取值：0=歌曲，1=歌手，2=专辑（QQ/网易云插件内部
-  /// 会转换为各自平台的搜索类型；其余插件忽略该参数）。
+  /// [searchType] 规范取值：0=歌曲，1=歌手，2=专辑（后端按各平台类型映射）。
   Future<List<SongMatchResult>> searchCovers(
     String keyword, {
     int page = 1,
     int pageSize = 10,
     int searchType = 0,
   }) {
-    return _pluginService.searchCovers(
-      keyword,
+    return _backend.searchCovers(
+      keyword: keyword,
+      sources: MatchSourceState.instance.enabledIdsInOrder,
       page: page,
       pageSize: pageSize,
       searchType: searchType,
@@ -192,64 +201,69 @@ class SongMatchService {
     );
   }
 
-  /// 从数据源插件获取候选歌词（LRC），取第一个有内容的候选。
+  /// 从后端获取歌词（LRC），按歌词模式 + 翻译/罗马音偏好渲染。
   ///
-  /// 返回 null 表示未获取到歌词。
+  /// [pluginId] 指定候选来自的平台（只查该平台）；否则按客户端启用平台顺序
+  /// 遍历，取第一个有歌词的。返回 null 表示未获取到歌词。
   Future<String?> fetchLyrics({
     required String title,
     required String artist,
     String album = '',
     int duration = 0,
-    String? sourceId, // 源平台歌曲 id（来自 searchSongs 候选），供 getLyrics 定位
+    String? sourceId, // 源平台歌曲 id（来自 searchSongs 候选），供定位歌词
     Map<String, String>? sourceInternal,
     Map<String, String>? sourceFields,
-    String? pluginId, // 候选来自哪个插件（getLyrics 需同插件）
+    String? pluginId, // 候选来自哪个平台（只查该平台歌词）
   }) async {
-    final candidates = await _pluginService.getLyricsCandidates(
-      songId: sourceId ?? title, // 优先用源平台 id，无则标题占位
-      title: title,
-      artist: artist,
-      album: album,
-      duration: duration,
-      pluginId: pluginId,
-      internal: sourceInternal,
-      fields: sourceFields,
-    );
-    if (candidates.isEmpty) return null;
-    // 按歌词模式（逐字/增强逐字/逐行/TTML）+ 翻译/罗马音偏好选择歌词。
-    final mode = MatchSettings.lyricMode.value;
-    final includeTranslation = MatchSettings.translation.value;
-    final includeRomanization = MatchSettings.romanization.value;
-    final onlyTranslation = MatchSettings.onlyTranslation.value;
-
-    // TTML 模式：优先找 rawTtml 类型候选（Apple 等插件），否则退回普通处理。
-    if (mode == LyricMode.ttml) {
-      for (final candidate in candidates) {
-        if (candidate.type == 'rawTtml' && candidate.rawTtml.isNotEmpty) {
-          return candidate.rawTtml;
-        }
-      }
-      // 无 rawTtml 候选时退回 structured → 生成 TTML
-      for (final candidate in candidates) {
-        final text = candidate.lyricsFor(
-          mode,
-          includeTranslation: includeTranslation,
-          includeRomanization: includeRomanization,
-          onlyTranslation: onlyTranslation,
-        );
-        if (text.isNotEmpty) return text;
-      }
-      return null;
-    }
-
-    for (final candidate in candidates) {
+    final platforms = pluginId != null
+        ? [pluginId]
+        : MatchSourceState.instance.enabledIdsInOrder;
+    // 客户端偏好：简繁转换 / 移除空行 / 过滤规则（传服务端处理）
+    final convert = switch (MatchSettings.chineseConvert.value) {
+      ChineseTextConvert.simplifiedToTraditional => 'simplifiedToTraditional',
+      ChineseTextConvert.traditionalToSimplified => 'traditionalToSimplified',
+      ChineseTextConvert.none => 'none',
+    };
+    final removeBlankLines = MatchSettings.removeBlankLines.value;
+    final filterRules = MatchSettings.filterRules.value;
+    for (final platform in platforms) {
+      final result = await _backend.fetchLyrics(
+        platform: platform,
+        songId: sourceId ?? title,
+        title: title,
+        artist: artist,
+        album: album,
+        duration: duration,
+        convert: convert,
+        removeBlankLines: removeBlankLines,
+        filterRules: filterRules,
+      );
+      if (result == null) continue;
+      // 优先后端 structured（词级/行级）；无则从 rawPlainLrc 降级解析行级。
+      final original = result.original.isNotEmpty
+          ? result.original
+          : linesFromPlainLrc(result.rawPlainLrc);
+      if (original.isEmpty) continue;
+      final candidate = LyricMatchResult(
+        pluginId: 'backend',
+        pluginName: '后端',
+        type: 'structured',
+        tags: {'ti': title, 'ar': artist, 'al': album},
+        original: original,
+        translated: result.translated,
+        romanization: result.romanization,
+      );
+      final mode = MatchSettings.lyricMode.value;
+      final includeTranslation = MatchSettings.translation.value;
+      final includeRomanization = MatchSettings.romanization.value;
+      final onlyTranslation = MatchSettings.onlyTranslation.value;
       final text = candidate.lyricsFor(
         mode,
         includeTranslation: includeTranslation,
         includeRomanization: includeRomanization,
         onlyTranslation: onlyTranslation,
       );
-      if (text.isNotEmpty) return text;
+      if (text.trim().isNotEmpty) return text;
     }
     return null;
   }
@@ -380,4 +394,37 @@ class SongMatchService {
     }
     return buffer.toString();
   }
+}
+
+/// 把行级 LRC 文本解析为 structured 行列表（无逐字时间戳）。
+///
+/// 解析 `[mm:ss.xx]text`（毫秒位支持 1~3 位）；纯时间戳行 / 空行忽略。
+/// 供后端歌词（原文/翻译/罗马音三条 LRC）构造 [LyricMatchResult] 后走
+/// `lyricsFor` 渲染。
+List<LyricLine> linesFromPlainLrc(String lrc) {
+  if (lrc.isEmpty) return const [];
+  final lines = <LyricLine>[];
+  final re = RegExp(r'\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?](.*)');
+  for (final raw in lrc.split('\n')) {
+    final m = re.firstMatch(raw.trim());
+    if (m == null) continue;
+    final minutes = int.tryParse(m.group(1)!);
+    final seconds = int.tryParse(m.group(2)!);
+    if (minutes == null || seconds == null) continue;
+    var startMs = (minutes * 60 + seconds) * 1000;
+    final fracRaw = m.group(3);
+    if (fracRaw != null && fracRaw.isNotEmpty) {
+      final frac = int.tryParse(fracRaw) ?? 0;
+      final scale = fracRaw.length == 1
+          ? 100
+          : fracRaw.length == 2
+              ? 10
+              : 1;
+      startMs += frac * scale;
+    }
+    final text = m.group(4)!.trim();
+    if (text.isEmpty) continue;
+    lines.add(LyricLine(startMs: startMs, endMs: startMs, text: text));
+  }
+  return lines;
 }

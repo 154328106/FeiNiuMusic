@@ -21,7 +21,7 @@ import 'app/services/feiniu/account_store.dart';
 import 'app/services/feiniu/api_client.dart';
 import 'app/services/feiniu/auth_service.dart';
 import 'app/services/feiniu/fn_connection_probe_service.dart';
-import 'app/services/plugin/plugin_service.dart';
+import 'app/services/song_match/match_source_state.dart';
 import 'app/state/settings_island_lyric.dart';
 import 'app/state/settings_lyric_companion.dart';
 import 'app/state/settings_match.dart';
@@ -112,10 +112,18 @@ Future<void> main() async {
   if (Platform.isAndroid) {
     IslandLyricService.start();
   }
-  // 数据源匹配设置 + 服务端增强（FnMusicEnhance）设置：启动时加载，
-  // 并把并发上限同步到 PluginService。
+  // 数据源匹配设置 + 服务端增强（FnMusicEnhance）设置：启动时加载。
   await MatchSettings.ensureLoaded();
-  PluginService.instance.concurrencyLimit = MatchSettings.concurrency.value;
+  await MatchSourceState.instance.ensureLoaded();
+  // 后台刷新可用平台（不阻塞启动）：首次运行拉取列表并默认全启用，
+  // 后续启动读缓存；后端不可达时静默保留缓存。
+  unawaited(() async {
+    try {
+      await MatchSourceState.instance.refresh();
+    } catch (_) {
+      // 后端不可达：保留缓存，不阻塞启动
+    }
+  }());
   await LyricCompanionSettings.ensureLoaded();
   await AppBackgroundSettings.ensureLoaded();
   await AppFnConnectionSettings.ensureLoaded();
@@ -161,9 +169,17 @@ class _SslOverride extends HttpOverrides {
       // 实时读取用户 SSL 忽略偏好
       return AppFnConnectionSettings.ignoreSsl.value;
     };
+    // 浏览器 UA：网易云等平台 CDN 拒绝 Dart/Dio 默认 UA（HTTP 403），
+    // 全局覆盖使封面加载（CachedNetworkImage/NetworkImage/Dio）统一带浏览器 UA。
+    client.userAgent = _browserUserAgent;
     return client;
   }
 }
+
+/// 浏览器 User-Agent（外部平台封面/CDN 用）。
+const String _browserUserAgent =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+    '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 /// 后台连接预热——不阻塞首页渲染，静默验证缓存连接的可用性
 void _warmupConnection() {

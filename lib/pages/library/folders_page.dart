@@ -278,6 +278,20 @@ class _FoldersPageState extends State<FoldersPage>
       _total.value = listing.total;
       _fileTotal.value = listing.fileTotal;
       _hasMore.value = listing.files.length < listing.fileTotal;
+
+      // 自动进入：当前目录只有一个文件夹且没有歌曲时，自动进入该文件夹（递归，
+      // 直到出现多文件夹或歌曲）。搜索/平铺模式下不自动进入。
+      if (_searchQuery.value.isEmpty &&
+          !_flatten.value &&
+          listing.folders.length == 1 &&
+          listing.fileTotal == 0) {
+        final only = listing.folders.first;
+        if (only.path != _path.value) {
+          _path.value = only.path;
+          await _load();
+          return;
+        }
+      }
     } catch (e) {
       if (!mounted) return;
       _error.value = e.toString().replaceFirst('Exception: ', '');

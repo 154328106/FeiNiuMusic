@@ -3,7 +3,7 @@ import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
 import '../../app/services/feiniu/favorite_service.dart';
 import '../../app/services/player_service.dart';
-import '../../app/services/plugin/plugin_service.dart';
+import '../../app/services/song_match/song_match_service.dart';
 import '../../app/state/song_state.dart';
 import '../../pages/library/playlists_page.dart' show showAddToPlaylistDialog;
 import '../../app/router/app_router.dart';
@@ -229,8 +229,8 @@ mixin SongMultiSelectMixin<T extends StatefulWidget>
         label: '添加到歌单',
         onTap: empty ? null : () => addSelectedToPlaylist(),
       ),
-      // 「批量匹配」依赖数据源插件（原生 QuickJS），非 Android 隐藏。
-      if (PluginService.pluginSupportedOnPlatform)
+      // 「批量匹配」依赖服务端增强（FnMusicEnhance）数据源，后端不可达时隐藏。
+      if (SongMatchService.instance.available)
         MultiSelectAction(
           icon: Icons.travel_explore_rounded,
           label: '批量匹配',

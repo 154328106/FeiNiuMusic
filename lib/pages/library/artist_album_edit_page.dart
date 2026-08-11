@@ -5,14 +5,14 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../app/services/companion/companion_error.dart';
 import '../../app/services/companion/metadata_companion_service.dart';
 import '../../app/services/feiniu/api_client.dart';
-import '../../app/services/plugin/plugin_result_parser.dart';
-import '../../app/services/plugin/plugin_service.dart';
+import '../../app/services/song_match/song_match_models.dart';
 import '../../app/services/song_match/song_match_service.dart';
 import '../../app/state/settings_lyric_companion.dart';
 import '../../app/utils/image_crop_helper.dart';
@@ -80,12 +80,12 @@ class _ArtistAlbumEditPageState extends State<ArtistAlbumEditPage> {
                 _pickCover();
               },
             ),
-            // 「联网搜索封面」依赖数据源插件（原生 QuickJS），非 Android 隐藏。
-            if (PluginService.pluginSupportedOnPlatform)
+            // 「联网搜索封面」依赖服务端增强数据源，后端可达即可用（含 Windows）。
+            if (SongMatchService.instance.available)
               ListTile(
                 leading: const Icon(Icons.travel_explore_rounded),
                 title: const Text('联网搜索封面'),
-                subtitle: const Text('通过数据源插件搜索匹配的封面'),
+                subtitle: const Text('通过数据源搜索匹配的封面'),
                 onTap: () {
                   Navigator.pop(sheetContext);
                   _searchCoverOnline();
@@ -183,7 +183,10 @@ class _ArtistAlbumEditPageState extends State<ArtistAlbumEditPage> {
     }
   }
 
-  /// 下载封面 URL 到本地临时文件（供预览与保存时上传）。
+  /// 下载封面 URL 到本地临时文件（转成 JPEG，供预览与保存时上传）。
+  ///
+  /// 平台封面可能是 webp 等格式，服务端增强仅接受 PNG/JPEG（magic-byte 校验），
+  /// 故下载后统一转成 JPEG，避免上传被拒。
   Future<String?> _downloadCoverToLocal(String url) async {
     if (url.isEmpty) return null;
     try {
@@ -198,10 +201,22 @@ class _ArtistAlbumEditPageState extends State<ArtistAlbumEditPage> {
       final response = await dio.get<Uint8List>(url);
       final bytes = response.data;
       if (bytes == null || bytes.isEmpty) return null;
+      // webp 等格式 → JPEG（PNG/JPEG 转码后仍是 JPEG，统一通过服务端校验）
+      var out = bytes;
+      try {
+        final jpeg = await FlutterImageCompress.compressWithList(
+          bytes,
+          quality: 92,
+          format: CompressFormat.jpeg,
+        );
+        if (jpeg.isNotEmpty) out = Uint8List.fromList(jpeg);
+      } catch (_) {
+        // 转码失败用原字节（PNG/JPEG 也能直接通过）
+      }
       final dir = await getTemporaryDirectory();
       final file =
           File('${dir.path}/cover_${DateTime.now().millisecondsSinceEpoch}.jpg');
-      await file.writeAsBytes(bytes);
+      await file.writeAsBytes(out);
       return file.path;
     } catch (e) {
       debugPrint('[ArtistAlbumEditPage] download cover error: $e');
