@@ -59,7 +59,9 @@ class PluginService {
 
   /// 数据源插件走原生 QuickJS（MethodChannel `com.feiniu.music/match_plugin`），
   /// 仅 Android 有实现。桌面端（Windows）显式禁用，返回空结果。
-  static bool get _enabledOnPlatform => !kIsWeb && Platform.isAndroid;
+  static bool get pluginSupportedOnPlatform => !kIsWeb && Platform.isAndroid;
+
+  static bool get _enabledOnPlatform => pluginSupportedOnPlatform;
 
   /// 搜索歌曲（聚合所有已启用且含 searchSongs 能力的插件），**按源分组**返回。
   ///
@@ -155,6 +157,7 @@ class PluginService {
     int duration = 0,
     String? pluginId,
     Map<String, String>? internal,
+    Map<String, String>? fields,
   }) async {
     if (!_enabledOnPlatform) return [];
     final plugins = await PluginStore.instance.getPlugins();
@@ -164,6 +167,9 @@ class PluginService {
             p.hasCapability(PluginCapability.getLyrics) &&
             (pluginId == null || p.manifest.id == pluginId))
         .toList();
+    debugPrint('[getLyrics] pluginId=$pluginId 过滤后 ${candidates.length} 个，'
+        '总插件 ${plugins.length}，'
+        'getLyrics能力 ${plugins.where((p) => p.hasCapability(PluginCapability.getLyrics)).length}');
     if (candidates.isEmpty) return [];
 
     final fallback = {'title': title, 'artist': artist};
@@ -177,9 +183,10 @@ class PluginService {
           'duration': duration,
           'sourceId': plugin.manifest.id,
           'pluginId': plugin.manifest.id,
-          'fields': <String, String>{},
+          'fields': fields ?? <String, String>{},
           'internal': internal ?? <String, String>{},
         };
+        debugPrint('[getLyrics] song=$song');
         final raw = await _call(plugin, 'getLyrics', {
           'song': song,
           'page': 1,

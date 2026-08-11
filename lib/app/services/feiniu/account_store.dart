@@ -420,6 +420,9 @@ class AccountStore {
     // 会触发门控重建外壳、新首页立即读 SQLite 缓存，若缓存未清会先渲染旧数据。
     await _clearDataCaches();
     currentAccountId.value = entry.id;
+    // 地址账号登录（无 fnId）时清掉残留的 fn_last_fnid，避免启动预热用
+    // 上一个 FNID 账号的标识去探测/回写，把地址账号误改成 FNID 身份。
+    await _syncLastFnIdFor(entry.fnId);
     await _persist();
     return entry;
   }
@@ -471,6 +474,8 @@ class AccountStore {
     // 避免新账号首页/列表渲染旧服务器数据。
     await _clearDataCaches();
     currentAccountId.value = id;
+    // 地址账号（无 fnId）时清残留 fn_last_fnid，避免身份被改写。
+    await _syncLastFnIdFor(updated.fnId);
     await _persist();
     return updated;
   }
@@ -602,10 +607,15 @@ class AccountStore {
     return true;
   }
 
-  /// 把激活槽位中的连接信息（探测得到的 URL/中继/安全码/FNID）回写当前账号。
+  /// 把激活槽位中的连接信息（探测得到的 URL/中继/安全码）回写当前账号。
   ///
   /// 仅更新连接字段，绝不动 token。供启动预热与自动重连成功后调用，
   /// 使账号列表与「当前实际使用的连接」保持一致。
+  ///
+  /// 注意：**绝不改变账号的 FNID 身份**。当前账号是地址账号（无 FNID）时，
+  /// 即使 `fn_last_fnid` 有残留值，也不给它注入 FNID——否则地址账号的
+  /// [AccountEntry.identityKey] 会从 `serverUrl::username` 变成
+  /// `fnid:xxx::username`，与同用户的 FNID 账号冲突并被合并（账号丢失）。
   Future<void> syncActiveAccountConnection() async {
     final current = currentAccount;
     if (current == null) return;
@@ -613,7 +623,10 @@ class AccountStore {
     final url = prefs.getString('feiniu_server_url');
     final relay = prefs.getBool('feiniu_relay_mode') ?? false;
     final code = prefs.getString('fn_access_code');
-    final fnId = prefs.getString('fn_last_fnid');
+    // 仅当当前账号原本就是 FNID 账号时才更新其 FNID（探测可能换新地址但
+    // FNID 稳定）；地址账号保持无 FNID，避免身份被改写导致误合并。
+    final hasFnId = current.fnId != null && current.fnId!.isNotEmpty;
+    final fnId = hasFnId ? prefs.getString('fn_last_fnid') : null;
     final next = current.copyWith(
       serverUrl: (url != null && url.isNotEmpty) ? url : current.serverUrl,
       relayMode: relay,
@@ -693,6 +706,20 @@ class AccountStore {
   }
 
   // ── 工具 ────────────────────────────────────────────────────────────
+
+  /// 让 `fn_last_fnid` 与账号的 FNID 身份保持一致。
+  ///
+  /// [fnId] 为空（地址账号）时移除残留的 `fn_last_fnid`，避免启动预热
+  /// 用上一个 FNID 账号的标识去探测/回写，把地址账号误改成 FNID 身份
+  /// 导致与同用户的 FNID 账号合并；非空（FNID 账号）时写入，供预热复用。
+  static Future<void> _syncLastFnIdFor(String? fnId) async {
+    await AppFnConnectionSettings.restoreConnection(
+      url: FeiNiuApiClient.instance.baseUrl,
+      isRelay: FeiNiuApiClient.instance.relayMode,
+      fnId: (fnId == null || fnId.isEmpty) ? null : fnId,
+      method: (fnId == null || fnId.isEmpty) ? '手动连接' : 'FNID 连接',
+    );
+  }
 
   static String _generateId() {
     final random = Random();

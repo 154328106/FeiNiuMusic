@@ -10,7 +10,7 @@ import 'companion_error.dart';
 /// `shared_library` / `audio_file` 表提供按目录浏览音乐文件的能力：
 /// `GET /music/api/v1/folder/list?path=<相对路径>`。
 ///
-/// 仅非中继（relayMode == false）连接下可用：中继时 NAS 内网端口不暴露。
+/// 配置了服务地址且已登录即可用。
 /// 基础 URL 取 `FeiNiuApiClient.instance.baseUrl` 的主机 + `:38200`。
 /// X-API-Key 携带飞牛音乐登录 token（`FeiNiuApiClient.token`）。
 class FolderCompanionService {
@@ -34,18 +34,18 @@ class FolderCompanionService {
   static const Duration _ttl = Duration(minutes: 5);
   final Map<String, _CacheEntry> _cache = {};
 
-  /// 当前是否可用（非中继连接 + 已登录）。
+  /// 当前是否可用（已配置服务地址 + 已登录）。
   bool get available {
     final api = FeiNiuApiClient.instance;
-    return !api.relayMode && api.baseUrl.isNotEmpty && api.token.isNotEmpty;
+    return api.baseUrl.isNotEmpty && api.token.isNotEmpty;
   }
 
   /// 构造服务端增强基础 URL：`http://<NAS-host>:38200`。
   ///
-  /// NAS-host 取自 `FeiNiuApiClient.baseUrl` 的主机部分。仅非 relay 时有效。
+  /// NAS-host 取自 `FeiNiuApiClient.baseUrl` 的主机部分。
   String? get baseUrl {
     final api = FeiNiuApiClient.instance;
-    if (api.relayMode || api.baseUrl.isEmpty) return null;
+    if (api.baseUrl.isEmpty) return null;
     final host = Uri.tryParse(api.baseUrl)?.host;
     if (host == null || host.isEmpty) return null;
     return 'http://$host:$port';
@@ -69,7 +69,7 @@ class FolderCompanionService {
     bool forceRefresh = false,
   }) async {
     final base = baseUrl;
-    if (base == null) throw StateError('中继连接下不可用');
+    if (base == null) throw StateError('未配置服务器地址');
     final cacheKey = '$path#$keyword#$flatten#$sort#$asc#$page#$pageSize';
     if (!forceRefresh) {
       final hit = _cache[cacheKey];

@@ -188,12 +188,54 @@ class _LoginPageState extends State<LoginPage> {
     return true;
   }
 
+  /// 探测并选择可达的服务器地址：优先用户填写的，不可达则回退默认端口。
+  ///
+  /// 对普通地址（http/https 开头）做连通性探测：
+  /// 1. 先测用户填的地址本身；
+  /// 2. 不可达 → 依次尝试 `:5666`（HTTP）与 `:5667`（HTTPS）；
+  /// 3. 返回第一个可达的地址；全不可达返回原地址（由登录流程报错）。
+  ///
+  /// [isRelay] 透传给探测（中继地址按中继链路探测）。
+  Future<String> _resolveServerAddress(String input, {bool isRelay = false}) async {
+    final trimmed = input.trim();
+    final uri = Uri.tryParse(trimmed);
+    // 非普通地址（FNID 等）或无法解析 → 原样返回
+    if (uri == null || uri.host.isEmpty) return trimmed;
+
+    // 已带端口：只测该地址；无端口 → 依次尝试默认端口
+    final candidates = <String>[
+      trimmed,
+      if (!uri.hasPort) ...[
+        '${uri.scheme}://${_hostWithPort(uri, 5666)}',
+        '${uri.scheme}://${_hostWithPort(uri, 5667)}',
+      ],
+    ];
+
+    for (final candidate in candidates) {
+      final ok = await FnConnectionProbeService.instance.isAddressReachable(
+        candidate,
+        isRelay: isRelay,
+      );
+      // null = 被其它探测占用，按不可达继续尝试（避免卡住登录）
+      if (ok == true) return candidate;
+    }
+    return trimmed;
+  }
+
+  /// 把 host 后追加端口，保留 userInfo（构造带端口的 URL）。
+  static String _hostWithPort(Uri uri, int port) {
+    final hostPart = uri.userInfo.isNotEmpty
+        ? '${uri.userInfo}@${uri.host}:$port'
+        : '${uri.host}:$port';
+    return hostPart;
+  }
+
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _errorMessage = null);
 
-    final serverUrlInput = _serverUrlController.text.trim();
+    var serverUrlInput = _serverUrlController.text.trim();
     final username = _usernameController.text.trim();
     final password = _passwordController.text;
     final name = _nameController.text.trim();
@@ -202,6 +244,8 @@ class _LoginPageState extends State<LoginPage> {
     if (_isFnId(serverUrlInput)) {
       await _fnLogin(serverUrlInput, username, password, name: name);
     } else {
+      // 普通地址：探测可达的服务器地址（用户地址优先，回退默认端口）
+      serverUrlInput = await _resolveServerAddress(serverUrlInput);
       await _performLogin(serverUrlInput, username, password, name: name);
     }
   }

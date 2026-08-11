@@ -11,6 +11,7 @@ import '../../state/settings_lyric_auto_search.dart';
 import '../../state/settings_lyric_companion.dart';
 import '../../state/song_state.dart';
 import '../song_match/song_match_service.dart';
+import '../plugin/plugin_service.dart';
 import 'lyric_companion_service.dart';
 import 'lyrics_parser.dart';
 import 'lyrics_repository.dart';
@@ -226,8 +227,10 @@ class LyricsService {
 
       if (lrc == null || lrc.trim().isEmpty) {
         // 无歌词：若开启「播放无歌词音乐时自动搜索」，通过数据源插件搜索。
+        // 插件（原生 QuickJS）仅 Android 支持，非 Android 直接跳过。
         var searched = lrc;
-        if (LyricAutoSearchSettings.enabled.value) {
+        if (LyricAutoSearchSettings.enabled.value &&
+            PluginService.pluginSupportedOnPlatform) {
           searched = await _searchLyricForSong(song);
           if (seq != _loadSeq) return;
         }
@@ -295,7 +298,7 @@ class LyricsService {
   /// 通过数据源插件自动搜索歌曲歌词（「播放无歌词音乐时自动搜索」）。
   ///
   /// 命中后写入本地歌词缓存；「搜索到后自动回写到 NAS」开启且服务端增强
-  /// （FnMusicEnhance）可用（非中继直连）时，再同步写入 NAS。
+  /// （FnMusicEnhance）可用（已配置地址）时，再同步写入 NAS。
   /// 返回 LRC 文本；未命中返回 null。
   Future<String?> _searchLyricForSong(SongEntity song) async {
     try {
@@ -310,7 +313,8 @@ class LyricsService {
       // 命中歌词写入本地缓存（后续播放/搜索不再走网络）。
       await _repo.saveLrcToCache(song.id, lyrics);
 
-      // 回写开关开启且服务端增强可用时，同步写入 NAS（仅非中继直连）。
+      // 回写开关开启且服务端增强已配置地址时，同步写入 NAS。
+      // 真正可达性由 saveLyrics 内部 HTTP 决定（失败已 try/catch 静默）。
       if (LyricAutoSearchSettings.writeBack.value &&
           LyricCompanionSettings.enabled.value &&
           LyricCompanionService.instance.available) {

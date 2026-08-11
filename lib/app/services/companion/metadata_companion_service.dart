@@ -30,7 +30,7 @@ enum EntityEditKind {
 ///   写 `cover/{type}/{guid[:2]}/{guid}` 并更新 DB `cover_guid`；
 /// - `POST /music/api/v1/entity`：`action=update` 改名，`action=create` 新建实体。
 ///
-/// 仅非中继（relayMode == false）连接下可用：中继时 NAS 内网端口不暴露。
+/// 配置了服务地址且已登录即可用。
 /// 基础 URL 取 `FeiNiuApiClient.instance.baseUrl` 的主机 + `:38200`。
 /// X-API-Key 携带飞牛音乐登录 token（`FeiNiuApiClient.token`）。
 class MetadataCompanionService {
@@ -53,20 +53,18 @@ class MetadataCompanionService {
     ),
   );
 
-  /// 当前是否可用（非中继连接 + 已登录）。
+  /// 当前是否可用（已配置服务地址 + 已登录）。
   bool get available {
     final api = FeiNiuApiClient.instance;
-    return !api.relayMode &&
-        api.baseUrl.isNotEmpty &&
-        api.token.isNotEmpty;
+    return api.baseUrl.isNotEmpty && api.token.isNotEmpty;
   }
 
   /// 构造服务端增强基础 URL：`http://<NAS-host>:38200`。
   ///
-  /// NAS-host 取自 `FeiNiuApiClient.baseUrl` 的主机部分。仅非 relay 时有效。
+  /// NAS-host 取自 `FeiNiuApiClient.baseUrl` 的主机部分。
   String? get baseUrl {
     final api = FeiNiuApiClient.instance;
-    if (api.relayMode || api.baseUrl.isEmpty) return null;
+    if (api.baseUrl.isEmpty) return null;
     final host = Uri.tryParse(api.baseUrl)?.host;
     if (host == null || host.isEmpty) return null;
     return 'http://$host:$port';
@@ -139,7 +137,7 @@ class MetadataCompanionService {
     required Map<String, dynamic> data,
   }) async {
     final base = baseUrl;
-    if (base == null) throw StateError('中继连接下不可用');
+    if (base == null) throw StateError('未配置服务器地址');
     try {
       return await _dio.post<Map<String, dynamic>>(
         '$base$path',

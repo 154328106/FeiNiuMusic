@@ -156,10 +156,9 @@ class _BatchMatchPageState extends State<BatchMatchPage> {
     // 选择候选：自动取第一个，或逐首确认
     SongMatchResult candidate;
     if (options.autoConfirmCandidates) {
-      // 自动选择：取「综合」排序第一项（匹配度最高；同分按源顺序靠前）
+      // 自动选择：取「综合」排序第一项（按插件源顺序，同源内保持返回顺序）
       candidate = SongMatchScorer.mergeRanked(
         grouped.groups.map((g) => g.results).toList(),
-        keyword,
         sourceOrder: grouped.groups.map((g) => g.pluginId).toList(),
       ).first;
     } else {
@@ -180,6 +179,7 @@ class _BatchMatchPageState extends State<BatchMatchPage> {
         album: patch.album,
         sourceId: candidate.id,
         sourceInternal: candidate.internal,
+        sourceFields: candidate.normalizedFields,
         pluginId: candidate.pluginId,
       );
       if (lyrics != null && lyrics.isNotEmpty) {
@@ -641,13 +641,12 @@ class _CandidatePickerSheetState extends State<_CandidatePickerSheet> {
   /// 当前激活的 tab：0 = 综合，>0 = 对应 grouped.groups[index-1] 的源。
   int _activeTab = 0;
 
-  /// 综合 tab 的合并排序结果（匹配度降序，同分按源顺序）。
+  /// 综合 tab 的合并排序结果（按插件源顺序，同源内保持返回顺序）。
   late final List<SongMatchResult> _merged = _computeMerged();
 
   List<SongMatchResult> _computeMerged() {
     return SongMatchScorer.mergeRanked(
       widget.grouped.groups.map((g) => g.results).toList(),
-      widget.keyword,
       sourceOrder: widget.grouped.groups.map((g) => g.pluginId).toList(),
     );
   }

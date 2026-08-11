@@ -92,6 +92,10 @@ class _SongEditPageState extends State<SongEditPage> {
   bool _lyricsSaving = false;
   late final TextEditingController _lyricsController;
 
+  /// 检测服务端增强连接中 / 是否已连接（未连接时禁用歌词编辑）。
+  bool _companionProbing = false;
+  bool _companionConnected = false;
+
   /// 歌词是否被修改过（只有修改时才随主保存按钮写入服务端增强）。
   bool _lyricsDirty = false;
 
@@ -154,8 +158,26 @@ class _SongEditPageState extends State<SongEditPage> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
-    // 歌词修改已开启时自动读取歌词（无需手动点击）。
+    // 歌词修改已开启时：先探测服务端增强连接，已连接才读取歌词。
     if (mounted && LyricCompanionSettings.enabled.value) {
+      await _maybeLoadLyrics();
+    }
+  }
+
+  /// 歌词修改开启时调用：先检查服务端增强是否可达，已连接才读取歌词。
+  ///
+  /// 未连接时置 `_companionConnected = false`，歌词编辑区显示未连接提示
+  /// 并禁用编辑（而不是误报「未获取到歌词」）。
+  Future<void> _maybeLoadLyrics() async {
+    if (_lyricsLoading) return;
+    setState(() => _companionProbing = true);
+    final connected = await LyricCompanionService.instance.checkConnected();
+    if (!mounted) return;
+    setState(() {
+      _companionProbing = false;
+      _companionConnected = connected;
+    });
+    if (connected) {
       await _loadLyrics();
     }
   }
@@ -229,15 +251,17 @@ class _SongEditPageState extends State<SongEditPage> {
                 _pickCover();
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.travel_explore_rounded),
-              title: const Text('联网搜索封面'),
-              subtitle: const Text('通过数据源插件搜索匹配的封面'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                _searchCoverOnline();
-              },
-            ),
+            // 「联网搜索封面」依赖数据源插件（原生 QuickJS），非 Android 隐藏。
+            if (PluginService.pluginSupportedOnPlatform)
+              ListTile(
+                leading: const Icon(Icons.travel_explore_rounded),
+                title: const Text('联网搜索封面'),
+                subtitle: const Text('通过数据源插件搜索匹配的封面'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _searchCoverOnline();
+                },
+              ),
           ],
         ),
       ),
@@ -391,8 +415,14 @@ class _SongEditPageState extends State<SongEditPage> {
       if (selected == null || !mounted) return;
 
       // 歌词修改开启时，候选选中即同步预取歌词（应用时直接使用，不再二次搜索）。
+      // 歌词预取走数据源插件（getLyricsCandidates），与 38200 端口的服务端增强
+      // 无关，故不 gate 于 checkConnected()；连接状态只影响弹层里「未连接到增强
+      // 插件」提示与是否可勾选歌词（决定能否写入 NAS）。
       String? prefetchedLyrics;
+      bool companionConnected = false;
       if (LyricCompanionSettings.enabled.value) {
+        companionConnected =
+            await LyricCompanionService.instance.checkConnected();
         final kwTitle = selected.title.isNotEmpty ? selected.title : _titleController.text.trim();
         final kwArtist = selected.artist.isNotEmpty ? selected.artist : _artists.map((a) => a.name).join(' ');
         prefetchedLyrics = await SongMatchService.instance.fetchLyrics(
@@ -401,6 +431,7 @@ class _SongEditPageState extends State<SongEditPage> {
           album: selected.album,
           sourceId: selected.id,
           sourceInternal: selected.internal,
+          sourceFields: selected.normalizedFields,
           pluginId: selected.pluginId,
         );
         if (!mounted) return;
@@ -424,6 +455,7 @@ class _SongEditPageState extends State<SongEditPage> {
           currentTrackNo: _trackNoController.text.trim(),
           currentDiscNo: _discNoController.text.trim(),
           prefetchedLyrics: prefetchedLyrics,
+          companionConnected: companionConnected,
         ),
       );
       if (fields == null || !mounted) return;
@@ -617,12 +649,15 @@ class _SongEditPageState extends State<SongEditPage> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
-          IconButton(
-            tooltip: '匹配设置',
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: () =>
-                Navigator.pushNamed(context, AppRoutes.matchSettings),
-          ),
+          // 「匹配设置」是数据源插件流程（歌词偏好/元数据处理），
+          // 依赖原生 QuickJS，非 Android 隐藏。
+          if (PluginService.pluginSupportedOnPlatform)
+            IconButton(
+              tooltip: '匹配设置',
+              icon: const Icon(Icons.settings_outlined),
+              onPressed: () =>
+                  Navigator.pushNamed(context, AppRoutes.matchSettings),
+            ),
         ],
       ),
       showMiniPlayer: false,
@@ -961,23 +996,25 @@ class _SongEditPageState extends State<SongEditPage> {
                 ),
           ),
           const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: _matching ? null : _matchSongInfo,
-            icon: _matching
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.travel_explore_rounded, size: 18),
-            label: Text(_matching ? '匹配中…' : '匹配歌曲信息'),
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size(double.infinity, 42),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+          // 「匹配歌曲信息」依赖数据源插件（原生 QuickJS），非 Android 隐藏。
+          if (PluginService.pluginSupportedOnPlatform)
+            OutlinedButton.icon(
+              onPressed: _matching ? null : _matchSongInfo,
+              icon: _matching
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.travel_explore_rounded, size: 18),
+              label: Text(_matching ? '匹配中…' : '匹配歌曲信息'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 42),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
-          ),
           const SizedBox(height: 16),
           _buildTextField(
             controller: _titleController,
@@ -1060,6 +1097,20 @@ class _SongEditPageState extends State<SongEditPage> {
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 )
+              else if (_companionProbing)
+                Text(
+                  '检测服务端增强连接…',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                )
+              else if (!_companionConnected)
+                Text(
+                  '未连接到增强插件',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.error,
+                  ),
+                )
               else if (_lyricsDirty)
                 Text(
                   '已修改',
@@ -1072,6 +1123,13 @@ class _SongEditPageState extends State<SongEditPage> {
           const SizedBox(height: 8),
           if (!LyricCompanionSettings.enabled.value)
             _buildLyricDisabledHint(context)
+          else if (_companionProbing)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 32),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (!_companionConnected)
+            _buildLyricNotConnectedHint(context)
           else if (_lyricsLoading)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 32),
@@ -1096,15 +1154,11 @@ class _SongEditPageState extends State<SongEditPage> {
     );
   }
 
-  /// 歌词修改未开启时的提示（非中继下可开启；中继不可用）。
+  /// 歌词修改未开启时的提示（引导开启服务端增强）。
   Widget _buildLyricDisabledHint(BuildContext context) {
     final theme = Theme.of(context);
-    final relayMode = FeiNiuApiClient.instance.relayMode;
-    final message = relayMode
-        ? '服务端增强仅内网直连（非中继）可用，当前为中继连接'
-        : '启用「服务端增强」后可在此读取 / 编辑 / 保存歌词（需 NAS 上运行 FnMusicEnhance）';
     return InkWell(
-      onTap: relayMode ? null : () => _openLyricCompanionSettings(),
+      onTap: () => _openLyricCompanionSettings(),
       borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.all(20),
@@ -1116,28 +1170,79 @@ class _SongEditPageState extends State<SongEditPage> {
         child: Column(
           children: [
             Icon(
-              relayMode
-                  ? Icons.lock_outline_rounded
-                  : Icons.tune_rounded,
+              Icons.tune_rounded,
               color: theme.colorScheme.onSurfaceVariant,
             ),
             const SizedBox(height: 8),
             Text(
-              message,
+              '启用「服务端增强」后可在此读取 / 编辑 / 保存歌词（需 NAS 上运行 FnMusicEnhance）',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
-            if (!relayMode) ...[
-              const SizedBox(height: 8),
-              Text(
-                '点击前往元数据匹配开启',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.primary,
-                ),
+            const SizedBox(height: 8),
+            Text(
+              '点击前往元数据匹配开启',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.primary,
               ),
-            ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 服务端增强已开启但未连接时的提示（禁用歌词编辑，可点击前往重试）。
+  Widget _buildLyricNotConnectedHint(BuildContext context) {
+    final theme = Theme.of(context);
+    // 曾检测到过 → 已安装但当前不可达；否则 → 未安装。
+    final installed = LyricCompanionService.instance.everConnected;
+    return InkWell(
+      onTap: () => _openLyricCompanionSettings(),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest.withValues(
+            alpha: 0.4,
+          ),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          children: [
+            Icon(
+              Icons.link_off_rounded,
+              color: theme.colorScheme.error,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              installed
+                  ? '已连接到增强插件但当前不可达，暂时无法编辑歌词'
+                  : '未检测到增强插件（FnMusicEnhance），暂时无法编辑歌词',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              installed
+                  ? '请确认 FnMusicEnhance 正在运行，且端口 ${LyricCompanionService.port} 已开放'
+                  : '请先安装 / 配置 FnMusicEnhance（需运行在 NAS 上）',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '点击前往元数据匹配检查连接',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.primary,
+              ),
+            ),
           ],
         ),
       ),
@@ -1919,7 +2024,6 @@ class _MatchCandidateSheetState extends State<_MatchCandidateSheet> {
     final sourceOrder = _grouped.groups.map((g) => g.pluginId).toList();
     _merged = SongMatchScorer.mergeRanked(
       _grouped.groups.map((g) => g.results).toList(),
-      _searchController.text.trim(),
       sourceOrder: sourceOrder,
     );
   }
@@ -2302,6 +2406,9 @@ class _MatchApplySheet extends StatefulWidget {
   /// 候选选中时同步预取的歌词（LRC）；未获取时为 null。
   final String? prefetchedLyrics;
 
+  /// 服务端增强是否已连接（未连接时歌词字段显示「未连接到增强插件」并禁用）。
+  final bool companionConnected;
+
   const _MatchApplySheet({
     required this.candidate,
     required this.currentTitle,
@@ -2313,6 +2420,7 @@ class _MatchApplySheet extends StatefulWidget {
     this.currentTrackNo = '',
     this.currentDiscNo = '',
     this.prefetchedLyrics,
+    this.companionConnected = false,
   });
 
   @override
@@ -2477,6 +2585,7 @@ class _MatchApplySheetState extends State<_MatchApplySheet> {
                         : '已匹配（${widget.prefetchedLyrics!.length} 字符）',
                     enabled: widget.prefetchedLyrics != null &&
                         widget.prefetchedLyrics!.isNotEmpty,
+                    note: widget.companionConnected ? null : '未连接到增强插件（写入 NAS 不可用）',
                   ),
               ],
             ),
@@ -2502,6 +2611,9 @@ class _MatchApplySheetState extends State<_MatchApplySheet> {
   }
 
   /// 字段行：勾选 + 「原值 → 新值」变更对比。
+  ///
+  /// [note] 为状态说明（如「未连接到增强插件」）：显示在行尾但不参与
+  /// 「变更」对比（不显示箭头、不视为待应用的新值）。
   Widget _fieldTile(
     BuildContext context,
     MatchField field,
@@ -2509,9 +2621,12 @@ class _MatchApplySheetState extends State<_MatchApplySheet> {
     String oldValue,
     String newValue, {
     required bool enabled,
+    String? note,
   }) {
     final theme = Theme.of(context);
-    final changed = oldValue.trim() != newValue.trim() && newValue.isNotEmpty;
+    final changed = note == null &&
+        oldValue.trim() != newValue.trim() &&
+        newValue.isNotEmpty;
     return CheckboxListTile(
       value: _selected.contains(field),
       enabled: enabled,
@@ -2547,6 +2662,25 @@ class _MatchApplySheetState extends State<_MatchApplySheet> {
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.primary,
                   fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ] else if (note != null) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Icon(
+                Icons.info_outline_rounded,
+                size: 14,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            Flexible(
+              child: Text(
+                note,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
             ),

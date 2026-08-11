@@ -285,8 +285,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
                     ValueListenableBuilder<bool>(
                       valueListenable: LyricCompanionSettings.enabled,
                       builder: (context, enabled, _) {
-                        final available =
-                            enabled && !FeiNiuApiClient.instance.relayMode;
+                        final available = enabled;
                         return IconButton(
                           tooltip: available ? '编辑' : '需先启用服务端增强（设置 → 元数据匹配）',
                           icon: Icon(
@@ -815,8 +814,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage>
                     ValueListenableBuilder<bool>(
                       valueListenable: LyricCompanionSettings.enabled,
                       builder: (context, enabled, _) {
-                        final available =
-                            enabled && !FeiNiuApiClient.instance.relayMode;
+                        final available = enabled;
                         return IconButton(
                           tooltip: available ? '编辑' : '需先启用服务端增强（设置 → 元数据匹配）',
                           icon: Icon(

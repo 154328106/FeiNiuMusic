@@ -22,7 +22,7 @@ import 'library_detail_pages.dart';
 /// 目录数据来自服务端增强（FnMusicEnhance，38200 端口）的
 /// `GET /music/api/v1/folder/list`，路径为库内相对路径（不含 /vol3/...）。
 /// 第一层是库根目录（如 `/Music`），根请求 `/` 只显示库根入口。
-/// 需要已开启「服务端增强」（[LyricCompanionSettings.enabled]）且非中继连接。
+/// 需要已开启「服务端增强」（[LyricCompanionSettings.enabled]）。
 class FoldersPage extends StatefulWidget {
   /// 初始目录（库内相对路径，`/` 为根目录）。
   final String initialPath;
@@ -544,7 +544,6 @@ class _FoldersPageState extends State<FoldersPage>
 
   @override
   Widget build(BuildContext context) {
-    final relayMode = _api.relayMode;
     final enabled = LyricCompanionSettings.enabled.value;
 
     return PopScope(
@@ -644,13 +643,6 @@ class _FoldersPageState extends State<FoldersPage>
                 actionText: '去开启',
                 onAction: () =>
                     Navigator.of(context).pushNamed(AppRoutes.metadataMatchSettings),
-              );
-            }
-            // 中继连接不可用
-            if (relayMode) {
-              return const _CenterHint(
-                icon: Icons.wifi_off_rounded,
-                text: '服务端增强仅内网直连（非中继）可用，当前为中继连接',
               );
             }
 
@@ -951,7 +943,7 @@ class _FoldersPageState extends State<FoldersPage>
   }
 }
 
-/// 居中提示（未开启 / 中继不可用 / 加载失败 / 空目录）。
+/// 居中提示（未开启 / 加载失败 / 空目录）。
 class _CenterHint extends StatelessWidget {
   final IconData icon;
   final String text;

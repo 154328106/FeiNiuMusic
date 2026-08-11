@@ -202,6 +202,7 @@ class SongMatchService {
     int duration = 0,
     String? sourceId, // 源平台歌曲 id（来自 searchSongs 候选），供 getLyrics 定位
     Map<String, String>? sourceInternal,
+    Map<String, String>? sourceFields,
     String? pluginId, // 候选来自哪个插件（getLyrics 需同插件）
   }) async {
     final candidates = await _pluginService.getLyricsCandidates(
@@ -212,6 +213,7 @@ class SongMatchService {
       duration: duration,
       pluginId: pluginId,
       internal: sourceInternal,
+      fields: sourceFields,
     );
     if (candidates.isEmpty) return null;
     // 按歌词模式（逐字/增强逐字/逐行/TTML）+ 翻译/罗马音偏好选择歌词。
@@ -313,7 +315,7 @@ class SongMatchService {
       if (album.name == name) return album;
     }
 
-    // 库中不存在 → 服务端增强创建（仅非中继直连 + 已登录时可用）
+    // 库中不存在 → 服务端增强创建（已配置地址 + 已登录时尝试；失败回退 null）
     if (!MetadataCompanionService.instance.available) return null;
     try {
       final guid = await MetadataCompanionService.instance

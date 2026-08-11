@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/router/app_router.dart';
-import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/lyrics/lyric_companion_service.dart';
 import '../../app/state/settings_lyric_auto_search.dart';
 import '../../app/state/settings_lyric_companion.dart';
@@ -33,11 +32,18 @@ class _MetadataMatchSettingsPageState extends State<MetadataMatchSettingsPage> {
   /// 端口探测结果：null = 成功（服务端增强在 NAS 上运行）；否则为错误消息。
   String? _probeError;
 
+  /// 服务端增强是否已连接（探测成功后置 true，供区块显示连接状态）。
+  bool _connected = false;
+
   @override
   void initState() {
     super.initState();
     LyricCompanionSettings.ensureLoaded();
     LyricAutoSearchSettings.ensureLoaded();
+    // 加载「历史上曾检测到服务端增强」标记，用于区分未安装/已安装不可达。
+    LyricCompanionService.ensureEverConnectedLoaded().then((_) {
+      if (mounted) setState(() {});
+    });
     _probeCompanion();
   }
 
@@ -53,6 +59,7 @@ class _MetadataMatchSettingsPageState extends State<MetadataMatchSettingsPage> {
     setState(() {
       _probing = false;
       _probeError = error;
+      _connected = error == null;
     });
   }
 
@@ -156,19 +163,8 @@ class _MetadataMatchSettingsPageState extends State<MetadataMatchSettingsPage> {
   /// 服务端增强（FnMusicEnhance）区块。
   ///
   /// 除歌词修改外，还提供歌手/专辑编辑（改名 + 封面写入）。
-  /// 仅非中继（relayMode == false）连接下显示；中继时隐藏。
   /// 进入页面时探测 NAS 上 38200 端口，不可达则禁用开关并提供仓库链接。
   List<Widget> _buildCompanionSection(BuildContext context) {
-    final relayMode = FeiNiuApiClient.instance.relayMode;
-    if (relayMode) {
-      return [
-        AppSettingTile(
-          title: '服务端增强',
-          subtitle: '中继连接下不可用',
-        ),
-      ];
-    }
-
     // 探测中
     if (_probing) {
       return [
@@ -185,12 +181,31 @@ class _MetadataMatchSettingsPageState extends State<MetadataMatchSettingsPage> {
       ];
     }
 
-    // 端口不可达：禁用开关 + 提供 GitHub 链接
+    // 服务不可达：按「是否历史上检测到过一次」区分未安装 / 已安装不可达。
     if (_probeError != null) {
+      // 曾检测到过 → 已安装，当前不可达：不提示安装，引导检查端口/网络。
+      if (LyricCompanionService.instance.everConnected) {
+        return [
+          AppSettingTile(
+            title: '服务端增强',
+            subtitle: '已安装但当前不可达：请确认 NAS 上 FnMusicEnhance 正在运行，'
+                '且端口 ${LyricCompanionService.port} 已开放',
+            trailing: const Icon(Icons.warning_amber_rounded),
+          ),
+          AppSettingTile(
+            title: '重新检测',
+            subtitle: '再次探测服务端增强连接',
+            leading: const Icon(Icons.refresh_rounded),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: _probeCompanion,
+          ),
+        ];
+      }
+      // 从未检测到 → 未安装：禁用开关 + 提供 GitHub 链接。
       return [
         AppSettingTile(
           title: '服务端增强',
-          subtitle: '未检测到 NAS 上运行的 FnMusicEnhance',
+          subtitle: '未检测到已安装的 FnMusicEnhance',
           trailing: const Icon(Icons.warning_amber_rounded),
         ),
         AppSettingTile(
@@ -204,6 +219,22 @@ class _MetadataMatchSettingsPageState extends State<MetadataMatchSettingsPage> {
     }
 
     return [
+      AppSettingTile(
+        title: '连接状态',
+        subtitle: _connected
+            ? '已连接到 NAS 上的 FnMusicEnhance'
+            : '未连接：请确认 NAS 已运行 FnMusicEnhance，且端口 '
+                '${LyricCompanionService.port} 已开放',
+        leading: Icon(
+          _connected ? Icons.check_circle_rounded : Icons.link_off_rounded,
+          color: _connected ? Colors.green : null,
+        ),
+        trailing: TextButton(
+          onPressed: _probing ? null : _probeCompanion,
+          child: const Text('重新检测'),
+        ),
+      ),
+      const Divider(height: 1),
       ValueListenableBuilder<bool>(
         valueListenable: LyricCompanionSettings.enabled,
         builder: (context, enabled, _) {
@@ -231,6 +262,7 @@ class _MetadataMatchSettingsPageState extends State<MetadataMatchSettingsPage> {
         AppToast.show(context, error, type: ToastType.error);
         return;
       }
+      setState(() => _connected = true);
     }
     await LyricCompanionSettings.setEnabled(value);
   }
