@@ -66,6 +66,19 @@ class OverlayTrackChange(private val context: Context) {
         false
     }
 
+    /** 悬浮窗权限缺失时的一次性提示（前台/后台均可见，不静默失败）。 */
+    fun showPermissionToast() {
+        try {
+            android.widget.Toast.makeText(
+                context,
+                "未开启悬浮窗权限，无法显示切歌弹窗",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "悬浮窗权限提示失败", e)
+        }
+    }
+
     fun show(
         title: String,
         artist: String,

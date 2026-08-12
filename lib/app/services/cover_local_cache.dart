@@ -132,7 +132,7 @@ class CoverLocalCache {
   }
 
   static void _debugLog(String message) {
-    if (kDebugMode) debugPrint('[CoverLocalCache] $message');
+    debugPrint('[CoverLocalCache] $message');
   }
 
   static Future<String> _resolveApplicationId() {

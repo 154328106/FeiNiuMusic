@@ -20,6 +20,21 @@ class DebugLogService {
 
   Future<void> ensureLoaded() => _loading ??= _doLoad();
 
+  /// 测试专用：重置内存状态并还原被覆盖的全局 [debugPrint]，避免测试间
+  /// hook 链式叠加或残留 enable 状态。
+  @visibleForTesting
+  void resetForTest() {
+    _loading = null;
+    _persistScheduled = false;
+    if (_installed && _originalDebugPrint != null) {
+      debugPrint = _originalDebugPrint!;
+    }
+    _installed = false;
+    _originalDebugPrint = null;
+    enabled.value = false;
+    entries.value = <String>[];
+  }
+
   Future<void> _doLoad() async {
     final prefs = await SharedPreferences.getInstance();
     enabled.value = prefs.getBool(_prefsEnabled) ?? false;
@@ -33,7 +48,7 @@ class DebugLogService {
     await prefs.setBool(_prefsEnabled, value);
     enabled.value = value;
     if (value) {
-      add('Debug logging enabled');
+      add('调试日志已开启');
     }
   }
 

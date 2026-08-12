@@ -1,5 +1,18 @@
+import 'package:flutter/foundation.dart' show ValueNotifier;
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_test/flutter_test.dart';
+
 import 'package:feiniu_music/app/services/track_change_overlay_service.dart';
+import 'package:feiniu_music/app/state/settings_layout_state.dart';
+import 'package:feiniu_music/app/state/song_state.dart';
+
+const _overlayChannel = MethodChannel('com.feiniu.music/track_change_overlay');
+
+SongEntity _song(String id) => SongEntity(
+      id: id,
+      title: 't',
+      artist: '[{"name":"a"}]',
+    );
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -102,6 +115,59 @@ void main() {
       expect(colors.secondary.toARGB32(), isA<int>());
       expect(colors.accent.toARGB32(), isA<int>());
       expect(colors.card != colors.text, true);
+    });
+  });
+
+  group('TrackChangeOverlayService._show 悬浮窗权限校验', () {
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+
+    void mockOverlay(bool hasPermission, List<String> calls) {
+      messenger.setMockMethodCallHandler(_overlayChannel, (call) async {
+        calls.add(call.method);
+        if (call.method == 'hasOverlayPermission') return hasPermission;
+        return null;
+      });
+    }
+
+    setUp(() {
+      AppLayoutSettings.trackChangeNotify.value = true;
+    });
+
+    tearDown(() {
+      AppLayoutSettings.trackChangeNotify.value = false;
+      // 先 resetForTest（内部会 invokeMethod('hide')），再清 mock，避免无处理器异常。
+      TrackChangeOverlayService.resetForTest();
+      messenger.setMockMethodCallHandler(_overlayChannel, null);
+    });
+
+    test('无权限：每会话只引导一次，不弹窗', () async {
+      final calls = <String>[];
+      mockOverlay(false, calls);
+      final notifier = ValueNotifier<SongEntity?>(null);
+      TrackChangeOverlayService.start(currentSong: notifier);
+
+      notifier.value = _song('a'); // 首曲：记录 lastTrackId，不弹
+      notifier.value = _song('b'); // 切歌：无权限 → 引导一次
+      notifier.value = _song('c'); // 再切歌：不重复引导
+      await pumpEventQueue();
+
+      expect(calls.where((m) => m == 'showPermissionToast').length, 1);
+      expect(calls.where((m) => m == 'show').length, 0);
+    });
+
+    test('有权限：正常弹窗，无权限提示', () async {
+      final calls = <String>[];
+      mockOverlay(true, calls);
+      final notifier = ValueNotifier<SongEntity?>(null);
+      TrackChangeOverlayService.start(currentSong: notifier);
+
+      notifier.value = _song('a');
+      notifier.value = _song('b');
+      await pumpEventQueue();
+
+      expect(calls.where((m) => m == 'show').length, 1);
+      expect(calls.where((m) => m == 'showPermissionToast').length, 0);
     });
   });
 }

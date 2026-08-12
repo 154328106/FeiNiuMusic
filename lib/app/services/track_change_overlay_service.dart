@@ -35,6 +35,9 @@ class TrackChangeOverlayService {
   static bool _appForeground = true;
   static bool _showing = false;
 
+  /// 悬浮窗权限提示标记：每会话只提示一次，避免每次切歌都打扰。
+  static bool _permissionHintShown = false;
+
   /// 幂等启动。默认监听 [PlayerService.instance.currentSong]；测试可注入。
   static void start({ValueListenable<SongEntity?>? currentSong}) {
     if (_started) return;
@@ -60,6 +63,7 @@ class TrackChangeOverlayService {
     _lastTrackId = null;
     _appForeground = true;
     _showing = false;
+    _permissionHintShown = false;
     _channel.invokeMethod('hide');
   }
 
@@ -197,7 +201,18 @@ class TrackChangeOverlayService {
     if (shouldHide) _hide();
   }
 
-  static void _show(SongEntity song) {
+  static Future<void> _show(SongEntity song) async {
+    // 打开切歌弹窗前校验悬浮窗权限：缺失时每会话用原生 Toast 引导一次，
+    // 而非静默失败；权限就绪后重置提示标记。
+    if (!await hasOverlayPermission()) {
+      if (!_permissionHintShown) {
+        _permissionHintShown = true;
+        _channel.invokeMethod('showPermissionToast');
+      }
+      return;
+    }
+    _permissionHintShown = false;
+
     final durationMs = AppLayoutSettings.trackChangeToastDurationMs.value
         .clamp(2000, 10000);
     final isLarge =

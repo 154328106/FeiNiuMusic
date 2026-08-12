@@ -13,9 +13,10 @@ import '../../components/index.dart';
 /// 元数据匹配设置入口页。
 ///
 /// 集中管理数据匹配相关功能：
-/// - 数据源维护（Lyrico 插件导入/启用/配置）；
+/// - 服务端增强（FnMusicEnhance 开关，置顶；未开启时隐藏下方全部选项）；
+/// - 数据源维护（选择搜索平台并排序）；
 /// - 匹配设置（歌词偏好 / 元数据处理 / 并发）；
-/// - 服务端增强（FnMusicEnhance 开关，支持歌词修改 + 歌手/专辑编辑）。
+/// - 批量操作（批量刷新歌曲/歌手/专辑）。
 class MetadataMatchSettingsPage extends StatefulWidget {
   const MetadataMatchSettingsPage({super.key});
 
@@ -83,127 +84,136 @@ class _MetadataMatchSettingsPageState extends State<MetadataMatchSettingsPage> {
         elevation: 0,
       ),
       showMiniPlayer: false,
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: [
-          AppSettingSection(
-            title: '数据源',
+      body: ValueListenableBuilder<bool>(
+        valueListenable: LyricCompanionSettings.enabled,
+        builder: (context, companionEnabled, _) {
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
             children: [
-              AppSettingTile(
-                title: '数据源维护',
-                subtitle: '选择搜索平台并排序',
-                leading: const Icon(Icons.extension_outlined),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => Navigator.pushNamed(
-                  context,
-                  AppRoutes.dataSourceSettings,
-                ),
+              // 服务端增强置顶：未开启时隐藏下方全部依赖服务端的功能。
+              AppSettingSection(
+                title: '服务端增强',
+                children: _buildCompanionSection(context),
               ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          AppSettingSection(
-            title: '匹配偏好',
-            children: [
-              AppSettingTile(
-                title: '匹配设置',
-                subtitle: '歌词偏好 / 元数据处理 / 并发',
-                leading: const Icon(Icons.tune_rounded),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => Navigator.pushNamed(
-                  context,
-                  AppRoutes.matchSettings,
-                ),
-              ),
-              const Divider(height: 1),
-              ValueListenableBuilder<bool>(
-                valueListenable: LyricAutoSearchSettings.enabled,
-                builder: (context, enabled, _) {
-                  return Column(
-                    children: [
-                      AppSettingSwitchTile(
-                        title: '播放无歌词音乐时自动搜索',
-                        subtitle: enabled
-                            ? '播放时自动通过数据源搜索并应用歌词'
-                            : '播放时遇到无歌词歌曲自动搜索歌词',
-                        value: enabled,
-                        onChanged: (value) =>
-                            LyricAutoSearchSettings.setEnabled(value),
+              if (companionEnabled) ...[
+                const SizedBox(height: 16),
+                AppSettingSection(
+                  title: '数据源',
+                  children: [
+                    AppSettingTile(
+                      title: '数据源维护',
+                      subtitle: '选择搜索平台并排序',
+                      leading: const Icon(Icons.extension_outlined),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => Navigator.pushNamed(
+                        context,
+                        AppRoutes.dataSourceSettings,
                       ),
-                      if (enabled) ...[
-                        const Divider(height: 1),
-                        ValueListenableBuilder<bool>(
-                          valueListenable: LyricAutoSearchSettings.writeBack,
-                          builder: (context, writeBack, _) {
-                            return AppSettingSwitchTile(
-                              title: '搜索到后自动回写到 NAS',
-                              subtitle: writeBack
-                                  ? '命中歌词同步写入服务端增强，其他设备可用'
-                                  : '仅本地使用，不回写到 NAS',
-                              value: writeBack,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                AppSettingSection(
+                  title: '匹配偏好',
+                  children: [
+                    AppSettingTile(
+                      title: '匹配设置',
+                      subtitle: '歌词偏好 / 元数据处理 / 并发',
+                      leading: const Icon(Icons.tune_rounded),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => Navigator.pushNamed(
+                        context,
+                        AppRoutes.matchSettings,
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    ValueListenableBuilder<bool>(
+                      valueListenable: LyricAutoSearchSettings.enabled,
+                      builder: (context, enabled, _) {
+                        return Column(
+                          children: [
+                            AppSettingSwitchTile(
+                              title: '播放无歌词音乐时自动搜索',
+                              subtitle: enabled
+                                  ? '播放时自动通过数据源搜索并应用歌词'
+                                  : '播放时遇到无歌词歌曲自动搜索歌词',
+                              value: enabled,
                               onChanged: (value) =>
-                                  LyricAutoSearchSettings.setWriteBack(value),
-                            );
-                          },
-                        ),
-                      ],
-                    ],
-                  );
-                },
-              ),
+                                  LyricAutoSearchSettings.setEnabled(value),
+                            ),
+                            if (enabled) ...[
+                              const Divider(height: 1),
+                              ValueListenableBuilder<bool>(
+                                valueListenable:
+                                    LyricAutoSearchSettings.writeBack,
+                                builder: (context, writeBack, _) {
+                                  return AppSettingSwitchTile(
+                                    title: '搜索到后自动回写到 NAS',
+                                    subtitle: writeBack
+                                        ? '命中歌词同步写入服务端增强，其他设备可用'
+                                        : '仅本地使用，不回写到 NAS',
+                                    value: writeBack,
+                                    onChanged: (value) => LyricAutoSearchSettings
+                                        .setWriteBack(value),
+                                  );
+                                },
+                              ),
+                            ],
+                          ],
+                        );
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                AppSettingSection(
+                  title: '批量操作',
+                  children: [
+                    AppSettingTile(
+                      title: '批量刷新所有歌曲信息',
+                      subtitle: '遍历全部歌曲，搜索并自动写入标题/歌手/专辑等',
+                      leading: const Icon(Icons.refresh_rounded),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => _confirmAndRun(
+                        '批量刷新所有歌曲信息',
+                        '将遍历音乐库全部歌曲，逐一联网搜索并自动写入标题/歌手/'
+                        '专辑/封面/歌词等（填充模式）。该操作未经过大量验证，耗时较长，'
+                        '可能产生不符合预期的修改。是否继续？',
+                        _refreshAllSongs,
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    AppSettingTile(
+                      title: '批量刷新所有歌手图片',
+                      subtitle: '遍历全部歌手，搜索并替换头像（删除旧图）',
+                      leading: const Icon(Icons.badge_outlined),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => _confirmAndRun(
+                        '批量刷新所有歌手图片',
+                        '将遍历全部歌手，逐一联网搜索头像并替换（删除旧封面文件）。'
+                        '该操作未经过大量验证，耗时较长。是否继续？',
+                        _refreshArtistCovers,
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    AppSettingTile(
+                      title: '批量刷新所有专辑图片',
+                      subtitle: '遍历全部专辑，搜索并替换封面（删除旧图）',
+                      leading: const Icon(Icons.album_outlined),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => _confirmAndRun(
+                        '批量刷新所有专辑图片',
+                        '将遍历全部专辑，逐一联网搜索封面并替换（删除旧封面文件）。'
+                        '该操作未经过大量验证，耗时较长。是否继续？',
+                        _refreshAlbumCovers,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
-          ),
-          const SizedBox(height: 16),
-          AppSettingSection(
-            title: '服务端增强',
-            children: _buildCompanionSection(context),
-          ),
-          const SizedBox(height: 16),
-          AppSettingSection(
-            title: '批量操作',
-            children: [
-              AppSettingTile(
-                title: '批量刷新所有歌曲信息',
-                subtitle: '遍历全部歌曲，搜索并自动写入标题/歌手/专辑等',
-                leading: const Icon(Icons.refresh_rounded),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => _confirmAndRun(
-                  '批量刷新所有歌曲信息',
-                  '将遍历音乐库全部歌曲，逐一联网搜索并自动写入标题/歌手/'
-                  '专辑/封面/歌词等（填充模式）。该操作未经过大量验证，耗时较长，'
-                  '可能产生不符合预期的修改。是否继续？',
-                  _refreshAllSongs,
-                ),
-              ),
-              const Divider(height: 1),
-              AppSettingTile(
-                title: '批量刷新所有歌手图片',
-                subtitle: '遍历全部歌手，搜索并替换头像（删除旧图）',
-                leading: const Icon(Icons.badge_outlined),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => _confirmAndRun(
-                  '批量刷新所有歌手图片',
-                  '将遍历全部歌手，逐一联网搜索头像并替换（删除旧封面文件）。'
-                  '该操作未经过大量验证，耗时较长。是否继续？',
-                  _refreshArtistCovers,
-                ),
-              ),
-              const Divider(height: 1),
-              AppSettingTile(
-                title: '批量刷新所有专辑图片',
-                subtitle: '遍历全部专辑，搜索并替换封面（删除旧图）',
-                leading: const Icon(Icons.album_outlined),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => _confirmAndRun(
-                  '批量刷新所有专辑图片',
-                  '将遍历全部专辑，逐一联网搜索封面并替换（删除旧封面文件）。'
-                  '该操作未经过大量验证，耗时较长。是否继续？',
-                  _refreshAlbumCovers,
-                ),
-              ),
-            ],
-          ),
-        ],
+          );
+        },
       ),
     );
   }

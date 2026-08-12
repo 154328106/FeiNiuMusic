@@ -105,7 +105,8 @@ CREATE TABLE ${DbConstants.tableSongs} (
   discNumber INTEGER,
   updatedAt INTEGER,
   isCue INTEGER NOT NULL DEFAULT 0,
-  cueOffsetMs INTEGER
+  cueOffsetMs INTEGER,
+  isAudioFileDeleted INTEGER NOT NULL DEFAULT 0
 )
 ''');
         await db.execute(
@@ -394,6 +395,16 @@ CREATE TABLE IF NOT EXISTS ${DbConstants.tableReportEvents} (
           );
           await db.execute(
             'CREATE INDEX IF NOT EXISTS idx_report_events_song ON ${DbConstants.tableReportEvents}(songId)',
+          );
+        }
+        if (oldVersion < 17) {
+          // SongEntity.toMap() 新增 isAudioFileDeleted 写入（失效歌曲标记），
+          // 旧库缺列会使 upsertSongs / 统计事务 INSERT 回滚（SQLITE_ERROR）。
+          // 已有行默认 0（未失效），后续按 accessStatus 刷新时回填。
+          await _addSongColumnIfMissing(
+            db,
+            'isAudioFileDeleted',
+            'INTEGER NOT NULL DEFAULT 0',
           );
         }
       },

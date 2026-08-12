@@ -29,7 +29,7 @@ class BackupSections {
   const BackupSections({
     this.accounts = true,
     this.stats = true,
-    this.settings = false,
+    this.settings = true,
   });
 
   BackupSections copyWith({
@@ -70,7 +70,8 @@ class BackupService {
   static const Set<String> _settingsDenyList = {
     'feiniu_accounts_v1',
     'feiniu_current_account_id',
-    // 运行时会话/激活槽位，随账号分块走（见 _exportAccounts 直接存取）
+    // 运行时会话/激活槽位，随账号分块走：导出见 _exportAccounts/
+    // _exportCurrentAccountId，还原经 AccountStore.activateForRestore 回填
     'feiniu_music_token',
     'feiniu_server_url',
     'feiniu_relay_mode',
@@ -99,7 +100,7 @@ class BackupService {
       return BackupSections(
         accounts: m['accounts'] as bool? ?? true,
         stats: m['stats'] as bool? ?? true,
-        settings: m['settings'] as bool? ?? false,
+        settings: m['settings'] as bool? ?? true,
       );
     } catch (_) {
       return const BackupSections();
@@ -141,6 +142,7 @@ class BackupService {
 
     if (sections.accounts) {
       data['accounts'] = await _exportAccounts();
+      data['currentAccountId'] = await _exportCurrentAccountId();
     }
     if (sections.stats) {
       data['stats'] = await _exportStats();
@@ -171,7 +173,10 @@ class BackupService {
     final applied = <String>[];
 
     if (data['accounts'] is List && (restrict?.accounts ?? true)) {
-      final n = await _importAccounts((data['accounts'] as List));
+      final n = await _importAccounts(
+        (data['accounts'] as List),
+        data['currentAccountId']?.toString(),
+      );
       applied.add('账号 $n 个');
     }
     if (data['stats'] is Map && (restrict?.stats ?? true)) {
@@ -193,19 +198,39 @@ class BackupService {
     return store.accounts.value.map((e) => e.toJson()).toList();
   }
 
-  Future<int> _importAccounts(List raw) async {
+  /// 导出「当前激活账号」id，还原时连同登录态一并恢复。
+  Future<String?> _exportCurrentAccountId() async {
+    final store = AccountStore.instance;
+    if (!store.isInitialized) await store.init();
+    return store.currentAccountId.value;
+  }
+
+  Future<int> _importAccounts(List raw, String? currentAccountId) async {
     final store = AccountStore.instance;
     if (!store.isInitialized) await store.init();
 
     var count = 0;
+    // 备份内 id → 合并后的条目：同身份账号已存在时 addOrUpdate 会保留本地
+    // id，需用备份 id 兜底找回「当时的当前账号」。
+    final byBackupId = <String, AccountEntry>{};
     for (final item in raw) {
       if (item is! Map) continue;
       try {
         final entry = AccountEntry.fromJson(item.cast<String, dynamic>());
         if (entry.id.isEmpty) continue;
-        await store.addOrUpdate(entry);
+        final canonical = await store.addOrUpdate(entry);
+        byBackupId[entry.id] = canonical;
         count++;
       } catch (_) {}
+    }
+    // 还原「当前激活账号」：激活会话槽位（token/服务器/中继/安全码/FNID）
+    // 并标记为当前，使备份里的登录态还原后保持，无需手动重新点选。
+    if (count > 0 && currentAccountId != null && currentAccountId.isNotEmpty) {
+      AccountEntry? target = store.byId(currentAccountId);
+      target ??= byBackupId[currentAccountId];
+      if (target != null) {
+        await store.activateForRestore(target);
+      }
     }
     return count;
   }

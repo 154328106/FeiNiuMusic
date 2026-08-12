@@ -543,6 +543,16 @@ class AccountStore {
     AuthService.instance.isLoggedIn.value = entry.token.isNotEmpty;
   }
 
+  /// 还原备份后设为当前账号：激活会话槽位（token/服务器/中继/安全码/FNID）
+  /// 并标记为当前，使备份里的登录态在还原后保持，无需手动重新点选。
+  ///
+  /// 与 [switchTo] 的区别：不做数据缓存清理、不自动重登；仅回填会话槽位。
+  Future<void> activateForRestore(AccountEntry entry) async {
+    await activate(entry);
+    currentAccountId.value = entry.id;
+    await _persist();
+  }
+
   /// 切换到另一已保存账号：停止播放 → 清空缓存 → 激活 → 设当前。
   ///
   /// 目标账号 token 有效时直接切换；token 失效/为空但保存了密码时，

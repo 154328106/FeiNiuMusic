@@ -136,4 +136,93 @@ CREATE TABLE ${DbConstants.tableSongs} (
     final names = cols.map((r) => r['name']).toSet();
     expect(names, contains('codec'));
   });
+
+  // ---- isAudioFileDeleted 列（v17）----
+  Future<void> createLegacyV16Db(String path) async {
+    // v16 历史 schema：含 codec/isCue/cueOffsetMs，但缺 isAudioFileDeleted。
+    final legacy = await databaseFactory.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: 16,
+        onCreate: (db, version) async {
+          await db.execute('''
+CREATE TABLE ${DbConstants.tableSongs} (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  artist TEXT NOT NULL,
+  album TEXT,
+  uri TEXT,
+  isLocal INTEGER NOT NULL DEFAULT 0,
+  headersJson TEXT,
+  durationMs INTEGER,
+  bitrate INTEGER,
+  sampleRate INTEGER,
+  fileSize INTEGER,
+  format TEXT,
+  codec TEXT,
+  isFavorite INTEGER NOT NULL DEFAULT 0,
+  coverId TEXT,
+  audioSpec TEXT,
+  trackNumber INTEGER,
+  discNumber INTEGER,
+  updatedAt INTEGER,
+  isCue INTEGER NOT NULL DEFAULT 0,
+  cueOffsetMs INTEGER
+)
+''');
+        },
+      ),
+    );
+    await legacy.close();
+  }
+
+  test('v16 旧库升级到 v17：isAudioFileDeleted 列被添加，写入不抛错', () async {
+    final dbPath = p.join(tempDir.path, 'legacy-v16.db');
+    await createLegacyV16Db(dbPath);
+
+    DbHelper.instance.resetForTest(overridePath: dbPath);
+    final db = await DbHelper.instance.database;
+
+    final cols = await db.rawQuery(
+      'PRAGMA table_info(${DbConstants.tableSongs})',
+    );
+    final names = cols.map((r) => r['name']).toSet();
+    expect(names, contains('isAudioFileDeleted'),
+        reason: 'v17 迁移后应有 isAudioFileDeleted 列');
+
+    // 复现 SongEntity.toMap() 的写入语义：INSERT OR REPLACE 带 isAudioFileDeleted。
+    await db.transaction((txn) async {
+      final batch = txn.batch();
+      batch.insert(
+        DbConstants.tableSongs,
+        {
+          'id': 's-broken',
+          'title': '病态',
+          'artist': '[{"name":"..."}]',
+          'codec': 'flac',
+          'isAudioFileDeleted': 1,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      await batch.commit(noResult: true);
+    });
+    final row = await db.query(
+      DbConstants.tableSongs,
+      where: 'id = ?',
+      whereArgs: ['s-broken'],
+    );
+    expect(row.single['isAudioFileDeleted'], 1);
+  });
+
+  test('全新安装（onCreate）的 songs 表直接含 isAudioFileDeleted 列', () async {
+    final dbPath = p.join(tempDir.path, 'fresh-v17.db');
+    DbHelper.instance.resetForTest(overridePath: dbPath);
+    final db = await DbHelper.instance.database;
+
+    final cols = await db.rawQuery(
+      'PRAGMA table_info(${DbConstants.tableSongs})',
+    );
+    final names = cols.map((r) => r['name']).toSet();
+    expect(names, contains('isAudioFileDeleted'));
+  });
 }

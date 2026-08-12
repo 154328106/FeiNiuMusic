@@ -251,7 +251,8 @@ class PlayerService with WidgetsBindingObserver {
   bool get hasLoadedAudioSource => _activeEngine.hasLoadedSource;
 
   void _debugLog(String message) {
-    if (!kDebugMode) return;
+    // 不依赖 kDebugMode：release 版同样输出，供设置页「调试模式」开启后
+    // 排查线上问题（DebugLogService 通过覆盖 debugPrint 捕获）。
     debugPrint('[PlayerService] $message');
   }
 

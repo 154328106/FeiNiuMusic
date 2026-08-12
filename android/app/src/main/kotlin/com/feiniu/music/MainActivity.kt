@@ -318,6 +318,10 @@ class MainActivity : AudioServiceActivity() {
                 }
                 "hasOverlayPermission" -> result.success(overlayTrackChange.hasOverlayPermission())
                 "openOverlaySettings" -> result.success(overlayTrackChange.openOverlaySettings())
+                "showPermissionToast" -> {
+                    overlayTrackChange.showPermissionToast()
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         }
