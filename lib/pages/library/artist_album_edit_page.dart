@@ -230,7 +230,7 @@ class _ArtistAlbumEditPageState extends State<ArtistAlbumEditPage> {
 
     // 服务端增强可用性门槛：未启用时禁用
     if (!LyricCompanionSettings.enabled.value) {
-      AppToast.show(context, '请先在设置 → 元数据匹配启用服务端增强', type: ToastType.error);
+      AppToast.show(context, '请先在设置 → 元数据管理启用服务端增强', type: ToastType.error);
       return;
     }
 

@@ -606,15 +606,15 @@ class _FoldersPageState extends State<FoldersPage>
                   const SizedBox(width: 4),
                 ]
               : [
+                  MultiSelectToggleButton(
+                    enabled: false,
+                    onTap: toggleMultiSelect,
+                  ),
+                  SortActionButton(onTap: _showSortSheet),
                   IconButton(
                     tooltip: _searchVisible ? '关闭搜索' : '搜索',
                     icon: Icon(_searchVisible ? Icons.search_off : Icons.search),
                     onPressed: _toggleSearch,
-                  ),
-                  SortActionButton(onTap: _showSortSheet),
-                  MultiSelectToggleButton(
-                    enabled: false,
-                    onTap: toggleMultiSelect,
                   ),
                 ],
         ),
@@ -663,7 +663,7 @@ class _FoldersPageState extends State<FoldersPage>
             if (!enabled) {
               return _CenterHint(
                 icon: Icons.folder_open_rounded,
-                text: '请先在设置 → 元数据匹配开启「服务端增强」',
+                text: '请先在设置 → 元数据管理开启「服务端增强」',
                 actionText: '去开启',
                 onAction: () =>
                     Navigator.of(context).pushNamed(AppRoutes.metadataMatchSettings),

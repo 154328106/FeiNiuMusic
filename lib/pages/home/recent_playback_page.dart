@@ -359,6 +359,10 @@ class _RecentPlaybackPageState extends State<RecentPlaybackPage>
                   ),
                 ]
               : [
+                  MultiSelectToggleButton(
+                    enabled: false,
+                    onTap: toggleMultiSelect,
+                  ),
                   IconButton(
                     icon: Icon(_searchVisible ? Icons.search_off : Icons.search),
                     onPressed: () {
@@ -371,10 +375,6 @@ class _RecentPlaybackPageState extends State<RecentPlaybackPage>
                         }
                       });
                     },
-                  ),
-                  MultiSelectToggleButton(
-                    enabled: false,
-                    onTap: toggleMultiSelect,
                   ),
                 ],
         ),

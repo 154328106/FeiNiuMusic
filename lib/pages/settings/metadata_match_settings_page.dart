@@ -10,7 +10,7 @@ import '../../app/state/settings_lyric_companion.dart';
 import '../../app/state/settings_match.dart';
 import '../../components/index.dart';
 
-/// 元数据匹配设置入口页。
+/// 元数据管理设置入口页。
 ///
 /// 集中管理数据匹配相关功能：
 /// - 服务端增强（FnMusicEnhance 开关，置顶；未开启时隐藏下方全部选项）；
@@ -79,7 +79,7 @@ class _MetadataMatchSettingsPageState extends State<MetadataMatchSettingsPage> {
     return AppPageScaffold(
       extendBodyBehindAppBar: true,
       appBar: const AppTopBar(
-        title: '元数据匹配',
+        title: '元数据管理',
         backgroundColor: Colors.transparent,
         elevation: 0,
       ),
@@ -90,12 +90,12 @@ class _MetadataMatchSettingsPageState extends State<MetadataMatchSettingsPage> {
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
             children: [
-              // 服务端增强置顶：未开启时隐藏下方全部依赖服务端的功能。
+              // 服务端增强置顶：未开启或未连接上服务器时，隐藏下方全部依赖服务端的功能。
               AppSettingSection(
                 title: '服务端增强',
                 children: _buildCompanionSection(context),
               ),
-              if (companionEnabled) ...[
+              if (companionEnabled && _connected) ...[
                 const SizedBox(height: 16),
                 AppSettingSection(
                   title: '数据源',

@@ -112,8 +112,11 @@ class FolderCompanionService {
   }
 
   Map<String, String> _authHeaders() {
+    final api = FeiNiuApiClient.instance;
     return {
-      'X-API-Key': FeiNiuApiClient.instance.token,
+      'X-API-Key': api.token,
+      // 中继模式下需携带 mode=relay cookie(与主 API 一致)
+      if (api.relayMode) 'Cookie': 'mode=relay',
     };
   }
 }

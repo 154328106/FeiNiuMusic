@@ -391,7 +391,7 @@ class _SongsPageState extends State<SongsPage>
     } else {
       AppToast.show(
         context,
-        '请先在设置 → 元数据匹配开启「服务端增强」',
+        '请先在设置 → 元数据管理开启「服务端增强」',
         type: ToastType.error,
       );
     }
@@ -496,15 +496,15 @@ class _SongsPageState extends State<SongsPage>
                           ),
                         ),
                       ),
+                    MultiSelectToggleButton(
+                      enabled: false,
+                      onTap: toggleMultiSelect,
+                    ),
+                    SortActionButton(onTap: _showSortSheet),
                     IconButton(
                       tooltip: '搜索',
                       icon: const Icon(Icons.search_rounded),
                       onPressed: _openSearch,
-                    ),
-                    SortActionButton(onTap: _showSortSheet),
-                    MultiSelectToggleButton(
-                      enabled: false,
-                      onTap: toggleMultiSelect,
                     ),
                     const SizedBox(width: 4),
                   ],

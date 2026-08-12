@@ -13,6 +13,7 @@ import '../../app/services/feiniu/track_service.dart';
 import '../../app/services/player_service.dart';
 import '../../app/state/settings_layout_state.dart';
 import '../../app/state/song_state.dart';
+import '../../app/theme/app_styles.dart';
 import '../../app/tv/tv_layout.dart';
 import '../../app/utils/api_cache_manager.dart';
 import '../../components/index.dart';
@@ -43,8 +44,14 @@ class _GenresPageState extends State<GenresPage> with SignalsMixin {
   late final _sortKey = createSignal(genresDefaultSortKey);
   late final _ascending = createSignal(genresDefaultAscending);
   late final _gridColumns = createSignal(2);
+
   /// genreGUID → 该风格第一首歌曲封面 coverId
   late final _genreCovers = createSignal<Map<String, String?>>({});
+
+  // 本地搜索(样式对齐最近播放页): 仅过滤已加载列表
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  bool _searchVisible = false;
 
   static const int _pageSize = 100;
   int _currentPage = 1;
@@ -99,11 +106,13 @@ class _GenresPageState extends State<GenresPage> with SignalsMixin {
   @override
   void dispose() {
     _scrollController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
   void _handleScroll() {
-    if (!_scrollController.hasClients || !_hasMore || _loadingMore.value) return;
+    if (!_scrollController.hasClients || !_hasMore || _loadingMore.value)
+      return;
     final maxScroll = _scrollController.position.maxScrollExtent;
     final offset = _scrollController.offset;
     if (maxScroll - offset < 400) {
@@ -145,10 +154,14 @@ class _GenresPageState extends State<GenresPage> with SignalsMixin {
     const key = 'covers';
     // 断网兜底：先读已缓存的封面映射立即渲染，再对缺失风格后台拉取。
     try {
-      final cachedJson = await ApiCacheManager.instance.getPersisted(scope, key);
+      final cachedJson = await ApiCacheManager.instance.getPersisted(
+        scope,
+        key,
+      );
       if (cachedJson != null) {
-        final cached = (jsonDecode(cachedJson) as Map<String, dynamic>)
-            .map((k, v) => MapEntry(k, v as String?));
+        final cached = (jsonDecode(cachedJson) as Map<String, dynamic>).map(
+          (k, v) => MapEntry(k, v as String?),
+        );
         final map = Map<String, String?>.from(_genreCovers.value)
           ..addAll(cached);
         _genreCovers.value = map;
@@ -205,10 +218,12 @@ class _GenresPageState extends State<GenresPage> with SignalsMixin {
         ? MediaQuery.sizeOf(context).width
         : 0.0;
     final prefs = await SharedPreferences.getInstance();
-    var key = (prefs.getString(genresPrefsSortKey) ?? genresDefaultSortKey).trim();
+    var key = (prefs.getString(genresPrefsSortKey) ?? genresDefaultSortKey)
+        .trim();
     if (key.isEmpty) key = genresDefaultSortKey;
     _sortKey.value = key;
-    _ascending.value = prefs.getBool(genresPrefsSortAscending) ?? genresDefaultAscending;
+    _ascending.value =
+        prefs.getBool(genresPrefsSortAscending) ?? genresDefaultAscending;
     // TV 模式：列数按屏幕宽度自适应，不读移动端持久化值（互不串味）。
     if (AppLayoutSettings.tvMode.value) {
       _gridColumns.value = TvLayout.gridColumns(width);
@@ -237,7 +252,10 @@ class _GenresPageState extends State<GenresPage> with SignalsMixin {
     final key = 'list-$sort';
     // 断网兜底：先读本地持久缓存立即渲染，再后台刷新最新数据。
     try {
-      final cachedJson = await ApiCacheManager.instance.getPersisted(scope, key);
+      final cachedJson = await ApiCacheManager.instance.getPersisted(
+        scope,
+        key,
+      );
       if (cachedJson != null && mounted) {
         try {
           final cached = jsonDecode(cachedJson) as List;
@@ -402,6 +420,19 @@ class _GenresPageState extends State<GenresPage> with SignalsMixin {
           elevation: 0,
           actions: [
             SortActionButton(onTap: _showSortSheet),
+            IconButton(
+              tooltip: _searchVisible ? '关闭搜索' : '搜索',
+              icon: Icon(_searchVisible ? Icons.search_off : Icons.search),
+              onPressed: () {
+                setState(() {
+                  _searchVisible = !_searchVisible;
+                  if (!_searchVisible) {
+                    _searchController.clear();
+                    _searchQuery = '';
+                  }
+                });
+              },
+            ),
           ],
         ),
         drawer: useBottomNavigation
@@ -419,112 +450,199 @@ class _GenresPageState extends State<GenresPage> with SignalsMixin {
               return const Center(child: CircularProgressIndicator());
             }
 
-            final genres = _genres.value;
-            if (genres.isEmpty) {
+            final allGenres = _genres.value;
+            if (allGenres.isEmpty) {
               return Center(
-                child: Text('暂无风格', style: TextStyle(color: scheme.onSurfaceVariant)),
+                child: Text(
+                  '暂无风格',
+                  style: TextStyle(color: scheme.onSurfaceVariant),
+                ),
               );
             }
 
-            return RefreshIndicator(
-              onRefresh: _load,
-              child: CustomScrollView(
-                controller: _scrollController,
-                slivers: [
-                  const SliverToBoxAdapter(child: SizedBox(height: 8)),
-                  SliverPadding(
-                    padding: AppLayoutSettings.tvMode.value
-                        ? TvLayout.pagePadding()
-                        : const EdgeInsets.fromLTRB(12, 0, 12, 160),
-                    sliver: SliverGrid(
-                      delegate: SliverChildBuilderDelegate((context, index) {
-                        if (index >= genres.length) {
-                          return const Center(
-                            child: Padding(
-                              padding: EdgeInsets.all(8),
-                              child: SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              ),
-                            ),
-                          );
-                        }
-                        final g = genres[index];
-                        final theme = Theme.of(context);
-                        final coverId = _genreCovers.value[g.guid];
-                        return InkWell(
-                          key: ValueKey(g.guid),
-                          borderRadius: BorderRadius.circular(16),
-                          onTap: () {
-                            Navigator.of(context).push(
-                              buildAppPageRoute(
-                                (_) => GenreDetailPage(genre: g),
-                              ),
-                            );
-                          },
-                          child: Padding(
-                            padding: const EdgeInsets.all(4),
-                            child: Column(
-                              children: [
-                                // 封面缩小并居中，名称与歌曲数在下方居中
-                                Expanded(
-                                  child: Center(
-                                    child: AspectRatio(
-                                      aspectRatio: 1,
-                                      child: _GenreCover(
-                                        coverId: coverId,
-                                        borderRadius: 16,
-                                        genreName: g.name,
-                                        placeholder:
-                                            const SizedBox.shrink(),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  g.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    height: 1.2,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  '${g.trackCount} 首',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.center,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    fontSize: 12,
-                                    color: theme.textTheme.bodySmall?.color
-                                        ?.withValues(alpha: 0.7),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      }, childCount: genres.length + (_loadingMore.value ? 1 : 0)),
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: _adaptiveGridColumns(context),
-                        crossAxisSpacing: 14,
-                        mainAxisSpacing: _gridMainAxisSpacingForColumns(
-                          _adaptiveGridColumns(context),
+            final q = _searchQuery.trim().toLowerCase();
+            final genres = q.isEmpty
+                ? allGenres
+                : allGenres
+                      .where((g) => g.name.toLowerCase().contains(q))
+                      .toList();
+
+            return Column(
+              children: [
+                if (_searchVisible)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                    child: TextField(
+                      controller: _searchController,
+                      autofocus: true,
+                      onChanged: (v) => setState(() => _searchQuery = v),
+                      decoration: InputDecoration(
+                        hintText: '搜索风格...',
+                        prefixIcon: const Icon(Icons.search, size: 20),
+                        suffixIcon: _searchQuery.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, size: 18),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  setState(() => _searchQuery = '');
+                                },
+                              )
+                            : null,
+                        filled: true,
+                        fillColor: Theme.of(context).appPanelColor,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
                         ),
-                        childAspectRatio: _gridAspectRatioForColumns(
-                          _adaptiveGridColumns(context),
+                        border: const OutlineInputBorder(
+                          borderRadius: BorderRadius.all(Radius.circular(20)),
+                          borderSide: BorderSide.none,
                         ),
+                        isDense: true,
                       ),
                     ),
                   ),
-                ],
-              ),
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _load,
+                    child: genres.isEmpty
+                        ? ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: [
+                              const SizedBox(height: 160),
+                              Center(
+                                child: Text(
+                                  '无匹配的风格',
+                                  style: TextStyle(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          )
+                        : CustomScrollView(
+                            controller: _scrollController,
+                            slivers: [
+                              const SliverToBoxAdapter(
+                                child: SizedBox(height: 8),
+                              ),
+                              SliverPadding(
+                                padding: AppLayoutSettings.tvMode.value
+                                    ? TvLayout.pagePadding()
+                                    : const EdgeInsets.fromLTRB(12, 0, 12, 160),
+                                sliver: SliverGrid(
+                                  delegate: SliverChildBuilderDelegate(
+                                    (context, index) {
+                                      if (index >= genres.length) {
+                                        return const Center(
+                                          child: Padding(
+                                            padding: EdgeInsets.all(8),
+                                            child: SizedBox(
+                                              width: 20,
+                                              height: 20,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                      final g = genres[index];
+                                      final theme = Theme.of(context);
+                                      final coverId =
+                                          _genreCovers.value[g.guid];
+                                      return InkWell(
+                                        key: ValueKey(g.guid),
+                                        borderRadius: BorderRadius.circular(16),
+                                        onTap: () {
+                                          Navigator.of(context).push(
+                                            buildAppPageRoute(
+                                              (_) => GenreDetailPage(genre: g),
+                                            ),
+                                          );
+                                        },
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(4),
+                                          child: Column(
+                                            children: [
+                                              // 封面缩小并居中，名称与歌曲数在下方居中
+                                              Expanded(
+                                                child: Center(
+                                                  child: AspectRatio(
+                                                    aspectRatio: 1,
+                                                    child: _GenreCover(
+                                                      coverId: coverId,
+                                                      borderRadius: 16,
+                                                      genreName: g.name,
+                                                      placeholder:
+                                                          const SizedBox.shrink(),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(height: 6),
+                                              Text(
+                                                g.name,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                textAlign: TextAlign.center,
+                                                style: const TextStyle(
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w600,
+                                                  height: 1.2,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                '${g.trackCount} 首',
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                textAlign: TextAlign.center,
+                                                style: theme.textTheme.bodySmall
+                                                    ?.copyWith(
+                                                      fontSize: 12,
+                                                      color: theme
+                                                          .textTheme
+                                                          .bodySmall
+                                                          ?.color
+                                                          ?.withValues(
+                                                            alpha: 0.7,
+                                                          ),
+                                                    ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                    childCount:
+                                        genres.length +
+                                        (_loadingMore.value ? 1 : 0),
+                                  ),
+                                  gridDelegate:
+                                      SliverGridDelegateWithFixedCrossAxisCount(
+                                        crossAxisCount: _adaptiveGridColumns(
+                                          context,
+                                        ),
+                                        crossAxisSpacing: 14,
+                                        mainAxisSpacing:
+                                            _gridMainAxisSpacingForColumns(
+                                              _adaptiveGridColumns(context),
+                                            ),
+                                        childAspectRatio:
+                                            _gridAspectRatioForColumns(
+                                              _adaptiveGridColumns(context),
+                                            ),
+                                      ),
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                ),
+              ],
             );
           },
         ),
@@ -571,7 +689,10 @@ class _GenreCover extends StatelessWidget {
         final coverSize = size * 0.6;
         Widget? centerCover;
         if (coverId != null && coverId!.isNotEmpty) {
-          final coverUrl = FeiNiuApiClient.instance.coverUrl(coverId!, size: 300);
+          final coverUrl = FeiNiuApiClient.instance.coverUrl(
+            coverId!,
+            size: 300,
+          );
           centerCover = ClipOval(
             child: CachedNetworkImage(
               imageUrl: coverUrl,
@@ -670,7 +791,8 @@ class _GenreDetailPageState extends State<GenreDetailPage>
   }
 
   void _handleScroll() {
-    if (!_scrollController.hasClients || !_hasMore || _loadingMore.value) return;
+    if (!_scrollController.hasClients || !_hasMore || _loadingMore.value)
+      return;
     final maxScroll = _scrollController.position.maxScrollExtent;
     final offset = _scrollController.offset;
     if (maxScroll - offset < 400) {
@@ -792,7 +914,11 @@ class _GenreDetailPageState extends State<GenreDetailPage>
         return SortSheet(
           title: '排序',
           options: const [
-            SortOption(key: 'createdAt', label: '添加日期', icon: Icons.access_time),
+            SortOption(
+              key: 'createdAt',
+              label: '添加日期',
+              icon: Icons.access_time,
+            ),
             SortOption(key: 'artistName', label: '歌手', icon: Icons.person),
           ],
           currentKey: _sortKey.value,
@@ -835,10 +961,7 @@ class _GenreDetailPageState extends State<GenreDetailPage>
                   totalCount: multiSelectSongs.length,
                   onTap: toggleSelectAll,
                 ),
-                MultiSelectToggleButton(
-                  enabled: true,
-                  onTap: exitMultiSelect,
-                ),
+                MultiSelectToggleButton(enabled: true, onTap: exitMultiSelect),
               ]
             : [
                 SortActionButton(onTap: _showSortSheet),
@@ -857,7 +980,10 @@ class _GenreDetailPageState extends State<GenreDetailPage>
           final songs = _songs.value;
           if (songs.isEmpty) {
             return Center(
-              child: Text('暂无歌曲', style: TextStyle(color: scheme.onSurfaceVariant)),
+              child: Text(
+                '暂无歌曲',
+                style: TextStyle(color: scheme.onSurfaceVariant),
+              ),
             );
           }
 
@@ -881,71 +1007,91 @@ class _GenreDetailPageState extends State<GenreDetailPage>
                 ),
                 Expanded(
                   child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 160),
-              itemCount: songs.length + (_loadingMore.value ? 1 : 0),
-              itemBuilder: (context, index) {
-                if (index >= songs.length) {
-                  return const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(8),
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    ),
-                  );
-                }
-                final song = songs[index];
-                final selected = isSongSelected(song.id);
-                return InkWell(
-                  onTap: () => isMultiSelecting
-                      ? toggleSongSelection(song.id)
-                      : _playSong(index),
-                  onLongPress: isMultiSelecting
-                      ? null
-                      : () {
-                          showModalBottomSheet<void>(
-                            context: context,
-                            backgroundColor: Colors.transparent,
-                            isScrollControlled: true,
-                            builder: (_) => SongDetailSheet(song: song),
-                          );
-                        },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    child: Row(
-                      children: [
-                        if (isMultiSelecting) ...[
-                          Icon(
-                            selected ? Icons.check_circle : Icons.circle_outlined,
-                            size: 20,
-                            color: selected
-                                ? scheme.primary
-                                : Theme.of(context).disabledColor,
+                    controller: _scrollController,
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 160),
+                    itemCount: songs.length + (_loadingMore.value ? 1 : 0),
+                    itemBuilder: (context, index) {
+                      if (index >= songs.length) {
+                        return const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(8),
+                            child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
                           ),
-                          const SizedBox(width: 12),
-                        ],
-                        ArtworkWidget(song: song, size: 48, borderRadius: 8),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                        );
+                      }
+                      final song = songs[index];
+                      final selected = isSongSelected(song.id);
+                      return InkWell(
+                        onTap: () => isMultiSelecting
+                            ? toggleSongSelection(song.id)
+                            : _playSong(index),
+                        onLongPress: isMultiSelecting
+                            ? null
+                            : () {
+                                showModalBottomSheet<void>(
+                                  context: context,
+                                  backgroundColor: Colors.transparent,
+                                  isScrollControlled: true,
+                                  builder: (_) => SongDetailSheet(song: song),
+                                );
+                              },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Row(
                             children: [
-                              Text(song.title, maxLines: 1, overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                              const SizedBox(height: 2),
-                              Text(song.artistDisplayName, maxLines: 1, overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                              if (isMultiSelecting) ...[
+                                Icon(
+                                  selected
+                                      ? Icons.check_circle
+                                      : Icons.circle_outlined,
+                                  size: 20,
+                                  color: selected
+                                      ? scheme.primary
+                                      : Theme.of(context).disabledColor,
+                                ),
+                                const SizedBox(width: 12),
+                              ],
+                              ArtworkWidget(
+                                song: song,
+                                size: 48,
+                                borderRadius: 8,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      song.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      song.artistDisplayName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: scheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ],
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-                );
-              },
+                      );
+                    },
                   ),
                 ),
                 if (isMultiSelecting) buildMultiSelectBar(),

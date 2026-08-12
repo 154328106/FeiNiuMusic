@@ -287,7 +287,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
                       builder: (context, enabled, _) {
                         final available = enabled;
                         return IconButton(
-                          tooltip: available ? '编辑' : '需先启用服务端增强（设置 → 元数据匹配）',
+                          tooltip: available ? '编辑' : '需先启用服务端增强（设置 → 元数据管理）',
                           icon: Icon(
                             Icons.edit_outlined,
                             color: available
@@ -816,7 +816,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage>
                       builder: (context, enabled, _) {
                         final available = enabled;
                         return IconButton(
-                          tooltip: available ? '编辑' : '需先启用服务端增强（设置 → 元数据匹配）',
+                          tooltip: available ? '编辑' : '需先启用服务端增强（设置 → 元数据管理）',
                           icon: Icon(
                             Icons.edit_outlined,
                             color: available

@@ -448,6 +448,11 @@ class _FavoritePageState extends State<FavoritePage>
                   ),
                 ]
               : [
+                  MultiSelectToggleButton(
+                    enabled: false,
+                    onTap: toggleMultiSelect,
+                  ),
+                  SortActionButton(onTap: _showSortSheet),
                   IconButton(
                     icon: Icon(_searchVisible ? Icons.search_off : Icons.search),
                     onPressed: () {
@@ -460,11 +465,6 @@ class _FavoritePageState extends State<FavoritePage>
                         }
                       });
                     },
-                  ),
-                  SortActionButton(onTap: _showSortSheet),
-                  MultiSelectToggleButton(
-                    enabled: false,
-                    onTap: toggleMultiSelect,
                   ),
                 ],
         ),

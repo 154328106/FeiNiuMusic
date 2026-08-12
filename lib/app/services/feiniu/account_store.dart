@@ -36,6 +36,10 @@ class AccountStore {
 
   bool _initialized = false;
 
+  /// 账号切换进行中：期间抑制 onSessionExpired(401) 触发的会话失效处理，
+  /// 避免切换窗口内闪现登录页。
+  bool _switching = false;
+
   bool get isInitialized => _initialized;
 
   AccountEntry? get currentAccount {
@@ -556,65 +560,71 @@ class AccountStore {
   /// 切换到另一已保存账号：停止播放 → 清空缓存 → 激活 → 设当前。
   ///
   /// 目标账号 token 有效时直接切换；token 失效/为空但保存了密码时，
-  /// 自动用密码重新登录验证后再切换（不跳登录页）；否则 `isLoggedIn` 会
-  /// 被置为 false，由门控回退到登录页。
+  /// 自动用密码重新登录验证后再切换（不跳登录页）。无法自动登录的失败
+  /// 场景返回 false 且**不置空当前会话**（`isLoggedIn` 保持 true），由调用方
+  /// 提示「需登录」，避免门控闪现登录页。
   ///
-  /// 返回切换是否成功（无需重新登录的失败场景返回 false，不抛出）。
+  /// 返回切换是否成功（失败返回 false，不抛出）。
   Future<bool> switchTo(String id) async {
     final entry = byId(id);
     if (entry == null || id == currentAccountId.value) return false;
+    if (_switching) return false;
+    _switching = true;
+    try {
+      // 账号切换前先清空上一账号的数据缓存并停止播放
+      await _clearDataCaches();
 
-    // 账号切换前先清空上一账号的数据缓存并停止播放
-    await _clearDataCaches();
-
-    // token 失效/为空但有密码 → 自动重新登录验证
-    if (entry.token.isEmpty) {
-      final password = entry.password;
-      if (password == null || password.isEmpty) {
-        // 无密码可用，无法自动登录；由门控回退到登录页
-        await activate(entry);
-        currentAccountId.value = entry.id;
-        await _persist();
-        return false;
-      }
-      try {
-        final deviceId = AuthService.instance.getOrCreateDeviceId();
-        await FeiNiuApiClient.instance.setBaseUrl(entry.serverUrl);
-        if (entry.relayMode) {
-          FeiNiuApiClient.instance.setRelayMode(true);
+      // token 失效/为空但有密码 → 自动重新登录验证
+      if (entry.token.isEmpty) {
+        final password = entry.password;
+        if (password == null || password.isEmpty) {
+          // 无密码可用，无法自动登录：不切换、不置空当前会话（避免门控闪现
+          // 登录页），返回 false 由页面提示「需登录」，停留在当前账号。
+          return false;
         }
-        final response = await FeiNiuApiClient.instance.login(
-          entry.username,
-          password,
-          deviceId,
-          relayMode: entry.relayMode,
-        );
-        // 用新 token 更新账号并激活
-        final refreshed = entry.copyWith(
-          token: response.userToken,
-          username: response.username ?? entry.username,
-        );
-        _replaceInList(refreshed);
-        await activate(refreshed);
-        currentAccountId.value = refreshed.id;
-        await _persist();
-        return true;
-      } catch (_) {
-        // 自动登录失败：激活为空 token 的条目，由门控回退到登录页
-        await activate(entry);
-        currentAccountId.value = entry.id;
-        await _persist();
-        return false;
+        try {
+          final deviceId = AuthService.instance.getOrCreateDeviceId();
+          await FeiNiuApiClient.instance.setBaseUrl(entry.serverUrl);
+          if (entry.relayMode) {
+            FeiNiuApiClient.instance.setRelayMode(true);
+          }
+          final response = await FeiNiuApiClient.instance.login(
+            entry.username,
+            password,
+            deviceId,
+            relayMode: entry.relayMode,
+          );
+          // 用新 token 更新账号并激活
+          final refreshed = entry.copyWith(
+            token: response.userToken,
+            username: response.username ?? entry.username,
+          );
+          _replaceInList(refreshed);
+          await activate(refreshed);
+          currentAccountId.value = refreshed.id;
+          await _persist();
+          return true;
+        } catch (_) {
+          // 自动登录失败：恢复当前账号连接，不置空会话（避免闪现登录页）。
+          final currentId = currentAccountId.value;
+          final current = currentId == null ? null : byId(currentId);
+          if (current != null) {
+            await activate(current);
+          }
+          return false;
+        }
       }
-    }
 
-    await activate(entry);
-    currentAccountId.value = entry.id;
-    await _persist();
-    if (kDebugMode) {
-      debugPrint('[AccountStore] Switched to ${entry.displayName}');
+      await activate(entry);
+      currentAccountId.value = entry.id;
+      await _persist();
+      if (kDebugMode) {
+        debugPrint('[AccountStore] Switched to ${entry.displayName}');
+      }
+      return true;
+    } finally {
+      _switching = false;
     }
-    return true;
   }
 
   /// 把激活槽位中的连接信息（探测得到的 URL/中继/安全码）回写当前账号。
@@ -667,6 +677,9 @@ class AccountStore {
     final current = currentAccount;
     final api = FeiNiuApiClient.instance;
     if (current == null) return false;
+
+    // 账号切换进行中：401 可能来自切换前的遗留请求，不处理会话失效，避免闪现登录页。
+    if (_switching) return false;
 
     // 1) 尝试用保存的密码静默重登（与 switchTo 的自动登录一致）
     if (current.token.isNotEmpty && current.password != null && current.password!.isNotEmpty) {

@@ -648,11 +648,11 @@ class _AlbumsPageState extends State<AlbumsPage>
           backgroundColor: Colors.transparent,
           elevation: 0,
           actions: [
+            SortActionButton(onTap: _showSortSheet),
             IconButton(
               icon: const Icon(Icons.search),
               onPressed: () => Navigator.pushNamed(context, AppRoutes.search, arguments: SearchCategory.album),
             ),
-            SortActionButton(onTap: _showSortSheet),
           ],
         ),
         drawer: useBottomNavigation

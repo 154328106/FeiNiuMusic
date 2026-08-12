@@ -628,6 +628,17 @@ class _PlaylistsPageState extends State<PlaylistsPage>
           elevation: 0,
           actions: [
             IconButton(
+              tooltip: '导入歌单',
+              icon: const Icon(Icons.playlist_add_check_circle_outlined),
+              onPressed: _importPlaylist,
+            ),
+            IconButton(
+              tooltip: '新建歌单',
+              icon: const Icon(Icons.add),
+              onPressed: _createPlaylist,
+            ),
+            SortActionButton(onTap: _showSortSheet),
+            IconButton(
               icon: Icon(_searchVisible ? Icons.search_off : Icons.search),
               onPressed: () {
                 setState(() {
@@ -639,17 +650,6 @@ class _PlaylistsPageState extends State<PlaylistsPage>
                   }
                 });
               },
-            ),
-            SortActionButton(onTap: _showSortSheet),
-            IconButton(
-              tooltip: '导入歌单',
-              icon: const Icon(Icons.playlist_add_check_circle_outlined),
-              onPressed: _importPlaylist,
-            ),
-            IconButton(
-              tooltip: '新建歌单',
-              icon: const Icon(Icons.add),
-              onPressed: _createPlaylist,
             ),
             const SizedBox(width: 8),
           ],

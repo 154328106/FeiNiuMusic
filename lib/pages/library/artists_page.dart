@@ -428,11 +428,11 @@ class _ArtistsPageState extends State<ArtistsPage>
           backgroundColor: Colors.transparent,
           elevation: 0,
           actions: [
+            SortActionButton(onTap: _showSortSheet),
             IconButton(
               icon: const Icon(Icons.search),
               onPressed: () => Navigator.pushNamed(context, AppRoutes.search, arguments: SearchCategory.artist),
             ),
-            SortActionButton(onTap: _showSortSheet),
           ],
         ),
         drawer: useBottomNavigation
