@@ -287,18 +287,25 @@ class _RootBackHandlerState extends State<_RootBackHandler> {
 
   @override
   Widget build(BuildContext context) {
-    // canPop=false → we intercept the back; canPop=true → let the system exit.
-    final canPop = _subtreeCanPop ? false : _armedToExit;
+    // 只有「已进入待退出」才放行系统返回；未待退出时无论是否在首页都由我们
+    // 拦截（子页面手动 maybePop，首页弹 toast 并进入待退出）。
+    // 不能用 `_subtreeCanPop ? false : _armedToExit`：本 PopScope 自身的
+    // canPop=false 会让嵌套 Navigator 的 canPop() 误报为 true（willHandlePopInternally），
+    // 首次进入时第一次返回会走 maybePop 冒泡、什么都不弹也不出 toast。
     return PopScope(
-      canPop: canPop,
-      onPopInvokedWithResult: (didPop, result) {
+      canPop: _armedToExit,
+      onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
         if (_subtreeCanPop) {
-          widget.navigatorKey.currentState?.maybePop();
-          return;
+          final popped = await (widget.navigatorKey.currentState?.maybePop() ??
+              Future.value(false));
+          // 确实弹出子页面 → 正常返回；否则（maybePop 冒泡到根 = 在首页）
+          // 落到下面的待退出提示。
+          if (popped) return;
+          if (!mounted) return;
         }
-        // At home, not yet armed: prompt and arm a real exit for the next back.
-        AppToast.show(context, '再返回一次退回桌面');
+        // 在首页（或 maybePop 冒泡无果）：弹提示并进入待退出，第二次返回真正退出。
+        AppToast.showGlobal('再按一次返回键退回桌面');
         setState(() => _armedToExit = true);
         _armExitWindow();
       },
