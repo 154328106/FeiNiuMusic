@@ -346,7 +346,10 @@ class _PlayerView extends StatelessWidget {
                 mq.size.width >= 900;
             if (!isTabletLandscape) {
               if (stylePreset == PlayerStylePreset.poster) {
-                return _PosterPlayerLayout(player: player);
+                return _PosterPlayerLayout(
+                  player: player,
+                  onTapLyrics: onTapLyrics,
+                );
               }
               return _MobilePlayerLayout(
                 player: player,
@@ -479,10 +482,20 @@ class _TabletLandscapePlayerLayout extends StatelessWidget {
   }
 }
 
+/// 海报模式 Slider 轨道两端的内缩量。`BaseSliderTrackShape.getPreferredRect` 按
+/// `max(overlayWidth, thumbWidth) / 2` 收进两端：这里 overlay 半径为 0、
+/// thumb 半径 6，因此每端内缩 6px，轨道并不会占满全宽。轨道、加载条、
+/// 时间标签与下方按钮行都对齐同一个内缩量，保证水平几何一致。
+const double _posterTrackInset = 6;
+
 class _PosterPlayerLayout extends StatelessWidget {
   final PlayerService player;
+  final VoidCallback onTapLyrics;
 
-  const _PosterPlayerLayout({required this.player});
+  const _PosterPlayerLayout({
+    required this.player,
+    required this.onTapLyrics,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -558,20 +571,40 @@ class _PosterPlayerLayout extends StatelessWidget {
                     ),
                     // 歌词预览：弹性占满「标题之下、控制区之上」的剩余空间，
                     // 空间不足时收缩（含收缩到 0），底栏永不溢出。
+                    // 点击预览区跳转到右侧歌词页（与底栏迷你歌词行为一致）。
                     const SizedBox(height: 12),
                     Expanded(
                       child: Skeletonizer(
                         enabled: song == null,
-                        child: _PosterLyricsPreview(),
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: onTapLyrics,
+                          child: _PosterLyricsPreview(),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
-                    // 收藏 / 队列按钮（与 1.4.1 一致，位于进度条上方）
-                    _PosterMetaRow(player: player, song: song),
+                    // 收藏 / 队列按钮（与 1.4.1 一致，位于进度条上方）。
+                    // 两端与轨道内缩（_posterTrackInset）对齐，不超出轨道。
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: _posterTrackInset,
+                      ),
+                      child: _PosterMetaRow(player: player, song: song),
+                    ),
                     const SizedBox(height: 2),
                     _PosterSeekBar(player: player),
                     const SizedBox(height: 20),
-                    PosterControls(player: player),
+                    // 播放控制：行宽与轨道对齐（两端内缩 _posterTrackInset）。
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: _posterTrackInset,
+                      ),
+                      child: PosterControls(
+                        player: player,
+                        alignToTrack: true,
+                      ),
+                    ),
                     // 底部留白：让控制栏整体抬离屏幕底部
                     SizedBox(height: bottomInset > 20 ? 16 : 28),
                   ],
@@ -954,12 +987,7 @@ class _PosterSeekBar extends StatefulWidget {
 }
 
 class _PosterSeekBarState extends State<_PosterSeekBar> with SignalsMixin {
-  /// Slider 轨道两端的内缩量。`BaseSliderTrackShape.getPreferredRect` 按
-  /// `max(overlayWidth, thumbWidth) / 2` 收进两端：这里 overlay 半径为 0、
-  /// thumb 半径 6，因此每端内缩 6px，轨道并不会占满全宽。下方加载条的两端
-  /// 对齐同一个内缩量，保证两条轨道几何完全一致、重叠对齐，不会在左端多出
-  /// 一截灰色。
-  static const double _trackInset = 6;
+  // 轨道两端内缩量见文件级 [_posterTrackInset]，加载条/时间标签/按钮行共用。
 
   late final _dragValue = createSignal<double?>(null);
 
@@ -990,7 +1018,7 @@ class _PosterSeekBarState extends State<_PosterSeekBar> with SignalsMixin {
             // 进度条
             // Slider 轨道两端默认按 max(overlayWidth, thumbWidth)/2 内缩：
             // overlay 半径 0、thumb 半径 6 → 每端内缩 6px，并不能真正占满
-            // 全宽。因此下方加载条两端也用相同的 _trackInset，两条轨道几何
+            // 全宽。因此下方加载条两端也用相同的 _posterTrackInset，两条轨道几何
             // 完全一致、重叠对齐，避免加载条在左端多出一截灰色。
             SizedBox(
               height: 24,
@@ -999,10 +1027,10 @@ class _PosterSeekBarState extends State<_PosterSeekBar> with SignalsMixin {
                 children: [
                   Positioned.fill(
                     child: Padding(
-                      // 水平方向与 Slider 轨道内缩一致（_trackInset=6），两端
+                      // 水平方向与 Slider 轨道内缩一致（_posterTrackInset=6），两端
                       // 对齐，保证加载条与进度条完全重叠。
                       padding: const EdgeInsets.symmetric(
-                        horizontal: _trackInset,
+                        horizontal: _posterTrackInset,
                         vertical: 10,
                       ),
                       child: ClipRRect(
@@ -1024,7 +1052,7 @@ class _PosterSeekBarState extends State<_PosterSeekBar> with SignalsMixin {
                       trackHeight: 3,
                       trackShape: const RoundedRectSliderTrackShape(),
                       thumbShape: const RoundSliderThumbShape(
-                        enabledThumbRadius: _trackInset,
+                        enabledThumbRadius: _posterTrackInset,
                       ),
                       overlayShape: const RoundSliderOverlayShape(
                         overlayRadius: 0,
@@ -1057,9 +1085,10 @@ class _PosterSeekBarState extends State<_PosterSeekBar> with SignalsMixin {
                 ],
               ),
             ),
-            // 时间标签：位于进度条下方，两端对齐
+            // 时间标签：位于进度条下方，两端与轨道内缩（_posterTrackInset）对齐，
+            // 不超出进度条两端的实际长度。
             Padding(
-              padding: EdgeInsets.zero,
+              padding: const EdgeInsets.symmetric(horizontal: _posterTrackInset),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [

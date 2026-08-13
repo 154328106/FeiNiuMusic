@@ -1428,7 +1428,16 @@ class _QueueLimitDialog extends StatelessWidget {
 class PosterControls extends StatelessWidget {
   final PlayerService player;
 
-  const PosterControls({super.key, required this.player});
+  /// 是否让首尾图标对齐轨道两端（海报页封面侧：顺序播放 / 更多 落在进度条
+  /// 两端，配合外层 [_posterTrackInset] 内缩与轨道对齐）。歌词页保持
+  /// 居中分布（spaceAround）不变。
+  final bool alignToTrack;
+
+  const PosterControls({
+    super.key,
+    required this.player,
+    this.alignToTrack = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1444,7 +1453,9 @@ class PosterControls extends StatelessWidget {
           PlaybackMode.single => Icons.repeat_one_rounded,
         };
         return Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          mainAxisAlignment: alignToTrack
+              ? MainAxisAlignment.spaceBetween
+              : MainAxisAlignment.spaceAround,
           children: [
             IconButton(
               iconSize: 30,
