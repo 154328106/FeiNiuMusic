@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../app/router/app_router.dart';
 import '../../app/state/settings_state.dart';
@@ -293,9 +294,17 @@ class _RootBackHandlerState extends State<_RootBackHandler> {
     // canPop=false 会让嵌套 Navigator 的 canPop() 误报为 true（willHandlePopInternally），
     // 首次进入时第一次返回会走 maybePop 冒泡、什么都不弹也不出 toast。
     return PopScope(
-      canPop: _armedToExit,
+      // 根路由没有可弹出的上级路由，始终拦截返回并在回调中决定是返回
+      // 子页面、提示用户，还是交给系统退到后台。
+      canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
+        if (_armedToExit && !_subtreeCanPop) {
+          // 根路由没有可弹出的上级页面，不能依赖 Navigator.pop() 退出。
+          // 显式交给系统处理，Android 会结束当前 Activity 并回到桌面。
+          await SystemNavigator.pop();
+          return;
+        }
         if (_subtreeCanPop) {
           final popped = await (widget.navigatorKey.currentState?.maybePop() ??
               Future.value(false));
