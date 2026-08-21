@@ -40,6 +40,15 @@ class AppLayoutSettings {
   static bool get _forceTabletOnDesktop =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
 
+  /// 桌面端平台（macOS / Windows / Linux）。
+  /// 这些平台没有移动端那种「从屏幕边缘滑动返回」的手势，
+  /// 因此即便选了底部导航布局，仍需显式返回键才能退出子页面。
+  static bool get isDesktop =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.macOS ||
+          defaultTargetPlatform == TargetPlatform.windows ||
+          defaultTargetPlatform == TargetPlatform.linux);
+
   /// 有效平板模式：Windows 桌面端恒为真；其余平台取用户开关或 TV 模式。
   ///
   /// TV 与平板共用同一套桌面式布局外壳；TV 只是额外强制开启 + 焦点导航。
