@@ -15,6 +15,7 @@ import 'app/services/backup/backup_service.dart';
 import 'app/services/debug_log_service.dart';
 import 'app/services/fn_auto_reconnect_service.dart';
 import 'app/services/island_lyric_service.dart';
+import 'app/services/macos_status_bar_service.dart';
 import 'app/services/media_notification_service.dart';
 import 'app/services/portable_storage_service.dart';
 import 'app/services/tv_detection.dart';
@@ -92,10 +93,15 @@ Future<void> main() async {
   // 避免把本机凭据带到别的机器。须在 AuthService.init（恢复会话）之前执行。
   await AppPortableStorage.checkMachineOwner();
   await AuthService.instance.init();
-  // 媒体通知（MediaSession/通知栏/Android Auto）仅 Android 有原生实现。
-  // 桌面端跳过：PlayerService 由首个用到它的页面懒构造，无需在此初始化。
-  if (Platform.isAndroid) {
+  // Android：MediaSession / 通知栏 / Android Auto。
+  // macOS：MPNowPlayingInfoCenter / MPRemoteCommandCenter（控制中心“正在播放”）。
+  if (Platform.isAndroid || Platform.isMacOS) {
     await MediaNotificationService.init();
+  }
+  // macOS 菜单栏（状态栏）播放状态指示器：在 macOS 原生 NSStatusItem 里
+  // 显示当前歌曲与播放/暂停/上下首控制，仅 macOS 平台启用。
+  if (Platform.isMacOS) {
+    await MacosStatusBarService.init();
   }
   // 切歌通知监听：PlayerService 已构造（MediaNotificationService.init 内），
   // AppLayoutSettings 已在上面 ensureLoaded，可安全订阅 currentSong。

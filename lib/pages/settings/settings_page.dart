@@ -22,6 +22,7 @@ class _SettingsPageState extends State<SettingsPage> {
     AppPlaybackVolumeSettings.ensureLoaded();
     PlayerBottomActionSettings.ensureLoaded();
     MediaNotificationSettings.ensureLoaded();
+    StatusBarSettings.ensureLoaded();
     AppLayoutSettings.ensureLoaded();
     AppBackgroundSettings.ensureLoaded();
   }
@@ -39,7 +40,7 @@ class _SettingsPageState extends State<SettingsPage> {
           extendBodyBehindAppBar: true,
           appBar: AppTopBar(
             title: '设置',
-            showBackButton: !useBottomNavigation,
+            showBackButton: !useBottomNavigation || AppLayoutSettings.isDesktop,
             backgroundColor: Colors.transparent,
             elevation: 0,
           ),
@@ -53,10 +54,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     title: '账号管理',
                     subtitle: '切换、重命名或添加已保存的账号',
                     trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => Navigator.pushNamed(
-                      context,
-                      AppRoutes.accounts,
-                    ),
+                    onTap: () =>
+                        Navigator.pushNamed(context, AppRoutes.accounts),
                   ),
                 ],
               ),
@@ -200,6 +199,26 @@ class _SettingsPageState extends State<SettingsPage> {
                 ],
               ),
               const SizedBox(height: 16),
+              if (Platform.isMacOS)
+                AppSettingSection(
+                  title: '桌面端',
+                  children: [
+                    ValueListenableBuilder<bool>(
+                      valueListenable: StatusBarSettings.enabled,
+                      builder: (context, enabled, _) {
+                        return AppSettingSwitchTile(
+                          title: '状态栏播放状态',
+                          subtitle: '在 macOS 菜单栏显示当前歌曲与播放控制',
+                          value: enabled,
+                          onChanged: (value) {
+                            StatusBarSettings.setEnabled(value);
+                          },
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              if (Platform.isMacOS) const SizedBox(height: 16),
               AppSettingSection(
                 title: '应用',
                 children: [
@@ -207,10 +226,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     title: '数据备份',
                     subtitle: '备份账号、听歌统计与设置到本地或 WebDAV',
                     trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => Navigator.pushNamed(
-                      context,
-                      AppRoutes.backupRestore,
-                    ),
+                    onTap: () =>
+                        Navigator.pushNamed(context, AppRoutes.backupRestore),
                   ),
                   AppSettingTile(
                     title: '版本信息',

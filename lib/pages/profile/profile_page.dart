@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/router/app_router.dart';
+import '../../app/state/settings_layout_state.dart';
 import '../../components/account/profile_account_card.dart';
 import '../../components/index.dart';
 
@@ -20,7 +21,7 @@ class ProfilePage extends StatelessWidget {
           extendBodyBehindAppBar: true,
           appBar: AppTopBar(
             title: '我的',
-            showBackButton: !useBottomNavigation,
+            showBackButton: !useBottomNavigation || AppLayoutSettings.isDesktop,
             backgroundColor: Colors.transparent,
             elevation: 0,
             actions: [
