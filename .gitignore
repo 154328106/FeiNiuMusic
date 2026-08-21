@@ -115,3 +115,7 @@ secrets.*
 # 源码打包压缩包
 *.7z
 *.zip
+
+# macOS 构建产物
+dist/
+macos/Podfile.lock
