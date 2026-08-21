@@ -44,11 +44,11 @@ class MediaKitEngine implements PlayerEngine {
       ),
     );
     _player = player;
-    // 订阅 mpv 原生日志：仅保留错误级别，诊断加载/解码失败的具体原因。
+    // 订阅 mpv 原生日志：仅保留错误级别（PlayerConfiguration.logLevel=error），
+    // 诊断加载/解码失败的具体原因。不依赖 kDebugMode：release 版经 DebugLogService
+    // 设置页「调试模式」同样可捕获，便于排查线上偶发播放失败。
     player.stream.log.listen((log) {
-      if (kDebugMode) {
-        debugPrint('[mpv:${log.prefix}] ${log.text}');
-      }
+      debugPrint('[mpv:${log.prefix}] ${log.text}');
     });
     _wire(player);
   }
@@ -104,9 +104,8 @@ class MediaKitEngine implements PlayerEngine {
       if (!_indexCtl.isClosed) _indexCtl.add(playlist.index);
     });
     player.stream.error.listen((msg) {
-      if (kDebugMode) {
-        debugPrint('[MediaKitEngine] error="$msg" index=${player.state.playlist.index}');
-      }
+      // 始终输出（release 可经 DebugLogService 捕获），让偶发播放失败可诊断。
+      debugPrint('[MediaKitEngine] error="$msg" index=${player.state.playlist.index}');
       if (_errorCtl.isClosed) return;
       // mpv 错误不带索引；附加当前播放列表索引，让 PlayerService 能定位
       // 失败歌曲并触发恢复/降级。

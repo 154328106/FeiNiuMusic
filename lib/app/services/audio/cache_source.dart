@@ -103,6 +103,11 @@ class StreamAudioCacheSource extends StreamAudioSource {
   /// 单一顺序下载循环：完整 GET 流式写 `.part`，同时服务所有在途字节请求。
   Future<void> _downloadToFile() async {
     final client = _createHttpClient();
+    // 下载句柄提升到外层作用域：无论成败都在 finally 里关闭，避免下载中途
+    // 失败（网络抖动/服务器中断）时 IOSink 依赖 GC 兜底才释放 FD，长会话
+    // 累积触发 macOS EMFILE「Too many open files」→ mpv 打开缓存文件失败
+    // → 偶发播放失败（需重试多次才能成功）。
+    IOSink? sink;
     try {
       final httpRequest = await client.getUrl(uri);
       for (final entry in headers.entries) {
@@ -113,7 +118,7 @@ class StreamAudioCacheSource extends StreamAudioSource {
         throw Exception('HTTP Status Error: ${response.statusCode}');
       }
       partFile.createSync(recursive: true);
-      final sink = partFile.openWrite();
+      sink = partFile.openWrite();
       _sourceLength = response.contentLength == -1 ? null : response.contentLength;
       _contentType = response.headers.contentType.toString();
       await mimeFile.writeAsString(_contentType);
@@ -195,12 +200,17 @@ class StreamAudioCacheSource extends StreamAudioSource {
       }
       _inProgressResponses.clear();
       await sink.close();
+      sink = null;
       partFile.renameSync(cacheFile.path);
       _completed = true;
       if (!_downloadCompleter.isCompleted) {
         _downloadCompleter.complete();
       }
     } finally {
+      // 无论成败都显式关闭文件句柄（幂等；成功路径已置 null 则跳过）。
+      try {
+        await sink?.close();
+      } catch (_) {}
       client.close(force: true);
     }
   }

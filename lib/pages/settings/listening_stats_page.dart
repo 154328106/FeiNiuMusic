@@ -226,8 +226,12 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
           padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
           children: [
             // 年度报告入口：仅开发版（debug）显示，正式版隐藏（先发布埋点收集数据）。
-            // Windows 桌面端无 WebView 实现，报告页不可用，一律隐藏。
-            if (kDebugMode && !kIsWeb && defaultTargetPlatform != TargetPlatform.windows) ...[
+            // 桌面端无 WebView 实现，报告页不可用，一律隐藏。
+            if (kDebugMode &&
+                !kIsWeb &&
+                defaultTargetPlatform != TargetPlatform.windows &&
+                defaultTargetPlatform != TargetPlatform.macOS &&
+                defaultTargetPlatform != TargetPlatform.linux) ...[
               _buildReportEntry(context),
               const SizedBox(height: 16),
             ],

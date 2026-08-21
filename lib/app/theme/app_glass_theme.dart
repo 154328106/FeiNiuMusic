@@ -59,13 +59,19 @@ GlassThemeData appGlassTheme(Color seed) {
   );
 
   return GlassThemeData(
+    // 显式固定 quality：quality=null 时各 widget 默认 premium（重 multi-pass
+    // shader + blend group），在 Skia（macOS/Windows 3.44 默认渲染器）上滚动时
+    // 逐帧重采样开销大。standard 为桌面端推荐档：单一轻量 shader，观感一致
+    // 且稳定，杜绝滚动黑屏闪烁。
     light: GlassThemeVariant.light.copyWith(
       settings: surfaceFor(),
       glowColors: GlassGlowColors(primary: seed),
+      quality: GlassQuality.standard,
     ),
     dark: GlassThemeVariant.dark.copyWith(
       settings: surfaceFor(),
       glowColors: GlassGlowColors(primary: seed),
+      quality: GlassQuality.standard,
     ),
   );
 }

@@ -413,13 +413,50 @@ class StreamCacheService {
     unawaited(_precacheSongAsync(song));
   }
 
+  /// 后台下载并发上限：media_kit 每首歌都会触发整首下载，慢网/中继下同时
+  /// 下载多首会打开大量 HTTP 连接 + 文件句柄，叠加 mpv/封面后逼近 macOS
+  /// 单进程 FD 上限（ulimit -n=256）→ EMFILE「Too many open files」。
+  /// 超出的下载排入队列串行执行，不阻塞播放、不丢任务。
+  static const int _maxConcurrentDownloads = 2;
+  int _activeDownloads = 0;
+  final List<Future<void> Function()> _pendingDownloads = [];
+
   Future<void> _precacheSongAsync(SongEntity song) async {
-    try {
-      final source = await sourceForSong(song);
-      if (source.isComplete) return;
-      await source.precache();
-    } catch (_) {
-      // 预缓存失败静默忽略（不影响播放）
+    Future<void> run() async {
+      try {
+        final source = await sourceForSong(song);
+        if (source.isComplete) return;
+        await source.precache();
+      } catch (_) {
+        // 预缓存失败静默忽略（不影响播放）
+      }
+    }
+
+    if (_activeDownloads < _maxConcurrentDownloads) {
+      _activeDownloads++;
+      try {
+        await run();
+      } finally {
+        _activeDownloads--;
+        _drainPendingDownloads();
+      }
+    } else {
+      _pendingDownloads.add(() async {
+        _activeDownloads++;
+        try {
+          await run();
+        } finally {
+          _activeDownloads--;
+          _drainPendingDownloads();
+        }
+      });
+    }
+  }
+
+  void _drainPendingDownloads() {
+    while (_activeDownloads < _maxConcurrentDownloads &&
+        _pendingDownloads.isNotEmpty) {
+      unawaited(_pendingDownloads.removeAt(0)());
     }
   }
 

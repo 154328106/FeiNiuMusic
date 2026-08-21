@@ -36,9 +36,9 @@ class AppLayoutSettings {
   /// 由 [syncTvMode] 计算合并，不直接持久化（forceTvMode 才是持久化来源）。
   static final ValueNotifier<bool> tvMode = ValueNotifier(false);
 
-  /// 桌面端（Windows）恒用平板/大屏布局：侧边栏外壳，无需屏幕尺寸判定。
-  static bool get _forceTabletOnDesktop =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+  /// 桌面端（Windows/macOS/Linux）恒用平板/大屏布局：侧边栏外壳，
+  /// 无需屏幕尺寸判定。
+  static bool get _forceTabletOnDesktop => isDesktop;
 
   /// 桌面端平台（macOS / Windows / Linux）。
   /// 这些平台没有移动端那种「从屏幕边缘滑动返回」的手势，

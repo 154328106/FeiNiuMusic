@@ -210,10 +210,13 @@ class MiniPlayerBar extends StatelessWidget {
           settings: kAppGlassSurfaceSettings.copyWith(
             glassColor: const Color(0x1AFFFFFF),
           ),
-          // 独立渲染层 + 尽量走 premium 完整折射管线（Lightweight 2D shader
-          // 折射弱，容易退化成只有模糊）。
+          // 独立渲染层 + 与全局主题一致的 standard 质量（0.30.2 Skia 路径下
+          // premium 需要 blend group 多通道，且滚动时整条全宽面板逐帧重采样，
+          // 是滚动黑屏闪烁/掉帧的主要来源；Windows 端本就静态封顶 standard，
+          // 此改动仅影响 macOS 观感——折射略弱）。如偏好更通透的折射可改回
+          // premium，但需接受滚动时的重采样开销。
           useOwnLayer: true,
-          quality: GlassQuality.premium,
+          quality: GlassQuality.standard,
           child: const SizedBox.expand(),
         );
 

@@ -272,9 +272,9 @@ class _PlayerPageState extends State<PlayerPage>
                   },
                 ),
               ),
-              // Windows 桌面端没有系统返回键，播放页左上角放一个返回按钮，
+              // 桌面端没有系统返回键，播放页左上角放一个返回按钮，
               // 点击关闭播放页（等价于手机的下滑返回/系统返回）。其他平台不显示。
-              if (Platform.isWindows)
+              if (Platform.isWindows || Platform.isMacOS || Platform.isLinux)
                 Positioned(
                   top: 8,
                   left: 12,

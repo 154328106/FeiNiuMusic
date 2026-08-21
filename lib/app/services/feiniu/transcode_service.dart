@@ -178,10 +178,14 @@ class FeiNiuTranscodeService {
   /// CUE 曲目也参与转码（服务器按 guid 返回**裁切好的单曲 HLS**，客户端无需
   /// 再裁剪）；CUE 整轨文件往往很大，转码后明显更小。
   Future<bool> shouldTranscode(SongEntity song) async {
-    // Windows 桌面端强制直连：转码产出 HLS（fMP4），media_kit 的 mpv FFmpeg
-    // 音频库未编入 hls demuxer 播不了；全量走 media_kit 直连原始流即可。
+    // 桌面端（Windows/macOS/Linux）强制直连：转码产出 HLS（fMP4），
+    // media_kit 的 mpv FFmpeg 音频库未编入 hls demuxer 播不了；
+    // 全量走 media_kit 直连原始流即可。
     // 用 defaultTargetPlatform 而非 Platform.isWindows：单测默认 android。
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.linux)) {
       return false;
     }
     if (!AppTranscodeSettings.enabled.value) return false;

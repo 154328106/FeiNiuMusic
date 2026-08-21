@@ -25,21 +25,23 @@ class MediaNotificationService {
   static bool _initStarted = false;
 
   static Future<void> init({bool force = false}) async {
-    // Android 走 MediaSession / 通知栏，macOS 走 MPNowPlayingInfoCenter；
-    // 其他桌面平台没有 audio_service 原生实现，播放本身不依赖它。
-    if (!io.Platform.isAndroid && !io.Platform.isMacOS) return;
+    // Android 走 MediaSession / 通知栏，iOS/macOS 走 MPNowPlayingInfoCenter；
+    // 其他平台没有 audio_service 原生实现，播放本身不依赖它。
+    if (!io.Platform.isAndroid && !io.Platform.isIOS && !io.Platform.isMacOS) {
+      return;
+    }
     if (_audioHandler != null || _initStarted) return;
     await MediaNotificationSettings.ensureLoaded();
     final player = PlayerService.instance;
     final snap = player.snapshot.value;
     if (!force && snap.song == null && !snap.isPlaying) {
       // Android Auto / 系统媒体中心通过 MediaBrowserService 发现应用；
-      // macOS 也应提前建立 AudioHandler，首次播放时才能立即把媒体信息
+      // iOS/macOS 也应提前建立 AudioHandler，首次播放时才能立即把媒体信息
       // 发布到 MPNowPlayingInfoCenter。
       // 即使当前没有播放内容也要注册 MediaSession，否则首次连接车机时
       // 启动器里看不到本应用（要等用户手动播一首歌才会出现）。
       // 其他平台保持原有延迟注册行为。
-      if (io.Platform.isAndroid || io.Platform.isMacOS) {
+      if (io.Platform.isAndroid || io.Platform.isIOS || io.Platform.isMacOS) {
         try {
           await _initHandler();
         } catch (e) {

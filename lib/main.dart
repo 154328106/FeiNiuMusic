@@ -16,6 +16,7 @@ import 'app/services/debug_log_service.dart';
 import 'app/services/fn_auto_reconnect_service.dart';
 import 'app/services/island_lyric_service.dart';
 import 'app/services/macos_status_bar_service.dart';
+import 'app/services/macos_window_background_service.dart';
 import 'app/services/media_notification_service.dart';
 import 'app/services/portable_storage_service.dart';
 import 'app/services/tv_detection.dart';
@@ -94,14 +95,17 @@ Future<void> main() async {
   await AppPortableStorage.checkMachineOwner();
   await AuthService.instance.init();
   // Android：MediaSession / 通知栏 / Android Auto。
-  // macOS：MPNowPlayingInfoCenter / MPRemoteCommandCenter（控制中心“正在播放”）。
-  if (Platform.isAndroid || Platform.isMacOS) {
+  // iOS/macOS：MPNowPlayingInfoCenter / MPRemoteCommandCenter（锁屏/控制中心“正在播放”）。
+  if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
     await MediaNotificationService.init();
   }
   // macOS 菜单栏（状态栏）播放状态指示器：在 macOS 原生 NSStatusItem 里
   // 显示当前歌曲与播放/暂停/上下首控制，仅 macOS 平台启用。
   if (Platform.isMacOS) {
     await MacosStatusBarService.init();
+    // 窗口背景同步：把主题背景色推给原生 FlutterView，覆盖引擎默认黑底，
+    // 消除滚动/切页时合成间隙露黑底的整窗闪烁。
+    await MacosWindowBackgroundService.init();
   }
   // 切歌通知监听：PlayerService 已构造（MediaNotificationService.init 内），
   // AppLayoutSettings 已在上面 ensureLoaded，可安全订阅 currentSong。
@@ -175,7 +179,10 @@ Future<void> main() async {
         theme: appGlassTheme(
           AppThemeSettings.themeSeedColor.value ?? const Color(0xFF3B82F6),
         ),
-        adaptiveQuality: true,
+        // 关闭自适应质量：GlassAdaptiveScope（experimental）会在滚动触发帧耗时
+        // 波动时频繁降级/恢复质量，整屏玻璃表面随之重建 → 滚动时黑屏闪烁。
+        // 固定为 theme 中显式指定的稳定质量（见 appGlassTheme quality）。
+        adaptiveQuality: false,
       ),
     ),
   );

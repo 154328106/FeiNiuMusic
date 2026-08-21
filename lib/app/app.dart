@@ -105,10 +105,16 @@ class FeiNiuMusicApp extends StatelessWidget {
                           builder: (context, isTv, _) {
                         final isWindows = !kIsWeb &&
                             defaultTargetPlatform == TargetPlatform.windows;
-                        // Windows 桌面端不设 fontFamily 时，Flutter 默认用 Segoe UI，
-                        // 中文字形回退到系统 CJK 字体——拉丁/中文混排时字体不同、
-                        // 字重渲染不一致（有的粗有的细）。统一到微软雅黑解决。
-                        final fontFamily = isWindows ? 'Microsoft YaHei UI' : null;
+                        final isMacOS = !kIsWeb &&
+                            defaultTargetPlatform == TargetPlatform.macOS;
+                        // Windows/macOS 桌面端不显式设 fontFamily 时，Flutter 走
+                        // 系统默认：Windows = Segoe UI + 系统 CJK 回退；macOS =
+                        // SF Pro + 苹方回退。两者都面临拉丁/中文混排时字体不同、
+                        // 字重渲染不一致（有的粗有的细）。统一到各自原生中文 UI
+                        // 字体：Windows 微软雅黑 / macOS 苹方 PingFang SC。
+                        final fontFamily = isWindows
+                            ? 'Microsoft YaHei UI'
+                            : (isMacOS ? 'PingFang SC' : null);
                         final lightBase = ThemeData(
                           colorScheme: ColorScheme.fromSeed(
                             seedColor: baseSeed,

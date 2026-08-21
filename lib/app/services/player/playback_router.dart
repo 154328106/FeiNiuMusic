@@ -24,10 +24,15 @@ import 'player_engine.dart';
 /// 未知/空格式走 just_audio 直连（与现状一致）：格式探测延后，播放出错由
 /// 引擎错误处理兜底。
 EngineKind routeForFormat(String? format, {String? codec}) {
-  // Windows 桌面端：just_audio（ExoPlayer）无原生实现，全量走 media_kit
-  // （libmpv + FFmpeg，任意格式都能软解）。用 defaultTargetPlatform 而非
-  // Platform.isWindows：单测默认 TargetPlatform.android，保持路由测试有效。
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+  // 桌面端（Windows/macOS/Linux）全量走 media_kit（libmpv + FFmpeg）：
+  // - Windows：just_audio（ExoPlayer）无原生实现；
+  // - macOS：流需携带认证头，AVPlayer 不可靠；
+  // 任意格式都能软解，且显式带 httpHeaders。
+  // 用 defaultTargetPlatform 而非 Platform.isWindows：单测默认 TargetPlatform.android。
+  if (!kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.windows ||
+          defaultTargetPlatform == TargetPlatform.macOS ||
+          defaultTargetPlatform == TargetPlatform.linux)) {
     return EngineKind.mediaKit;
   }
   // codec 判断优先：eac3/ac3/alac 等 ExoPlayer 设备解码不可靠的编码直接

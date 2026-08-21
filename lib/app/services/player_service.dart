@@ -56,10 +56,12 @@ class PlayerService with WidgetsBindingObserver {
   /// 首次播放 media_kit 格式时才实例化原生 Player，省启动开销。
   MediaKitEngine? _mediaKitEngine;
 
-  /// 默认播放引擎。Windows 桌面端 just_audio（ExoPlayer）无原生实现，
-  /// 直接以 media_kit 为默认引擎，避免构造 just_audio 抛错。
+  /// 默认播放引擎。桌面端（Windows/macOS/Linux）全量走 media_kit：
+  /// - Windows：just_audio（ExoPlayer）无原生实现；
+  /// - macOS：流需携带认证头，AVPlayer 不可靠；
+  /// 直接以 media_kit 为默认引擎，避免构造 just_audio。
   PlayerEngine _defaultEngine() {
-    if (Platform.isWindows) {
+    if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
       return _mediaKitEngine ??= MediaKitEngine();
     }
     return _justAudioEngine;
@@ -1059,6 +1061,11 @@ class PlayerService with WidgetsBindingObserver {
     // 还卡在等 _initFuture），会把旧会话队列加载进播放器，与用户刚选的队列并发
     // setAudioSources → just_audio 抛 PlayerInterruptedException（Loading interrupted）。
     _queueGeneration++;
+    // 用户显式新建播放队列：清除本会话 media_kit「无法播放」黑名单，让
+    // 偶发失败（网络抖动/服务器慢/音频设备瞬时不可用）的歌曲在重新点播时
+    // 有机会再试，而不是整个会话内一直被跳过。升级标记
+    // （_mediaKitEscalateSongIds）是结构性路由决定，不在此清除。
+    _mediaKitFailedSongIds.clear();
     // 等待初始化（含旧播放会话恢复）完成，避免 setAudioSources 与恢复流程
     // 并发交错导致播放器物理 loop/shuffle 状态被覆盖。
     await _initFuture;
@@ -1123,15 +1130,17 @@ class PlayerService with WidgetsBindingObserver {
     // 双引擎架构：计算引擎路由，只加载当前 run 到对应引擎。
     _applyEngineKinds(await _computeEngineKinds(playable));
 
+    String? loadFailReason;
     Future<bool> loadCurrentRunOnce() async {
       try {
         await _activateLogicalIndex(actualIndex);
         return true;
       } catch (e) {
+        loadFailReason = e.toString();
         if (kDebugMode) {
           debugPrint('PlayerService.playQueue activate failed: $e');
         }
-        final msg = e.toString();
+        final msg = loadFailReason!;
         final shouldRetry =
             msg.contains('404') ||
             msg.contains('InvalidResponseCodeException') ||
@@ -1151,6 +1160,7 @@ class PlayerService with WidgetsBindingObserver {
           await _activateLogicalIndex(actualIndex);
           return true;
         } catch (e2) {
+          loadFailReason = e2.toString();
           if (kDebugMode) {
             debugPrint('PlayerService.playQueue activate retry failed: $e2');
           }
@@ -1166,6 +1176,13 @@ class PlayerService with WidgetsBindingObserver {
       } catch (_) {}
       isPlaying.value = false;
       _emitSnapshot(force: true);
+      // 初始播放失败不再静默：告诉用户原因（mpv 原始报错经 _briefFailureReason
+      // 截断），区分「网络/源问题」还是「本机不可播」，避免反复盲试。
+      AppToast.showGlobal(
+        '播放失败：${playable[actualIndex].title}\n'
+        '${_briefFailureReason(loadFailReason)}',
+        type: ToastType.error,
+      );
       return;
     }
 
@@ -1593,7 +1610,7 @@ class PlayerService with WidgetsBindingObserver {
         // → 跳过该歌（前进/回卷），不卡死在不可播的源上。
         if (_mediaKitFailedSongIds.contains(failedSong.id)) {
           _mediaKitFailedSongIds.add(failedSong.id);
-          await _skipFailedSong(failedSong, wasPlaying);
+          await _skipFailedSong(failedSong, wasPlaying, reason: errorMsg);
           return;
         }
         _mediaKitFailedSongIds.add(failedSong.id);
@@ -1650,12 +1667,35 @@ class PlayerService with WidgetsBindingObserver {
   /// 在 [_handlePlayerError] 的恢复块内调用（`_recoveringCurrentSource` 已置位，
   /// 不会再触发重复恢复）。跳过用 [_advanceToLogicalIndex] / [_activateLogicalIndex]，
   /// 由恢复块 finally 释放 `_recoveringCurrentSource`。
-  Future<void> _skipFailedSong(SongEntity failedSong, bool wasPlaying) async {
+  /// 截断播放器原始报错为适合 toast 展示的短句（多行取首行 + 超长加省略号）。
+  static String _briefFailureReason(String? reason) {
+    if (reason == null || reason.isEmpty) return '无法播放';
+    final trimmed = reason.trim();
+    final firstLine = trimmed.contains('\n')
+        ? trimmed.substring(0, trimmed.indexOf('\n'))
+        : trimmed;
+    return firstLine.length > 40
+        ? '${firstLine.substring(0, 40)}…'
+        : firstLine;
+  }
+
+  Future<void> _skipFailedSong(
+    SongEntity failedSong,
+    bool wasPlaying, {
+    String? reason,
+  }) async {
     if (kDebugMode) {
       debugPrint(
-        'PlayerService skip failed media_kit song: ${failedSong.title}',
+        'PlayerService skip failed media_kit song: ${failedSong.title} '
+        'reason=$reason',
       );
     }
+    // 不静默跳歌：让用户看到失败原因（mpv 原始报错可能很长，截断后展示）。
+    // 依赖设置页「调试模式」的完整日志可进一步定位。
+    AppToast.showGlobal(
+      '播放失败：${failedSong.title}\n${_briefFailureReason(reason)}',
+      type: ToastType.error,
+    );
     final list = queue.value;
     final idx = currentIndex.value;
     if (list.isEmpty || idx < 0 || idx >= list.length) return;
@@ -3778,9 +3818,10 @@ class PlayerService with WidgetsBindingObserver {
     await _becomingNoisySub?.cancel();
     _stopBackgroundAudioKeepAlive();
     await _setAudioSessionActive(false);
-    // Windows 上 just_audio 从未构造（_defaultEngine 走 media_kit），
-    // 访问 late final 会反构造一个 AudioPlayer 报错，须跳过。
-    if (!Platform.isWindows) {
+    // 桌面端（Windows/macOS/Linux）just_audio 从未构造
+    // （_defaultEngine 走 media_kit），访问 late final 会反构造一个
+    // AudioPlayer 报错，须跳过。
+    if (!Platform.isWindows && !Platform.isMacOS && !Platform.isLinux) {
       await _justAudioEngine.dispose();
     }
     await _mediaKitEngine?.dispose();

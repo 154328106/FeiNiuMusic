@@ -370,9 +370,11 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                             const SizedBox(width: 6),
                             _DecoderTag(
                               engine: engine,
-                              // Windows 桌面端只有 media_kit（FFmpeg）引擎，
+                              // 桌面端只有 media_kit（FFmpeg）引擎，
                               // 禁止手动切到 just_audio（无实现）。
-                              onTap: Platform.isWindows
+                              onTap: Platform.isWindows ||
+                                      Platform.isMacOS ||
+                                      Platform.isLinux
                                   ? null
                                   : () => _showDecoderPicker(context, engine),
                             ),
