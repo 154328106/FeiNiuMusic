@@ -100,6 +100,9 @@ class StreamCacheService {
   void resetForTest() {
     _sources.clear();
     _formatExtensions.clear();
+    _scheduledDownloadIds.clear();
+    _pendingDownloads.clear();
+    _activeDownloads = 0;
     _dir = null;
     _initFuture = null;
     currentSongId = null;
@@ -420,9 +423,10 @@ class StreamCacheService {
   static const int _maxConcurrentDownloads = 2;
   int _activeDownloads = 0;
   final List<Future<void> Function()> _pendingDownloads = [];
+  final Set<String> _scheduledDownloadIds = {};
 
-  Future<void> _precacheSongAsync(SongEntity song) async {
-    Future<void> run() async {
+  Future<void> _precacheSongAsync(SongEntity song) {
+    return _scheduleDownload(song.id, () async {
       try {
         final source = await sourceForSong(song);
         if (source.isComplete) return;
@@ -430,28 +434,45 @@ class StreamCacheService {
       } catch (_) {
         // 预缓存失败静默忽略（不影响播放）
       }
+    });
+  }
+
+  Future<void> _scheduleDownload(
+    String songId,
+    Future<void> Function() download,
+  ) async {
+    // 活跃或已排队的相同曲目只保留一个任务。GUID 在当前飞牛音乐库内唯一；
+    // 这也避免播放队列重载时重复闭包长期堆积。
+    if (!_scheduledDownloadIds.add(songId)) return;
+
+    final done = Completer<void>();
+    Future<void> run() async {
+      _activeDownloads++;
+      try {
+        await download();
+        done.complete();
+      } catch (error, stackTrace) {
+        done.completeError(error, stackTrace);
+      } finally {
+        _activeDownloads--;
+        _scheduledDownloadIds.remove(songId);
+        _drainPendingDownloads();
+      }
     }
 
     if (_activeDownloads < _maxConcurrentDownloads) {
-      _activeDownloads++;
-      try {
-        await run();
-      } finally {
-        _activeDownloads--;
-        _drainPendingDownloads();
-      }
+      unawaited(run());
     } else {
-      _pendingDownloads.add(() async {
-        _activeDownloads++;
-        try {
-          await run();
-        } finally {
-          _activeDownloads--;
-          _drainPendingDownloads();
-        }
-      });
+      _pendingDownloads.add(run);
     }
+    await done.future;
   }
+
+  @visibleForTesting
+  Future<void> scheduleDownloadForTest(
+    String songId,
+    Future<void> Function() download,
+  ) => _scheduleDownload(songId, download);
 
   void _drainPendingDownloads() {
     while (_activeDownloads < _maxConcurrentDownloads &&

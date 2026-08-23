@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -100,6 +101,31 @@ void main() {
   });
 
   group('StreamCacheService pure logic', () {
+    test('duplicate song IDs share one scheduled download', () async {
+      final started = Completer<void>();
+      final release = Completer<void>();
+      var calls = 0;
+
+      final first = StreamCacheService.instance.scheduleDownloadForTest(
+        'same-song',
+        () async {
+          calls++;
+          started.complete();
+          await release.future;
+        },
+      );
+      await started.future;
+      final duplicate = StreamCacheService.instance.scheduleDownloadForTest(
+        'same-song',
+        () async => calls++,
+      );
+
+      await duplicate;
+      expect(calls, 1);
+      release.complete();
+      await first;
+    });
+
     test('safeCacheName sanitizes and keeps valid chars', () {
       expect(StreamCacheService.safeCacheName('abc-123._x'), 'abc-123._x');
       expect(

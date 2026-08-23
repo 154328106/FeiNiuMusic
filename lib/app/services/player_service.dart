@@ -991,11 +991,11 @@ class PlayerService with WidgetsBindingObserver {
         'uri=$uri',
       );
     }
-    // 后台触发完整下载缓存（不阻塞播放）：本次流式播放的同时把整首下载到
-    // 本地，下次播同一首命中缓存 `Media(file)` 秒播（media_kit 直连流本身
-    // 不留缓存，必须显式下载）。下载失败静默忽略，不影响本次播放。
-    // CUE 整轨曲目跳过该下载（否则每首各缓存一份整轨镜像）。
-    if (!isCue && StreamCacheService.instance.isEnabled) {
+    // 仅为当前激活歌曲后台下载完整缓存。run 内其它歌曲只创建轻量 Media，
+    // 下一首由既有链式预缓存负责；否则 macOS 全队列走 media_kit 时会把整段
+    // 队列一次性排入下载，DSD 大文件会让待下载任务长期积压。
+    // CUE 整轨曲目跳过下载（否则每首各缓存一份整轨镜像）。
+    if (waitForLocal && !isCue && StreamCacheService.instance.isEnabled) {
       StreamCacheService.instance.cacheSong(song);
     }
     if (isCue && cueOffset != null) {
