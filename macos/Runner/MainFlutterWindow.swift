@@ -69,6 +69,7 @@ private final class MacosStatusBarController: NSObject {
       binaryMessenger: binaryMessenger)
     super.init()
 
+    configureStatusItemButton()
     statusItem.button?.title = lastTitle
     statusItem.button?.toolTip = "飞牛音乐"
     statusItem.menu = buildMenu()
@@ -78,6 +79,19 @@ private final class MacosStatusBarController: NSObject {
     DispatchQueue.main.async { [weak self] in
       self?.methodChannel.invokeMethod("ready", arguments: nil)
     }
+  }
+
+  private func configureStatusItemButton() {
+    guard let button = statusItem.button,
+          let image = NSImage(named: "StatusBarIcon") else {
+      return
+    }
+    image.isTemplate = true
+    image.size = NSSize(width: 18, height: 18)
+    button.image = image
+    button.imagePosition = .imageLeading
+    button.imageScaling = .scaleProportionallyDown
+    button.setAccessibilityLabel("飞牛音乐")
   }
 
   private func buildMenu() -> NSMenu {
@@ -130,8 +144,10 @@ private final class MacosStatusBarController: NSObject {
           statusItem.button?.title = "飞牛音乐"
           statusItem.button?.toolTip = "飞牛音乐"
         } else {
-          statusItem.button?.title = (isPlaying ? "▶ " : "⏸ ") + truncate(lastTitle, max: 28)
-          statusItem.button?.toolTip = lastArtist.isEmpty ? lastTitle : "\(lastTitle) — \(lastArtist)"
+          statusItem.button?.title = truncate(lastTitle, max: 28)
+          let playbackState = isPlaying ? "正在播放" : "已暂停"
+          let songDescription = lastArtist.isEmpty ? lastTitle : "\(lastTitle) — \(lastArtist)"
+          statusItem.button?.toolTip = "\(playbackState)：\(songDescription)"
         }
         statusItem.menu = buildMenu()
       }
