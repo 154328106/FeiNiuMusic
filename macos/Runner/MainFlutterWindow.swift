@@ -56,11 +56,23 @@ class MainFlutterWindow: NSWindow {
 }
 
 private final class MacosStatusBarController: NSObject {
+  private static let marqueeStatusItemLength: CGFloat = 210
+  private static let marqueeTitleWidth: CGFloat = 170
+  private static let marqueeInterval: TimeInterval = 0.25
+  private static let marqueeGap = "     "
+  private static let marqueeHoldTicks = 4
+
   private let statusItem: NSStatusItem
   private let methodChannel: FlutterMethodChannel
   private var lastTitle = "飞牛音乐"
   private var lastArtist = ""
   private var isPlaying = false
+  private var isIdle = true
+  private var isStatusItemVisible = true
+  private var marqueeTimer: Timer?
+  private var marqueeCharacters: [Character] = []
+  private var marqueeOffset = 0
+  private var marqueeHoldTicks = 0
 
   init(binaryMessenger: FlutterBinaryMessenger) {
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -70,7 +82,7 @@ private final class MacosStatusBarController: NSObject {
     super.init()
 
     configureStatusItemButton()
-    statusItem.button?.title = lastTitle
+    updateStatusItemTitle()
     statusItem.button?.toolTip = "飞牛音乐"
     statusItem.menu = buildMenu()
     methodChannel.setMethodCallHandler { [weak self] call, result in
@@ -91,6 +103,7 @@ private final class MacosStatusBarController: NSObject {
     button.image = image
     button.imagePosition = .imageLeading
     button.imageScaling = .scaleProportionallyDown
+    button.cell?.lineBreakMode = .byClipping
     button.setAccessibilityLabel("飞牛音乐")
   }
 
@@ -139,12 +152,11 @@ private final class MacosStatusBarController: NSObject {
         lastTitle = (args["title"] as? String) ?? "飞牛音乐"
         lastArtist = (args["artist"] as? String) ?? ""
         isPlaying = (args["isPlaying"] as? Bool) ?? false
-        let idle = (args["isIdle"] as? Bool) ?? false
-        if idle || lastTitle.isEmpty {
-          statusItem.button?.title = "飞牛音乐"
+        isIdle = (args["isIdle"] as? Bool) ?? false
+        updateStatusItemTitle()
+        if isIdle || lastTitle.isEmpty {
           statusItem.button?.toolTip = "飞牛音乐"
         } else {
-          statusItem.button?.title = truncate(lastTitle, max: 28)
           let playbackState = isPlaying ? "正在播放" : "已暂停"
           let songDescription = lastArtist.isEmpty ? lastTitle : "\(lastTitle) — \(lastArtist)"
           statusItem.button?.toolTip = "\(playbackState)：\(songDescription)"
@@ -153,9 +165,13 @@ private final class MacosStatusBarController: NSObject {
       }
       result(nil)
     case "show":
+      isStatusItemVisible = true
       statusItem.isVisible = true
+      updateStatusItemTitle()
       result(nil)
     case "hide":
+      isStatusItemVisible = false
+      stopMarquee()
       statusItem.isVisible = false
       result(nil)
     default:
@@ -163,9 +179,60 @@ private final class MacosStatusBarController: NSObject {
     }
   }
 
-  private func truncate(_ value: String, max: Int) -> String {
-    guard value.count > max else { return value }
-    return String(value.prefix(max)) + "…"
+  private func updateStatusItemTitle() {
+    stopMarquee()
+
+    let title = isIdle || lastTitle.isEmpty ? "飞牛音乐" : lastTitle
+    guard let button = statusItem.button else { return }
+    button.setAccessibilityLabel(title)
+
+    guard isStatusItemVisible, titleWidth(title, font: button.font) > Self.marqueeTitleWidth else {
+      statusItem.length = NSStatusItem.variableLength
+      button.title = title
+      return
+    }
+
+    statusItem.length = Self.marqueeStatusItemLength
+    button.title = title
+    marqueeCharacters = Array(title + Self.marqueeGap)
+    marqueeHoldTicks = Self.marqueeHoldTicks
+
+    let timer = Timer(timeInterval: Self.marqueeInterval, repeats: true) { [weak self] _ in
+      self?.advanceMarquee()
+    }
+    marqueeTimer = timer
+    RunLoop.main.add(timer, forMode: .common)
+  }
+
+  private func advanceMarquee() {
+    guard let button = statusItem.button, !marqueeCharacters.isEmpty else { return }
+    if marqueeHoldTicks > 0 {
+      marqueeHoldTicks -= 1
+      return
+    }
+
+    marqueeOffset = (marqueeOffset + 1) % marqueeCharacters.count
+    if marqueeOffset == 0 {
+      marqueeHoldTicks = Self.marqueeHoldTicks
+    }
+    let rotated = Array(marqueeCharacters[marqueeOffset...])
+      + Array(marqueeCharacters[..<marqueeOffset])
+    button.title = String(rotated)
+  }
+
+  private func stopMarquee() {
+    marqueeTimer?.invalidate()
+    marqueeTimer = nil
+    marqueeCharacters = []
+    marqueeOffset = 0
+    marqueeHoldTicks = 0
+  }
+
+  private func titleWidth(_ title: String, font: NSFont?) -> CGFloat {
+    let attributes: [NSAttributedString.Key: Any] = [
+      .font: font ?? NSFont.menuBarFont(ofSize: 0),
+    ]
+    return (title as NSString).size(withAttributes: attributes).width
   }
 
   @objc private func playPauseTapped(_ sender: Any) {
