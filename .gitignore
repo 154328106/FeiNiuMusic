@@ -118,4 +118,5 @@ secrets.*
 
 # macOS 构建产物
 dist/
+*.dmg
 macos/Podfile.lock
