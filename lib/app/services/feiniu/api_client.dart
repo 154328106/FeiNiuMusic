@@ -48,8 +48,26 @@ class FeiNiuApiClient {
                 .then((result) {
                   handler.resolve(result);
                 })
-                .catchError((e) {
-                  handler.next(e);
+                .catchError((Object e, StackTrace st) {
+                  // _handleRedirect 重发失败（如重定向目标 TLS 握手失败）时，
+                  // 必须把错误通过 handler.reject 传给拦截器链走正常错误流程
+                  // （触发自动重连/错误 UI）。不能塞进 handler.next——其参数是
+                  // Response，传 DioException 会抛「DioException 不是 Response」
+                  // 类型错误 → 未捕获异常崩溃。
+                  if (kDebugMode) {
+                    debugPrint(
+                      '[ApiClient] Redirect follow failed: $e\n$st',
+                    );
+                  }
+                  handler.reject(
+                    e is DioException
+                        ? e
+                        : DioException(
+                            requestOptions: response.requestOptions,
+                            error: e,
+                            stackTrace: st,
+                          ),
+                  );
                 });
             return;
           }
@@ -245,7 +263,23 @@ class FeiNiuApiClient {
     final redirectUri = baseUri.resolve(location);
 
     if (kDebugMode) {
-      debugPrint('[ApiClient] 3xx → $redirectUri (depth=$depth)');
+      debugPrint(
+        '[ApiClient] 3xx → $redirectUri (depth=$depth) '
+        'from ${response.requestOptions.uri}',
+      );
+    }
+
+    // 重定向目标与原始请求完全一致 → 重定向循环（典型：nginx「HTTP 强制跳转
+    // HTTPS」的规则误命中 HTTPS 端口，把 HTTPS 请求 302 回自己）。直接终止，
+    // 由调用方（如登录）给出明确错误，而不是每跳重发直到 depth 上限。
+    if (redirectUri == response.requestOptions.uri) {
+      if (kDebugMode) {
+        debugPrint(
+          '[ApiClient] Redirect loop detected: $redirectUri '
+          '(HTTP ${response.statusCode})',
+        );
+      }
+      return response;
     }
 
     // 获取原始请求中的 Cookie（保持原始请求头不变）
@@ -381,6 +415,15 @@ class FeiNiuApiClient {
         },
       ),
     );
+    // _handleRedirect 已尝试跟随（含自循环终止/深度上限），走到这里仍是 3xx
+    // 说明重定向没被正常消化：给用户明确提示而不是笼统「登录失败」。
+    final status = response.statusCode ?? 0;
+    if (status >= 300 && status < 400) {
+      throw Exception(
+        '服务器返回重定向 (HTTP $status)，请检查服务器'
+        '「HTTP 强制跳转 HTTPS」配置是否误拦截了 HTTPS 请求',
+      );
+    }
     final data = response.data is Map<String, dynamic>
         ? response.data as Map<String, dynamic>
         : <String, dynamic>{};

@@ -71,7 +71,8 @@ class AccountEntry {
 
   /// 服务器地址展示标签：
   /// - FNID 连接的账号只显示 FNID，不显示完整链接/域名；
-  /// - 否则显示服务器主机名。
+  /// - 否则显示完整 origin（scheme://host:port），区分 HTTP/HTTPS 与端口
+  ///   （同一台服务器可分别保存 HTTP 与 HTTPS 两个账号）。
   String get serverLabel {
     final id = fnId;
     if (id != null && id.isNotEmpty) {
@@ -81,7 +82,13 @@ class AccountEntry {
       }
       return id;
     }
-    return host;
+    final uri = Uri.tryParse(serverUrl);
+    if (uri != null && uri.host.isNotEmpty) {
+      final host = uri.host.contains(':') ? '[${uri.host}]' : uri.host;
+      final port = uri.hasPort ? ':${uri.port}' : '';
+      return '${uri.scheme}://$host$port';
+    }
+    return serverUrl;
   }
 
   /// 展示名称：优先备注，否则默认「飞牛音乐」

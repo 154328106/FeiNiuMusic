@@ -24,7 +24,7 @@ class AppLayoutSettings {
   /// 用户手动开关的平板模式（设置页「平板模式」）。
   static final ValueNotifier<bool> tabletMode = ValueNotifier(false);
   static final ValueNotifier<AppNavigationStyle> navigationStyle =
-      ValueNotifier(AppNavigationStyle.drawer);
+      ValueNotifier(AppNavigationStyle.bottomBar);
 
   /// 强制 TV 模式（设置页「TV 模式」开关，持久化）。
   ///
@@ -187,7 +187,7 @@ class AppLayoutSettings {
     final savedNavigationStyle = prefs.getString(_prefsNavigationStyle);
     navigationStyle.value = AppNavigationStyle.values.firstWhere(
       (style) => style.name == savedNavigationStyle,
-      orElse: () => AppNavigationStyle.drawer,
+      orElse: () => AppNavigationStyle.bottomBar,
     );
     forceTvMode.value = prefs.getBool(_prefsForceTvMode) ?? false;
     _tvEdgeHintShown = prefs.getBool(_prefsTvEdgeHintShown) ?? false;
@@ -276,7 +276,7 @@ class AppLayoutSettings {
   static void resetForTest() {
     _loading = null;
     tabletMode.value = false;
-    navigationStyle.value = AppNavigationStyle.drawer;
+    navigationStyle.value = AppNavigationStyle.bottomBar;
     forceTvMode.value = false;
     tvMode.value = false;
     _tvEdgeHintShown = true;

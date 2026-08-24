@@ -195,6 +195,10 @@ class _LoginPageState extends State<LoginPage> {
   /// 2. 不可达 → 依次尝试 `:5666`（HTTP）与 `:5667`（HTTPS）；
   /// 3. 返回第一个可达的地址；全不可达返回原地址（由登录流程报错）。
   ///
+  /// 服务器开启「HTTP 强制跳转 HTTPS」时（HTTP 端口对请求返回 302 → HTTPS），
+  /// HTTP 候选会被 [probeEffectiveUrl] 自动升级为跳转目标 HTTPS 地址，避免
+  /// App 留在 HTTP 后封面/音频因重定向丢 Cookie 全部加载失败。
+  ///
   /// [isRelay] 透传给探测（中继地址按中继链路探测）。
   Future<String> _resolveServerAddress(String input, {bool isRelay = false}) async {
     final trimmed = input.trim();
@@ -212,21 +216,21 @@ class _LoginPageState extends State<LoginPage> {
     ];
 
     for (final candidate in candidates) {
-      final ok = await FnConnectionProbeService.instance.isAddressReachable(
-        candidate,
-        isRelay: isRelay,
-      );
-      // null = 被其它探测占用，按不可达继续尝试（避免卡住登录）
-      if (ok == true) return candidate;
+      final effective = await FnConnectionProbeService.instance
+          .probeEffectiveUrl(candidate, isRelay: isRelay);
+      // null = 探测失败或被其它探测占用，继续尝试下一个（避免卡住登录）
+      if (effective != null) return effective;
     }
     return trimmed;
   }
 
   /// 把 host 后追加端口，保留 userInfo（构造带端口的 URL）。
+  /// IPv6 host 需补方括号（`Uri.host` 返回未加括号的字面量）。
   static String _hostWithPort(Uri uri, int port) {
+    final host = uri.host.contains(':') ? '[${uri.host}]' : uri.host;
     final hostPart = uri.userInfo.isNotEmpty
-        ? '${uri.userInfo}@${uri.host}:$port'
-        : '${uri.host}:$port';
+        ? '${uri.userInfo}@$host:$port'
+        : '$host:$port';
     return hostPart;
   }
 
@@ -244,9 +248,19 @@ class _LoginPageState extends State<LoginPage> {
     if (_isFnId(serverUrlInput)) {
       await _fnLogin(serverUrlInput, username, password, name: name);
     } else {
-      // 普通地址：探测可达的服务器地址（用户地址优先，回退默认端口）
-      serverUrlInput = await _resolveServerAddress(serverUrlInput);
-      await _performLogin(serverUrlInput, username, password, name: name);
+      // 普通地址：探测可达的服务器地址（用户地址优先，回退默认端口）。
+      // typed 保留用户填写值用于存账号——服务器「HTTP 强制跳转 HTTPS」时
+      // _resolveServerAddress 会把连接地址升级为 HTTPS，但账号应存填写值，
+      // 使 HTTP/HTTPS 各自独立、互不覆盖。
+      final typed = serverUrlInput.trim();
+      serverUrlInput = await _resolveServerAddress(typed);
+      await _performLogin(
+        serverUrlInput,
+        username,
+        password,
+        name: name,
+        accountServerUrl: typed,
+      );
     }
   }
 
@@ -316,6 +330,10 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   /// 执行实际登录（共享逻辑）
+  ///
+  /// [serverUrl] 为**连接地址**（可能已被 HTTP→HTTPS 升级）；[accountServerUrl]
+  /// 为**用户填写的地址**（用于保存账号，使 HTTP/HTTPS 各自独立，缺省时用
+  /// 连接地址——FNID 登录即如此）。
   Future<void> _performLogin(
     String serverUrl,
     String username,
@@ -323,6 +341,7 @@ class _LoginPageState extends State<LoginPage> {
     bool relayMode = false,
     String? fnId,
     String name = '',
+    String? accountServerUrl,
   }) async {
     try {
       // 安全码检查（仅未存过才询问）：域名/IP 直连与 FNID 登录共用
@@ -336,6 +355,7 @@ class _LoginPageState extends State<LoginPage> {
         username,
         password,
         relayMode: relayMode,
+        persistServerUrl: accountServerUrl,
       );
     } catch (e) {
       if (!mounted) return;
@@ -345,12 +365,14 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    // 登录成功：捕获账号入列表（含 token/服务器地址/中继/安全码/FNID/备注）
+    // 登录成功：捕获账号入列表（含 token/服务器地址/中继/安全码/FNID/备注）。
+    // 账号存 accountServerUrl（填写值），保证 HTTP/HTTPS 各自独立不覆盖。
+    final accountUrl = accountServerUrl ?? FeiNiuApiClient.instance.baseUrl;
     if (widget.editAccount != null) {
       // 编辑账号：写回原账号（保留 id 与自定义备注），而非新增
       await AccountStore.instance.persistLoginForEdit(
         id: widget.editAccount!.id,
-        serverUrl: FeiNiuApiClient.instance.baseUrl,
+        serverUrl: accountUrl,
         username: AuthService.instance.username.value ?? username,
         password: password,
         relayMode: relayMode,
@@ -359,7 +381,7 @@ class _LoginPageState extends State<LoginPage> {
       );
     } else {
       await AccountStore.instance.persistLogin(
-        serverUrl: FeiNiuApiClient.instance.baseUrl,
+        serverUrl: accountUrl,
         username: AuthService.instance.username.value ?? username,
         password: password,
         relayMode: relayMode,

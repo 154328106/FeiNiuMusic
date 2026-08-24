@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -12,6 +13,7 @@ import '../player_service.dart';
 import 'account_entry.dart';
 import 'api_client.dart';
 import 'auth_service.dart';
+import 'fn_connection_probe_service.dart';
 
 /// 已保存账号列表管理（单例）
 ///
@@ -545,6 +547,19 @@ class AccountStore {
     AuthService.instance.serverUrl.value = entry.serverUrl;
     AuthService.instance.username.value = entry.username;
     AuthService.instance.isLoggedIn.value = entry.token.isNotEmpty;
+
+    // 地址账号（无 FNID）保存的是用户填写的地址；若为 HTTP 且服务器「HTTP
+    // 强制跳转 HTTPS」，把内存中的活动连接升级为 HTTPS（不持久化，账号仍存
+    // 填写值，HTTP/HTTPS 各自独立），避免切换后封面/音频因重定向丢 Cookie
+    // 失败。FNID 账号由完整探测处理，此处不干预。
+    if ((entry.fnId == null || entry.fnId!.isEmpty) &&
+        entry.token.isNotEmpty &&
+        entry.serverUrl.startsWith('http://')) {
+      unawaited(
+        FnConnectionProbeService.instance
+            .upgradeLiveConnectionToHttpsIfRedirects(),
+      );
+    }
   }
 
   /// 还原备份后设为当前账号：激活会话槽位（token/服务器/中继/安全码/FNID）

@@ -123,6 +123,53 @@ void main() {
     expect(AccountStore.instance.accounts.value, hasLength(2));
   });
 
+  test('同主机 HTTP/HTTPS 视为两个独立账号（互不覆盖）', () async {
+    await AccountStore.instance.init();
+
+    final http = await AccountStore.instance.addOrUpdate(
+      AccountEntry.build(serverUrl: 'http://h:5666', username: 'u', token: 't1'),
+    );
+    final https = await AccountStore.instance.addOrUpdate(
+      AccountEntry.build(serverUrl: 'https://h:5667', username: 'u', token: 't2'),
+    );
+
+    expect(AccountStore.instance.accounts.value, hasLength(2));
+    expect(http.id, isNot(https.id));
+    expect(https.token, 't2');
+    expect(http.token, 't1', reason: 'HTTP 账号不应被 HTTPS 登录覆盖');
+  });
+
+  group('serverLabel 区分 HTTP/HTTPS', () {
+    test('地址账号显示 scheme://host:port', () {
+      expect(
+        AccountEntry.build(serverUrl: 'http://h:5666', username: 'u').serverLabel,
+        'http://h:5666',
+      );
+      expect(
+        AccountEntry.build(serverUrl: 'https://h:5667', username: 'u').serverLabel,
+        'https://h:5667',
+      );
+      expect(
+        AccountEntry.build(
+          serverUrl: 'https://[2001:db8::1]:5667',
+          username: 'u',
+        ).serverLabel,
+        'https://[2001:db8::1]:5667',
+      );
+    });
+
+    test('FNID 账号仍只显示 FNID', () {
+      expect(
+        AccountEntry.build(
+          serverUrl: 'https://h:5667',
+          username: 'u',
+          fnId: 'abc.5ddd.com',
+        ).serverLabel,
+        'abc',
+      );
+    });
+  });
+
   group('FNID 维度去重（重连换地址不产生新账号）', () {
     test('identityKey 相同 FNID + 用户名即使 serverUrl 不同也视为同一账号', () async {
       await AccountStore.instance.init();

@@ -2622,19 +2622,23 @@ class PlayerService with WidgetsBindingObserver {
     if (wasPlaying) await _startPlayback();
   }
 
-  /// 切换转码格式（歌曲面板转码 tag 点击）：设置格式 → 清除该歌的转码缓存
-  /// 与失败/降级标记 → 重算路由 → 重新激活当前歌，立即用新格式重新转码。
-  Future<void> setTranscodeFormat(TranscodeFormat format) async {
-    await AppTranscodeSettings.setFormat(format);
+  /// 切换转码格式（歌曲信息面板转码 tag 点击）：本歌**强制**按该格式转码，
+  /// **不依赖全局「开启转码」开关**——直接请求转码地址播放；传 null 清除
+  /// 强制，恢复按全局设置判定。仅当前歌曲有效（会话级，按 songId 命中）。
+  ///
+  /// 与 [setTranscodeDirect] 互斥：选转码格式即取消该歌的直连覆盖。
+  Future<void> setTranscodeOverride(TranscodeFormat? format) async {
     final song = currentSong.value;
     final idx = currentIndex.value;
     if (song == null || idx < 0) return;
-    _debugLog('setTranscodeFormat ${song.title} -> ${format.name}');
-    // 取消「直连」覆盖（该歌恢复按设置转码）。
+    final svc = FeiNiuTranscodeService.instance;
+    _debugLog('setTranscodeOverride ${song.title} -> ${format?.name ?? 'global'}');
+    svc.setForcedTranscodeCodec(song.id, format?.name);
+    // 强制转码与强制直连互斥：选了转码格式就取消该歌的直连覆盖。
     _forceDirectSongIds.remove(song.id);
     // 清除该歌的转码缓存/降级标记/失败标记，允许按新格式重新转码。
-    FeiNiuTranscodeService.instance.invalidate(song.id);
-    FeiNiuTranscodeService.instance.clearDowngradeFor(song.id);
+    svc.invalidate(song.id);
+    svc.clearDowngradeFor(song.id);
     _transcodeFailedSongIds.remove(song.id);
     final seekPos = position.value;
     final wasPlaying = isPlaying.value;
@@ -2647,13 +2651,15 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   /// 歌曲面板转码格式选「直连」：该歌本会话强制直连原始流（不转码），
-  /// 回到默认引擎路由（FLAC→just_audio，DSF→media_kit）。
+  /// 回到默认引擎路由（FLAC→just_audio，DSF→media_kit）。同时清除该歌的
+  /// 强制转码覆盖（与 [setTranscodeOverride] 互斥）。
   Future<void> setTranscodeDirect() async {
     final song = currentSong.value;
     final idx = currentIndex.value;
     if (song == null || idx < 0) return;
     _debugLog('setTranscodeDirect ${song.title}');
     _forceDirectSongIds.add(song.id);
+    FeiNiuTranscodeService.instance.setForcedTranscodeCodec(song.id, null);
     FeiNiuTranscodeService.instance.invalidate(song.id);
     FeiNiuTranscodeService.instance.clearDowngradeFor(song.id);
     _transcodeFailedSongIds.remove(song.id);

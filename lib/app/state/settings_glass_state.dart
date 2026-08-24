@@ -10,7 +10,7 @@ import 'settings_layout_state.dart';
 /// 开启液体玻璃会自动关闭高斯模糊，反之亦然；两者不会同时生效。
 /// 开启时各界面渲染液体玻璃材质；关闭时回退为原有 BackdropFilter/实色方案。
 ///
-/// 默认关闭（避免改变老用户既有观感），由用户在设置页手动开启；
+/// 默认开启（新用户首装即用液体玻璃材质；老用户保留自己的选择）；
 /// 开启后可调 [glassBlurStrength] / [glassThickness] 等参数。
 class AppGlassSettings {
   static const String _prefsLiquidGlassEnabled =
@@ -19,8 +19,8 @@ class AppGlassSettings {
   static const String _prefsGlassThickness =
       'setting_liquid_glass_thickness';
 
-  /// 液体玻璃总开关（默认关闭）。
-  static final ValueNotifier<bool> liquidGlassEnabled = ValueNotifier(false);
+  /// 液体玻璃总开关（默认开启）。
+  static final ValueNotifier<bool> liquidGlassEnabled = ValueNotifier(true);
 
   /// 玻璃模糊强度（0-16，默认 3 = 与底栏玻璃观感一致的浅模糊）。
   static final ValueNotifier<double> glassBlurStrength = ValueNotifier(3);
@@ -47,7 +47,7 @@ class AppGlassSettings {
     await AppBackgroundSettings.ensureLoaded();
     final prefs = await SharedPreferences.getInstance();
     liquidGlassEnabled.value =
-        prefs.getBool(_prefsLiquidGlassEnabled) ?? false;
+        prefs.getBool(_prefsLiquidGlassEnabled) ?? true;
     glassBlurStrength.value =
         (prefs.getDouble(_prefsGlassBlur) ?? 3).clamp(0.0, 16.0);
     glassThickness.value =

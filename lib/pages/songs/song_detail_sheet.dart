@@ -133,7 +133,8 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
   }
 
   /// 点击转码格式 tag：弹出「直连 / FLAC / MP3 / OPUS」四选一。选定后切换当前
-  /// 歌曲的转码格式（直连=强制不转码）并关掉面板（重载期间避免拖其他控件）。
+  /// 歌曲的转码格式（直连=强制本曲不转码；格式=强制本曲按该格式转码，
+  /// **不依赖全局「开启转码」开关**，直接请求转码地址）并关掉面板。
   Future<void> _showTranscodeFormatPicker(BuildContext context) async {
     final selected = await showModalBottomSheet<Object?>(
       context: context,
@@ -150,7 +151,9 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
     if (selected == _TranscodeChoice.direct) {
       await PlayerService.instance.setTranscodeDirect();
     } else {
-      await PlayerService.instance.setTranscodeFormat(selected as TranscodeFormat);
+      await PlayerService.instance.setTranscodeOverride(
+        selected as TranscodeFormat,
+      );
     }
   }
 
@@ -738,7 +741,8 @@ class _TranscodeTag extends StatelessWidget {
     // 本曲被强制直连 / 转码已失败 → 直连
     final forcedDirect = player.isTranscodeDirect(song.id);
     final failed = player.isTranscodeFailed(song.id);
-    // 按配置应转码的格式（同步，不依赖短暂的活动会话）
+    // 按配置应转码的格式（同步，不依赖短暂的活动会话）；手动「强制转码」的
+    // 歌会由 configuredTranscodeLabel 返回强制格式（不依赖全局开关）。
     final configured = forcedDirect || failed
         ? null
         : svc.configuredTranscodeLabel(song);
@@ -771,12 +775,14 @@ class _TranscodeTag extends StatelessWidget {
 }
 
 /// 转码格式四选一选择面板：直连 / FLAC 无损 / MP3 / OPUS。选定后切换当前歌曲
-/// 转码格式（直连 = 本歌强制不转码，返回 `_TranscodeChoice.direct`）。
+/// 转码格式（直连 = 本歌强制不转码，返回 `_TranscodeChoice.direct`；格式 =
+/// 本歌**强制**按该格式转码，不依赖全局「开启转码」开关）。
 ///
 /// 高亮与转码 tag 同源（`FeiNiuTranscodeService.configuredTranscodeLabel` +
 /// 强制直连/失败标记）：本歌实际直连（未开启 / 源格式==转码格式 / 超阈值判定
 /// 不转 / 被强制直连 / 转码已失败）就高亮「直连」，否则高亮实际生效格式——
 /// **不再高亮全局设置格式**（避免 tag 直连、选择器却选中全局 mp3 的不一致）。
+/// 手动「强制转码」过的歌由 configuredTranscodeLabel 返回强制格式，高亮强制格式。
 class _TranscodeFormatPickerSheet extends StatelessWidget {
   final SongEntity song;
   const _TranscodeFormatPickerSheet({required this.song});

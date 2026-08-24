@@ -143,6 +143,8 @@ class _SearchPageState extends State<SearchPage> {
       resizeToAvoidBottomInset: false,
       keepBottomOverlayFixed: true,
       ignoreKeyboardInsets: true,
+      // 搜索页为沉浸式搜索体验，屏蔽底部迷你播放器（含平板/TV/Windows 外壳）。
+      showMiniPlayer: false,
       appBar: AppTopBar(
         title: '搜索',
         backgroundColor: Colors.transparent,
@@ -295,7 +297,7 @@ class _SearchPageState extends State<SearchPage> {
         top: 4,
         bottom: AppPageScaffold.scrollableBottomPadding(
           context,
-          showMiniPlayer: true,
+          showMiniPlayer: false,
         ),
       ),
       children: [

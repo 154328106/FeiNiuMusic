@@ -201,15 +201,16 @@ Future<void> main() async {
 /// 通过 [HttpOverrides.global] 安装，拦截进程内所有 [HttpClient]，
 /// 覆盖 Dio、CachedNetworkImage / flutter_cache_manager 等所有基于 [HttpClient] 的请求。
 ///
-/// [badCertificateCallback] 实时读取 [AppFnConnectionSettings.ignoreSsl]，
+/// [badCertificateCallback] 实时读取 [AppFnConnectionSettings.shouldBypassSslForHost]：
+/// IP 字面量直连（IPv4/IPv6）恒放行自签名证书；域名连接按「忽略 SSL」开关。
 /// 开关动态度生效，无需重启 APP。
 class _SslOverride extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) {
     final client = super.createHttpClient(context);
-    client.badCertificateCallback = (_, _, _) {
-      // 实时读取用户 SSL 忽略偏好
-      return AppFnConnectionSettings.ignoreSsl.value;
+    client.badCertificateCallback = (_, host, _) {
+      // 实时读取：IP 直连恒放行，域名按用户开关
+      return AppFnConnectionSettings.shouldBypassSslForHost(host);
     };
     // 浏览器 UA：网易云等平台 CDN 拒绝 Dart/Dio 默认 UA（HTTP 403），
     // 全局覆盖使封面加载（CachedNetworkImage/NetworkImage/Dio）统一带浏览器 UA。
@@ -226,7 +227,10 @@ const String _browserUserAgent =
 /// 后台连接预热——不阻塞首页渲染，静默验证缓存连接的可用性
 void _warmupConnection() {
   final fnId = AppFnConnectionSettings.lastFnId;
-  if (fnId == null || fnId.isEmpty) return;
+  if (fnId == null || fnId.isEmpty) {
+    _warmupDirectIpConnection();
+    return;
+  }
 
   final cache = AppFnConnectionSettings.cachedConnection;
   if (cache == null) return;
@@ -262,4 +266,22 @@ void _warmupConnection() {
         // 并立即触发自动重连（失败后保持周期重试直到恢复）
         FnAutoReconnectService.instance.onConnectionLost(reason: '启动预热连接失败');
       });
+}
+
+/// 直连 IP（非 FNID）连接的启动预热。
+///
+/// FNID 连接由 [_warmupConnection] 走完整探测；直连 IP 没有 FNID，启动时直接
+/// 恢复持久化的 baseUrl，且 [FnAutoReconnectService] 只对 FNID 自动重连——
+/// 一旦服务器开启「HTTP 强制跳转 HTTPS」，持久化的 HTTP 地址会一直停在 HTTP：
+/// 封面/音频因重定向丢 Cookie 全部加载失败。
+///
+/// 这里对非 HTTPS 的直连 baseUrl 做一次轻量探测：服务器 302 强制跳 HTTPS 时
+/// 把**内存中的活动连接**升级为 HTTPS（账号仍存用户填写的地址，HTTP/HTTPS
+/// 各自独立，见 [FnConnectionProbeService.upgradeLiveConnectionToHttpsIfRedirects]）。
+void _warmupDirectIpConnection() {
+  // fire-and-forget：不 await，不抛异常到顶层
+  unawaited(
+    FnConnectionProbeService.instance
+        .upgradeLiveConnectionToHttpsIfRedirects(),
+  );
 }

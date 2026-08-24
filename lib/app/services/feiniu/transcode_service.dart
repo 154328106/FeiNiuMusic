@@ -93,6 +93,12 @@ class FeiNiuTranscodeService {
   /// 已降级到 mp3 的歌（flac 转码解析失败后，本会话不再尝试 flac）。
   final Set<String> _downgradedToMp3 = {};
 
+  /// 歌曲信息面板手动指定的「强制转码」codec（会话级，key = songId）。
+  ///
+  /// 与全局「开启转码」开关无关：命中该歌即强制按此格式请求转码地址播放，
+  /// 不参与「全部转码」/阈值/源格式==转码格式等判定。切歌后按 id 命中仍有效。
+  final Map<String, String> _forcedCodecs = {};
+
   /// 活动转码会话 id（只读视图，供 PlayerService quit 释放）。
   Set<String> get activeTranscodeIds => Set.unmodifiable(_activeIds);
 
@@ -188,6 +194,9 @@ class FeiNiuTranscodeService {
             defaultTargetPlatform == TargetPlatform.linux)) {
       return false;
     }
+    // 歌曲信息面板手动指定「强制转码」：不依赖全局「开启转码」开关，
+    // 直接请求该歌的转码地址播放。
+    if (_forcedCodecs.containsKey(song.id)) return true;
     if (!AppTranscodeSettings.enabled.value) return false;
     // 源格式与生效转码格式一致（flac→flac / mp3→mp3 / opus→opus）→ 无转码收益，
     // 直接直连播放。已降级到 mp3 的歌若源本就是 mp3 也跳过。
@@ -200,10 +209,29 @@ class FeiNiuTranscodeService {
   }
 
   /// 当前生效的转码 codec：降级到 mp3 的歌恒为 `mp3`，否则取设置格式。
+  /// 歌曲信息面板手动「强制转码」的歌按强制格式（优先级最高，覆盖全局格式）。
   String effectiveCodecFor(String songId) {
     if (_downgradedToMp3.contains(songId)) return 'mp3';
+    final forced = _forcedCodecs[songId];
+    if (forced != null) return forced;
     return AppTranscodeSettings.format.value.name;
   }
+
+  /// 设置/清除某歌的强制转码 codec（歌曲信息面板选择）。
+  /// 传 null 清除强制，恢复按全局设置判定。
+  void setForcedTranscodeCodec(String songId, String? codec) {
+    if (codec == null || codec.isEmpty) {
+      _forcedCodecs.remove(songId);
+    } else {
+      _forcedCodecs[songId] = codec;
+    }
+  }
+
+  /// 该歌是否被强制转码（不依赖全局「开启转码」开关）。
+  bool isForcedTranscode(String songId) => _forcedCodecs.containsKey(songId);
+
+  /// 该歌被强制转码的 codec（未强制返回 null）。
+  String? forcedTranscodeCodec(String songId) => _forcedCodecs[songId];
 
   /// 某首歌**配置上应走**的转码格式名（大写，如 FLAC/MP3/OPUS），供歌曲面板
   /// tag 显示。同步计算（不查网络/会话）：
@@ -213,6 +241,16 @@ class FeiNiuTranscodeService {
   /// - `全部转码` 关 → 歌曲自带 fileSize 且超阈值 → 生效格式；否则 null
   ///   （文件大小未知时需异步 resolvedSizeFor 才能判定 → 面板显示直连）。
   String? configuredTranscodeLabel(SongEntity song) {
+    // 桌面端强制直连（media_kit 播不了 fMP4 HLS），一律显示直连。
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.linux)) {
+      return null;
+    }
+    // 歌曲信息面板手动指定「强制转码」：不依赖全局开关，按强制格式显示。
+    final forced = _forcedCodecs[song.id];
+    if (forced != null) return forced.toUpperCase();
     if (!AppTranscodeSettings.enabled.value) return null;
     final source = (song.format ?? '').trim().toLowerCase();
     if (source.isNotEmpty && source == effectiveCodecFor(song.id)) return null;
@@ -512,6 +550,7 @@ class FeiNiuTranscodeService {
     _sizes.clear();
     _activeIds.clear();
     _downgradedToMp3.clear();
+    _forcedCodecs.clear();
   }
 
   @visibleForTesting
@@ -524,6 +563,7 @@ class FeiNiuTranscodeService {
     _sizes.clear();
     _activeIds.clear();
     _downgradedToMp3.clear();
+    _forcedCodecs.clear();
   }
 }
 

@@ -17,6 +17,21 @@ void main() {
         data: data,
       );
 
+  /// 带 Location 头的响应（构造探测候选返回的 3xx）。
+  Response<dynamic> rWithLocation(
+    int status,
+    String location, {
+    String requestUrl = 'http://[2001:db8::1]:5666/music/api/v1/track/list',
+  }) =>
+      Response<dynamic>(
+        requestOptions: RequestOptions(path: requestUrl),
+        statusCode: status,
+        headers: Headers.fromMap({
+          'location': [location],
+        }),
+        data: null,
+      );
+
   group('fnProbeResponseUsable', () {
     test('未鉴权检查（登录前 TCP-only）时一律可用', () {
       expect(fnProbeResponseUsable(r(200), authChecked: false), isTrue);
@@ -57,6 +72,105 @@ void main() {
 
     test('200 且无业务码 → 可用（兜底）', () {
       expect(fnProbeResponseUsable(r(200), authChecked: true), isTrue);
+    });
+
+    test('HTTP 被强制跳转 HTTPS（302 → https）：未鉴权也判不可用', () {
+      final resp = rWithLocation(
+        302,
+        'https://[2001:db8::1]:5667/music/api/v1/track/list',
+      );
+      expect(fnProbeResponseUsable(resp, authChecked: false), isFalse);
+    });
+
+    test('HTTP 被强制跳转 HTTPS（302 → https）：已鉴权也判不可用', () {
+      final resp = rWithLocation(
+        302,
+        'https://[2001:db8::1]:5667/music/api/v1/track/list',
+      );
+      expect(fnProbeResponseUsable(resp, authChecked: true), isFalse);
+    });
+
+    test('302 但 Location 为同协议 http → 不误伤（按原逻辑）', () {
+      final sameScheme = rWithLocation(302, 'http://[2001:db8::1]:5666/x');
+      expect(fnProbeResponseUsable(sameScheme, authChecked: false), isTrue);
+      expect(fnProbeResponseUsable(sameScheme, authChecked: true), isTrue);
+    });
+
+    test('无 Location 的 3xx → 不误伤（按原逻辑）', () {
+      expect(fnProbeResponseUsable(r(302), authChecked: false), isTrue);
+      expect(fnProbeResponseUsable(r(302), authChecked: true), isTrue);
+    });
+  });
+
+  group('fnHttpToHttpsRedirectTarget', () {
+    test('绝对 https Location → 返回跳转目标', () {
+      final resp = rWithLocation(
+        302,
+        'https://[2001:db8::1]:5667/music/api/v1/track/list',
+      );
+      expect(
+        fnHttpToHttpsRedirectTarget(resp),
+        'https://[2001:db8::1]:5667/music/api/v1/track/list',
+      );
+    });
+
+    test('相对 Location → 相对原请求 URL 解析（保持原 scheme）', () {
+      // https 原请求 + 相对 Location：解析后仍是 https，命中 HTTPS 跳转判定
+      final httpsResp = rWithLocation(
+        302,
+        '/other',
+        requestUrl: 'https://[2001:db8::1]:5667/music/api/v1/track/list',
+      );
+      expect(
+        fnHttpToHttpsRedirectTarget(httpsResp),
+        'https://[2001:db8::1]:5667/other',
+      );
+      // http 原请求 + 相对 Location：解析后仍为 http，不是 HTTPS 跳转
+      final httpResp = rWithLocation(302, '/other');
+      expect(fnHttpToHttpsRedirectTarget(httpResp), isNull);
+    });
+
+    test('同协议 http 跳转 / 非 3xx / 无 Location → null', () {
+      final httpJump = rWithLocation(302, 'http://[2001:db8::1]:5666/y');
+      expect(fnHttpToHttpsRedirectTarget(httpJump), isNull);
+
+      final not3xx = rWithLocation(
+        200,
+        'https://[2001:db8::1]:5667/y',
+      );
+      expect(fnHttpToHttpsRedirectTarget(not3xx), isNull);
+
+      expect(fnHttpToHttpsRedirectTarget(r(302)), isNull);
+    });
+  });
+
+  group('fnHttpsRedirectBase', () {
+    test('authChecked=true：剥掉探测路径 /music/api/v1/track/list', () {
+      expect(
+        fnHttpsRedirectBase(
+          'https://[2001:db8::1]:5667'
+          '/music/api/v1/track/list',
+          authChecked: true,
+        ),
+        'https://[2001:db8::1]:5667',
+      );
+    });
+
+    test('authChecked=false：根路径跳转仅去末尾斜杠', () {
+      expect(
+        fnHttpsRedirectBase(
+          'https://[2001:db8::1]:5667/',
+          authChecked: false,
+        ),
+        'https://[2001:db8::1]:5667',
+      );
+    });
+
+    test('跳转目标不带探测路径时不被误剥', () {
+      expect(
+        fnHttpsRedirectBase('https://h:5667/', authChecked: true),
+        'https://h:5667',
+      );
     });
   });
 }

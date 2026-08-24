@@ -54,6 +54,36 @@ class AppFnConnectionSettings {
   /// 是否忽略 SSL 证书校验（默认开启）
   static final ValueNotifier<bool> ignoreSsl = ValueNotifier(true);
 
+  /// 判断某个 host 的 SSL 证书校验是否应被放行（由全局
+  /// `_SslOverride.badCertificateCallback` 实时调用）：
+  ///
+  /// - **IP 字面量直连（IPv4 / IPv6）恒放行**：NAS 直连多为自签名证书，且
+  ///   直连 IP 用户没有 FN Connect 设置页入口去开关「忽略 SSL」；
+  /// - 域名连接按 [ignoreSsl] 开关。
+  ///
+  /// 纯 Dart 判定（不依赖 dart:io，web 端可用）：含冒号视为 IPv6 字面量
+  /// （域名不含冒号）；四段全数字视为 IPv4；其余按域名处理。IPv6 方括号
+  /// 会被剥掉（dart:io 回调的 host 可能是带方括号的字面量）。
+  static bool shouldBypassSslForHost(String host) {
+    final h = host.trim();
+    final bare = (h.startsWith('[') && h.endsWith(']'))
+        ? h.substring(1, h.length - 1)
+        : h;
+    if (bare.contains(':')) return true; // IPv6 字面量
+    final octets = bare.split('.');
+    if (octets.length == 4) {
+      var allDigits = true;
+      for (final o in octets) {
+        if (o.isEmpty || int.tryParse(o) == null) {
+          allDigits = false;
+          break;
+        }
+      }
+      if (allDigits) return true; // IPv4 字面量
+    }
+    return ignoreSsl.value;
+  }
+
   /// 安全码（原始字符串，未 base64）
   ///
   /// 登录时验证并写入；此后所有 API / 图片 / 音频流请求自动携带

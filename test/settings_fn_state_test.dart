@@ -197,4 +197,49 @@ void main() {
       kDefaultConnectionOrder,
     );
   });
+
+  group('shouldBypassSslForHost：IP 直连恒放行、域名按开关', () {
+    test('IPv4 / IPv6 字面量（含方括号）恒放行，无论开关', () {
+      AppFnConnectionSettings.ignoreSsl.value = false;
+      expect(
+        AppFnConnectionSettings.shouldBypassSslForHost('192.168.11.200'),
+        isTrue,
+      );
+      expect(
+        AppFnConnectionSettings.shouldBypassSslForHost('10.0.0.1'),
+        isTrue,
+      );
+      expect(
+        AppFnConnectionSettings.shouldBypassSslForHost(
+          '2001:db8::1',
+        ),
+        isTrue,
+      );
+      expect(
+        AppFnConnectionSettings.shouldBypassSslForHost(
+          '[2001:db8::1]',
+        ),
+        isTrue,
+      );
+    });
+
+    test('域名按 ignoreSsl 开关', () {
+      AppFnConnectionSettings.ignoreSsl.value = false;
+      expect(
+        AppFnConnectionSettings.shouldBypassSslForHost('nas.example.com'),
+        isFalse,
+      );
+      AppFnConnectionSettings.ignoreSsl.value = true;
+      expect(
+        AppFnConnectionSettings.shouldBypassSslForHost('nas.example.com'),
+        isTrue,
+      );
+      // 形似 IP 的域名（nip.io 风格）不算 IP 字面量，按域名处理
+      AppFnConnectionSettings.ignoreSsl.value = false;
+      expect(
+        AppFnConnectionSettings.shouldBypassSslForHost('192.168.11.200.nip.io'),
+        isFalse,
+      );
+    });
+  });
 }

@@ -49,11 +49,18 @@ class AuthService {
   /// 登录
   ///
   /// [relayMode] 设置为 true 时，后续所有 API 请求自动携带 Cookie: mode=relay。
+  ///
+  /// [persistServerUrl] 可选：**持久化到账号/feiniu_server_url 的服务器地址**
+  /// （默认用 [serverUrl]）。登录页在「HTTP 强制跳转 HTTPS」时会把连接地址
+  /// 自动升级为 HTTPS（[serverUrl] 传有效地址），但账号应保存用户填写的原始
+  /// 地址（[persistServerUrl] 传填写值），使 HTTP/HTTPS 可各自存为独立账号、
+  /// 互不覆盖。仅改持久化，不影响本次连接。
   Future<bool> login(
     String serverUrl,
     String username,
     String password, {
     bool relayMode = false,
+    String? persistServerUrl,
   }) async {
     if (isLoggingIn.value) return false;
     isLoggingIn.value = true;
@@ -72,12 +79,16 @@ class AuthService {
         relayMode: relayMode,
       );
 
-      // 持久化认证信息（含中继模式标记）
+      // 持久化认证信息（含中继模式标记）。持久化地址用 persistServerUrl
+      // （用户填写值），与账号条目保持一致，保证 HTTP/HTTPS 各自独立。
       await FeiNiuApiClient.instance.setAuth(
-        serverUrl,
+        persistServerUrl ?? serverUrl,
         response.userToken,
         relayMode: relayMode,
       );
+      // setAuth 会把活动 _baseUrl 一并设为持久化地址（可能是用户填写的 HTTP）；
+      // 本次会话的连接地址仍是 serverUrl（可能已被升级为 HTTPS），重新指回。
+      await FeiNiuApiClient.instance.setBaseUrl(serverUrl);
 
       final prefs = await SharedPreferences.getInstance();
       if (response.username != null) {

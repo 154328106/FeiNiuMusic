@@ -453,6 +453,57 @@ void main() {
       expect(await FeiNiuTranscodeService.instance.shouldTranscode(song), isFalse);
     });
 
+    test('强制转码不依赖「开启转码」开关（歌曲信息面板单独选择）', () async {
+      await AppTranscodeSettings.setEnabled(false);
+      final svc = FeiNiuTranscodeService.instance;
+      final song = _song('id-tf', format: 'flac');
+      // 未强制 → 直连（master 关）
+      expect(await svc.shouldTranscode(song), isFalse);
+      expect(svc.configuredTranscodeLabel(song), isNull);
+
+      // 手动强制 mp3 → 即使 master 关也转码，生效格式 = mp3
+      svc.setForcedTranscodeCodec(song.id, 'mp3');
+      expect(svc.isForcedTranscode(song.id), isTrue);
+      expect(svc.forcedTranscodeCodec(song.id), 'mp3');
+      expect(await svc.shouldTranscode(song), isTrue,
+          reason: '强制转码不依赖全局开关');
+      expect(svc.effectiveCodecFor(song.id), 'mp3');
+      expect(svc.configuredTranscodeLabel(song), 'MP3');
+
+      // 清除强制 → 恢复全局判定（master 关 → 直连）
+      svc.setForcedTranscodeCodec(song.id, null);
+      expect(svc.isForcedTranscode(song.id), isFalse);
+      expect(await svc.shouldTranscode(song), isFalse);
+      expect(svc.configuredTranscodeLabel(song), isNull);
+    });
+
+    test('强制转码直接请求对应格式的转码地址（master 关）', () async {
+      await AppTranscodeSettings.setEnabled(false);
+      String? requestedCodec;
+      FeiNiuApiClient.instance.setDioForTest(
+        _mockDio((o) {
+          final body = o.data;
+          if (body is Map<String, dynamic>) {
+            final output = body['output'];
+            if (output is Map<String, dynamic>) {
+              requestedCodec = output['codec'] as String?;
+            }
+          }
+          return {
+            'code': 0,
+            'data': {'url': '/music/api/v1/track/hls/id-tf2/preset.m3u8'},
+          };
+        }),
+      );
+      final svc = FeiNiuTranscodeService.instance;
+      final song = _song('id-tf2', format: 'flac');
+      svc.setForcedTranscodeCodec(song.id, 'opus');
+      final url = await svc.transcodeHlsUrlFor(song);
+      expect(url, isNotNull);
+      expect(url, contains('id-tf2/preset.m3u8'));
+      expect(requestedCodec, 'opus', reason: '按强制格式请求转码地址');
+    });
+
     test('全部转码=开 → 无条件转码（免 size，含小文件）', () async {
       await AppTranscodeSettings.setEnabled(true);
       await AppTranscodeSettings.setTranscodeAll(true);

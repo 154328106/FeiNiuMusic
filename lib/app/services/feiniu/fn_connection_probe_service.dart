@@ -10,6 +10,51 @@ import '../../state/settings_fn_state.dart';
 import 'api_client.dart';
 import 'fn_models.dart';
 
+/// 从探测响应中识别「HTTP 被服务器强制跳转 HTTPS」的 3xx 重定向（如 nginx
+/// `return 302 https://$host:<httpsPort>$request_uri`）。是则返回跳转目标的
+/// HTTPS URL（相对 [Response.requestOptions.uri] 解析，兼容相对/协议相对
+/// Location），否则返回 null。
+///
+/// 该场景下 HTTP 端口「TCP 可达但不可用」：dart:io HttpClient 自动跟随跨
+/// 协议/跨端口重定向时会丢弃 `Cookie`（SDK `shouldCopyHeaderOnRedirect` 仅
+/// 同 scheme + 同 port 才复制），封面/音频资源请求将不带 `music-token` 被
+/// 服务端拒绝。因此探测应把 HTTP 候选判为不可用，让 HTTPS 候选胜出。
+String? fnHttpToHttpsRedirectTarget(Response response) {
+  final status = response.statusCode ?? 0;
+  if (status < 300 || status >= 400) return null;
+  final location = response.headers.value('location');
+  if (location == null || location.isEmpty) return null;
+  final uri = response.requestOptions.uri.resolve(location);
+  return uri.isScheme('https') ? uri.toString() : null;
+}
+
+/// 探测响应是否为「HTTP 强制跳转 HTTPS」的重定向（见
+/// [fnHttpToHttpsRedirectTarget]）。
+bool fnRedirectsToHttps(Response response) =>
+    fnHttpToHttpsRedirectTarget(response) != null;
+
+/// 从「HTTP 强制跳转 HTTPS」的跳转目标中提取服务器基址（`scheme://host:port`）。
+///
+/// 探测 URL 是 `<服务器地址> + probePath`，nginx 的 302 Location 会原样携带该
+/// 路径（如 `https://host:port/music/api/v1/track/list`）。剥掉 probePath
+/// （含其上的 `/music/api/v1` 前缀）与末尾斜杠，恢复基址——否则调用方会把
+/// baseUrl 当成带路径的地址，再拼 `/music/api/v1` 后打到双重路径导致 404。
+///
+/// [authChecked] 为 true 时探测路径是 `/music/api/v1/track/list`，需要精确
+/// 剥掉该后缀；未鉴权探测根路径（probePath 为空）时无需剥。
+String fnHttpsRedirectBase(String redirectTarget, {required bool authChecked}) {
+  final probeSuffix = authChecked ? '/music/api/v1/track/list' : '';
+  var base = redirectTarget;
+  if (probeSuffix.isNotEmpty && base.endsWith(probeSuffix)) {
+    base = base.substring(0, base.length - probeSuffix.length);
+  }
+  base = base.replaceAll(RegExp(r'/music/api/v1/*$'), '');
+  while (base.endsWith('/')) {
+    base = base.substring(0, base.length - 1);
+  }
+  return base;
+}
+
 /// 探测响应是否判定候选「可用」。
 ///
 /// [authChecked] 为 true（已登录、探测携带 token）时，候选必须通过鉴权才算
@@ -17,12 +62,17 @@ import 'fn_models.dart';
 /// `INVALID TOKEN`）会被排除，避免探测选到「能连上但用不了」的链路（典型：
 /// 当前登录凭据绑定 FNID 中继，但候选列表里有 TCP 可达的公网直连 IP——
 /// 会因 token 不匹配全量 401）。未鉴权检查（登录前 TCP-only）时一律视为可用。
+///
+/// 例外：无论是否鉴权，**HTTP 候选若被服务器 302 强制跳转 HTTPS 一律判为
+/// 不可用**（见 [fnRedirectsToHttps]）——HTTP 链路跟随重定向会丢 Cookie，
+/// 资源请求必然失败，不能让探测选到它。
 bool fnProbeResponseUsable(
   dynamic response, {
   required bool authChecked,
 }) {
-  if (!authChecked) return true;
   if (response is! Response) return false;
+  if (fnRedirectsToHttps(response)) return false;
+  if (!authChecked) return true;
   final status = response.statusCode ?? 0;
   if (status >= 400) return false;
   final data = response.data;
@@ -357,6 +407,121 @@ class FnConnectionProbeService {
     }
   }
 
+  /// 探测单条候选地址，返回「实际应使用的连接地址」：
+  ///
+  /// - 候选可用（[fnProbeResponseUsable] 通过）→ 原样返回候选；
+  /// - 候选为 HTTP 且服务器 302 强制跳转 HTTPS → 返回跳转后的 HTTPS URL
+  ///   （端口取自服务器 Location，适配自定义端口/自定义 scheme）；
+  /// - 其余失败（连接错误 / 超时 / 被其它探测占用）→ 返回 null。
+  ///
+  /// 供登录页手动填写服务器地址时使用：用户填 `http://ip:5666`，服务器开启了
+  /// 「HTTP 强制跳转 HTTPS」时直接改用 `https://ip:5667` 登录，避免 App 留在
+  /// HTTP 后封面/音频因重定向丢 Cookie 全部加载失败。
+  Future<String?> probeEffectiveUrl(
+    String url, {
+    bool isRelay = false,
+  }) async {
+    if (isProbing.value) return null;
+    isProbing.value = true;
+    _cancelToken = CancelToken();
+    try {
+      return await _probeEffectiveUrl(url, isRelay, _cancelToken!);
+    } finally {
+      isProbing.value = false;
+      _cancelToken = null;
+    }
+  }
+
+  Future<String?> _probeEffectiveUrl(
+    String url,
+    bool isRelay,
+    CancelToken cancelToken,
+  ) async {
+    final start = DateTime.now();
+    final token = FeiNiuApiClient.instance.token;
+    final authChecked = token.isNotEmpty;
+    try {
+      final probePath = authChecked ? '/music/api/v1/track/list' : '';
+      final response = await _probeDio.getUri(
+        Uri.parse(url + probePath),
+        cancelToken: cancelToken,
+        options: Options(
+          connectTimeout: cachedProbeTimeout(isRelay),
+          receiveTimeout: const Duration(seconds: 1),
+          sendTimeout: const Duration(seconds: 1),
+          followRedirects: false,
+          validateStatus: (_) => true,
+          // 鉴权与中继合并进同一个 Cookie 头，避免拆成两个键互相覆盖丢 mode=relay。
+          headers: {
+            if (authChecked)
+              'Cookie': isRelay
+                  ? 'music-token=$token; mode=relay'
+                  : 'music-token=$token'
+            else if (isRelay)
+              'Cookie': 'mode=relay',
+          },
+        ),
+      );
+      if (fnProbeResponseUsable(response, authChecked: authChecked)) {
+        return url;
+      }
+      // HTTP 候选被服务器强制跳转 HTTPS → 返回跳转目标，让调用方直接连 HTTPS。
+      final redirectTarget = fnHttpToHttpsRedirectTarget(response);
+      if (redirectTarget != null) {
+        // 探测 URL 是 <服务器地址> + probePath；nginx 的 302 Location 会原样
+        // 携带该路径。fnHttpsRedirectBase 剥掉 probePath（含 /music/api/v1
+        // 前缀）与末尾斜杠，恢复 scheme://host:port 基址（与 FNID 探测保存的
+        // URL 形态一致），否则登录会打到双重路径 → 404 登录失败。
+        final base = fnHttpsRedirectBase(
+          redirectTarget,
+          authChecked: authChecked,
+        );
+        if (kDebugMode) {
+          debugPrint(
+            '[FnProbe] $url upgraded to HTTPS ($base) in '
+            '${DateTime.now().difference(start).inMilliseconds}ms',
+          );
+        }
+        return base;
+      }
+      return null;
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) {
+        return null;
+      }
+      if (kDebugMode) {
+        debugPrint(
+          '[FnProbe] Probe effective FAILED $url in '
+          '${DateTime.now().difference(start).inMilliseconds}ms: '
+          '${_dioErrorMessage(e)}',
+        );
+      }
+      return null;
+    }
+  }
+
+  /// 直连 IP（非 FNID）HTTP 连接的 HTTPS 保活升级。
+  ///
+  /// 探测当前活动 baseUrl，服务器「HTTP 强制跳转 HTTPS」时把**内存中的活动
+  /// 连接**升级为 HTTPS（[FeiNiuApiClient.setBaseUrl]，不持久化）——账号条目
+  /// 与 `feiniu_server_url` 保持用户填写的地址，从而 HTTP/HTTPS 可各自存为
+  /// 独立账号、互不覆盖；每次启动（预热）与账号切换时重新升级活动连接。
+  /// fire-and-forget，失败静默（登录后仍可用原连接）。
+  Future<void> upgradeLiveConnectionToHttpsIfRedirects() async {
+    final base = FeiNiuApiClient.instance.baseUrl;
+    if (base.isEmpty || base.startsWith('https://')) return;
+    final token = FeiNiuApiClient.instance.token;
+    if (token.isEmpty) return;
+    try {
+      final effective = await probeEffectiveUrl(base, isRelay: false);
+      if (effective == null || effective == base) return;
+      await FeiNiuApiClient.instance.setBaseUrl(effective);
+      debugPrint('[FnProbe] Direct-IP HTTP connection upgraded to $effective');
+    } catch (_) {
+      // 升级失败静默：连接仍走原地址（重定向/错误由既有逻辑兜底）
+    }
+  }
+
   /// 快速验证缓存连接是否可达（[cachedProbeTimeout] 快探）
   Future<bool> _tryCachedAddress(
     String url,
@@ -392,10 +557,12 @@ class FnConnectionProbeService {
       );
       if (!fnProbeResponseUsable(response, authChecked: authChecked)) {
         if (kDebugMode) {
+          final redirectTarget = fnHttpToHttpsRedirectTarget(response);
           debugPrint(
             '[FnProbe] Cached check REJECTED $url in '
             '${DateTime.now().difference(start).inMilliseconds}ms '
-            '(status ${response.statusCode}): token 未被该地址接受',
+            '(status ${response.statusCode}): '
+            '${redirectTarget != null ? '强制跳转 HTTPS ($redirectTarget)' : 'token 未被该地址接受'}',
           );
         }
         return false;
@@ -736,11 +903,15 @@ class FnConnectionProbeService {
       );
 
       if (!fnProbeResponseUsable(response, authChecked: authChecked)) {
+        // HTTP 被服务器强制跳转 HTTPS：HTTP 链路跟随重定向会丢 Cookie，
+        // 资源请求必然失败，给出明确文案（区别于「token 未被接受」）。
+        final redirectTarget = fnHttpToHttpsRedirectTarget(response);
         if (kDebugMode) {
           debugPrint(
             '[FnProbe] Probe REJECTED ${candidate.description} in '
             '${DateTime.now().difference(start).inMilliseconds}ms '
-            '(status ${response.statusCode}): token 未被该地址接受',
+            '(status ${response.statusCode}): '
+            '${redirectTarget != null ? '强制跳转 HTTPS ($redirectTarget)' : 'token 未被该地址接受'}',
           );
         }
         return ProbeCandidateResult(
@@ -750,7 +921,9 @@ class FnConnectionProbeService {
           ipLabel: candidate.ipLabel,
           isRelay: candidate.relayMode,
           isReachable: false,
-          error: '连接可用但登录校验失败（token 未被该地址接受）',
+          error: redirectTarget != null
+              ? '服务器强制跳转 HTTPS，HTTP 端口不可直连'
+              : '连接可用但登录校验失败（token 未被该地址接受）',
         );
       }
 
