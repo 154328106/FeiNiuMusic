@@ -5,6 +5,24 @@ import 'package:media_kit/media_kit.dart' as mk;
 
 import 'player_engine.dart';
 
+/// media_kit 会在播放列表中的**每一首**结束时短暂上报 completed=true，
+/// 随后自行推进到下一项；业务层只应在物理播放列表最后一项结束时处理完成，
+/// 否则会与 media_kit 的自动推进叠加，造成一次跳过两首。
+@visibleForTesting
+EngineProcessingState mediaKitProcessingState({
+  required bool buffering,
+  required bool completed,
+  required int playlistIndex,
+  required int playlistLength,
+}) {
+  if (buffering) return EngineProcessingState.buffering;
+  final reachedPlaylistEnd =
+      playlistLength > 0 && playlistIndex >= playlistLength - 1;
+  return completed && reachedPlaylistEnd
+      ? EngineProcessingState.completed
+      : EngineProcessingState.ready;
+}
+
 /// [PlayerEngine] 的 media_kit（libmpv + FFmpeg）实现。
 ///
 /// 负责 ExoPlayer 受限的格式（FLAC 32KB 帧缓冲上限、DSF/DSD/APE/WMA 等）。
@@ -65,13 +83,13 @@ class MediaKitEngine implements PlayerEngine {
     });
     player.stream.playing.listen((playing) {
       if (!_playbackStateCtl.isClosed) {
+        // EOF 时 media_kit 先广播 playing=false，再广播 completed=true。
+        // completed 只由下方 completed 流归一化，避免队尾完成被处理两次。
         _playbackStateCtl.add(EnginePlaybackState(
           playing: playing,
           processingState: player.state.buffering
               ? EngineProcessingState.buffering
-              : (player.state.completed
-                  ? EngineProcessingState.completed
-                  : EngineProcessingState.ready),
+              : EngineProcessingState.ready,
         ));
       }
     });
@@ -86,18 +104,27 @@ class MediaKitEngine implements PlayerEngine {
       }
     });
     player.stream.completed.listen((completed) {
-      if (kDebugMode && completed) {
+      final playlist = player.state.playlist;
+      final processingState = mediaKitProcessingState(
+        buffering: player.state.buffering,
+        completed: completed,
+        playlistIndex: playlist.index,
+        playlistLength: playlist.medias.length,
+      );
+      if (kDebugMode && processingState == EngineProcessingState.completed) {
         // 诊断：media_kit 可能在加载失败时也置 completed（mpv 端无法播放），
         // 导致 PlayerService 把它当"播完"前进而不是走 error 恢复。
-        debugPrint('[MediaKitEngine] completed=true index=${player.state.playlist.index}');
+        debugPrint(
+          '[MediaKitEngine] playlist completed index=${playlist.index}',
+        );
       }
       if (!_playbackStateCtl.isClosed) {
-        _playbackStateCtl.add(EnginePlaybackState(
-          playing: player.state.playing,
-          processingState: completed
-              ? EngineProcessingState.completed
-              : EngineProcessingState.ready,
-        ));
+        _playbackStateCtl.add(
+          EnginePlaybackState(
+            playing: player.state.playing,
+            processingState: processingState,
+          ),
+        );
       }
     });
     player.stream.playlist.listen((playlist) {
