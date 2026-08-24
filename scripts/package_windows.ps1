@@ -6,7 +6,7 @@
 #   .\scripts\package_windows.ps1 -Build     # 先 flutter build windows --release 再打包
 #
 # 前置：默认要求已执行 flutter build windows --release（-Build 会自动构建）
-# 产物：build\installer\FeiNiuMusic-Windows-<版本>.zip
+# 产物：build\installer\FeiNiuMusic-v<版本>-Windows.zip
 #
 # 数据持久化说明：App 数据（账号、收藏、听歌统计、缓存）存放在
 # %LOCALAPPDATA% 下，卸载/删除绿色版不会清掉，重装后数据仍在。
@@ -62,7 +62,7 @@ if (-not (Test-Path (Join-Path $ReleaseDir "feiniumusic.exe"))) {
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 
 # 组装临时发布目录（Release 内容 + 使用说明 + 应用图标）
-$BundleName = "FeiNiuMusic-Windows-$Version"
+$BundleName = "FeiNiuMusic-v$Version-Windows"
 $Stage = Join-Path $OutDir "_stage_$BundleName"
 if (Test-Path $Stage) { Remove-Item -Recurse -Force $Stage }
 New-Item -ItemType Directory -Force $Stage | Out-Null

@@ -39,13 +39,13 @@ jobs:
       - name: 拷贝 zip 到工作区根目录（避免 upload-artifact 保留目录前缀）
         shell: powershell
         run: |
-          Copy-Item -Path build/installer/FeiNiuMusic-Windows-*.zip -Destination . -Force
+          Copy-Item -Path build/installer/FeiNiuMusic-v*-Windows.zip -Destination . -Force
       - name: 上传 Windows 产物
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
           path: |
-            FeiNiuMusic-Windows-*.zip
+            FeiNiuMusic-v*-Windows.zip
             pubspec.yaml
 
   build-android:
@@ -165,7 +165,7 @@ jobs:
           cd build/macos/Build/Products/Release
           # 1) 绿色版 zip（便携，免安装；ditto 保留 .app 内符号链接）
           ditto -c -k --sequesterRsrc --keepParent "飞牛音乐.app" \
-            "${GITHUB_WORKSPACE}/FeiNiuMusic-MacOS-${VERSION}.zip"
+            "${GITHUB_WORKSPACE}/FeiNiuMusic-v${VERSION}-MacOS.zip"
           # 2) 安装版 dmg（标准分发格式：挂载后拖入"应用程序"）
           STAGE="${GITHUB_WORKSPACE}/dmg-stage"
           rm -rf "$STAGE" && mkdir -p "$STAGE"
@@ -173,14 +173,14 @@ jobs:
           ln -s /Applications "$STAGE/Applications"
           hdiutil create -volname "FeiNiuMusic" -srcfolder "$STAGE" \
             -ov -format UDZO \
-            "${GITHUB_WORKSPACE}/FeiNiuMusic-MacOS-${VERSION}.dmg"
+            "${GITHUB_WORKSPACE}/FeiNiuMusic-v${VERSION}-MacOS.dmg"
       - name: 上传 macOS 产物
         uses: actions/upload-artifact@v4
         with:
           name: macos-build
           path: |
-            FeiNiuMusic-MacOS-*.zip
-            FeiNiuMusic-MacOS-*.dmg
+            FeiNiuMusic-v*-MacOS.zip
+            FeiNiuMusic-v*-MacOS.dmg
             pubspec.yaml
 
   # iOS：未签名 .ipa，供用户下载后自行签名安装（Sideloadly / AltStore /
@@ -214,12 +214,12 @@ jobs:
           cp -R build/ios/iphoneos/Runner.app "$STAGE/Payload/"
           cd "$STAGE"
           ditto -c -k --sequesterRsrc --keepParent Payload \
-            "${GITHUB_WORKSPACE}/FeiNiuMusic-iOS-${VERSION}-unsigned.ipa"
+            "${GITHUB_WORKSPACE}/FeiNiuMusic-v${VERSION}-iOS-unsigned.ipa"
       - name: 上传 iOS 产物
         uses: actions/upload-artifact@v4
         with:
           name: ios-build
-          path: FeiNiuMusic-iOS-*-unsigned.ipa
+          path: FeiNiuMusic-v*-iOS-unsigned.ipa
 
   publish:
     runs-on: ubuntu-latest
@@ -278,7 +278,7 @@ jobs:
           files: |
             android-artifact/FeiNiuMusic-v*.apk
             android-artifact/FnMusicEnhance-*.fpk
-            windows-artifact/FeiNiuMusic-Windows-*.zip
-            macos-artifact/FeiNiuMusic-MacOS-*.dmg
-            macos-artifact/FeiNiuMusic-MacOS-*.zip
-            ios-artifact/FeiNiuMusic-iOS-*-unsigned.ipa
+            windows-artifact/FeiNiuMusic-v*-Windows.zip
+            macos-artifact/FeiNiuMusic-v*-MacOS.dmg
+            macos-artifact/FeiNiuMusic-v*-MacOS.zip
+            ios-artifact/FeiNiuMusic-v*-iOS-unsigned.ipa
