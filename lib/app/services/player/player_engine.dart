@@ -47,6 +47,7 @@ abstract interface class PlayerEngine {
   // ---- 队列原地修改（同 run 增量路径） ----
   Future<void> insertItem(int index, EngineItem item);
   Future<void> insertItems(int index, List<EngineItem> items);
+  Future<void> removeItem(int index);
   Future<void> moveItem(int from, int to);
 
   // ---- 查询 ----

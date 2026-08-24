@@ -99,6 +99,9 @@ class JustAudioEngine implements PlayerEngine {
   }
 
   @override
+  Future<void> removeItem(int index) => _player.removeAudioSourceAt(index);
+
+  @override
   Future<void> moveItem(int from, int to) => _player.moveAudioSource(from, to);
 
   @override

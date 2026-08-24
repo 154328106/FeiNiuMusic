@@ -1385,19 +1385,114 @@ class PlayerService with WidgetsBindingObserver {
       return;
     }
 
-    final nextIndex = remaining.indexWhere((s) => s.id == current.id);
-    if (nextIndex < 0) {
+    final oldCurrentIndex = currentIndex.value;
+    if (oldCurrentIndex < 0 ||
+        oldCurrentIndex >= oldQueue.length ||
+        oldQueue[oldCurrentIndex].id != current.id) {
       await stopAndClear();
       return;
     }
     final wasPlaying = isPlaying.value;
-    final pos = position.value;
-    await _reloadQueue(
-      remaining,
+    final enginePosition = _activeEngine.position;
+    final resumePosition = enginePosition > Duration.zero
+        ? enginePosition
+        : position.value;
+    final removedIndices = <int>[
+      for (var i = 0; i < oldQueue.length; i++)
+        if (toRemove.contains(oldQueue[i].id)) i,
+    ];
+    final nextIndex =
+        oldCurrentIndex -
+        removedIndices.where((i) => i < oldCurrentIndex).length;
+
+    // 原生播放器只装载当前同引擎 run。若逻辑队列与引擎队列仍严格对齐，
+    // 直接原地删除条目，让当前媒体与解码管线保持不动，播放位置自然保留。
+    // 删除跨引擎边界歌曲可能把前后两个 run 合并；这种情况下物理队列不完整，
+    // 才回退到带断点位置的全量重载。
+    final canPlanInPlace =
+        _engineKinds.length == oldQueue.length &&
+        _engineTranscodeFlags.length == oldQueue.length &&
+        _activeRunStart <= oldCurrentIndex &&
+        oldCurrentIndex < _activeRunStart + _activeEngine.sequenceLength;
+    if (!canPlanInPlace) {
+      await _reloadQueue(
+        remaining,
+        nextIndex,
+        play: wasPlaying,
+        initialPosition: resumePosition,
+      );
+      return;
+    }
+
+    final oldBounds = _runBounds(oldCurrentIndex);
+    final remainingKinds = <EngineKind>[
+      for (var i = 0; i < _engineKinds.length; i++)
+        if (!toRemove.contains(oldQueue[i].id)) _engineKinds[i],
+    ];
+    final remainingTranscodeFlags = <bool>[
+      for (var i = 0; i < _engineTranscodeFlags.length; i++)
+        if (!toRemove.contains(oldQueue[i].id)) _engineTranscodeFlags[i],
+    ];
+    final newBounds = _runBounds(
       nextIndex,
-      play: wasPlaying,
-      initialPosition: pos,
+      kinds: remainingKinds,
+      transcodeFlags: remainingTranscodeFlags,
     );
+    final loadedRunAfterRemoval = <SongEntity>[
+      for (var i = oldBounds.start; i <= oldBounds.end; i++)
+        if (!toRemove.contains(oldQueue[i].id)) oldQueue[i],
+    ];
+    final newRun = remaining.sublist(newBounds.start, newBounds.end + 1);
+    final runStillAligned =
+        oldBounds.start == _activeRunStart &&
+        oldBounds.kind == _activeEngine.kind &&
+        oldBounds.end - oldBounds.start + 1 == _activeEngine.sequenceLength &&
+        loadedRunAfterRemoval.length == newRun.length &&
+        List.generate(
+          newRun.length,
+          (i) => loadedRunAfterRemoval[i].id == newRun[i].id,
+        ).every((same) => same);
+    if (!runStillAligned) {
+      await _reloadQueue(
+        remaining,
+        nextIndex,
+        play: wasPlaying,
+        initialPosition: resumePosition,
+      );
+      return;
+    }
+
+    final localIndicesToRemove =
+        removedIndices
+            .where((i) => i >= oldBounds.start && i <= oldBounds.end)
+            .map((i) => i - oldBounds.start)
+            .toList()
+          ..sort((a, b) => b.compareTo(a));
+
+    _pendingLoadLogicalIndex = nextIndex;
+    queue.value = remaining;
+    _engineKinds = remainingKinds;
+    _engineTranscodeFlags = remainingTranscodeFlags;
+    _activeRunStart = newBounds.start;
+    try {
+      for (final localIndex in localIndicesToRemove) {
+        await _activeEngine.removeItem(localIndex);
+      }
+      _activateSong(nextIndex);
+      _emitSnapshot(force: true);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('PlayerService remove queue item in place failed: $e');
+      }
+      await _reloadQueue(
+        remaining,
+        nextIndex,
+        play: wasPlaying,
+        initialPosition: resumePosition,
+      );
+    } finally {
+      _pendingLoadLogicalIndex = null;
+    }
   }
 
   Future<void> stopAndClear() async {

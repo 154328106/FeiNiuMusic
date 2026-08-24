@@ -281,6 +281,13 @@ class MediaKitEngine implements PlayerEngine {
   }
 
   @override
+  Future<void> removeItem(int index) async {
+    final p = _player;
+    if (p == null) return;
+    await p.remove(index);
+  }
+
+  @override
   Future<void> moveItem(int from, int to) async {
     final p = _player;
     if (p == null) return;
