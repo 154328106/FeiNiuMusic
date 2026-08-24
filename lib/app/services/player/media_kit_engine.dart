@@ -15,12 +15,37 @@ EngineProcessingState mediaKitProcessingState({
   required int playlistIndex,
   required int playlistLength,
 }) {
-  if (buffering) return EngineProcessingState.buffering;
   final reachedPlaylistEnd =
       playlistLength > 0 && playlistIndex >= playlistLength - 1;
-  return completed && reachedPlaylistEnd
-      ? EngineProcessingState.completed
-      : EngineProcessingState.ready;
+  if (completed && reachedPlaylistEnd) {
+    return EngineProcessingState.completed;
+  }
+  if (buffering) return EngineProcessingState.buffering;
+  return EngineProcessingState.ready;
+}
+
+/// completed 与 playlist 来自不同的异步流；completed 回调执行时原生状态里的
+/// 索引可能已经抢先切到下一首，因此优先使用 playlist 流已交付的索引。
+@visibleForTesting
+int mediaKitCompletedPlaylistIndex({
+  required int? observedIndex,
+  required int nativeIndex,
+}) => observedIndex ?? nativeIndex;
+
+/// 部分 FLAC 在尾部附带非音频字节时，FFmpeg 会先报一条解码错误，紧接着
+/// 正常 EOF。这个错误不应触发“重载当前歌曲”，否则会带着末尾进度重开并
+/// 形成反复暂停；真正发生在歌曲中段的解码错误仍交给业务层恢复。
+@visibleForTesting
+bool mediaKitIsTrailingDecodeError({
+  required String message,
+  required bool completed,
+  required Duration position,
+  required Duration duration,
+}) {
+  if (!message.toLowerCase().contains('error decoding audio')) return false;
+  if (completed) return true;
+  if (duration <= Duration.zero) return false;
+  return duration - position <= const Duration(seconds: 2);
 }
 
 /// [PlayerEngine] 的 media_kit（libmpv + FFmpeg）实现。
@@ -35,6 +60,10 @@ EngineProcessingState mediaKitProcessingState({
 class MediaKitEngine implements PlayerEngine {
   mk.Player? _player;
   bool _disposed = false;
+  int? _observedPlaylistIndex;
+  int _loadGeneration = 0;
+  bool _playRequested = false;
+  int? _recoveringEofIndex;
 
   // 归一化流：用 Subject 桥接 media_kit 原生流，让 PlayerService 只订阅一次。
   final _positionCtl = StreamController<Duration>.broadcast();
@@ -62,6 +91,18 @@ class MediaKitEngine implements PlayerEngine {
       ),
     );
     _player = player;
+    // media_kit 默认启用 mpv cache-on-disk。macOS 沙盒下 mpv 无法创建其默认
+    // 文件缓存（日志为 "Failed to create file cache"），随后 FLAC 流可能在
+    // 曲末报 invalid frame header。关闭磁盘层，仅保留既有 32MB 内存 demux
+    // 缓存；应用自己的 StreamCacheService 仍负责完整歌曲落盘。
+    if (defaultTargetPlatform == TargetPlatform.macOS) {
+      try {
+        final dynamic nativePlayer = player.platform;
+        await nativePlayer.setProperty('cache-on-disk', 'no');
+      } catch (e) {
+        debugPrint('[MediaKitEngine] disable disk cache failed: $e');
+      }
+    }
     // 订阅 mpv 原生日志：仅保留错误级别（PlayerConfiguration.logLevel=error），
     // 诊断加载/解码失败的具体原因。不依赖 kDebugMode：release 版经 DebugLogService
     // 设置页「调试模式」同样可捕获，便于排查线上偶发播放失败。
@@ -85,37 +126,66 @@ class MediaKitEngine implements PlayerEngine {
       if (!_playbackStateCtl.isClosed) {
         // EOF 时 media_kit 先广播 playing=false，再广播 completed=true。
         // completed 只由下方 completed 流归一化，避免队尾完成被处理两次。
-        _playbackStateCtl.add(EnginePlaybackState(
-          playing: playing,
-          processingState: player.state.buffering
-              ? EngineProcessingState.buffering
-              : EngineProcessingState.ready,
-        ));
+        _playbackStateCtl.add(
+          EnginePlaybackState(
+            playing: playing,
+            processingState: player.state.buffering
+                ? EngineProcessingState.buffering
+                : EngineProcessingState.ready,
+          ),
+        );
       }
     });
     player.stream.buffering.listen((buffering) {
       if (!_playbackStateCtl.isClosed) {
-        _playbackStateCtl.add(EnginePlaybackState(
-          playing: player.state.playing,
-          processingState: buffering
-              ? EngineProcessingState.buffering
-              : EngineProcessingState.ready,
-        ));
+        _playbackStateCtl.add(
+          EnginePlaybackState(
+            playing: player.state.playing,
+            processingState: buffering
+                ? EngineProcessingState.buffering
+                : EngineProcessingState.ready,
+          ),
+        );
       }
     });
     player.stream.completed.listen((completed) {
       final playlist = player.state.playlist;
+      // `completed` 与 `playlist` 是两个异步 StreamController。mpv 在一首
+      // 结束后会先 enqueue completed=true，再立即把 PlayerState.playlist
+      // 更新到下一首；因此此回调执行时直接读 playlist.index 可能已经是
+      // 下一首，倒数第二首会被误判为整个 run 已完成。使用 playlist 流已经
+      // 按事件顺序交付的索引，才能确定这次 EOF 实际属于哪一首。
+      final completedIndex = mediaKitCompletedPlaylistIndex(
+        observedIndex: _observedPlaylistIndex,
+        nativeIndex: playlist.index,
+      );
       final processingState = mediaKitProcessingState(
         buffering: player.state.buffering,
         completed: completed,
-        playlistIndex: playlist.index,
+        playlistIndex: completedIndex,
         playlistLength: playlist.medias.length,
       );
+      if (completed &&
+          processingState != EngineProcessingState.completed &&
+          _playRequested) {
+        // mpv 正常情况下会自行进入下一项；部分 macOS/libmpv 时序下公开状态
+        // 会停在 playing=false + completed=true。延后一拍确认，仍未继续时精确
+        // 重开 EOF 的下一项。不能调用 Player.play()（completed=true 时会回到
+        // playlist index 0），也不能直接 next()（mpv 已自动前进时会跳过一首）。
+        unawaited(
+          _recoverIntermediateEof(
+            player,
+            completedIndex: completedIndex,
+            generation: _loadGeneration,
+          ),
+        );
+      }
       if (kDebugMode && processingState == EngineProcessingState.completed) {
         // 诊断：media_kit 可能在加载失败时也置 completed（mpv 端无法播放），
         // 导致 PlayerService 把它当"播完"前进而不是走 error 恢复。
         debugPrint(
-          '[MediaKitEngine] playlist completed index=${playlist.index}',
+          '[MediaKitEngine] playlist completed index=$completedIndex '
+          'nativeIndex=${playlist.index}',
         );
       }
       if (!_playbackStateCtl.isClosed) {
@@ -128,27 +198,88 @@ class MediaKitEngine implements PlayerEngine {
       }
     });
     player.stream.playlist.listen((playlist) {
+      _observedPlaylistIndex = playlist.index;
       if (!_indexCtl.isClosed) _indexCtl.add(playlist.index);
     });
     player.stream.error.listen((msg) {
       // 始终输出（release 可经 DebugLogService 捕获），让偶发播放失败可诊断。
-      debugPrint('[MediaKitEngine] error="$msg" index=${player.state.playlist.index}');
+      final state = player.state;
+      final trailingDecodeError = mediaKitIsTrailingDecodeError(
+        message: msg,
+        completed: state.completed,
+        position: state.position,
+        duration: state.duration,
+      );
+      if (trailingDecodeError) {
+        debugPrint(
+          '[MediaKitEngine] ignored trailing decode error '
+          'index=${state.playlist.index} '
+          'position=${state.position.inMilliseconds} '
+          'duration=${state.duration.inMilliseconds}',
+        );
+        return;
+      }
+      debugPrint('[MediaKitEngine] error="$msg" index=${state.playlist.index}');
       if (_errorCtl.isClosed) return;
       // mpv 错误不带索引；附加当前播放列表索引，让 PlayerService 能定位
       // 失败歌曲并触发恢复/降级。
-      final idx = player.state.playlist.index;
-      _errorCtl.add(EngineError(
-        message: msg,
-        index: idx >= 0 && idx < player.state.playlist.medias.length
-            ? idx
-            : null,
-      ));
+      final idx = state.playlist.index;
+      _errorCtl.add(
+        EngineError(
+          message: msg,
+          index: idx >= 0 && idx < state.playlist.medias.length ? idx : null,
+        ),
+      );
     });
+  }
+
+  Future<void> _recoverIntermediateEof(
+    mk.Player player, {
+    required int completedIndex,
+    required int generation,
+  }) async {
+    if (_recoveringEofIndex == completedIndex) return;
+    _recoveringEofIndex = completedIndex;
+    try {
+      // 给 mpv 的正常 playlist 自动前进与 START_FILE 事件一个短暂窗口。
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      if (_disposed ||
+          generation != _loadGeneration ||
+          !_playRequested ||
+          !identical(player, _player) ||
+          player.state.playing) {
+        return;
+      }
+
+      final playlist = player.state.playlist;
+      final targetIndex = completedIndex + 1;
+      if (targetIndex < 0 || targetIndex >= playlist.medias.length) return;
+      // 用户/业务层已经切到更后面的歌曲时，旧 EOF 恢复任务不得倒退播放。
+      if (playlist.index > targetIndex) return;
+
+      _observedPlaylistIndex = targetIndex;
+      await player.open(
+        mk.Playlist(playlist.medias, index: targetIndex),
+        play: true,
+      );
+      debugPrint(
+        '[MediaKitEngine] recovered intermediate EOF '
+        'completedIndex=$completedIndex targetIndex=$targetIndex',
+      );
+    } catch (e) {
+      debugPrint('[MediaKitEngine] intermediate EOF recovery failed: $e');
+    } finally {
+      if (_recoveringEofIndex == completedIndex) {
+        _recoveringEofIndex = null;
+      }
+    }
   }
 
   @override
   Future<void> dispose() async {
     _disposed = true;
+    _playRequested = false;
+    _loadGeneration++;
     await _closeControllers();
     final p = _player;
     _player = null;
@@ -189,15 +320,18 @@ class MediaKitEngine implements PlayerEngine {
   }) async {
     await init();
     final player = _player!;
+    _playRequested = false;
+    _loadGeneration++;
     final medias = items
         .cast<MediaKitItem>()
         .map((e) => e.media)
         .toList(growable: false);
     final safeIndex = index.clamp(0, medias.length - 1);
-    await player.open(
-      mk.Playlist(medias, index: safeIndex),
-      play: false,
-    ).timeout(openTimeout);
+    // 在 open 的 playlist 事件异步送达前，completed 判定也必须有正确种子。
+    _observedPlaylistIndex = safeIndex;
+    await player
+        .open(mk.Playlist(medias, index: safeIndex), play: false)
+        .timeout(openTimeout);
     if (initialPosition != null && initialPosition > Duration.zero) {
       await player.seek(initialPosition);
     }
@@ -207,6 +341,7 @@ class MediaKitEngine implements PlayerEngine {
   Future<void> play() async {
     final p = _player;
     if (p == null) return;
+    _playRequested = true;
     await p.play();
   }
 
@@ -214,6 +349,7 @@ class MediaKitEngine implements PlayerEngine {
   Future<void> pause() async {
     final p = _player;
     if (p == null) return;
+    _playRequested = false;
     await p.pause();
   }
 
@@ -221,6 +357,8 @@ class MediaKitEngine implements PlayerEngine {
   Future<void> stop() async {
     final p = _player;
     if (p == null) return;
+    _playRequested = false;
+    _loadGeneration++;
     try {
       await p.stop();
     } catch (_) {}
@@ -255,10 +393,7 @@ class MediaKitEngine implements PlayerEngine {
     if (index < 0 || index >= medias.length) return;
     // media_kit 无公开"跳索引"API：以当前播放列表为蓝本，在目标索引处重开。
     // open(play: 当前状态) 保持播放/暂停语义。
-    await p.open(
-      mk.Playlist(medias, index: index),
-      play: p.state.playing,
-    );
+    await p.open(mk.Playlist(medias, index: index), play: p.state.playing);
   }
 
   @override
@@ -340,7 +475,8 @@ class MediaKitEngine implements PlayerEngine {
   }
 
   @override
-  bool get hasLoadedSource => _player != null && _player!.state.playlist.medias.isNotEmpty;
+  bool get hasLoadedSource =>
+      _player != null && _player!.state.playlist.medias.isNotEmpty;
 
   @override
   bool get playing => _player?.state.playing ?? false;
@@ -376,7 +512,8 @@ class MediaKitEngine implements PlayerEngine {
   Stream<Duration> get bufferedPositionStream => _bufferedCtl.stream;
 
   @override
-  Stream<EnginePlaybackState> get playbackStateStream => _playbackStateCtl.stream;
+  Stream<EnginePlaybackState> get playbackStateStream =>
+      _playbackStateCtl.stream;
 
   @override
   Stream<EngineError> get errorStream => _errorCtl.stream;

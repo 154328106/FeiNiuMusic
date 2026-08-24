@@ -571,8 +571,11 @@ class PlayerService with WidgetsBindingObserver {
     if (activeHls != null && activeCodec != null) {
       final curSong = currentSong.value;
       if (curSong != null) {
-        StreamCacheService.instance
-            .cacheTranscodedSong(curSong.id, activeCodec, activeHls);
+        StreamCacheService.instance.cacheTranscodedSong(
+          curSong.id,
+          activeCodec,
+          activeHls,
+        );
       }
     }
     _activeTranscodeHlsUrl = null;
@@ -590,7 +593,7 @@ class PlayerService with WidgetsBindingObserver {
         }
         await _autoExtendQueue();
         if (queue.value.length > list.length) {
-          await _advanceToLogicalIndex(idx + 1);
+          await _advanceToLogicalIndex(idx + 1, resumePlayback: true);
         }
         return;
       }
@@ -602,15 +605,18 @@ class PlayerService with WidgetsBindingObserver {
       }
       return;
     }
-    await _advanceToLogicalIndex(idx + 1);
+    await _advanceToLogicalIndex(idx + 1, resumePlayback: true);
   }
 
   /// 前进到逻辑索引 [logicalIndex]：同 run 内无缝 next；跨 run 切换引擎。
-  Future<void> _advanceToLogicalIndex(int logicalIndex) async {
+  Future<void> _advanceToLogicalIndex(
+    int logicalIndex, {
+    bool? resumePlayback,
+  }) async {
     final list = queue.value;
     if (logicalIndex < 0 || logicalIndex >= list.length) return;
     final cur = currentIndex.value;
-    final wasPlaying = isPlaying.value;
+    final shouldResume = resumePlayback ?? isPlaying.value;
     // 同 run 判定用 _runBounds 覆盖范围（转码歌是单例 run，相邻两首转码歌
     // 引擎相同但不在同一 run，必须走重新激活而不是 seekToNext）。
     if (cur >= 0 && cur < list.length) {
@@ -618,7 +624,7 @@ class PlayerService with WidgetsBindingObserver {
       final sameRun = cur >= bounds.start && cur <= bounds.end;
       if (sameRun) {
         await _activeEngine.seekToNext();
-        if (wasPlaying && !_activeEngine.playing) {
+        if (shouldResume && !_activeEngine.playing) {
           try {
             await _activeEngine.play();
           } catch (_) {}
@@ -627,9 +633,11 @@ class PlayerService with WidgetsBindingObserver {
       }
     }
     await _activateLogicalIndex(logicalIndex);
-    if (wasPlaying && !_activeEngine.playing) {
+    if (shouldResume) {
       try {
-        await _activeEngine.play();
+        // loadQueue(play:false) 后无条件发送新的播放意图。不能依赖异步流可能
+        // 尚未刷新的 playing getter，否则 macOS 曲末切 run 时会误以为仍在播。
+        await _startPlayback();
       } catch (_) {}
     }
   }
@@ -643,7 +651,7 @@ class PlayerService with WidgetsBindingObserver {
   ///   ExoPlayer 播，且每首独立成 run）；
   /// - 其余 → `routeForSong` 默认路由，flag=false。
   Future<({List<EngineKind> kinds, List<bool> transcodeFlags})>
-      _computeEngineKinds(List<SongEntity> songs) async {
+  _computeEngineKinds(List<SongEntity> songs) async {
     final results = await Future.wait(
       songs.map((s) async {
         if (_mediaKitEscalateSongIds.contains(s.id)) {
@@ -705,12 +713,15 @@ class PlayerService with WidgetsBindingObserver {
     // 预载整 run，若把多首转码歌并入同 run，会并行打爆转码会话。单例保证
     // 每次激活只对当前这一首转码，且相邻同引擎歌不并入。
     if (logicalIndex < tc.length && tc[logicalIndex]) {
-      return (start: logicalIndex, end: logicalIndex, localIndex: 0, kind: kind);
+      return (
+        start: logicalIndex,
+        end: logicalIndex,
+        localIndex: 0,
+        kind: kind,
+      );
     }
     var s = logicalIndex;
-    while (s > 0 &&
-        k[s - 1] == kind &&
-        !(s - 1 < tc.length && tc[s - 1])) {
+    while (s > 0 && k[s - 1] == kind && !(s - 1 < tc.length && tc[s - 1])) {
       s--;
     }
     var e = logicalIndex;
@@ -1585,7 +1596,11 @@ class PlayerService with WidgetsBindingObserver {
     // media_kit 的 mpv 错误常在播放列表尚未建立时上报（playlist.index 无效），
     // 此时 index 为 null。用当前歌曲兜底：仍能定位到失败歌曲并触发降级/恢复，
     // 避免「mpv 识别不了 HLS → index null → 错误被吞 → 静默跳下一首」。
-    var failedIndex = error.index;
+    // EngineError.index 按 PlayerEngine 契约是当前物理 run 内索引，必须映射
+    // 回逻辑队列；直接当逻辑索引会在 runStart != 0 时恢复到另一首歌曲。
+    var failedIndex = error.index == null
+        ? null
+        : _activeRunStart + error.index!;
     if (failedIndex == null || failedIndex < 0 || failedIndex >= list.length) {
       failedIndex = currentIndex.value;
     }
@@ -1651,14 +1666,14 @@ class PlayerService with WidgetsBindingObserver {
       // - 已是 mp3/opus 或已降级仍失败 → 完全失败：标记退直连（不重转码，
       //   防死循环）。
       if (!isMediaKitError &&
-          FeiNiuTranscodeService.instance.activeTranscodeIds
-              .contains(failedSong.id)) {
-        final codec =
-            FeiNiuTranscodeService.instance.effectiveCodecFor(failedSong.id);
+          FeiNiuTranscodeService.instance.activeTranscodeIds.contains(
+            failedSong.id,
+          )) {
+        final codec = FeiNiuTranscodeService.instance.effectiveCodecFor(
+          failedSong.id,
+        );
         if (codec == 'flac' &&
-            !FeiNiuTranscodeService.instance.isDowngradedToMp3(
-              failedSong.id,
-            )) {
+            !FeiNiuTranscodeService.instance.isDowngradedToMp3(failedSong.id)) {
           _debugLog(
             'transcode ${failedSong.title} flac decode failed -> downgrade mp3',
           );
@@ -1769,9 +1784,7 @@ class PlayerService with WidgetsBindingObserver {
     final firstLine = trimmed.contains('\n')
         ? trimmed.substring(0, trimmed.indexOf('\n'))
         : trimmed;
-    return firstLine.length > 40
-        ? '${firstLine.substring(0, 40)}…'
-        : firstLine;
+    return firstLine.length > 40 ? '${firstLine.substring(0, 40)}…' : firstLine;
   }
 
   Future<void> _skipFailedSong(
@@ -1813,7 +1826,7 @@ class PlayerService with WidgetsBindingObserver {
       }
       return;
     }
-    await _advanceToLogicalIndex(idx + 1);
+    await _advanceToLogicalIndex(idx + 1, resumePlayback: wasPlaying);
   }
 
   /// 是否应为当前歌曲启动无声看门狗。
@@ -2357,7 +2370,8 @@ class PlayerService with WidgetsBindingObserver {
     final bounds = _runBounds(index);
     final cur = currentIndex.value;
     final sameRun = cur >= 0 && cur >= bounds.start && cur <= bounds.end;
-    if (sameRun && index >= _activeRunStart &&
+    if (sameRun &&
+        index >= _activeRunStart &&
         index < _activeRunStart + _activeEngine.sequenceLength) {
       await _activeEngine.skipToIndex(index - _activeRunStart);
     } else {
@@ -3857,8 +3871,10 @@ class PlayerService with WidgetsBindingObserver {
     final codec = svc.effectiveCodecFor(song.id);
 
     // 1) 转码完整缓存命中 → 本地文件零流量。
-    final cached = await StreamCacheService.instance
-        .transcodeCompleteFileFor(song.id, codec);
+    final cached = await StreamCacheService.instance.transcodeCompleteFileFor(
+      song.id,
+      codec,
+    );
     if (cached != null) {
       if (kDebugMode) {
         debugPrint(
