@@ -237,15 +237,27 @@ class _HomePageState extends State<HomePage>
       // 收藏歌曲封面
       for (final s in _favoriteSongs.value.take(9))
         if (s.coverId != null && s.coverId!.isNotEmpty)
-          api.coverUrl(s.coverId!, size: FeiNiuApiClient.coverRequestSize, updatedAt: s.updatedAt),
+          api.coverUrl(
+            s.coverId!,
+            size: FeiNiuApiClient.coverRequestSize,
+            updatedAt: s.updatedAt,
+          ),
       // 最近播放封面
       for (final s in _recentSongs.value.take(9))
         if (s.coverId != null && s.coverId!.isNotEmpty)
-          api.coverUrl(s.coverId!, size: FeiNiuApiClient.coverRequestSize, updatedAt: s.updatedAt),
+          api.coverUrl(
+            s.coverId!,
+            size: FeiNiuApiClient.coverRequestSize,
+            updatedAt: s.updatedAt,
+          ),
       // 最近添加歌曲封面
       for (final s in _recentTracks.value.take(9))
         if (s.coverId != null && s.coverId!.isNotEmpty)
-          api.coverUrl(s.coverId!, size: FeiNiuApiClient.coverRequestSize, updatedAt: s.updatedAt),
+          api.coverUrl(
+            s.coverId!,
+            size: FeiNiuApiClient.coverRequestSize,
+            updatedAt: s.updatedAt,
+          ),
       // 专辑封面 — FeiNiuAlbum 无 updatedAt
       for (final a in _recentAlbums.value.take(10))
         if (a.coverId != null && a.coverId!.isNotEmpty)
@@ -253,7 +265,11 @@ class _HomePageState extends State<HomePage>
       // 歌单封面
       for (final p in _playlists.value.take(10))
         if (p.coverId != null && p.coverId!.isNotEmpty)
-          api.coverUrl(p.coverId!, size: FeiNiuApiClient.coverRequestSize, updatedAt: p.updatedAt),
+          api.coverUrl(
+            p.coverId!,
+            size: FeiNiuApiClient.coverRequestSize,
+            updatedAt: p.updatedAt,
+          ),
     ];
     for (final url in coverUrls) {
       if (!mounted) break;
@@ -588,10 +604,12 @@ class _HomePageState extends State<HomePage>
   }
 
   /// 从首页歌曲行播放：队列用完整列表（若已拉过完整列表则直接复用）。
-  void _playHomeSong(SongEntity song, List<SongEntity> preview) {
-    unawaited(
-      _playListWithFullFetch(preview, _HomePlaySource.recentTracks, song: song),
-    );
+  void _playHomeSong(
+    SongEntity song,
+    List<SongEntity> preview,
+    _HomePlaySource source,
+  ) {
+    unawaited(_playListWithFullFetch(preview, source, song: song));
   }
 
   /// 按队列长度上限请求完整列表填充队列后播放。
@@ -742,7 +760,11 @@ class _HomePageState extends State<HomePage>
                 _HomePlaySource.recentHistory,
               ),
               onOpenRecent: _openRecentPage,
-              onTapRecent: (song) => _playHomeSong(song, _recentSongs.value),
+              onTapRecent: (song) => _playHomeSong(
+                song,
+                _recentSongs.value,
+                _HomePlaySource.recentHistory,
+              ),
               onLongPressRecent: _showSongDetail,
               playlists: _playlists.value,
               onOpenPlaylists: _openPlaylistsPage,
@@ -756,10 +778,17 @@ class _HomePageState extends State<HomePage>
               favoriteSongs: _favoriteSongs.value,
               onOpenSongs: _openSongsPage,
               onOpenFavorite: _openFavoritePage,
-              onTapTrack: (song) => _playHomeSong(song, _recentTracks.value),
+              onTapTrack: (song) => _playHomeSong(
+                song,
+                _recentTracks.value,
+                _HomePlaySource.recentTracks,
+              ),
               onLongPressTrack: _showSongDetail,
-              onTapFavorite: (song) =>
-                  _playHomeSong(song, _favoriteSongs.value),
+              onTapFavorite: (song) => _playHomeSong(
+                song,
+                _favoriteSongs.value,
+                _HomePlaySource.favorites,
+              ),
             ),
           );
         }
@@ -869,7 +898,11 @@ class _HomePageState extends State<HomePage>
                 HomeSectionHeader(title: '最新歌曲', onViewAll: _openSongsPage),
                 _CompactSongList(
                   songs: _recentTracks.value,
-                  onTap: (song) => _playHomeSong(song, _recentTracks.value),
+                  onTap: (song) => _playHomeSong(
+                    song,
+                    _recentTracks.value,
+                    _HomePlaySource.recentTracks,
+                  ),
                   onLongPress: _showSongDetail,
                 ),
                 const SizedBox(height: 16),
