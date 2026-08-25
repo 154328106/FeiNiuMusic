@@ -507,9 +507,63 @@ void main() {
     test('全部转码=开 → 无条件转码（免 size，含小文件）', () async {
       await AppTranscodeSettings.setEnabled(true);
       await AppTranscodeSettings.setTranscodeAll(true);
-      // 源格式 dsf（media_kit 系）≠ 转码格式 flac → 转码
-      final song = _song('id-t1', format: 'dsf');
+      await AppTranscodeSettings.setFormat(TranscodeFormat.mp3);
+      // 无损源 flac + 有损目标 mp3（真降级）→ 转码
+      final song = _song('id-t1', format: 'flac');
       expect(await FeiNiuTranscodeService.instance.shouldTranscode(song), isTrue);
+    });
+
+    test('不向上转码：有损源 + flac 目标 → 直连（mp3→flac 纯浪费）', () async {
+      await AppTranscodeSettings.setEnabled(true);
+      await AppTranscodeSettings.setTranscodeAll(true);
+      await AppTranscodeSettings.setFormat(TranscodeFormat.flac);
+      final svc = FeiNiuTranscodeService.instance;
+      // 有损源 + flac 目标：向上转码 → 直连
+      expect(await svc.shouldTranscode(_song('id-u1', format: 'mp3')), isFalse);
+      expect(await svc.shouldTranscode(_song('id-u2', format: 'opus')), isFalse);
+      expect(await svc.shouldTranscode(_song('id-u3', format: 'm4a')), isFalse);
+      // 无损源 + flac 目标：等质量 → 直连（wav→flac / dsf→flac 无收益）
+      expect(await svc.shouldTranscode(_song('id-u4', format: 'wav')), isFalse);
+      expect(await svc.shouldTranscode(_song('id-u5', format: 'dsf')), isFalse);
+      // UI tag 同步：全部显示直连
+      expect(svc.configuredTranscodeLabel(_song('id-u1', format: 'mp3')), isNull);
+      expect(svc.configuredTranscodeLabel(_song('id-u5', format: 'dsf')), isNull);
+    });
+
+    test('有损源 + 有损目标：mp3→opus 向上 → 直连；ogg→mp3 真降级 → 转码', () async {
+      await AppTranscodeSettings.setEnabled(true);
+      await AppTranscodeSettings.setTranscodeAll(true);
+      final svc = FeiNiuTranscodeService.instance;
+      // mp3 源 + opus 目标：有损→有损无收益 → 直连
+      await AppTranscodeSettings.setFormat(TranscodeFormat.opus);
+      expect(await svc.shouldTranscode(_song('id-u6', format: 'mp3')), isFalse);
+      // ogg 源 + mp3 目标：真降级 → 转码
+      await AppTranscodeSettings.setFormat(TranscodeFormat.mp3);
+      expect(await svc.shouldTranscode(_song('id-u7', format: 'ogg')), isTrue);
+    });
+
+    test('无损源 + 有损目标 → 转码（flac/dsf→mp3/opus 真降级）', () async {
+      await AppTranscodeSettings.setEnabled(true);
+      await AppTranscodeSettings.setTranscodeAll(true);
+      final svc = FeiNiuTranscodeService.instance;
+      await AppTranscodeSettings.setFormat(TranscodeFormat.mp3);
+      expect(await svc.shouldTranscode(_song('id-d1', format: 'flac')), isTrue);
+      expect(await svc.shouldTranscode(_song('id-d2', format: 'dsf')), isTrue);
+      await AppTranscodeSettings.setFormat(TranscodeFormat.opus);
+      expect(await svc.shouldTranscode(_song('id-d3', format: 'flac')), isTrue);
+    });
+
+    test('源格式未知 → 不拦截（按既有全部转码/大小判定）', () async {
+      await AppTranscodeSettings.setEnabled(true);
+      await AppTranscodeSettings.setTranscodeAll(true);
+      final svc = FeiNiuTranscodeService.instance;
+      // 格式未知 + 全部转码 → 仍转码（保持现状）
+      final unknown = _song('id-u8');
+      expect(await svc.shouldTranscode(unknown), isTrue);
+      // 格式未知 + 阈值模式 → 按大小判定（未识别大小不转码）
+      await AppTranscodeSettings.setTranscodeAll(false);
+      expect(await svc.shouldTranscode(unknown), isFalse,
+          reason: '未识别大小不转码');
     });
 
     test('configuredTranscodeLabel：配置转码显示格式；直连情况显示 null', () async {
@@ -547,6 +601,7 @@ void main() {
       await AppTranscodeSettings.setEnabled(true);
       await AppTranscodeSettings.setTranscodeAll(false);
       await AppTranscodeSettings.setThresholdMb(80);
+      await AppTranscodeSettings.setFormat(TranscodeFormat.mp3); // dsf→mp3 真降级
       FeiNiuApiClient.instance.setDioForTest(
         _mockDio((o) {
           // id-t3 未识别大小（metadata 不带 size）；id-t2 由 song.fileSize 提供
@@ -582,6 +637,7 @@ void main() {
     test('CUE 曲也走转码（服务器返回裁切好的单曲 HLS）', () async {
       await AppTranscodeSettings.setEnabled(true);
       await AppTranscodeSettings.setTranscodeAll(true);
+      await AppTranscodeSettings.setFormat(TranscodeFormat.mp3); // dsf→mp3 真降级
       final song = SongEntity(
         id: 'id-t4',
         title: 't',
@@ -612,8 +668,9 @@ void main() {
       await AppTranscodeSettings.setEnabled(true);
       await AppTranscodeSettings.setTranscodeAll(true);
 
-      // flac（源 dsf，需转码；验证带 bitrate:320）
+      // flac（源 dsf；flac 目标不会自动转码，走强制转码路径；验证带 bitrate:320）
       await AppTranscodeSettings.setFormat(TranscodeFormat.flac);
+      FeiNiuTranscodeService.instance.setForcedTranscodeCodec('id-t5', 'flac');
       await FeiNiuTranscodeService.instance.transcodeHlsUrlFor(
         _song('id-t5', format: 'dsf'),
       );
@@ -659,6 +716,7 @@ void main() {
       );
       await AppTranscodeSettings.setEnabled(true);
       await AppTranscodeSettings.setTranscodeAll(true);
+      await AppTranscodeSettings.setFormat(TranscodeFormat.mp3); // dsf→mp3 真降级
       final url = await FeiNiuTranscodeService.instance.transcodeHlsUrlFor(
         _song('id-t8', format: 'dsf'),
       );
@@ -669,6 +727,7 @@ void main() {
       FeiNiuTranscodeService.instance.clearCacheForTest();
       await AppTranscodeSettings.setEnabled(true);
       await AppTranscodeSettings.setTranscodeAll(true);
+      await AppTranscodeSettings.setFormat(TranscodeFormat.mp3); // dsf→mp3 真降级
       final quitIds = <String>[];
       FeiNiuApiClient.instance.setDioForTest(
         _mockDio((o) {

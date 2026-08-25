@@ -74,6 +74,90 @@ class FeiNiuTranscodeService {
     return riskySilenceContainers.contains(format.trim().toLowerCase());
   }
 
+  /// 无损源格式（质量层 3）。
+  ///
+  /// 用于「禁止向上转码」：把有损源（mp3/aac/opus…）转成 flac 等无损格式
+  /// 纯属浪费服务器带宽，直接直连原始流即可；无损→无损（wav→flac 等）也
+  /// 无压缩收益，一律直连。
+  static const Set<String> losslessFormats = {
+    'flac', 'wav', 'alac', 'ape', 'aiff', 'aif',
+    'dsf', 'dff', 'dsd', 'dts', 'truehd', 'mlp',
+    'tta', 'wv', 'wavpack', 'shn', 'tak', 'ofr', 'wmal',
+  };
+
+  /// 有损「现代」源格式（质量层 2）：opus/ogg/aac/m4a 等，效率高于 mp3。
+  static const Set<String> modernLossyFormats = {
+    'opus', 'ogg', 'oga', 'aac', 'm4a', 'm4b', 'm4p', 'mp4',
+    'webm', 'ac3', 'eac3',
+  };
+
+  /// 有损「传统」源格式（质量层 1）：mp3/wma 等。
+  static const Set<String> legacyLossyFormats = {
+    'mp3', 'mp2', 'mp1', 'wma', 'wmv', 'ra', 'au', 'dvf', 'dss', 'mmf', 'amr',
+  };
+
+  /// 无损 codec（质量层 3）：alac/truehd/mlp 等常内嵌在 m4a/mp4 有损容器里，
+  /// 需按 codec 判定源质量，不能只看容器格式。
+  static const Set<String> losslessCodecs = {
+    'flac', 'alac', 'ape', 'wavpack', 'wv', 'dsd', 'dts', 'truehd', 'mlp',
+    'tta', 'shn', 'tak', 'ofr', 'pcm', 'lpcm', 'wmal',
+  };
+
+  /// 有损 codec（质量层 2/1）。
+  static const Set<String> lossyCodecs = {
+    'mp3', 'mp2', 'mp1', 'aac', 'ac3', 'eac3', 'opus', 'vorbis', 'ogg',
+    'wma', 'wmav1', 'wmav2', 'amr', 'adpcm', 'g711', 'speex', 'nellymoser',
+  };
+
+  /// 源格式质量层：3=无损，2=有损现代，1=有损传统，0=未知（不拦截）。
+  ///
+  /// codec 优先（alac 在 m4a 容器里也是无损）；codec 未知时回落到 format。
+  static int sourceQualityTier(String? format, {String? codec}) {
+    if (codec != null && codec.isNotEmpty) {
+      final c = codec.trim().toLowerCase();
+      if (losslessCodecs.contains(c)) return 3;
+      if (lossyCodecs.contains(c)) return 2;
+    }
+    if (format == null || format.isEmpty) return 0;
+    final f = format.trim().toLowerCase();
+    if (losslessFormats.contains(f)) return 3;
+    if (modernLossyFormats.contains(f)) return 2;
+    if (legacyLossyFormats.contains(f)) return 1;
+    return 0;
+  }
+
+  /// 转码输出格式质量层：flac=3，opus=2，mp3=1。
+  static int targetQualityTier(String codec) {
+    switch (codec.trim().toLowerCase()) {
+      case 'flac':
+        return 3;
+      case 'opus':
+        return 2;
+      case 'mp3':
+        return 1;
+      default:
+        return 0;
+    }
+  }
+
+  /// 把 [sourceFormat]（含可选 [sourceCodec]）转成 [targetCodec] 是否属于
+  /// **真降级**（输出质量层严格低于源 → 转码才有压缩收益）。
+  ///
+  /// - 目标 flac（无损）恒不满足：有损源转 flac 是向上转码（mp3→flac 浪费），
+  ///   无损源转 flac 也无收益 → 一律直连；
+  /// - 源/目标质量层任一未知 → 返回 true（不拦截，保持现状：未知格式仍按
+  ///   大小阈值等既有逻辑转码）。
+  static bool isDownscaleTranscode(
+    String? sourceFormat,
+    String? sourceCodec,
+    String targetCodec,
+  ) {
+    final src = sourceQualityTier(sourceFormat, codec: sourceCodec);
+    final dst = targetQualityTier(targetCodec);
+    if (src == 0 || dst == 0) return true;
+    return dst < src;
+  }
+
   static const Duration _ttl = Duration(minutes: 30);
 
   FeiNiuApiClient _api = FeiNiuApiClient.instance;
@@ -178,6 +262,9 @@ class FeiNiuTranscodeService {
   /// - `开启转码` 关 → 不转（直连）
   /// - **源格式 == 生效转码格式 → 不转（直连）**：flac 源 + 转码 flac 是纯浪费
   ///   （无损→无损大小不变，ExoPlayer 直连即播）；mp3/opus 源同理。
+  /// - **不向上转码 → 不转（直连）**：转码输出质量层 ≥ 源质量层（如 mp3 源 +
+  ///   flac 目标）无压缩收益，只有真降级（无损→有损等）才转码，见
+  ///   [isDownscaleTranscode]。
   /// - `全部转码` 开 → 转（免 size，含 DSF/APE/WMA 等无损）
   /// - `全部转码` 关 → 仅超过阈值转；**未识别大小的文件不转**
   ///
@@ -202,6 +289,11 @@ class FeiNiuTranscodeService {
     // 直接直连播放。已降级到 mp3 的歌若源本就是 mp3 也跳过。
     final source = (song.format ?? '').trim().toLowerCase();
     if (source.isNotEmpty && source == effectiveCodecFor(song.id)) return false;
+    // 不向上转码：输出质量层 ≥ 源质量层 → 转码无压缩收益（如 mp3 源 + flac
+    // 目标，纯浪费服务器带宽），直接直连。只有真降级（无损→有损等）才值得
+    // 请求服务器转码。
+    final target = effectiveCodecFor(song.id);
+    if (!isDownscaleTranscode(source, song.codec, target)) return false;
     if (AppTranscodeSettings.transcodeAll.value) return true;
     final size = await resolvedSizeFor(song);
     if (size == null || size <= 0) return false;
@@ -254,6 +346,11 @@ class FeiNiuTranscodeService {
     if (!AppTranscodeSettings.enabled.value) return null;
     final source = (song.format ?? '').trim().toLowerCase();
     if (source.isNotEmpty && source == effectiveCodecFor(song.id)) return null;
+    // 不向上转码：输出质量层 ≥ 源质量层 → 直连（与 shouldTranscode 同源判定，
+    // 避免 tag 显示转码、实际却直连的不一致）。
+    if (!isDownscaleTranscode(source, song.codec, effectiveCodecFor(song.id))) {
+      return null;
+    }
     if (AppTranscodeSettings.transcodeAll.value) {
       return effectiveCodecFor(song.id).toUpperCase();
     }
