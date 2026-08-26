@@ -24,6 +24,13 @@ const _primaryNavigationRoutes = <String>[
 /// 底栏的间隙（观感上离得远）。
 const double kGlassNavPillTopGap = 14;
 
+/// 非液体玻璃分支（实色/高斯模糊栏）的底栏高度。
+///
+/// 玻璃分支槽位仍是 [AppPageScaffold.modernNavHeight]（56 胶囊 + 14×2 空隙），
+/// 保持悬浮观感不动；这里单独收敛非玻璃栏高度，便于按需调矮。AppPageScaffold
+/// 的迷你播放器停靠与滚动留白按当前分支取对应高度，切换玻璃开关后布局自动对齐。
+const double kSolidNavHeight = 64;
+
 final ValueNotifier<int> primaryNavigationIndex = ValueNotifier<int>(0);
 bool primaryNavigationShellActive = false;
 
@@ -166,7 +173,9 @@ class ModernNavigationBar extends StatelessWidget {
           child: SafeArea(
             top: false,
             child: SizedBox(
-              height: 84,
+              // 非玻璃分支高度独立于玻璃胶囊（kSolidNavHeight，比玻璃槽位
+              // modernNavHeight=84 矮）。底部安全区由 SafeArea 计入，不含在此值。
+              height: kSolidNavHeight,
               child: Row(
                 children: List.generate(_labels.length, (index) {
                   final selected = currentIndex == index;

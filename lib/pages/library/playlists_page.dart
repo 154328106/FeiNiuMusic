@@ -618,6 +618,10 @@ class _PlaylistsPageState extends State<PlaylistsPage>
         extendBodyBehindAppBar: true,
         appBar: AppTopBar(
           title: '歌单',
+          // 底部导航栏模式下不应有返回按钮。leading 为 null 时 AppBar 默认
+          // 会自动加返回键（automaticallyImplyLeading），被压栈为独立路由时
+          // 就会出现；显式关闭，与首页/歌曲/收藏等 tab 页一致。
+          showBackButton: false,
           isRefreshing: _isRefreshing.value,
           leading: useBottomNavigation || AppLayoutSettings.tvMode.value
               ? null
@@ -1212,6 +1216,11 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
       builder: (context, useBottomNavigation) => AppPageScaffold(
         extendBodyBehindAppBar: true,
         showMiniPlayer: !_multiSelect.value,
+        hideBottomNav: _multiSelect.value,
+        cancelMultiSelectOnBack: _multiSelect.value,
+        onCancelMultiSelect: () {
+          if (_multiSelect.value) _toggleMultiSelect();
+        },
         appBar: AppTopBar(
           title: widget.playlistName,
           centerTitle: true,

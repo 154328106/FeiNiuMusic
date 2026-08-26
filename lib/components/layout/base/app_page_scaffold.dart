@@ -19,7 +19,12 @@ class AppPageScaffold extends StatefulWidget {
     final miniPlayerPadding = showMiniPlayer
         ? MiniPlayerBar.estimatedHeight
         : 0.0;
-    final bottomNavPadding = hasBottomNav ? modernNavHeight : 0.0;
+    // 留白高度跟随当前分支：玻璃胶囊槽位 84，非玻璃栏 kSolidNavHeight。
+    final bottomNavPadding = hasBottomNav
+        ? (AppGlassSettings.effectiveEnabled
+            ? modernNavHeight
+            : kSolidNavHeight)
+        : 0.0;
     return bottomInset + miniPlayerPadding + bottomNavPadding + minPadding;
   }
 
@@ -35,6 +40,15 @@ class AppPageScaffold extends StatefulWidget {
   final Widget? drawer;
   final bool showMiniPlayer;
 
+  /// 隐藏底部导航栏（如多选时：导航栏悬浮在页面内容上方，会盖住底部
+  /// 多选操作栏，与 [showMiniPlayer] 同理按需隐藏）。
+  final bool hideBottomNav;
+
+  /// 多选中：系统返回键不退出页面，而是取消多选（留在当前页）。
+  /// 仅 [onCancelMultiSelect] 非空时启用拦截。
+  final bool cancelMultiSelectOnBack;
+  final VoidCallback? onCancelMultiSelect;
+
   const AppPageScaffold({
     super.key,
     this.appBar,
@@ -48,6 +62,9 @@ class AppPageScaffold extends StatefulWidget {
     this.onBottomNavTap,
     this.drawer,
     this.showMiniPlayer = true,
+    this.hideBottomNav = false,
+    this.cancelMultiSelectOnBack = false,
+    this.onCancelMultiSelect,
   });
 
   @override
@@ -156,8 +173,9 @@ class AppPageScaffoldState extends State<AppPageScaffold>
       );
     }
 
-    final hasBottomNav =
-        widget.bottomNavIndex != null && widget.onBottomNavTap != null;
+    final hasBottomNav = !widget.hideBottomNav &&
+        widget.bottomNavIndex != null &&
+        widget.onBottomNavTap != null;
     // shell 主 tab 页由 shell 渲染唯一一份共享底栏（见 app_router.dart 的
     // _PrimaryNavigationShell），页面自身不再渲染，否则 IndexedStack 里每个
     // tab 页各持一份 GlassTabBar / TabIndicatorState，切换后胶囊会从各页
@@ -183,13 +201,13 @@ class AppPageScaffoldState extends State<AppPageScaffold>
     final lift = hasBottomNav ? miniPlayerLift : miniPlayerBottomLift;
     // 玻璃开启时胶囊只占槽位中间（上方留 kGlassNavPillTopGap 空隙），迷你
     // 播放器对齐胶囊顶（减去该空隙），避免把空隙误当成间隙；非玻璃分支是
-    // 占满槽位的实色栏，不减。该值随开关/TV 变化由下方 ListenableBuilder
-    // 触发重算。
-    final glassPillTopGap = AppGlassSettings.effectiveEnabled
-        ? kGlassNavPillTopGap
-        : 0.0;
+    // 占满槽位的实色栏，直接对齐栏顶（kSolidNavHeight）。该值随开关/TV 变化
+    // 由下方 ListenableBuilder 触发重算。
+    final navDockHeight = AppGlassSettings.effectiveEnabled
+        ? (AppPageScaffold.modernNavHeight - kGlassNavPillTopGap)
+        : kSolidNavHeight;
     final miniPlayerBottom = hasBottomNav
-        ? (AppPageScaffold.modernNavHeight - glassPillTopGap + bottomInset)
+        ? (navDockHeight + bottomInset)
         : bottomInset;
     final keyboardInset = widget.resizeToAvoidBottomInset
         ? MediaQuery.viewInsetsOf(context).bottom
@@ -247,8 +265,9 @@ class AppPageScaffoldState extends State<AppPageScaffold>
           body: buildBody(includeMiniPlayer: !tabletMode),
         );
 
+        Widget result;
         if (tabletMode || !_hasDrawer) {
-          return AppBackground(child: page);
+          result = AppBackground(child: page);
         }
         if (miniPlayer != null) {
           page = Scaffold(
@@ -377,7 +396,7 @@ class AppPageScaffoldState extends State<AppPageScaffold>
         );
         // 抽屉展开时系统返回键应先收起抽屉，而不是直接退出当前页。
         // _drawerOpen 只在开/关边界变化，避免 PopScope 随动画每帧重建。
-        return PopScope(
+        result = PopScope(
           canPop: !_drawerOpen,
           onPopInvokedWithResult: (didPop, _) {
             if (didPop) return;
@@ -387,6 +406,18 @@ class AppPageScaffoldState extends State<AppPageScaffold>
           },
           child: stack,
         );
+        // 多选中：返回键取消多选，留在当前页（不退出页面）。
+        if (widget.cancelMultiSelectOnBack &&
+            widget.onCancelMultiSelect != null) {
+          result = PopScope(
+            canPop: false,
+            onPopInvokedWithResult: (didPop, _) {
+              if (!didPop) widget.onCancelMultiSelect?.call();
+            },
+            child: result,
+          );
+        }
+        return result;
       },
     );
   }
