@@ -353,6 +353,24 @@ class _PlayerSeekBarState extends State<_PlayerSeekBar> with SignalsMixin {
   }
 }
 
+/// 次级控制按钮（上一首 / 下一首）的立体表面：浅底 + 发丝描边 + 轻投影。
+/// 与主播放按钮同一套质感，只是弱一档，避免抢焦点。
+BoxDecoration _secondaryControlDecoration(ColorScheme scheme) => BoxDecoration(
+  shape: BoxShape.circle,
+  color: scheme.primaryContainer.withValues(alpha: 0.28),
+  border: Border.all(
+    color: Colors.white.withValues(alpha: 0.16),
+    width: 0.8,
+  ),
+  boxShadow: [
+    BoxShadow(
+      color: Colors.black.withValues(alpha: 0.16),
+      blurRadius: 8,
+      offset: const Offset(0, 3),
+    ),
+  ],
+);
+
 class PlayerControls extends StatelessWidget {
   final PlayerService player;
   final PlayerStylePreset stylePreset;
@@ -380,16 +398,50 @@ class PlayerControls extends StatelessWidget {
         return Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            IconButton(
-              iconSize: isTv ? 64 : 48,
-              icon: Icon(Icons.skip_previous_rounded, color: iconColor),
-              onPressed: player.previous,
+            // DecoratedBox 只装饰不占位：给上一首/下一首加浅底+发丝描边+
+            // 轻投影，让它们也有厚度，同时不改变原有尺寸与间距。
+            DecoratedBox(
+              decoration: _secondaryControlDecoration(scheme),
+              child: IconButton(
+                iconSize: isTv ? 64 : 48,
+                icon: Icon(Icons.skip_previous_rounded, color: iconColor),
+                onPressed: player.previous,
+              ),
             ),
             SizedBox(width: isTv ? 28 : 20),
             Container(
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: buttonBg,
+                // 立体感（移植自 Beans 播放页）：左上→右下渐变做出弧面，
+                // 发丝描边勾边，强调色 + 黑色两层投影让按钮浮起来。
+                // 注意 BoxDecoration 的 color 与 gradient 互斥，只能留 gradient。
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    buttonBg,
+                    Color.alphaBlend(
+                      Colors.black.withValues(alpha: 0.12),
+                      buttonBg,
+                    ),
+                  ],
+                ),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.22),
+                  width: 1,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: scheme.primary.withValues(alpha: 0.32),
+                    blurRadius: 14,
+                    offset: const Offset(0, 7),
+                  ),
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.18),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
               child: IconButton(
                 iconSize: mainButtonSize,
@@ -414,10 +466,13 @@ class PlayerControls extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 20),
-            IconButton(
-              iconSize: isTv ? 64 : 48,
-              icon: Icon(Icons.skip_next_rounded, color: iconColor),
-              onPressed: player.next,
+            DecoratedBox(
+              decoration: _secondaryControlDecoration(scheme),
+              child: IconButton(
+                iconSize: isTv ? 64 : 48,
+                icon: Icon(Icons.skip_next_rounded, color: iconColor),
+                onPressed: player.next,
+              ),
             ),
           ],
         );
@@ -1474,7 +1529,29 @@ class PosterControls extends StatelessWidget {
               height: 56,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: scheme.onSurface,
+                // 与经典布局同一套立体质感，尺寸更小故投影收敛一档。
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    scheme.onSurface,
+                    Color.alphaBlend(
+                      Colors.black.withValues(alpha: 0.18),
+                      scheme.onSurface,
+                    ),
+                  ],
+                ),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  width: 0.8,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.28),
+                    blurRadius: 12,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
               ),
               child: IconButton(
                 iconSize: 36,

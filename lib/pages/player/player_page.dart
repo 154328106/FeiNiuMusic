@@ -1269,7 +1269,53 @@ class _ArtworkShadowContainer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(borderRadius: border, child: child);
+    // 封面立体感三层（移植自 Beans 播放页）：
+    //   1. 外投影 —— 必须画在 ClipRRect **外面**，画在里面会被自己裁掉；
+    //   2. 发丝描边 —— 边缘一圈半透明白，把封面从背景里「抬」起来；
+    //   3. 顶部玻璃反光 —— 上亮下透的白色渐变，做出弧面反光。
+    //
+    // 描边与反光叠在裁剪层之上、且不吃点击。它们**不跟着封面转**：这一层
+    // 在旋转组件（_RotatingArtwork）外面，反光跟着转就穿帮了。
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: border,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.38),
+            blurRadius: 24,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
+      child: Stack(
+        fit: StackFit.passthrough,
+        children: [
+          ClipRRect(borderRadius: border, child: child),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: border,
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.28),
+                    width: 1,
+                  ),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.center,
+                    colors: [
+                      Colors.white.withValues(alpha: 0.20),
+                      Colors.white.withValues(alpha: 0.03),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
