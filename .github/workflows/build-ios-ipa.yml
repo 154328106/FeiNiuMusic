@@ -1,0 +1,73 @@
+name: build-ios-ipa
+
+# 免签 IPA：不需要 Apple 开发者证书，产物用越狱环境 / TrollStore / 自签工具安装。
+#
+# 只用 workflow_dispatch 手动触发：macOS runner 的分钟数按 10 倍计费，
+# 不适合每次 push 都跑。日常改 Dart 代码用 ci-check（Linux）验证即可，
+# 需要装到手机上试的时候再手动跑这个。
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "要构建的分支或 tag（默认当前分支）"
+        required: false
+        default: ""
+
+jobs:
+  build-ipa:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: 环境信息
+        run: |
+          flutter --version
+          xcodebuild -version
+          echo "CocoaPods: $(pod --version)"
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      - name: 提取版本号
+        id: version
+        run: |
+          FULL=$(grep '^version:' pubspec.yaml | awk '{print $2}')
+          echo "VERSION=${FULL%%+*}" >> "$GITHUB_ENV"
+          echo "版本：${FULL%%+*}"
+
+      # --no-codesign 跳过签名；产物是未签名的 Runner.app。
+      - name: 构建 iOS（免签）
+        run: flutter build ios --release --no-codesign
+
+      # IPA 就是把 .app 放进 Payload/ 再打成 zip。ditto 保留符号链接与资源
+      # 分叉，用普通 zip 打出来的包在部分安装器上会解不开。
+      - name: 打包 IPA
+        run: |
+          APP_PATH=build/ios/iphoneos/Runner.app
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::没有找到 $APP_PATH，构建可能失败了"
+            exit 1
+          fi
+          echo "== 产物 Info.plist =="
+          plutil -p "$APP_PATH/Info.plist" | grep -E "CFBundleIdentifier|CFBundleShortVersionString|CFBundleVersion|CFBundleDisplayName" || true
+          echo "== 确认没有签名 =="
+          codesign -dv "$APP_PATH" 2>&1 || echo "（未签名，符合预期）"
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          ditto -c -k --sequesterRsrc --keepParent Payload "FeiNiuMusic-v${VERSION}-unsigned.ipa"
+          ls -lh "FeiNiuMusic-v${VERSION}-unsigned.ipa"
+
+      - name: 上传 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: FeiNiuMusic-unsigned-ipa
+          path: FeiNiuMusic-v*-unsigned.ipa
+          if-no-files-found: error
