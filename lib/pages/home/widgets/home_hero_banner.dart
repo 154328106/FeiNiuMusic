@@ -43,6 +43,11 @@ class HomeHeroBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 手机端用紧凑横向卡片（大屏仍用全出血大图：横向空间够，大图才成立）。
+    if (!AppLayoutSettings.tvMode.value &&
+        !AppLayoutSettings.effectiveTabletMode) {
+      return _buildCompact(context);
+    }
     final theme = Theme.of(context);
     final coverId = song?.coverId;
     // TV 端：16:9 全宽卡在横屏下会占满整屏。改 12:5 并限制最大宽度，
@@ -212,9 +217,165 @@ class HomeHeroBanner extends StatelessWidget {
     );
     return centered;
   }
+  /// 紧凑横向卡片（手机端默认）：左侧小封面 + 歌名/歌手 + 右侧圆形按钮。
+  ///
+  /// 取代原先 16:9 的全出血大图 —— 大图把首页第一屏占掉近一半，下面的
+  /// 快捷入口和列表都被挤到折叠线以下。
+  Widget _buildCompact(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final coverId = song?.coverId;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        height: 96,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          // 跟随主题的表面色做斜向渐变，深浅色都自然。
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              scheme.surfaceContainerHighest,
+              Color.alphaBlend(
+                scheme.primary.withValues(alpha: 0.10),
+                scheme.surfaceContainerHigh,
+              ),
+            ],
+          ),
+        ),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: SizedBox(
+                width: 68,
+                height: 68,
+                child: (coverId != null && coverId.isNotEmpty)
+                    ? CachedNetworkImage(
+                        imageUrl: FeiNiuApiClient.instance.coverUrl(
+                          coverId,
+                          size: FeiNiuApiClient.coverRequestSize,
+                          updatedAt: song?.updatedAt,
+                        ),
+                        httpHeaders: FeiNiuApiClient.imageAuthHeaders(),
+                        fit: BoxFit.cover,
+                        placeholder: (_, _) => _HeroFallback(song: song),
+                        errorWidget: (_, _, _) => _HeroFallback(song: song),
+                      )
+                    : _HeroFallback(song: song),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    song?.title ?? '随机播放',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.2,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    song?.artistDisplayName ?? '今天想听点什么',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // 「换一首」保留：Banner 虽然会自动轮播，但手动换一首仍有用。
+            if (onRefresh != null)
+              IconButton(
+                iconSize: 20,
+                visualDensity: VisualDensity.compact,
+                tooltip: '换一首',
+                onPressed: onRefresh,
+                icon: Icon(
+                  Icons.refresh_rounded,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            const SizedBox(width: 2),
+            _CompactPlayButton(onPlay: onPlay, isPlaying: isPlaying),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// 播放按钮：Material 自身已可聚焦（主题 focusColor 染出焦点）。
+/// 紧凑卡片右侧的圆形播放/暂停按钮。
+///
+/// 与 [_TvPlayButton] 分开：那个是压在封面上的白底大按钮（靠白色和背景拉开
+/// 对比），这里按钮在卡片表面上，得用主题色才不突兀。
+class _CompactPlayButton extends StatelessWidget {
+  final VoidCallback onPlay;
+  final bool isPlaying;
+
+  const _CompactPlayButton({required this.onPlay, required this.isPlaying});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            scheme.primaryContainer,
+            Color.alphaBlend(
+              Colors.black.withValues(alpha: 0.10),
+              scheme.primaryContainer,
+            ),
+          ],
+        ),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.22),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: scheme.primary.withValues(alpha: 0.28),
+            blurRadius: 12,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onPlay,
+          child: Icon(
+            isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            color: scheme.onPrimaryContainer,
+            size: 26,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _TvPlayButton extends StatelessWidget {
   final VoidCallback onPlay;
   final bool isPlaying;

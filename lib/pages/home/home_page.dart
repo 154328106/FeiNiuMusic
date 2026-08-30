@@ -1064,9 +1064,20 @@ class _CompactSongList extends StatelessWidget {
     return Column(
       children: List.generate(displaySongs.length, (i) {
         final song = displaySongs[i];
+        final isLast = i == displaySongs.length - 1;
         return Padding(
-          padding: EdgeInsets.only(bottom: i < displaySongs.length - 1 ? 6 : 0),
-          child: Material(
+          // 「逐行卡片」样式自带行间距，这里就不要再加 6，否则两处间距叠加。
+          padding: EdgeInsets.only(
+            bottom:
+                (isLast ||
+                    AppBackgroundSettings.contentFrameStyle.value ==
+                        AppContentFrameStyle.cards)
+                ? 0
+                : 6,
+          ),
+          child: AppContentRow(
+            isLast: isLast,
+            child: Material(
             color: Colors.transparent,
             child: InkWell(
               borderRadius: BorderRadius.circular(12),
@@ -1124,6 +1135,7 @@ class _CompactSongList extends StatelessWidget {
                 ),
               ),
             ),
+          ),
           ),
         );
       }),

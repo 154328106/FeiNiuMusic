@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../components/common/content_frame.dart';
 import 'settings_glass_state.dart';
 
 class AppBackgroundSettings {
@@ -14,6 +15,7 @@ class AppBackgroundSettings {
   static const String _prefsPanelBlur = 'setting_panel_blur';
   static const String _prefsPanelBlurEnabled = 'setting_panel_blur_enabled';
   static const String _prefsContentFrame = 'setting_content_frame_enabled';
+  static const String _prefsContentFrameStyle = 'setting_content_frame_style';
 
   static final ValueNotifier<String?> backgroundImagePath = ValueNotifier(null);
   static final ValueNotifier<double> backgroundMaskOpacity = ValueNotifier(
@@ -28,8 +30,10 @@ class AppBackgroundSettings {
   /// 高斯模糊总开关。关闭后 [panelBlurStrength] 视为 0，各处不渲染模糊。
   static final ValueNotifier<bool> panelBlurEnabled = ValueNotifier(true);
 
-  /// 内容描边框。开启后列表区块套一层圆角描边卡片，把内容从背景里框出来。
-  static final ValueNotifier<bool> contentFrameEnabled = ValueNotifier(false);
+  /// 列表加框样式。见 [AppContentFrameStyle]（不加框 / 整块描边 / 逐行卡片）。
+  /// 用字符串存，避免枚举顺序变化影响已保存的值。
+  static final ValueNotifier<AppContentFrameStyle> contentFrameStyle =
+      ValueNotifier(AppContentFrameStyle.none);
 
   /// 生效的高斯模糊强度：总开关关闭时恒为 0。
   static double get effectivePanelBlur {
@@ -50,7 +54,13 @@ class AppBackgroundSettings {
     pageGlowEnabled.value = prefs.getBool(_prefsPageGlowEnabled) ?? false;
     panelBlurStrength.value = (prefs.getDouble(_prefsPanelBlur) ?? 20).clamp(0.0, 32.0);
     panelBlurEnabled.value = prefs.getBool(_prefsPanelBlurEnabled) ?? true;
-    contentFrameEnabled.value = prefs.getBool(_prefsContentFrame) ?? false;
+    final rawFrame = prefs.getString(_prefsContentFrameStyle);
+    contentFrameStyle.value = rawFrame != null
+        ? AppContentFrameStyle.fromName(rawFrame)
+        // 上一版是个布尔开关，按它迁移一次。
+        : ((prefs.getBool(_prefsContentFrame) ?? false)
+              ? AppContentFrameStyle.outlined
+              : AppContentFrameStyle.none);
   }
 
   static Future<void> setBackgroundImagePath(String? path) async {
@@ -91,10 +101,10 @@ class AppBackgroundSettings {
     panelBlurStrength.value = next;
   }
 
-  static Future<void> setContentFrameEnabled(bool enabled) async {
+  static Future<void> setContentFrameStyle(AppContentFrameStyle style) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_prefsContentFrame, enabled);
-    contentFrameEnabled.value = enabled;
+    await prefs.setString(_prefsContentFrameStyle, style.name);
+    contentFrameStyle.value = style;
   }
 
   static Future<void> setPanelBlurEnabled(bool enabled) async {

@@ -640,16 +640,25 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                 },
               ),
               const SizedBox(height: 8),
-              ValueListenableBuilder<bool>(
-                valueListenable: AppBackgroundSettings.contentFrameEnabled,
-                builder: (context, frameEnabled, _) {
-                  return AppSettingSwitchTile(
-                    title: '内容描边框',
-                    subtitle: '列表区块套一层圆角描边，把内容从背景里框出来',
-                    value: frameEnabled,
-                    onChanged: (value) {
-                      AppBackgroundSettings.setContentFrameEnabled(value);
-                    },
+              // 列表加框样式三选一。用 CheckboxTile 做单选，与设置页其它
+              // 选择项保持一致的观感。
+              ValueListenableBuilder<AppContentFrameStyle>(
+                valueListenable: AppBackgroundSettings.contentFrameStyle,
+                builder: (context, current, _) {
+                  return Column(
+                    children: [
+                      for (final style in AppContentFrameStyle.values)
+                        AppSettingCheckboxTile(
+                          title: style.label,
+                          subtitle: style.description,
+                          value: current == style,
+                          onChanged: (checked) {
+                            // 单选：再点已选项不取消，避免出现一个都没选的状态。
+                            if (!checked) return;
+                            AppBackgroundSettings.setContentFrameStyle(style);
+                          },
+                        ),
+                    ],
                   );
                 },
               ),
