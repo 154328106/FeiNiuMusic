@@ -13,6 +13,7 @@ class AppBackgroundSettings {
   static const String _prefsPageGlowEnabled = 'setting_page_glow_enabled';
   static const String _prefsPanelBlur = 'setting_panel_blur';
   static const String _prefsPanelBlurEnabled = 'setting_panel_blur_enabled';
+  static const String _prefsContentFrame = 'setting_content_frame_enabled';
 
   static final ValueNotifier<String?> backgroundImagePath = ValueNotifier(null);
   static final ValueNotifier<double> backgroundMaskOpacity = ValueNotifier(
@@ -26,6 +27,9 @@ class AppBackgroundSettings {
   static final ValueNotifier<double> panelBlurStrength = ValueNotifier(20);
   /// 高斯模糊总开关。关闭后 [panelBlurStrength] 视为 0，各处不渲染模糊。
   static final ValueNotifier<bool> panelBlurEnabled = ValueNotifier(true);
+
+  /// 内容描边框。开启后列表区块套一层圆角描边卡片，把内容从背景里框出来。
+  static final ValueNotifier<bool> contentFrameEnabled = ValueNotifier(false);
 
   /// 生效的高斯模糊强度：总开关关闭时恒为 0。
   static double get effectivePanelBlur {
@@ -46,6 +50,7 @@ class AppBackgroundSettings {
     pageGlowEnabled.value = prefs.getBool(_prefsPageGlowEnabled) ?? false;
     panelBlurStrength.value = (prefs.getDouble(_prefsPanelBlur) ?? 20).clamp(0.0, 32.0);
     panelBlurEnabled.value = prefs.getBool(_prefsPanelBlurEnabled) ?? true;
+    contentFrameEnabled.value = prefs.getBool(_prefsContentFrame) ?? false;
   }
 
   static Future<void> setBackgroundImagePath(String? path) async {
@@ -84,6 +89,12 @@ class AppBackgroundSettings {
     final next = value.clamp(0.0, 32.0);
     await prefs.setDouble(_prefsPanelBlur, next);
     panelBlurStrength.value = next;
+  }
+
+  static Future<void> setContentFrameEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsContentFrame, enabled);
+    contentFrameEnabled.value = enabled;
   }
 
   static Future<void> setPanelBlurEnabled(bool enabled) async {

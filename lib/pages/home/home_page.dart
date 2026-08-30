@@ -1010,14 +1010,16 @@ class _HomePageState extends State<HomePage>
               // 4. 最新歌曲 — 紧凑竖排行列表
               if (_recentTracks.value.isNotEmpty) ...[
                 HomeSectionHeader(title: '最新歌曲', onViewAll: _openSongsPage),
-                _CompactSongList(
-                  songs: _recentTracks.value,
-                  onTap: (song) => _playHomeSong(
-                    song,
-                    _recentTracks.value,
-                    _HomePlaySource.recentTracks,
+                AppContentFrame(
+                  child: _CompactSongList(
+                    songs: _recentTracks.value,
+                    onTap: (song) => _playHomeSong(
+                      song,
+                      _recentTracks.value,
+                      _HomePlaySource.recentTracks,
+                    ),
+                    onLongPress: _showSongDetail,
                   ),
-                  onLongPress: _showSongDetail,
                 ),
                 const SizedBox(height: 16),
               ],

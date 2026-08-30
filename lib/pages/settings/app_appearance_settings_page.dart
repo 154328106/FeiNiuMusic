@@ -641,6 +641,19 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
               ),
               const SizedBox(height: 8),
               ValueListenableBuilder<bool>(
+                valueListenable: AppBackgroundSettings.contentFrameEnabled,
+                builder: (context, frameEnabled, _) {
+                  return AppSettingSwitchTile(
+                    title: '内容描边框',
+                    subtitle: '列表区块套一层圆角描边，把内容从背景里框出来',
+                    value: frameEnabled,
+                    onChanged: (value) {
+                      AppBackgroundSettings.setContentFrameEnabled(value);
+                    },
+                  );
+                },
+              ),
+              ValueListenableBuilder<bool>(
                 valueListenable: AppBackgroundSettings.panelBlurEnabled,
                 builder: (context, blurEnabled, _) {
                   return AppSettingSwitchTile(
