@@ -233,23 +233,36 @@ class _PlayerAppearanceSettingsPageState
                   }
                   return Column(
                     children: [
-                      ValueListenableBuilder<bool>(
-                        valueListenable: PlayerBackgroundSettings.roundCover,
-                        builder: (context, enabled, _) {
-                          return AppSettingSwitchTile(
-                            title: '圆形封面',
-                            subtitle: '播放页封面以圆形显示',
-                            value: enabled,
-                            onChanged: (value) {
-                              PlayerBackgroundSettings.setRoundCover(value);
-                            },
+                      // 封面样式四选一。用 CheckboxTile 做单选：设置页里已有
+                      // 这套控件，不必为一个选择器新造组件。
+                      ValueListenableBuilder<PlayerCoverStyle>(
+                        valueListenable: PlayerBackgroundSettings.coverStyle,
+                        builder: (context, current, _) {
+                          return Column(
+                            children: [
+                              for (final style in PlayerCoverStyle.values)
+                                AppSettingCheckboxTile(
+                                  title: style.label,
+                                  subtitle: style.description,
+                                  value: current == style,
+                                  onChanged: (checked) {
+                                    // 单选：只响应「勾选」，再点已选项不取消，
+                                    // 否则会出现一个都没选的空状态。
+                                    if (!checked) return;
+                                    PlayerBackgroundSettings.setCoverStyle(
+                                      style,
+                                    );
+                                  },
+                                ),
+                            ],
                           );
                         },
                       ),
-                      ValueListenableBuilder<bool>(
-                        valueListenable: PlayerBackgroundSettings.roundCover,
-                        builder: (context, roundEnabled, _) {
-                          if (!roundEnabled) {
+                      ValueListenableBuilder<PlayerCoverStyle>(
+                        valueListenable: PlayerBackgroundSettings.coverStyle,
+                        builder: (context, coverStyle, _) {
+                          // 方形封面转起来只会露出四个角，没有意义，隐藏开关。
+                          if (!coverStyle.spinnable) {
                             return const SizedBox.shrink();
                           }
                           return ValueListenableBuilder<bool>(

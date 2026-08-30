@@ -1141,7 +1141,11 @@ class _PlayerArtwork extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<bool>(
+    // coverStyle 是 ValueNotifier，Watch.builder 只跟踪 signals，不会因它重建；
+    // 不显式监听的话，改完封面样式要退出再进播放页才生效。
+    return ValueListenableBuilder<PlayerCoverStyle>(
+      valueListenable: PlayerBackgroundSettings.coverStyle,
+      builder: (context, coverStyle, _) => ValueListenableBuilder<bool>(
       valueListenable: AppLayoutSettings.effectiveTabletModeNotifier,
       builder: (context, effectiveTabletMode, _) {
         final isTabletLayout =
@@ -1176,6 +1180,7 @@ class _PlayerArtwork extends StatelessWidget {
                         height: size,
                         child: _ArtworkShadowContainer(
                           border: border,
+                          style: coverStyle,
                           child: _ArtworkPlaceholder(border: border, label: ''),
                         ),
                       ),
@@ -1192,8 +1197,9 @@ class _PlayerArtwork extends StatelessWidget {
                   final boxSize = width < maxSize ? width : maxSize;
                   final size =
                       boxSize < constraints.maxHeight ? boxSize : constraints.maxHeight;
-                  final borderRadius =
-                      PlayerBackgroundSettings.roundCover.value ? size / 2 : 12.0;
+                  final borderRadius = coverStyle == PlayerCoverStyle.square
+                      ? 12.0
+                      : size / 2;
                   return Center(
                     child: SizedBox(
                       width: size,
@@ -1202,8 +1208,7 @@ class _PlayerArtwork extends StatelessWidget {
                         // 必须用封面**实际**的圆角：圆形封面时是 size/2。
                         // 用 spec 的固定 12 会在圆形封面外面套一个圆角方框。
                         border: BorderRadius.circular(borderRadius),
-                        // 圆形封面渲染成 CD/VCD 碟片：中心挖孔 + 轮毂环。
-                        disc: PlayerBackgroundSettings.roundCover.value,
+                        style: coverStyle,
                         child: _RotatingArtwork(
                           song: song,
                           buildArtwork: (context, onCoverAvailable) =>
@@ -1227,6 +1232,7 @@ class _PlayerArtwork extends StatelessWidget {
           },
         );
       },
+      ),
     );
   }
 }
@@ -1271,35 +1277,50 @@ class _ArtworkShadowContainer extends StatelessWidget {
   final BorderRadius border;
   final Widget child;
 
-  /// 把圆形封面渲染成 CD / VCD 碟片：中心挖孔、轮毂透明环、压印环。
-  final bool disc;
+  /// 封面样式。碟片类样式（cd / vinyl）走各自的绘制分支。
+  final PlayerCoverStyle style;
 
   const _ArtworkShadowContainer({
     required this.border,
     required this.child,
-    this.disc = false,
+    this.style = PlayerCoverStyle.circle,
   });
 
   @override
   Widget build(BuildContext context) {
-    // 碟片模式：孔是真的镂空（能看见背景），所以投影不能用 BoxShadow —— 那会
-    // 在孔的位置糊一团黑，看起来像塞了块黑纸。改成按「圆环」路径自己画模糊
-    // 投影，孔的位置不落影。
-    if (disc) {
-      return CustomPaint(
-        painter: const _DiscShadowPainter(),
-        foregroundPainter: const _DiscSurfacePainter(),
-        child: ClipPath(clipper: const _DiscClipper(), child: child),
-      );
+    switch (style) {
+      case PlayerCoverStyle.cd:
+        return _DiscFrame(
+          holeRatio: _kCdHoleRatio,
+          surface: const _CdSurfacePainter(),
+          child: child,
+        );
+      case PlayerCoverStyle.vinyl:
+        return _DiscFrame(
+          holeRatio: _kVinylHoleRatio,
+          base: const _VinylBasePainter(),
+          surface: const _VinylSurfacePainter(),
+          // 黑胶的封面是中心贴标，不铺满盘面。用 Transform.scale 缩放而不是
+          // 改 ArtworkWidget 的 size：封面本来就按 800px 源图请求，缩小显示
+          // 不掉画质，也省得把尺寸一路透传下来。
+          child: Center(
+            child: Transform.scale(scale: _kVinylLabelRatio, child: child),
+          ),
+        );
+      case PlayerCoverStyle.square:
+      case PlayerCoverStyle.circle:
+        return _plainCover();
     }
+  }
 
-    // 方形/圆角封面的立体感三层（移植自 Beans 播放页）：
-    //   1. 外投影 —— 必须画在 ClipRRect **外面**，画在里面会被自己裁掉；
-    //   2. 发丝描边 —— 边缘一圈半透明白，把封面从背景里「抬」起来；
-    //   3. 顶部玻璃反光 —— 上亮下透的白色渐变，做出弧面反光。
-    //
-    // 描边与反光叠在裁剪层之上、且不吃点击。它们**不跟着封面转**：这一层
-    // 在旋转组件（_RotatingArtwork）外面，反光跟着转就穿帮了。
+  /// 方形 / 纯圆形封面的立体感三层（移植自 Beans 播放页）：
+  ///   1. 外投影 —— 必须画在 ClipRRect **外面**，画在里面会被自己裁掉；
+  ///   2. 发丝描边 —— 边缘一圈半透明白，把封面从背景里「抬」起来；
+  ///   3. 顶部玻璃反光 —— 上亮下透的白色渐变，做出弧面反光。
+  ///
+  /// 描边与反光叠在裁剪层之上、且不吃点击。它们**不跟着封面转**：这一层
+  /// 在旋转组件（_RotatingArtwork）外面，反光跟着转就穿帮了。
+  Widget _plainCover() {
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: border,
@@ -1343,36 +1364,81 @@ class _ArtworkShadowContainer extends StatelessWidget {
   }
 }
 
-/// 碟片各圈层的半径比例（相对碟片半径），照真实 CD 的尺寸换算：
-/// 碟片 ⌀120mm、中心孔 ⌀15mm、夹持区到 ⌀33mm 左右。
-const double _kDiscHoleRatio = 0.125;
-const double _kDiscHubRatio = 0.27;
-const double _kDiscStackRingRatio = 0.30;
+// ---------------------------------------------------------------------------
+// 碟片类封面（CD / 黑胶）
+//
+// 半径比例按真实盘片尺寸换算（孔径 / 盘片直径 = 孔半径 / 盘片半径）：
+//   CD    盘片 ⌀120mm、中心孔 ⌀15mm、夹持区 ⌀33mm
+//   黑胶  盘片 ⌀300mm、中心孔 ⌀7mm、贴标 ⌀100mm
+// ---------------------------------------------------------------------------
 
-/// 「外圆减内孔」的圆环路径，碟片的裁剪、投影、表面处理都用它。
-Path _discRingPath(Size size) {
+const double _kCdHoleRatio = 0.125;
+const double _kCdHubRatio = 0.27;
+const double _kCdStackRingRatio = 0.30;
+
+const double _kVinylHoleRatio = 0.024;
+const double _kVinylLabelRatio = 0.34;
+
+/// 「外圆减中心孔」的圆环路径。碟片的裁剪与投影都用它，孔是真镂空。
+Path _discRingPath(Size size, double holeRatio) {
   final r = size.shortestSide / 2;
   final c = Offset(size.width / 2, size.height / 2);
   return Path()
     ..fillType = PathFillType.evenOdd
     ..addOval(Rect.fromCircle(center: c, radius: r))
-    ..addOval(Rect.fromCircle(center: c, radius: r * _kDiscHoleRatio));
+    ..addOval(Rect.fromCircle(center: c, radius: r * holeRatio));
 }
 
-/// 碟片裁剪：把封面裁成中间带孔的圆环。
+/// 碟片的通用骨架：带孔投影 → 盘面底纹 → 裁成圆环的封面 → 表面处理。
+class _DiscFrame extends StatelessWidget {
+  final double holeRatio;
+  final CustomPainter? base;
+  final CustomPainter surface;
+  final Widget child;
+
+  const _DiscFrame({
+    required this.holeRatio,
+    required this.surface,
+    required this.child,
+    this.base,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // 孔是真镂空（能看见背景），所以投影不能用 BoxShadow —— 那会在孔的位置
+    // 糊一团黑，看起来像孔里塞了块黑纸。改成按圆环路径自己画模糊投影。
+    return CustomPaint(
+      painter: _DiscShadowPainter(holeRatio: holeRatio),
+      child: ClipPath(
+        clipper: _DiscClipper(holeRatio: holeRatio),
+        child: CustomPaint(
+          painter: base,
+          foregroundPainter: surface,
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
 class _DiscClipper extends CustomClipper<Path> {
-  const _DiscClipper();
+  final double holeRatio;
+
+  const _DiscClipper({required this.holeRatio});
 
   @override
-  Path getClip(Size size) => _discRingPath(size);
+  Path getClip(Size size) => _discRingPath(size, holeRatio);
 
   @override
-  bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
+  bool shouldReclip(covariant _DiscClipper oldClipper) =>
+      oldClipper.holeRatio != holeRatio;
 }
 
-/// 碟片投影：按圆环路径画模糊阴影，中心孔不落影。
+/// 沿圆环路径画的模糊投影，中心孔不落影。
 class _DiscShadowPainter extends CustomPainter {
-  const _DiscShadowPainter();
+  final double holeRatio;
+
+  const _DiscShadowPainter({required this.holeRatio});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1380,78 +1446,77 @@ class _DiscShadowPainter extends CustomPainter {
     final paint = Paint()
       ..color = Colors.black.withValues(alpha: 0.38)
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12);
-    canvas.drawPath(_discRingPath(size).shift(const Offset(0, 12)), paint);
+    canvas.drawPath(
+      _discRingPath(size, holeRatio).shift(const Offset(0, 12)),
+      paint,
+    );
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _DiscShadowPainter oldDelegate) =>
+      oldDelegate.holeRatio != holeRatio;
 }
 
-/// 碟片表面：顶部弧面反光、外沿发丝、轮毂透明环与压印环。
+/// 顶部弧面反光。CD 与黑胶共用。
+void _paintDiscGloss(Canvas canvas, Size size) {
+  final gloss = Paint()
+    ..shader = LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.center,
+      colors: [
+        Colors.white.withValues(alpha: 0.20),
+        Colors.white.withValues(alpha: 0.03),
+        Colors.transparent,
+      ],
+    ).createShader(Offset.zero & size);
+  canvas.drawRect(Offset.zero & size, gloss);
+}
+
+/// CD 表面：弧面反光、外沿发丝、轮毂透明环与叠盘环。
 ///
-/// 画在 foregroundPainter 上，所以**不跟着封面旋转** —— 中心孔和轮毂在真实
-/// 碟片上也是不动的，跟着转会立刻穿帮。
-class _DiscSurfacePainter extends CustomPainter {
-  const _DiscSurfacePainter();
+/// 画在 foregroundPainter 上，所以**不跟着封面旋转** —— 真实碟片的孔和轮毂
+/// 也是不动的，跟着转会立刻穿帮。
+class _CdSurfacePainter extends CustomPainter {
+  const _CdSurfacePainter();
 
   @override
   void paint(Canvas canvas, Size size) {
     final r = size.shortestSide / 2;
     final c = Offset(size.width / 2, size.height / 2);
-    final ring = _discRingPath(size);
 
-    // 顶部反光：只落在盘面上，孔与外圈之外不画。
-    canvas.save();
-    canvas.clipPath(ring);
-    final gloss = Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.center,
-        colors: [
-          Colors.white.withValues(alpha: 0.20),
-          Colors.white.withValues(alpha: 0.03),
-          Colors.transparent,
-        ],
-      ).createShader(Offset.zero & size);
-    canvas.drawRect(Offset.zero & size, gloss);
-    canvas.restore();
+    _paintDiscGloss(canvas, size);
 
-    // 轮毂：中心孔到夹持区之间的一圈，真实碟片这里是透明塑料，
-    // 压一层浅色让它和印刷面区分开。
+    // 轮毂：中心孔到夹持区之间。真实碟片这里是透明塑料，压一层浅色让它
+    // 和印刷面区分开。
     final hub = Path()
       ..fillType = PathFillType.evenOdd
-      ..addOval(Rect.fromCircle(center: c, radius: r * _kDiscHubRatio))
-      ..addOval(Rect.fromCircle(center: c, radius: r * _kDiscHoleRatio));
-    canvas.drawPath(
-      hub,
-      Paint()..color = Colors.white.withValues(alpha: 0.30),
-    );
+      ..addOval(Rect.fromCircle(center: c, radius: r * _kCdHubRatio))
+      ..addOval(Rect.fromCircle(center: c, radius: r * _kCdHoleRatio));
+    canvas.drawPath(hub, Paint()..color = Colors.white.withValues(alpha: 0.30));
 
     final hairline = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1;
 
-    // 外沿发丝：把碟片从背景里抬起来。
     canvas.drawCircle(
       c,
       r - 0.5,
       hairline..color = Colors.white.withValues(alpha: 0.28),
     );
-    // 中心孔内壁：一圈暗边，孔才有厚度。
+    // 孔内壁的暗边，孔才有厚度。
     canvas.drawCircle(
       c,
-      r * _kDiscHoleRatio,
+      r * _kCdHoleRatio,
       hairline..color = Colors.black.withValues(alpha: 0.45),
     );
-    // 夹持区外沿 + 叠盘环。
     canvas.drawCircle(
       c,
-      r * _kDiscHubRatio,
+      r * _kCdHubRatio,
       hairline..color = Colors.black.withValues(alpha: 0.22),
     );
     canvas.drawCircle(
       c,
-      r * _kDiscStackRingRatio,
+      r * _kCdStackRingRatio,
       hairline..color = Colors.white.withValues(alpha: 0.22),
     );
   }
@@ -1460,12 +1525,90 @@ class _DiscSurfacePainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
+/// 黑胶盘面：黑色底 + 同心纹路。画在封面**之下**，封面缩在中心当贴标。
+class _VinylBasePainter extends CustomPainter {
+  const _VinylBasePainter();
 
-/// 封面旋转门控：仅当显示真实封面图时才旋转。
-///
-/// 通过 [ArtworkWidget.onCoverAvailableChanged] 获知当前是否显示真实封面：
-/// 加载中 / 加载失败（文字占位图 / 骨架）时保持静止，只有真实封面在
-/// 播放中才旋转。播放状态与「旋转封面」开关变化时自动启停旋转。
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = size.shortestSide / 2;
+    final c = Offset(size.width / 2, size.height / 2);
+
+    // 盘面：中心略深、边缘略亮，做出一点弧面。
+    canvas.drawCircle(
+      c,
+      r,
+      Paint()
+        ..shader = RadialGradient(
+          colors: const [
+            Color(0xFF141414),
+            Color(0xFF0B0B0B),
+            Color(0xFF1C1C1C),
+          ],
+          stops: const [0.0, 0.72, 1.0],
+        ).createShader(Rect.fromCircle(center: c, radius: r)),
+    );
+
+    // 同心纹路：只画到贴标外沿，贴标区域会被封面盖住。
+    final groove = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.8;
+    final start = r * (_kVinylLabelRatio + 0.02);
+    // 步距 3px：再密就是无意义的过度绘制，视觉上也分辨不出来。
+    for (var radius = start; radius < r - 1; radius += 3) {
+      final t = (radius - start) / (r - start);
+      groove.color = Colors.white.withValues(alpha: 0.03 + 0.05 * (1 - t));
+      canvas.drawCircle(c, radius, groove);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// 黑胶表面：贴标金环、盘面外沿、中心孔内壁与弧面反光。
+class _VinylSurfacePainter extends CustomPainter {
+  const _VinylSurfacePainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = size.shortestSide / 2;
+    final c = Offset(size.width / 2, size.height / 2);
+
+    _paintDiscGloss(canvas, size);
+
+    final stroke = Paint()..style = PaintingStyle.stroke;
+
+    // 贴标外圈的金环。
+    canvas.drawCircle(
+      c,
+      r * _kVinylLabelRatio,
+      stroke
+        ..strokeWidth = 2
+        ..color = const Color(0xFFC9A227).withValues(alpha: 0.85),
+    );
+    // 盘面外沿。
+    canvas.drawCircle(
+      c,
+      r - 0.5,
+      stroke
+        ..strokeWidth = 1
+        ..color = Colors.white.withValues(alpha: 0.18),
+    );
+    // 中心孔内壁。
+    canvas.drawCircle(
+      c,
+      r * _kVinylHoleRatio,
+      stroke
+        ..strokeWidth = 1
+        ..color = Colors.black.withValues(alpha: 0.55),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
 class _RotatingArtwork extends StatefulWidget {
   /// 当前歌曲（null 表示无歌曲，显示占位图，不旋转）。
   final SongEntity? song;

@@ -11,12 +11,52 @@ import '../../../app/services/feiniu/api_client.dart';
 import '../../../app/state/song_state.dart';
 import '../../../app/utils/route_visibility.dart';
 
+/// 播放页封面样式。
+///
+/// 早期只有一个「圆形封面」布尔开关，加到三种以上样式后不够用了，
+/// 升级成枚举。旧的布尔键仍会被写入并作为降级来源，见
+/// [PlayerBackgroundSettings.load]。
+enum PlayerCoverStyle {
+  /// 圆角方形封面。
+  square,
+
+  /// 纯圆形封面。
+  circle,
+
+  /// CD / VCD 碟片：封面铺满盘面，中心真镂空 + 轮毂环。
+  cd,
+
+  /// 黑胶唱片：黑色盘面 + 纹路 + 金环，封面缩到中心标签区。
+  vinyl;
+
+  String get label => switch (this) {
+    PlayerCoverStyle.square => '方形封面',
+    PlayerCoverStyle.circle => '圆形封面',
+    PlayerCoverStyle.cd => 'CD 碟片',
+    PlayerCoverStyle.vinyl => '黑胶唱片',
+  };
+
+  String get description => switch (this) {
+    PlayerCoverStyle.square => '圆角矩形，封面完整显示',
+    PlayerCoverStyle.circle => '裁成正圆，无中心孔',
+    PlayerCoverStyle.cd => '封面印在盘面上，中间挖孔',
+    PlayerCoverStyle.vinyl => '黑胶盘面，封面作为中心贴标',
+  };
+
+  /// 非方形样式才谈得上「旋转」。
+  bool get spinnable => this != PlayerCoverStyle.square;
+
+  static PlayerCoverStyle fromName(String? raw) => PlayerCoverStyle.values
+      .firstWhere((e) => e.name == raw, orElse: () => PlayerCoverStyle.circle);
+}
+
 class PlayerBackgroundSettings {
   static const String _prefsPlaybackThemeMode = 'setting_playback_theme_mode';
   static const String _prefsDynamicGradientEnabled = 'dynamic_gradient_enabled';
   static const String _prefsSaturation = 'gradient_saturation';
   static const String _prefsHueShift = 'gradient_hue_shift';
   static const String _prefsRoundCover = 'player_round_cover';
+  static const String _prefsCoverStyle = 'player_cover_style';
   static const String _prefsRotateCover = 'player_rotate_cover';
 
   static final ValueNotifier<ThemeMode> playbackThemeMode = ValueNotifier(
@@ -25,6 +65,12 @@ class PlayerBackgroundSettings {
   static final ValueNotifier<bool> dynamicGradientEnabled = ValueNotifier(true);
   static final ValueNotifier<double> saturation = ValueNotifier(1.2);
   static final ValueNotifier<double> hueShift = ValueNotifier(120.0);
+  static final ValueNotifier<PlayerCoverStyle> coverStyle = ValueNotifier(
+    PlayerCoverStyle.circle,
+  );
+
+  /// 「非方形」的派生值。保留它是为了让预览组件、引导页等既有消费方
+  /// 不必跟着改；真正的样式来源是 [coverStyle]。
   static final ValueNotifier<bool> roundCover = ValueNotifier(true);
   static final ValueNotifier<bool> rotateCover = ValueNotifier(true);
 
@@ -63,7 +109,14 @@ class PlayerBackgroundSettings {
         prefs.getBool(_prefsDynamicGradientEnabled) ?? true;
     saturation.value = prefs.getDouble(_prefsSaturation) ?? 1.2;
     hueShift.value = prefs.getDouble(_prefsHueShift) ?? 120.0;
-    roundCover.value = prefs.getBool(_prefsRoundCover) ?? true;
+    final rawStyle = prefs.getString(_prefsCoverStyle);
+    coverStyle.value = rawStyle != null
+        ? PlayerCoverStyle.fromName(rawStyle)
+        // 老版本没有样式键，按旧的「圆形封面」开关迁移一次。
+        : ((prefs.getBool(_prefsRoundCover) ?? true)
+              ? PlayerCoverStyle.circle
+              : PlayerCoverStyle.square);
+    roundCover.value = coverStyle.value.spinnable;
     rotateCover.value =
         (prefs.getBool(_prefsRotateCover) ?? true) && roundCover.value;
   }
@@ -92,20 +145,30 @@ class PlayerBackgroundSettings {
     hueShift.value = value;
   }
 
-  static Future<void> setRoundCover(bool value) async {
+  static Future<void> setCoverStyle(PlayerCoverStyle style) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_prefsRoundCover, value);
-    roundCover.value = value;
-    // 打开圆形封面时联动开启旋转封面；关闭圆形封面时同时关闭旋转封面
-    // （旋转封面仅对圆形封面有意义）。
-    if (value && !rotateCover.value) {
+    await prefs.setString(_prefsCoverStyle, style.name);
+    coverStyle.value = style;
+
+    // 旧布尔键继续同步写入：降级安装回老版本时封面样式不至于错乱。
+    final round = style.spinnable;
+    await prefs.setBool(_prefsRoundCover, round);
+    roundCover.value = round;
+
+    // 旋转只对非方形样式有意义，跟着联动开关。
+    if (round && !rotateCover.value) {
       await prefs.setBool(_prefsRotateCover, true);
       rotateCover.value = true;
-    } else if (!value && rotateCover.value) {
+    } else if (!round && rotateCover.value) {
       await prefs.setBool(_prefsRotateCover, false);
       rotateCover.value = false;
     }
   }
+
+  /// 兼容旧调用方（引导页）：true 映射到圆形、false 映射到方形。
+  static Future<void> setRoundCover(bool value) => setCoverStyle(
+    value ? PlayerCoverStyle.circle : PlayerCoverStyle.square,
+  );
 
   static Future<void> setRotateCover(bool value) async {
     final prefs = await SharedPreferences.getInstance();
