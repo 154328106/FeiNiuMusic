@@ -658,7 +658,86 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                             AppBackgroundSettings.setContentFrameStyle(style);
                           },
                         ),
+                      // 不加框时颜色/透明度没有意义，收起来。
+                      if (current != AppContentFrameStyle.none) ...[
+                        ValueListenableBuilder<Color?>(
+                          valueListenable:
+                              AppBackgroundSettings.contentFrameColor,
+                          builder: (context, frameColor, _) {
+                            final fallback = Theme.of(
+                              context,
+                            ).colorScheme.outlineVariant;
+                            return _ColorSettingTile(
+                              title: '描边颜色',
+                              subtitle: frameColor == null
+                                  ? '跟随主题，点击自定义'
+                                  : '自定义颜色，长按恢复跟随主题',
+                              color: frameColor ?? fallback,
+                              onPick: () => _showColorPickerDialog(
+                                context,
+                                initial: frameColor ?? fallback,
+                                onSelected:
+                                    AppBackgroundSettings.setContentFrameColor,
+                              ),
+                              onReset: frameColor == null
+                                  ? null
+                                  : () => AppBackgroundSettings
+                                        .setContentFrameColor(null),
+                            );
+                          },
+                        ),
+                        ValueListenableBuilder<double>(
+                          valueListenable:
+                              AppBackgroundSettings.contentFrameOpacity,
+                          builder: (context, opacity, _) {
+                            return AppSettingSlider(
+                              title: '描边透明度',
+                              value: opacity,
+                              min: 0.05,
+                              max: 1.0,
+                              valueText: '${(opacity * 100).round()}%',
+                              onChanged:
+                                  AppBackgroundSettings.setContentFrameOpacity,
+                            );
+                          },
+                        ),
+                      ],
                     ],
+                  );
+                },
+              ),
+              ValueListenableBuilder<Color?>(
+                valueListenable: AppBackgroundSettings.navBarColor,
+                builder: (context, navColor, _) {
+                  final fallback = Theme.of(context).colorScheme.surface;
+                  return _ColorSettingTile(
+                    title: '导航栏背景色',
+                    subtitle: navColor == null
+                        ? '跟随主题，点击自定义'
+                        : '自定义颜色，长按恢复跟随主题',
+                    color: navColor ?? fallback,
+                    onPick: () => _showColorPickerDialog(
+                      context,
+                      initial: navColor ?? fallback,
+                      onSelected: AppBackgroundSettings.setNavBarColor,
+                    ),
+                    onReset: navColor == null
+                        ? null
+                        : () => AppBackgroundSettings.setNavBarColor(null),
+                  );
+                },
+              ),
+              ValueListenableBuilder<double>(
+                valueListenable: AppBackgroundSettings.navBarOpacity,
+                builder: (context, opacity, _) {
+                  return AppSettingSlider(
+                    title: '导航栏深浅度',
+                    description: '底色的不透明度，越高越实',
+                    value: opacity,
+                    min: 0.05,
+                    max: 1.0,
+                    valueText: '${(opacity * 100).round()}%',
+                    onChanged: AppBackgroundSettings.setNavBarOpacity,
                   );
                 },
               ),
@@ -719,6 +798,63 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+
+/// 通用取色入口，复用主题色那套调色板对话框。
+Future<void> _showColorPickerDialog(
+  BuildContext context, {
+  required Color initial,
+  required ValueChanged<Color?> onSelected,
+}) async {
+  await showDialog<void>(
+    context: context,
+    builder: (context) => _ThemeColorPickerDialog(
+      initialColor: initial,
+      onSelected: onSelected,
+    ),
+  );
+}
+
+/// 「颜色」设置条：右侧一块色卡，点击取色，长按恢复跟随主题。
+class _ColorSettingTile extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final Color color;
+  final VoidCallback onPick;
+
+  /// 为 null 表示当前就是「跟随主题」，没有可恢复的东西。
+  final VoidCallback? onReset;
+
+  const _ColorSettingTile({
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.onPick,
+    this.onReset,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onLongPress: onReset,
+      child: AppSettingTile(
+        title: title,
+        subtitle: subtitle,
+        onTap: onPick,
+        trailing: Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            border: Border.all(color: scheme.outlineVariant),
+          ),
+        ),
       ),
     );
   }

@@ -32,6 +32,28 @@ enum AppContentFrameStyle {
       );
 }
 
+
+/// 描边实际用色：优先自定义颜色，否则跟随主题的 outlineVariant；
+/// 两种情况都再乘上用户设定的不透明度。
+Color _frameBorderColor(BuildContext context, {double scale = 1.0}) {
+  final scheme = Theme.of(context).colorScheme;
+  final custom = AppBackgroundSettings.contentFrameColor.value;
+  final opacity = (AppBackgroundSettings.contentFrameOpacity.value * scale)
+      .clamp(0.0, 1.0);
+  return (custom ?? scheme.outlineVariant).withValues(alpha: opacity);
+}
+
+/// 颜色/透明度这两个设置也要触发重建，否则改完要重进页面才生效。
+Widget _watchFrameSettings(BuildContext context, WidgetBuilder builder) {
+  return ListenableBuilder(
+    listenable: Listenable.merge([
+      AppBackgroundSettings.contentFrameColor,
+      AppBackgroundSettings.contentFrameOpacity,
+    ]),
+    builder: (context, _) => builder(context),
+  );
+}
+
 /// 列表区块的外框。仅在「整块描边」样式下生效。
 ///
 /// 其余样式**原样透传**子组件，不额外包一层 widget —— 没开这个效果的用户
@@ -52,17 +74,13 @@ class AppContentFrame extends StatelessWidget {
       valueListenable: AppBackgroundSettings.contentFrameStyle,
       builder: (context, style, child) {
         if (style != AppContentFrameStyle.outlined) return child!;
-        final theme = Theme.of(context);
-        final scheme = theme.colorScheme;
-        final isDark = theme.brightness == Brightness.dark;
+        return _watchFrameSettings(context, (context) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
         return Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(borderRadius),
             border: Border.all(
-              // 跟主题走，换强调色 / 切深浅色时描边不会突兀。
-              color: scheme.outlineVariant.withValues(
-                alpha: isDark ? 0.5 : 0.8,
-              ),
+              color: _frameBorderColor(context),
               width: 1.2,
             ),
             boxShadow: [
@@ -79,6 +97,7 @@ class AppContentFrame extends StatelessWidget {
             child: child,
           ),
         );
+        });
       },
       child: child,
     );
@@ -104,6 +123,8 @@ class AppContentRow extends StatelessWidget {
     return ValueListenableBuilder<AppContentFrameStyle>(
       valueListenable: AppBackgroundSettings.contentFrameStyle,
       builder: (context, style, child) {
+        if (style == AppContentFrameStyle.none) return child!;
+        return _watchFrameSettings(context, (context) {
         final theme = Theme.of(context);
         final scheme = theme.colorScheme;
         final isDark = theme.brightness == Brightness.dark;
@@ -121,7 +142,8 @@ class AppContentRow extends StatelessWidget {
                   child: Divider(
                     height: 1,
                     thickness: 1,
-                    color: scheme.outlineVariant.withValues(alpha: 0.5),
+                    // 分隔线比外框淡一档，不然一列横线太抢眼。
+                    color: _frameBorderColor(context, scale: 0.6),
                   ),
                 ),
               ],
@@ -136,9 +158,7 @@ class AppContentRow extends StatelessWidget {
                       : Colors.white.withValues(alpha: 0.75),
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
-                    color: scheme.outlineVariant.withValues(
-                      alpha: isDark ? 0.35 : 0.6,
-                    ),
+                    color: _frameBorderColor(context, scale: 0.75),
                     width: 1,
                   ),
                   boxShadow: [
@@ -158,6 +178,7 @@ class AppContentRow extends StatelessWidget {
               ),
             );
         }
+        });
       },
       child: child,
     );

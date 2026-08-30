@@ -16,6 +16,11 @@ class AppBackgroundSettings {
   static const String _prefsPanelBlurEnabled = 'setting_panel_blur_enabled';
   static const String _prefsContentFrame = 'setting_content_frame_enabled';
   static const String _prefsContentFrameStyle = 'setting_content_frame_style';
+  static const String _prefsContentFrameColor = 'setting_content_frame_color';
+  static const String _prefsContentFrameOpacity =
+      'setting_content_frame_opacity';
+  static const String _prefsNavBarColor = 'setting_nav_bar_color';
+  static const String _prefsNavBarOpacity = 'setting_nav_bar_opacity';
 
   static final ValueNotifier<String?> backgroundImagePath = ValueNotifier(null);
   static final ValueNotifier<double> backgroundMaskOpacity = ValueNotifier(
@@ -34,6 +39,18 @@ class AppBackgroundSettings {
   /// 用字符串存，避免枚举顺序变化影响已保存的值。
   static final ValueNotifier<AppContentFrameStyle> contentFrameStyle =
       ValueNotifier(AppContentFrameStyle.none);
+
+  /// 描边自定义颜色。null = 跟随主题（scheme.outlineVariant）。
+  static final ValueNotifier<Color?> contentFrameColor = ValueNotifier(null);
+
+  /// 描边不透明度 0~1。
+  static final ValueNotifier<double> contentFrameOpacity = ValueNotifier(0.8);
+
+  /// 底部导航栏自定义底色。null = 跟随主题。
+  static final ValueNotifier<Color?> navBarColor = ValueNotifier(null);
+
+  /// 底部导航栏底色深浅度（不透明度）0~1。
+  static final ValueNotifier<double> navBarOpacity = ValueNotifier(0.85);
 
   /// 生效的高斯模糊强度：总开关关闭时恒为 0。
   static double get effectivePanelBlur {
@@ -61,6 +78,14 @@ class AppBackgroundSettings {
         : ((prefs.getBool(_prefsContentFrame) ?? false)
               ? AppContentFrameStyle.outlined
               : AppContentFrameStyle.none);
+    final frameColor = prefs.getInt(_prefsContentFrameColor);
+    contentFrameColor.value = frameColor == null ? null : Color(frameColor);
+    contentFrameOpacity.value =
+        (prefs.getDouble(_prefsContentFrameOpacity) ?? 0.8).clamp(0.0, 1.0);
+    final navColor = prefs.getInt(_prefsNavBarColor);
+    navBarColor.value = navColor == null ? null : Color(navColor);
+    navBarOpacity.value =
+        (prefs.getDouble(_prefsNavBarOpacity) ?? 0.85).clamp(0.0, 1.0);
   }
 
   static Future<void> setBackgroundImagePath(String? path) async {
@@ -99,6 +124,41 @@ class AppBackgroundSettings {
     final next = value.clamp(0.0, 32.0);
     await prefs.setDouble(_prefsPanelBlur, next);
     panelBlurStrength.value = next;
+  }
+
+  /// [color] 传 null 表示恢复「跟随主题」。
+  static Future<void> setContentFrameColor(Color? color) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (color == null) {
+      await prefs.remove(_prefsContentFrameColor);
+    } else {
+      await prefs.setInt(_prefsContentFrameColor, color.toARGB32());
+    }
+    contentFrameColor.value = color;
+  }
+
+  static Future<void> setContentFrameOpacity(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = value.clamp(0.0, 1.0);
+    await prefs.setDouble(_prefsContentFrameOpacity, v);
+    contentFrameOpacity.value = v;
+  }
+
+  static Future<void> setNavBarColor(Color? color) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (color == null) {
+      await prefs.remove(_prefsNavBarColor);
+    } else {
+      await prefs.setInt(_prefsNavBarColor, color.toARGB32());
+    }
+    navBarColor.value = color;
+  }
+
+  static Future<void> setNavBarOpacity(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = value.clamp(0.0, 1.0);
+    await prefs.setDouble(_prefsNavBarOpacity, v);
+    navBarOpacity.value = v;
   }
 
   static Future<void> setContentFrameStyle(AppContentFrameStyle style) async {

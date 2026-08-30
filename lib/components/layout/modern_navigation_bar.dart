@@ -153,7 +153,12 @@ class ModernNavigationBar extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     // Follow the same panel blur slider used by cards/setting panels so
     // the bottom bar visually belongs to the same surface family.
-    return ValueListenableBuilder<bool>(
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        AppBackgroundSettings.navBarColor,
+        AppBackgroundSettings.navBarOpacity,
+      ]),
+      builder: (context, _) => ValueListenableBuilder<bool>(
       valueListenable: AppBackgroundSettings.panelBlurEnabled,
       builder: (context, blurEnabled, _) {
         return ValueListenableBuilder<double>(
@@ -163,11 +168,15 @@ class ModernNavigationBar extends StatelessWidget {
                 ? AppBackgroundSettings.panelBlurStrength.value
                 : 0.0;
             final isBlurred = blurStrength > 0;
+        // 底色与深浅度可在「应用外观 → 底部导航栏」自定义；
+        // 未自定义时跟随主题表面色。开了模糊时底色本就接近透明（靠
+        // BackdropFilter 出效果），此时深浅度只按比例微调，不然一调就糊死。
+        final navTint =
+            AppBackgroundSettings.navBarColor.value ?? scheme.surface;
+        final navOpacity = AppBackgroundSettings.navBarOpacity.value;
         final barColor = isBlurred
-            ? (isDark
-                ? Colors.black.withValues(alpha: 0.06)
-                : Colors.white.withValues(alpha: 0.04))
-            : scheme.surface.withValues(alpha: 0.85);
+            ? navTint.withValues(alpha: 0.08 * navOpacity)
+            : navTint.withValues(alpha: navOpacity);
         Widget navBar = Material(
           color: barColor,
           elevation: 0,
@@ -210,6 +219,7 @@ class ModernNavigationBar extends StatelessWidget {
           },
         );
       },
+      ),
     );
   }
 
@@ -232,6 +242,8 @@ class ModernNavigationBar extends StatelessWidget {
     final pillColor = isDark
         ? Colors.white.withValues(alpha: 0.10)
         : Colors.black.withValues(alpha: 0.10);
+    final navTint = AppBackgroundSettings.navBarColor.value;
+    final navOpacity = AppBackgroundSettings.navBarOpacity.value;
     return SafeArea(
       top: false,
       child: GlassTabBar.bottom(
@@ -246,7 +258,12 @@ class ModernNavigationBar extends StatelessWidget {
         onTabSelected: onTap,
         // 显式传入共享表面参数（见 kAppGlassSurfaceSettings）：与全局其它玻璃
         // 统一观感，并防止包升级改动内部默认值导致底栏漂移。
-        settings: kAppGlassSurfaceSettings,
+        // 自定义底色时覆盖玻璃着色（glassColor），未自定义则用全局共享参数。
+        settings: navTint == null
+            ? kAppGlassSurfaceSettings
+            : kAppGlassSurfaceSettings.copyWith(
+                glassColor: navTint.withValues(alpha: navOpacity * 0.5),
+              ),
         // 悬浮：胶囊上下各留 kGlassNavPillTopGap 空隙（槽位 56 + 14×2 = 84），
         // 内容从胶囊四周透出，视觉上像 demo（GlassScaffold 底栏）一样飘浮。
         barHeight: 56,

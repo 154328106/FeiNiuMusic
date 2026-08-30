@@ -601,7 +601,19 @@ class _SongsPageState extends State<SongsPage>
                         controller: _listController,
                         padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
                         itemCount: songs.length + (_isLoadingMore.value ? 1 : 0),
-                        itemExtent: _itemExtent,
+                        // itemExtent 是固定行高（长列表滚动性能的关键）。套框会
+                        // 给每行加上额外高度，不把它算进来行会互相重叠。
+                        itemExtent:
+                            _itemExtent +
+                            switch (AppBackgroundSettings
+                                .contentFrameStyle
+                                .value) {
+                              // 行间距 8 + 上下描边各 1
+                              AppContentFrameStyle.cards => 10.0,
+                              // 分隔线 1
+                              AppContentFrameStyle.outlined => 1.0,
+                              AppContentFrameStyle.none => 0.0,
+                            },
                         addAutomaticKeepAlives: true,
                         scrollCacheExtent: ScrollCacheExtent.pixels(300),
                         itemBuilder: (context, index) {
@@ -625,18 +637,21 @@ class _SongsPageState extends State<SongsPage>
                               isCurrent && _player.isPlaying.value;
                           final selected = isSongSelected(song.id);
 
-                          return _SongListTile(
-                            song: song,
-                            isCurrent: isCurrent,
-                            isPlaying: isPlaying,
-                            multiSelect: isMultiSelecting,
-                            selected: selected,
-                            onTap: () => isMultiSelecting
-                                ? toggleSongSelection(song.id)
-                                : _playSong(index),
-                            onLongPress: isMultiSelecting
-                                ? null
-                                : () => _showSongDetail(song),
+                          return AppContentRow(
+                            isLast: index == songs.length - 1,
+                            child: _SongListTile(
+                              song: song,
+                              isCurrent: isCurrent,
+                              isPlaying: isPlaying,
+                              multiSelect: isMultiSelecting,
+                              selected: selected,
+                              onTap: () => isMultiSelecting
+                                  ? toggleSongSelection(song.id)
+                                  : _playSong(index),
+                              onLongPress: isMultiSelecting
+                                  ? null
+                                  : () => _showSongDetail(song),
+                            ),
                           );
                         },
                       ),

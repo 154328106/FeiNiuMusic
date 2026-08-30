@@ -908,7 +908,8 @@ class _HomePageState extends State<HomePage>
               // 1. Hero Banner — 漫游/今日推荐，封面是绝对主角
               if (heroSong != null)
                 // 自动轮播换歌时做交叉淡入淡出，避免大图硬切。
-                AnimatedSwitcher(
+                AppContentFrame(
+                  child: AnimatedSwitcher(
                   duration: const Duration(milliseconds: 420),
                   child: HomeHeroBanner(
                     key: ValueKey(heroSong?.id ?? 'roam-empty'),
@@ -918,11 +919,13 @@ class _HomePageState extends State<HomePage>
                     onRefresh: _refreshRoam,
                   ),
                 ),
+                ),
 
               if (heroSong != null) const SizedBox(height: 16),
 
-              // 1.5 快捷菜单 — 歌曲 / 歌手 / 专辑 / 风格（4×1）
-              HomeShortcutMenu(
+              // 1.5 快捷菜单 — 歌单 / 歌手 / 专辑 / 风格（4×1）
+              AppContentFrame(
+                child: HomeShortcutMenu(
                 items: [
                   HomeShortcutItem(
                     icon: Icons.queue_music_rounded,
@@ -949,6 +952,7 @@ class _HomePageState extends State<HomePage>
                     onTap: _openGenresPage,
                   ),
                 ],
+                ),
               ),
 
               const SizedBox(height: 16),
