@@ -38,6 +38,8 @@ dependencies:
   shared_preferences: ^2.2.2
   dio: ^5.4.0
   crypto: ^3.0.6
+  # 网易云接口加密需要 AES-128-CBC/ECB（RAW RSA 用 Dart 原生 BigInt.modPow）
+  pointycastle: ^3.7.0
   signals: ^6.3.0
   signals_flutter: ^6.3.0
   just_audio: ^0.10.5
