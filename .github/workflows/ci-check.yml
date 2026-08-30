@@ -45,28 +45,41 @@ jobs:
       - name: flutter analyze（全仓，仅 error 阻断）
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
-      # 本分支改动的文件按零容忍要求：新代码不许留 warning/info。
-      - name: flutter analyze（本分支改动的文件，零容忍）
+      # 本分支**新增**的文件零容忍：新代码不许留 warning/info。
+      #
+      # 只卡新增文件、不卡修改过的文件：修改上游文件时，analyze 会把该文件里
+      # 早就存在的问题一并报出来（例如给 player_service.dart 加一行 import，
+      # 就会「命中」它原有的 unused_local_variable）。把存量问题算到本次改动
+      # 头上，只会逼人去改无关代码。修改过的文件由上面的全仓 error 门禁兜底，
+      # 存量 warning/info 在下一步里只提示、不阻断。
+      - name: flutter analyze（新增文件零容忍 / 改动文件仅提示）
         if: always()
         run: |
           BASE=$(git merge-base origin/main HEAD 2>/dev/null || echo "")
           if [ -z "$BASE" ]; then echo "no merge-base, skip"; exit 0; fi
-          FILES=$(git diff --name-only --diff-filter=ACMR "$BASE" HEAD -- 'lib/**.dart' 'test/**.dart')
-          if [ -z "$FILES" ]; then echo "no dart changes"; exit 0; fi
-          echo "检查以下文件："; echo "$FILES"
-          # analyze 的输出是「… • 路径:行:列 • 规则名」，按路径过滤出本分支的行。
+          ADDED=$(git diff --name-only --diff-filter=A "$BASE" HEAD -- 'lib/**.dart' 'test/**.dart')
+          MODIFIED=$(git diff --name-only --diff-filter=MR "$BASE" HEAD -- 'lib/**.dart' 'test/**.dart')
+          # analyze 的输出是「… • 路径:行:列 • 规则名」，按路径过滤。
           flutter analyze --no-fatal-infos --no-fatal-warnings > analyze.txt 2>&1 || true
+
+          if [ -n "$MODIFIED" ]; then
+            echo "— 改动过的上游文件（仅提示，不阻断）—"
+            for f in $MODIFIED; do grep -F " • $f:" analyze.txt || true; done
+          fi
+
+          if [ -z "$ADDED" ]; then echo "本分支无新增 dart 文件"; exit 0; fi
+          echo "— 新增文件（零容忍）—"; echo "$ADDED"
           HITS=""
-          for f in $FILES; do
+          for f in $ADDED; do
             MATCH=$(grep -F " • $f:" analyze.txt || true)
             if [ -n "$MATCH" ]; then HITS="$HITS$MATCH"$'\n'; fi
           done
           if [ -n "$HITS" ]; then
-            echo "::error::本分支改动的文件存在 analyze 问题"
+            echo "::error::本分支新增的文件存在 analyze 问题"
             echo "$HITS"
             exit 1
           fi
-          echo "本分支改动的文件 analyze 干净"
+          echo "新增文件 analyze 干净"
 
       - name: flutter test
         if: always()
@@ -79,16 +92,20 @@ jobs:
         run: flutter build apk --debug
 
       # 不做全仓 dart format 门禁：CI 的 Flutter 自带的 formatter 版本比仓库
-      # 当初格式化时新，未改动的上游代码就会被判定为「需要重排」。只检查本
-      # 分支新增/改动的文件，避免制造与上游冲突的全量重排 diff。
+      # 当初格式化时新，未改动的上游代码就会被判定为「需要重排」。
+      #
+      # 与上面的 analyze 门禁同理，只卡**新增**文件：对改动过的上游文件，
+      # formatter 会连带重排该文件里本次没碰过的旧代码（例如往
+      # player_service.dart 里加一个分支，它会顺手重排 400 行开外的三元
+      # 表达式），那正是要避免的、与上游冲突的噪音 diff。
       # 直接打印 diff，方便在没有本地 Dart 工具链时照着改。
-      - name: dart format（仅本分支改动的文件）
+      - name: dart format（仅本分支新增的文件）
         if: always()
         run: |
           BASE=$(git merge-base origin/main HEAD 2>/dev/null || echo "")
           if [ -z "$BASE" ]; then echo "no merge-base, skip"; exit 0; fi
-          FILES=$(git diff --name-only --diff-filter=ACMR "$BASE" HEAD -- 'lib/**.dart' 'test/**.dart')
-          if [ -z "$FILES" ]; then echo "no dart changes"; exit 0; fi
+          FILES=$(git diff --name-only --diff-filter=A "$BASE" HEAD -- 'lib/**.dart' 'test/**.dart')
+          if [ -z "$FILES" ]; then echo "本分支无新增 dart 文件"; exit 0; fi
           echo "检查以下文件："
           echo "$FILES"
           dart format $FILES

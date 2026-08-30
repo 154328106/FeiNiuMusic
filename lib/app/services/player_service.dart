@@ -973,10 +973,7 @@ class PlayerService with WidgetsBindingObserver {
       if (url == null) {
         throw StateError('网易云歌曲无可用播放地址：${song.title}');
       }
-      return mk.Media(
-        url,
-        httpHeaders: NetEasePlaybackService.streamHeaders(),
-      );
+      return mk.Media(url, httpHeaders: NetEasePlaybackService.streamHeaders());
     }
 
     // CUE 整轨曲目：跳过本地缓存（命中会拿到整轨文件，缺失会让后台把整轨
