@@ -1,0 +1,49 @@
+name: ci-check
+
+# 轻量验证回路：不需要签名密钥，任何分支推送都能跑。
+# build-release.yml 需要 ANDROID_KEYSTORE_BASE64 才能出包，
+# 日常改代码用这个 workflow 验证编译/静态检查/单测即可。
+on:
+  push:
+    branches-ignore:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      - name: dart format --set-exit-if-changed
+        run: dart format --output=none --set-exit-if-changed lib test
+
+      - name: flutter analyze
+        run: flutter analyze
+
+      - name: flutter test
+        run: flutter test
+
+      # 未签名 debug APK：只验证 Android 侧（Kotlin/Gradle/AGP）能编过，
+      # 不上传产物，避免占用 artifact 配额。
+      - name: flutter build apk --debug
+        run: flutter build apk --debug
