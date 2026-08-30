@@ -1199,7 +1199,9 @@ class _PlayerArtwork extends StatelessWidget {
                       width: size,
                       height: size,
                       child: _ArtworkShadowContainer(
-                        border: border,
+                        // 必须用封面**实际**的圆角：圆形封面时是 size/2。
+                        // 用 spec 的固定 12 会在圆形封面外面套一个圆角方框。
+                        border: BorderRadius.circular(borderRadius),
                         child: _RotatingArtwork(
                           song: song,
                           buildArtwork: (context, onCoverAvailable) =>
@@ -1255,7 +1257,9 @@ class _ArtworkSpec {
         return _ArtworkSpec(
           borderRadius: 12,
           horizontalInset: 32,
-          maxSize: isTv ? 560 : (isTablet ? 320 : double.infinity),
+          // 手机端封面上限 300：原本是 double.infinity（占满宽度减两侧 32），
+          // 圆形封面在此宽度下显得过大、把下方控制区压得很紧。
+          maxSize: isTv ? 560 : (isTablet ? 320 : 300),
         );
     }
   }

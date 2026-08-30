@@ -39,29 +39,17 @@ class ProfilePage extends StatelessWidget {
               // 当前账号卡片（点击进入账号切换页）
               const ProfileAccountCard(),
               const SizedBox(height: 20),
+              // 「资源库」（专辑/歌手/风格）与「最近播放」已从这里移除：
+              // 首页的快捷入口和功能卡片里都有，放两份只是重复。
               AppSettingSection(
-                title: '资源库',
+                title: '账号',
                 children: [
                   _navTile(
                     context,
-                    icon: Icons.album_rounded,
-                    title: '专辑',
-                    subtitle: '按专辑浏览歌曲',
-                    route: AppRoutes.albums,
-                  ),
-                  _navTile(
-                    context,
-                    icon: Icons.people_rounded,
-                    title: '歌手',
-                    subtitle: '按歌手浏览歌曲',
-                    route: AppRoutes.artists,
-                  ),
-                  _navTile(
-                    context,
-                    icon: Icons.music_video_rounded,
-                    title: '风格',
-                    subtitle: '按曲风分类浏览',
-                    route: AppRoutes.genres,
+                    icon: Icons.manage_accounts_rounded,
+                    title: '账号管理',
+                    subtitle: '切换、重命名或添加已保存的账号',
+                    route: AppRoutes.accounts,
                   ),
                 ],
               ),
@@ -69,13 +57,6 @@ class ProfilePage extends StatelessWidget {
               AppSettingSection(
                 title: '更多',
                 children: [
-                  _navTile(
-                    context,
-                    icon: Icons.history_rounded,
-                    title: '最近播放',
-                    subtitle: '播放历史',
-                    route: AppRoutes.recent,
-                  ),
                   _navTile(
                     context,
                     icon: Icons.bar_chart_rounded,

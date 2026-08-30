@@ -488,6 +488,11 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _extendAndPlay(SongEntity first) async {
+    // 漫游是独立来源：它绕开 _playListWithFullFetch 直接 playQueue，不清掉
+    // 上一次卡片来源的话，「收藏 / 最近播放」卡片会继续显示暂停——看起来
+    // 就像大图和收藏卡是联动的。
+    _activePlaySource = null;
+    _activeQueueIds = const <String>{};
     try {
       // 直接用 banner 当前漫游链：_loadRoam 已用 getRoamStart 拿到
       // current（显示歌）+ next，并存于 _roamQueue / _roamId。用这套队列
@@ -788,10 +793,10 @@ class _HomePageState extends State<HomePage>
               onRefreshRoam: _refreshRoam,
               shortcutItems: [
                 HomeShortcutItem(
-                  icon: Icons.music_note_rounded,
-                  label: '歌曲',
+                  icon: Icons.queue_music_rounded,
+                  label: '歌单',
                   accent: const Color(0xFF3B82F6),
-                  onTap: _openSongsPage,
+                  onTap: _openPlaylistsPage,
                 ),
                 HomeShortcutItem(
                   icon: Icons.people_rounded,
@@ -872,10 +877,10 @@ class _HomePageState extends State<HomePage>
               HomeShortcutMenu(
                 items: [
                   HomeShortcutItem(
-                    icon: Icons.music_note_rounded,
-                    label: '歌曲',
+                    icon: Icons.queue_music_rounded,
+                    label: '歌单',
                     accent: const Color(0xFF3B82F6),
-                    onTap: _openSongsPage,
+                    onTap: _openPlaylistsPage,
                   ),
                   HomeShortcutItem(
                     icon: Icons.people_rounded,

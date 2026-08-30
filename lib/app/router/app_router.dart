@@ -157,8 +157,8 @@ class _PrimaryNavigationShellState extends State<_PrimaryNavigationShell> {
   Widget _buildPage(int index) {
     return switch (index) {
       0 => const HomePage(),
-      1 => const PlaylistsPage(),
-      2 => const SongsPage(),
+      1 => const SongsPage(),
+      2 => const SearchPage(),
       3 => const ProfilePage(),
       _ => const SizedBox.shrink(),
     };

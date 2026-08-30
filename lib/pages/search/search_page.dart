@@ -138,11 +138,17 @@ class _SearchPageState extends State<SearchPage> {
     final isDark = theme.brightness == Brightness.dark;
     const topBarHeight = 48.0;
 
-    return AppPageScaffold(
+    return AppNavigationModeBuilder(
+      builder: (context, useBottomNavigation) => AppPageScaffold(
       extendBodyBehindAppBar: true,
       resizeToAvoidBottomInset: false,
       keepBottomOverlayFixed: true,
       ignoreKeyboardInsets: true,
+      // 搜索已是底部导航目的地之一（首页-歌曲-搜索-我的）。
+      bottomNavIndex: useBottomNavigation ? 2 : null,
+      onBottomNavTap: useBottomNavigation
+          ? (index) => navigateToPrimaryDestination(context, index)
+          : null,
       // 搜索页为沉浸式搜索体验，屏蔽底部迷你播放器（含平板/TV/Windows 外壳）。
       showMiniPlayer: false,
       appBar: AppTopBar(
@@ -225,6 +231,7 @@ class _SearchPageState extends State<SearchPage> {
             Expanded(child: _buildResults(theme, isDark)),
           ],
         ),
+      ),
       ),
     );
   }

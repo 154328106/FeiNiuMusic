@@ -516,7 +516,7 @@ class _SongsPageState extends State<SongsPage>
               : SideMenu(
                   onCloseDrawer: () => _scaffoldKey.currentState?.closeDrawer(),
                 ),
-          bottomNavIndex: useBottomNavigation ? 2 : null,
+          bottomNavIndex: useBottomNavigation ? 1 : null,
           onBottomNavTap: useBottomNavigation
               ? (index) => navigateToPrimaryDestination(context, index)
               : null,

@@ -11,10 +11,12 @@ import '../common/glass_gate.dart';
 
 // 底部导航目的地。「收藏」不在其中：首页已有收藏入口，底部再放一个重复，
 // 收藏页改为从首页压栈进入（自带返回键）。
+// 底部导航目的地：首页 - 歌曲 - 搜索 - 我的。
+// 「收藏」「歌单」不在其中：首页已有它们的入口，底部再放一份重复。
 const _primaryNavigationRoutes = <String>[
   AppRoutes.home,
-  AppRoutes.playlists,
   AppRoutes.songs,
+  AppRoutes.search,
   AppRoutes.profile,
 ];
 
@@ -113,19 +115,19 @@ class ModernNavigationBar extends StatelessWidget {
   /// 底部导航点击回调（导航到对应 tab）。
   final ValueChanged<int> onTap;
 
-  static const List<String> _labels = ['首页', '歌单', '歌曲', '我的'];
+  static const List<String> _labels = ['首页', '歌曲', '搜索', '我的'];
   static const List<IconData> _icons = [
     Icons.home_rounded,
-    Icons.queue_music_rounded,
     Icons.music_note_rounded,
+    Icons.search_rounded,
     Icons.person_rounded,
   ];
 
   /// 液体玻璃分支：SF Symbols 字形（包内置 demo 同款 CupertinoIcons 实心图标）。
   static const List<IconData> _glassIcons = [
     CupertinoIcons.house_fill,
-    CupertinoIcons.square_stack_fill,
     CupertinoIcons.music_note_list,
+    CupertinoIcons.search,
     CupertinoIcons.person_fill,
   ];
 
