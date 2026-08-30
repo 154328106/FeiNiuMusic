@@ -124,11 +124,7 @@ class _NetEaseSearchPageState extends State<NetEaseSearchPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.cloud_off,
-                size: 48,
-                color: theme.disabledColor,
-              ),
+              Icon(Icons.cloud_off, size: 48, color: theme.disabledColor),
               const SizedBox(height: 12),
               Text(_error!, textAlign: TextAlign.center),
               const SizedBox(height: 12),
@@ -161,21 +157,34 @@ class _NetEaseSearchPageState extends State<NetEaseSearchPage> {
                     width: 48,
                     height: 48,
                     fit: BoxFit.cover,
-                    placeholder: (_, _) =>
-                        Container(width: 48, height: 48, color: theme.cardColor),
-                    errorWidget: (_, _, _) =>
-                        Container(width: 48, height: 48, color: theme.cardColor),
+                    placeholder: (_, _) => Container(
+                      width: 48,
+                      height: 48,
+                      color: theme.cardColor,
+                    ),
+                    errorWidget: (_, _, _) => Container(
+                      width: 48,
+                      height: 48,
+                      color: theme.cardColor,
+                    ),
                   ),
           ),
           title: Row(
             children: [
               Expanded(
-                child: Text(song.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                child: Text(
+                  song.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
               if (song.isVip)
                 Container(
                   margin: const EdgeInsets.only(left: 6),
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 1,
+                  ),
                   decoration: BoxDecoration(
                     border: Border.all(color: theme.colorScheme.primary),
                     borderRadius: BorderRadius.circular(3),
