@@ -99,6 +99,14 @@ class _HomePageState extends State<HomePage>
   final GlobalKey<AppPageScaffoldState> _scaffoldKey =
       GlobalKey<AppPageScaffoldState>();
 
+  /// 最近一次由首页卡片发起播放的来源，以及当时送进播放器的队列 id 集合。
+  ///
+  /// 卡片上的播放按钮要显示暂停图标时，光看播放器是否在播是不够的——用户
+  /// 完全可能从歌曲页或搜索页换了歌，那时首页卡片仍显示暂停就是错的。
+  /// 记下队列后即可判断「现在放的这首是不是这张卡放出去的」。
+  _HomePlaySource? _activePlaySource;
+  Set<String> _activeQueueIds = const <String>{};
+
   late final _loading = createSignal(true);
   late final _roamSong = createSignal<SongEntity?>(null);
   late final _roamId = createSignal<String?>(null);
@@ -595,6 +603,52 @@ class _HomePageState extends State<HomePage>
   ///
   /// [source] 指定首页数据源：列表只是 10 首预览，播放时按队列上限
   /// 请求完整列表填充队列，而不是只播预览的 10 首。
+  /// 判断某个来源当前是否正在播放。
+  ///
+  /// 不能只看播放器在不在播：用户可能从歌曲页/搜索页换了歌，那时首页卡片
+  /// 再显示暂停就是错的。所以要求「当前在播的歌确实来自本卡片发起的队列」。
+  bool _isSourcePlaying(_HomePlaySource source) {
+    if (_activePlaySource != source) return false;
+    if (!_player.isPlayingSignal.value) return false;
+    final current = _player.currentSongSignal.value;
+    return current != null && _activeQueueIds.contains(current.id);
+  }
+
+  /// 当前在播的是否就是本卡片发起的队列（不论播放还是暂停）。
+  bool _isSourceActive(_HomePlaySource source) {
+    if (_activePlaySource != source) return false;
+    final current = _player.currentSongSignal.value;
+    return current != null && _activeQueueIds.contains(current.id);
+  }
+
+  /// 卡片播放按钮：已经在放本卡片的队列就切换播放/暂停（不重建队列，
+  /// 否则会从头再播一遍），否则重新发起播放。
+  void _togglePlayFromList(List<SongEntity> songs, _HomePlaySource source) {
+    if (_isSourceActive(source)) {
+      unawaited(_player.togglePlayPause());
+      return;
+    }
+    _playFromList(songs, source);
+  }
+
+  /// hero 大图按钮：正在放这首 hero 歌就切换播放/暂停，否则起播漫游。
+  void _togglePlayRoam() {
+    final hero = _heroSong;
+    if (hero != null && _player.currentSongSignal.value?.id == hero.id) {
+      unawaited(_player.togglePlayPause());
+      return;
+    }
+    _playRoam();
+  }
+
+  /// hero 大图当前是否正在播放。
+  bool get _heroIsPlaying {
+    final hero = _heroSong;
+    if (hero == null) return false;
+    if (!_player.isPlayingSignal.value) return false;
+    return _player.currentSongSignal.value?.id == hero.id;
+  }
+
   void _playFromList(List<SongEntity> songs, _HomePlaySource source) {
     if (songs.isEmpty) {
       _playRoam();
@@ -635,6 +689,9 @@ class _HomePageState extends State<HomePage>
       }
     }
     if (!mounted) return;
+    // 记下这次播放的来源与队列，供卡片按钮判断播放/暂停图标。
+    _activePlaySource = source;
+    _activeQueueIds = {for (final s in queue) s.id};
     if (song != null) {
       final idx = queue.indexWhere((s) => s.id == song.id);
       _player.playQueue(queue, idx >= 0 ? idx : 0);
@@ -726,7 +783,8 @@ class _HomePageState extends State<HomePage>
             onRefresh: () => _loadAll(forceRefresh: true),
             child: HomeLargeLayout(
               heroSong: heroSong,
-              onPlayRoam: _playRoam,
+              onPlayRoam: _togglePlayRoam,
+              heroIsPlaying: _heroIsPlaying,
               onRefreshRoam: _refreshRoam,
               shortcutItems: [
                 HomeShortcutItem(
@@ -803,7 +861,8 @@ class _HomePageState extends State<HomePage>
               if (heroSong != null)
                 HomeHeroBanner(
                   song: heroSong,
-                  onPlay: _playRoam,
+                  onPlay: _togglePlayRoam,
+                  isPlaying: _heroIsPlaying,
                   onRefresh: _refreshRoam,
                 ),
 
@@ -850,7 +909,8 @@ class _HomePageState extends State<HomePage>
                     subtitle: '接着上次听',
                     accent: const Color(0xFF14B8A6),
                     onTap: _openRecentPage,
-                    onPlay: () => _playFromList(
+                    isPlaying: _isSourcePlaying(_HomePlaySource.recentHistory),
+                    onPlay: () => _togglePlayFromList(
                       _recentSongs.value,
                       _HomePlaySource.recentHistory,
                     ),
@@ -861,7 +921,8 @@ class _HomePageState extends State<HomePage>
                     subtitle: '我的最爱',
                     accent: const Color(0xFFEC4899),
                     onTap: _openFavoritePage,
-                    onPlay: () => _playFromList(
+                    isPlaying: _isSourcePlaying(_HomePlaySource.favorites),
+                    onPlay: () => _togglePlayFromList(
                       _favoriteSongs.value,
                       _HomePlaySource.favorites,
                     ),

@@ -15,6 +15,9 @@ class HomeHeroBanner extends StatelessWidget {
   final VoidCallback onPlay;
   final String label;
 
+  /// 这首 hero 歌当前是否正在播放。true 时大按钮显示暂停图标。
+  final bool isPlaying;
+
   /// 换一首按钮回调。为 null 时不显示刷新按钮。
   final VoidCallback? onRefresh;
 
@@ -31,6 +34,7 @@ class HomeHeroBanner extends StatelessWidget {
     super.key,
     required this.song,
     required this.onPlay,
+    this.isPlaying = false,
     this.label = '漫游 · 随心听',
     this.onRefresh,
     this.aspectRatio,
@@ -162,6 +166,7 @@ class HomeHeroBanner extends StatelessWidget {
                 // 大播放按钮
                 _TvPlayButton(
                   onPlay: onPlay,
+                  isPlaying: isPlaying,
                   primary: theme.colorScheme.primary,
                 ),
               ],
@@ -212,9 +217,14 @@ class HomeHeroBanner extends StatelessWidget {
 /// 播放按钮：Material 自身已可聚焦（主题 focusColor 染出焦点）。
 class _TvPlayButton extends StatelessWidget {
   final VoidCallback onPlay;
+  final bool isPlaying;
   final Color primary;
 
-  const _TvPlayButton({required this.onPlay, required this.primary});
+  const _TvPlayButton({
+    required this.onPlay,
+    required this.isPlaying,
+    required this.primary,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -237,7 +247,11 @@ class _TvPlayButton extends StatelessWidget {
         child: InkWell(
           customBorder: const CircleBorder(),
           onTap: onPlay,
-          child: Icon(Icons.play_arrow_rounded, color: primary, size: 36),
+          child: Icon(
+            isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            color: primary,
+            size: 36,
+          ),
         ),
       ),
     );

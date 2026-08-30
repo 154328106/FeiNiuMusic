@@ -24,6 +24,9 @@ import 'home_shortcut_menu.dart';
 class HomeLargeLayout extends StatelessWidget {
   final SongEntity? heroSong;
   final VoidCallback onPlayRoam;
+
+  /// hero 歌当前是否正在播放（大按钮显示暂停图标）。
+  final bool heroIsPlaying;
   final VoidCallback onRefreshRoam;
   final List<HomeShortcutItem> shortcutItems;
   final List<SongEntity> recentSongs;
@@ -49,6 +52,7 @@ class HomeLargeLayout extends StatelessWidget {
     super.key,
     this.heroSong,
     required this.onPlayRoam,
+    this.heroIsPlaying = false,
     required this.onRefreshRoam,
     required this.shortcutItems,
     required this.recentSongs,
@@ -89,6 +93,7 @@ class HomeLargeLayout extends StatelessWidget {
                   child: HomeHeroBanner(
                     song: heroSong,
                     onPlay: onPlayRoam,
+                    isPlaying: heroIsPlaying,
                     onRefresh: onRefreshRoam,
                     // 用固定高度让 Banner 与四宫格等高（由 IntrinsicHeight 定高）。
                     height: 200,

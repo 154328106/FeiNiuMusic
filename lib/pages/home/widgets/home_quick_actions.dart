@@ -12,6 +12,10 @@ class HomeQuickAction {
   /// 卡片上的「直接播放」按钮回调。为 null 时不显示按钮。
   final VoidCallback? onPlay;
 
+  /// 这张卡发起的队列当前是否正在播放。true 时按钮显示暂停图标。
+  /// 由调用方判定（不能只看播放器在不在播——用户可能在别处换了歌）。
+  final bool isPlaying;
+
   /// 卡片强调色：渐变背景 + 图标 + 播放按钮的主色调。
   /// 不同入口用不同色相，避免千篇一律。
   final Color accent;
@@ -22,6 +26,7 @@ class HomeQuickAction {
     required this.subtitle,
     this.onTap,
     this.onPlay,
+    this.isPlaying = false,
     this.accent = const Color(0xFF3B82F6),
   });
 }
@@ -152,7 +157,9 @@ class _QuickActionCard extends StatelessWidget {
                           customBorder: const CircleBorder(),
                           onTap: onPlay,
                           child: Icon(
-                            Icons.play_arrow_rounded,
+                            action.isPlaying
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
                             size: isTv ? 28 : 24,
                             color: accent,
                           ),
