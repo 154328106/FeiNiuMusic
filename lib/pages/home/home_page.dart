@@ -107,6 +107,13 @@ class _HomePageState extends State<HomePage>
   _HomePlaySource? _activePlaySource;
   Set<String> _activeQueueIds = const <String>{};
 
+  /// 漫游大图自动轮播的定时器。
+  Timer? _roamAutoTimer;
+  bool _roamAutoBusy = false;
+
+  /// 轮播间隔。每一跳都是一次 roam-next 网络请求，太密既费流量也没意义。
+  static const Duration _roamAutoInterval = Duration(seconds: 12);
+
   late final _loading = createSignal(true);
   late final _roamSong = createSignal<SongEntity?>(null);
   late final _roamId = createSignal<String?>(null);
@@ -123,6 +130,33 @@ class _HomePageState extends State<HomePage>
     super.initState();
     _loadAll();
     _maybeShowTvEdgeHint();
+    _roamAutoTimer = Timer.periodic(_roamAutoInterval, (_) => _autoRoamTick());
+  }
+
+  @override
+  void dispose() {
+    _roamAutoTimer?.cancel();
+    super.dispose();
+  }
+
+  /// 漫游大图自动换一首。
+  ///
+  /// 几种情况要跳过，否则纯属白跑网络请求、甚至干扰用户：
+  /// - 首页不在前台（切到别的 tab、或播放页盖在上面）；
+  /// - 正在播这首漫游歌 —— 换掉的话大图按钮会从「暂停」跳回「播放」，
+  ///   等于在用户眼皮底下把他正在听的那首换走了；
+  /// - 上一跳还没回来。
+  void _autoRoamTick() {
+    if (!mounted || _roamAutoBusy) return;
+    if (primaryNavigationShellActive && primaryNavigationIndex.value != 0) {
+      return;
+    }
+    if (AppLayoutSettings.playerRouteActive.value) return;
+    if (_heroIsPlaying) return;
+    _roamAutoBusy = true;
+    unawaited(
+      _refreshRoam(silent: true).whenComplete(() => _roamAutoBusy = false),
+    );
   }
 
   /// TV 首次启动：展示「按右键打开播放页」提示（只一次，会话级别持久化）。
@@ -332,11 +366,15 @@ class _HomePageState extends State<HomePage>
   /// 不触碰正在播放的队列——历史问题：播放中刷新把新歌 insertNext 进播放
   /// 队列会重建当前 run，打断正在播放的音乐。需要播放新歌时由用户点 Banner
   /// 触发 [_extendAndPlay]（以当前显示歌为队首重开队列）。
-  Future<void> _refreshRoam() async {
+  Future<void> _refreshRoam({bool silent = false}) async {
     final currentRoamId = _roamId.value;
     try {
       final deviceId = await AuthService.instance.ensureDeviceId();
-      final song = await _fetchNextRoamSong(deviceId, currentRoamId);
+      final song = await _fetchNextRoamSong(
+        deviceId,
+        currentRoamId,
+        silent: silent,
+      );
       if (song == null || !mounted) return;
       _roamSong.value = song;
       // 无论是否正在播放，_roamQueue 都以「当前显示的漫游歌」为队首：
@@ -353,8 +391,11 @@ class _HomePageState extends State<HomePage>
   /// 无 roamId 时用 roam-start 取起始曲（fallback），否则 roam-next。
   Future<SongEntity?> _fetchNextRoamSong(
     String deviceId,
-    String? currentRoamId,
-  ) async {
+    String? currentRoamId, {
+    /// 自动轮播触发时为 true：失败只记日志，不弹 toast（每 12 秒弹一次
+    /// 「获取漫游歌曲失败」会把界面刷爆）。
+    bool silent = false,
+  }) async {
     try {
       if (currentRoamId == null || currentRoamId.isEmpty) {
         final start = await _api.getRoamStart(deviceId);
@@ -369,7 +410,9 @@ class _HomePageState extends State<HomePage>
       return _trackService.trackToSongEntity(next.next!.track.toJson());
     } catch (e) {
       debugPrint('[HomePage] fetch next roam error: $e');
-      AppToast.showGlobal('获取漫游歌曲失败', type: ToastType.error);
+      if (!silent) {
+        AppToast.showGlobal('获取漫游歌曲失败', type: ToastType.error);
+      }
       return null;
     }
   }
@@ -864,11 +907,16 @@ class _HomePageState extends State<HomePage>
             children: [
               // 1. Hero Banner — 漫游/今日推荐，封面是绝对主角
               if (heroSong != null)
-                HomeHeroBanner(
-                  song: heroSong,
-                  onPlay: _togglePlayRoam,
-                  isPlaying: _heroIsPlaying,
-                  onRefresh: _refreshRoam,
+                // 自动轮播换歌时做交叉淡入淡出，避免大图硬切。
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 420),
+                  child: HomeHeroBanner(
+                    key: ValueKey(heroSong?.id ?? 'roam-empty'),
+                    song: heroSong,
+                    onPlay: _togglePlayRoam,
+                    isPlaying: _heroIsPlaying,
+                    onRefresh: _refreshRoam,
+                  ),
                 ),
 
               if (heroSong != null) const SizedBox(height: 16),
