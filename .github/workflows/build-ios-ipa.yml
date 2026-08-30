@@ -5,7 +5,16 @@ name: build-ios-ipa
 # 只用 workflow_dispatch 手动触发：macOS runner 的分钟数按 10 倍计费，
 # 不适合每次 push 都跑。日常改 Dart 代码用 ci-check（Linux）验证即可，
 # 需要装到手机上试的时候再手动跑这个。
+#
+# 两种触发方式：
+#   - 推 `ios-build-*` tag：从任意分支触发。GitHub 要求 workflow_dispatch 的
+#     文件必须已经在**默认分支**上才能手动触发，本 workflow 还在特性分支上，
+#     所以先用 tag 触发；合进 main 后 workflow_dispatch 才可用。
+#   - workflow_dispatch：合进 main 之后用。
 on:
+  push:
+    tags:
+      - "ios-build-*"
   workflow_dispatch:
     inputs:
       ref:
