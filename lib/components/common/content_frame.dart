@@ -60,7 +60,9 @@ class AppContentFrame extends StatelessWidget {
             borderRadius: BorderRadius.circular(borderRadius),
             border: Border.all(
               // 跟主题走，换强调色 / 切深浅色时描边不会突兀。
-              color: scheme.outlineVariant.withValues(alpha: isDark ? 0.5 : 0.8),
+              color: scheme.outlineVariant.withValues(
+                alpha: isDark ? 0.5 : 0.8,
+              ),
               width: 1.2,
             ),
             boxShadow: [

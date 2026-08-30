@@ -26,11 +26,13 @@ void main() {
   }
 
   double bannerWidth(WidgetTester tester) {
+    // 手机端紧凑卡片圆角 20，大屏全出血大图 24 / TV 28。三种都要认，
+    // 否则换了手机端样式后这里会「找不到 Banner」而不是「宽度不对」。
+    const radii = [20.0, 24.0, 28.0];
     final clip = find.byWidgetPredicate(
       (w) =>
           w is ClipRRect &&
-          (w.borderRadius == BorderRadius.circular(24.0) ||
-              w.borderRadius == BorderRadius.circular(28.0)),
+          radii.any((r) => w.borderRadius == BorderRadius.circular(r)),
     );
     return tester.getSize(clip.first).width;
   }
@@ -41,7 +43,7 @@ void main() {
     addTearDown(tester.view.reset);
     await tester.pumpWidget(buildBanner());
     await tester.pump();
-    // 手机宽 390，Banner 占满。
+    // 手机宽 390，Banner 占满。手机端现在是紧凑横向卡片，但仍应通栏全宽。
     expect(bannerWidth(tester), closeTo(390, 1));
   });
 
