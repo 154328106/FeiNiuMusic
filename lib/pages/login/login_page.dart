@@ -623,7 +623,19 @@ class _LoginPageState extends State<LoginPage> {
 
     // TV 模式：登录页是门控根页面，返回键需「按两次才退出」，与主界面一致。
     // 手机端不经此拦截，行为不变。
+    // 「添加新账号 / 编辑账号」是从账号页压栈进来的子页面，必须给返回入口：
+    // iOS 没有系统返回键，之前这页完全没有 AppBar，进来就出不去。
+    // 门控根登录页（未登录时的首屏）不加，它没有可返回的上一页。
+    final bool isSubPage = widget.isAddMode || widget.editAccount != null;
     final Widget page = Scaffold(
+      appBar: isSubPage
+          ? AppBar(
+              title: Text(widget.editAccount != null ? '编辑账号' : '添加新账号'),
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+            )
+          : null,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(

@@ -87,7 +87,7 @@ class ProfilePage extends StatelessWidget {
               ),
             ],
           ),
-          bottomNavIndex: useBottomNavigation ? 4 : null,
+          bottomNavIndex: useBottomNavigation ? 3 : null,
           onBottomNavTap: useBottomNavigation
               ? (index) => navigateToPrimaryDestination(context, index)
               : null,

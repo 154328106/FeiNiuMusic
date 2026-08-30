@@ -9,11 +9,12 @@ import '../../app/state/settings_state.dart';
 import '../../app/theme/app_glass_theme.dart';
 import '../common/glass_gate.dart';
 
+// 底部导航目的地。「收藏」不在其中：首页已有收藏入口，底部再放一个重复，
+// 收藏页改为从首页压栈进入（自带返回键）。
 const _primaryNavigationRoutes = <String>[
   AppRoutes.home,
   AppRoutes.playlists,
   AppRoutes.songs,
-  AppRoutes.favorites,
   AppRoutes.profile,
 ];
 
@@ -112,12 +113,11 @@ class ModernNavigationBar extends StatelessWidget {
   /// 底部导航点击回调（导航到对应 tab）。
   final ValueChanged<int> onTap;
 
-  static const List<String> _labels = ['首页', '歌单', '歌曲', '收藏', '我的'];
+  static const List<String> _labels = ['首页', '歌单', '歌曲', '我的'];
   static const List<IconData> _icons = [
     Icons.home_rounded,
     Icons.queue_music_rounded,
     Icons.music_note_rounded,
-    Icons.favorite_rounded,
     Icons.person_rounded,
   ];
 
@@ -126,7 +126,6 @@ class ModernNavigationBar extends StatelessWidget {
     CupertinoIcons.house_fill,
     CupertinoIcons.square_stack_fill,
     CupertinoIcons.music_note_list,
-    CupertinoIcons.heart_fill,
     CupertinoIcons.person_fill,
   ];
 

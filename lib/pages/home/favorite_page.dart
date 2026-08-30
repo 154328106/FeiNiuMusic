@@ -413,27 +413,34 @@ class _FavoritePageState extends State<FavoritePage>
             : SideMenu(
                 onCloseDrawer: () => _scaffoldKey.currentState?.closeDrawer(),
               ),
-        bottomNavIndex: useBottomNavigation ? 3 : null,
+        // 收藏已从底部导航移除，改为从首页压栈进入：与专辑/歌手等二级页
+        // 一致，底部栏保留并高亮「首页」，同时顶栏给返回键。
+        bottomNavIndex: useBottomNavigation ? 0 : null,
         onBottomNavTap: useBottomNavigation
             ? (index) => navigateToPrimaryDestination(context, index)
             : null,
         appBar: AppTopBar(
           title: isMultiSelecting ? '已选 $selectedCount 首' : '收藏',
-          showBackButton: false,
+          // iOS 没有系统返回键，二级页必须自带返回入口。
+          showBackButton: true,
           isRefreshing: _isRefreshing.value && !isMultiSelecting,
           backgroundColor: Colors.transparent,
           elevation: 0,
-          leading: useBottomNavigation || AppLayoutSettings.tvMode.value
-              ? null
-              : (isMultiSelecting
-                  ? IconButton(
-                      icon: const Icon(Icons.close_rounded),
-                      onPressed: exitMultiSelect,
-                    )
-                  : IconButton(
-                      icon: const Icon(Icons.menu_rounded),
-                      onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-                    )),
+          // 多选中一律用「关闭」退出多选（此前底部栏模式下 leading 恒为 null，
+          // 多选时拿不到关闭按钮）。非多选时：抽屉模式给菜单键，其余交给
+          // automaticallyImplyLeading 渲染返回键。
+          leading: isMultiSelecting
+              ? IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: exitMultiSelect,
+                )
+              : (useBottomNavigation || AppLayoutSettings.tvMode.value
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.menu_rounded),
+                        onPressed: () =>
+                            _scaffoldKey.currentState?.openDrawer(),
+                      )),
           actions: isMultiSelecting
               ? [
                   SelectAllButton(

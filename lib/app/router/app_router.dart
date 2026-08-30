@@ -150,13 +150,8 @@ class _PrimaryNavigationShell extends StatefulWidget {
 
 class _PrimaryNavigationShellState extends State<_PrimaryNavigationShell> {
   int _currentIndex = 0;
-  final List<Widget?> _pages = <Widget?>[
-    const HomePage(),
-    null,
-    null,
-    null,
-    null,
-  ];
+  // 长度必须与 _primaryNavigationRoutes / _buildPage 一致（首页 + 3 个懒加载）。
+  final List<Widget?> _pages = <Widget?>[const HomePage(), null, null, null];
   bool _warmupScheduled = false;
 
   Widget _buildPage(int index) {
@@ -164,8 +159,7 @@ class _PrimaryNavigationShellState extends State<_PrimaryNavigationShell> {
       0 => const HomePage(),
       1 => const PlaylistsPage(),
       2 => const SongsPage(),
-      3 => const FavoritePage(),
-      4 => const ProfilePage(),
+      3 => const ProfilePage(),
       _ => const SizedBox.shrink(),
     };
   }

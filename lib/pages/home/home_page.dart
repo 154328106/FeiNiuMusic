@@ -908,31 +908,9 @@ class _HomePageState extends State<HomePage>
                 const SizedBox(height: 16),
               ],
 
-              // 5. 最新专辑 — 横向大封面轮播
-              if (_recentAlbums.value.isNotEmpty) ...[
-                HomeSectionHeader(
-                  title: '最新专辑',
-                  onViewAll: () {
-                    Navigator.of(context).pushNamed(AppRoutes.albums);
-                  },
-                ),
-                HomeCoverCarousel(
-                  coverSize: AppLayoutSettings.tvMode.value ? 168 : 128,
-                  borderRadius: 16,
-                  items: [
-                    for (final a in _recentAlbums.value)
-                      HomeCoverItem(
-                        coverId: a.coverId,
-                        title: a.name,
-                        subtitle: a.trackCount != null
-                            ? '${a.trackCount} 首'
-                            : '',
-                        onTap: () => _openAlbumDetail(a),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-              ],
+              // 「最新专辑」区块已移除：首页上方的功能入口里已有「专辑」，
+              // 底部再放一次重复。_recentAlbums 仍由大屏布局
+              // （HomeLargeLayout）使用，故保留数据加载。
 
               // 空状态
               if (_favoriteSongs.value.isEmpty &&

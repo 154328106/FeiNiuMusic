@@ -40,7 +40,10 @@ class _SettingsPageState extends State<SettingsPage> {
           extendBodyBehindAppBar: true,
           appBar: AppTopBar(
             title: '设置',
-            showBackButton: !useBottomNavigation || AppLayoutSettings.isDesktop,
+            // 设置页永远是压栈进来的，必须给返回入口：iOS 没有系统返回键，
+            // 之前底部栏模式下不显示，进来就出不去了。
+            // automaticallyImplyLeading 在无法 pop 时本就不渲染，恒 true 安全。
+            showBackButton: true,
             backgroundColor: Colors.transparent,
             elevation: 0,
           ),
