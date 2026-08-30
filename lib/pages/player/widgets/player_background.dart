@@ -224,6 +224,22 @@ class PlayerTheme extends StatelessWidget {
               bodyColor: scheme.onSurface,
               displayColor: scheme.onSurface,
             ),
+            // 表面色必须一起翻。只翻 brightness/colorScheme/textTheme 的话，
+            // 这些底色仍留在 App 主题那一侧：播放页调深色后，从这里弹出的
+            // 底部弹窗（歌曲详情/播放列表）会拿到「浅色背景 + 浅色文字」——
+            // 白底白字，整页字都看不见。弹窗走 InheritedTheme.capture 继承
+            // 本主题，所以在这里补齐就够了。
+            scaffoldBackgroundColor: scheme.surface,
+            canvasColor: scheme.surface,
+            cardColor: scheme.surfaceContainerHighest,
+            dividerColor: scheme.outlineVariant,
+            bottomSheetTheme: base.bottomSheetTheme.copyWith(
+              backgroundColor: scheme.surface,
+              modalBackgroundColor: scheme.surface,
+            ),
+            dialogTheme: base.dialogTheme.copyWith(
+              backgroundColor: scheme.surface,
+            ),
           ),
           child: child,
         );

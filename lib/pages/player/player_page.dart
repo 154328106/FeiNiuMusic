@@ -1296,21 +1296,34 @@ class _ArtworkShadowContainer extends StatelessWidget {
           child: child,
         );
       case PlayerCoverStyle.vinyl:
-        return _DiscFrame(
+        return Stack(
+          fit: StackFit.passthrough,
+          children: [
+            _buildVinyl(),
+            // 唱臂叠在碟片之上，且不吃点击。
+            const Positioned.fill(
+              child: IgnorePointer(child: _ToneArm()),
+            ),
+          ],
+        );
+      case PlayerCoverStyle.square:
+      case PlayerCoverStyle.circle:
+        return _plainCover();
+    }
+  }
+
+  Widget _buildVinyl() {
+    return _DiscFrame(
           holeRatio: _kVinylHoleRatio,
           base: const _VinylBasePainter(),
           surface: const _VinylSurfacePainter(),
           // 黑胶的封面是中心贴标，不铺满盘面。用 Transform.scale 缩放而不是
           // 改 ArtworkWidget 的 size：封面本来就按 800px 源图请求，缩小显示
           // 不掉画质，也省得把尺寸一路透传下来。
-          child: Center(
-            child: Transform.scale(scale: _kVinylLabelRatio, child: child),
-          ),
-        );
-      case PlayerCoverStyle.square:
-      case PlayerCoverStyle.circle:
-        return _plainCover();
-    }
+      child: Center(
+        child: Transform.scale(scale: _kVinylLabelRatio, child: child),
+      ),
+    );
   }
 
   /// 方形 / 纯圆形封面的立体感三层（移植自 Beans 播放页）：
@@ -1377,7 +1390,7 @@ const double _kCdHubRatio = 0.27;
 const double _kCdStackRingRatio = 0.30;
 
 const double _kVinylHoleRatio = 0.024;
-const double _kVinylLabelRatio = 0.34;
+const double _kVinylLabelRatio = 0.40;
 
 /// 「外圆减中心孔」的圆环路径。碟片的裁剪与投影都用它，孔是真镂空。
 Path _discRingPath(Size size, double holeRatio) {
@@ -1607,6 +1620,133 @@ class _VinylSurfacePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// 唱臂。播放时落到盘面外圈，暂停时抬起摆到一侧。
+///
+/// 画在碟片的 ClipPath **之外**：唱臂支点在盘面右上角以外，画在裁剪里面会被
+/// 裁掉半截。
+class _ToneArm extends StatelessWidget {
+  const _ToneArm();
+
+  /// 支点位置（相对控件尺寸）：盘面右上角外侧。
+  static const Offset _pivot = Offset(0.90, 0.10);
+
+  /// 支点到唱头的长度（相对控件宽度）。配合支点位置，落针点约在 0.72R 处。
+  static const double _armLength = 0.237;
+
+  /// 落针角 / 抬起角（弧度，自 +X 轴顺时针量）。
+  static const double _downAngle = 1.951;
+  static const double _upAngle = 1.344;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: PlayerService.instance.isPlaying,
+      builder: (context, _) {
+        final playing = PlayerService.instance.isPlaying.value;
+        return TweenAnimationBuilder<double>(
+          tween: Tween<double>(
+            begin: playing ? _downAngle : _upAngle,
+            end: playing ? _downAngle : _upAngle,
+          ),
+          duration: const Duration(milliseconds: 420),
+          curve: Curves.easeInOut,
+          builder: (context, angle, _) => CustomPaint(
+            painter: _ToneArmPainter(
+              angle: angle,
+              pivot: _pivot,
+              armLength: _armLength,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ToneArmPainter extends CustomPainter {
+  final double angle;
+  final Offset pivot;
+  final double armLength;
+
+  const _ToneArmPainter({
+    required this.angle,
+    required this.pivot,
+    required this.armLength,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final s = size.shortestSide;
+    final origin = Offset(size.width * pivot.dx, size.height * pivot.dy);
+    final length = s * armLength;
+
+    canvas.save();
+    canvas.translate(origin.dx, origin.dy);
+
+    // 支点底座（不随臂转，转了看不出来但会多一次重绘开销）。
+    canvas.drawCircle(
+      Offset.zero,
+      s * 0.045,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFE8E8E8), Color(0xFF9A9A9A)],
+        ).createShader(Rect.fromCircle(center: Offset.zero, radius: s * 0.045)),
+    );
+    canvas.drawCircle(
+      Offset.zero,
+      s * 0.018,
+      Paint()..color = const Color(0xFF4A4A4A),
+    );
+
+    canvas.rotate(angle);
+
+    // 臂杆。
+    canvas.drawLine(
+      Offset.zero,
+      Offset(length, 0),
+      Paint()
+        ..color = const Color(0xFFD6D6D6)
+        ..strokeWidth = s * 0.020
+        ..strokeCap = StrokeCap.round,
+    );
+    // 沿臂杆压一条暗边，做出圆柱感。
+    canvas.drawLine(
+      Offset(s * 0.02, s * 0.005),
+      Offset(length - s * 0.01, s * 0.005),
+      Paint()
+        ..color = Colors.black.withValues(alpha: 0.28)
+        ..strokeWidth = s * 0.006
+        ..strokeCap = StrokeCap.round,
+    );
+
+    // 唱头：臂端的小方块，略微前倾。
+    canvas.save();
+    canvas.translate(length, 0);
+    canvas.rotate(0.32);
+    final head = RRect.fromRectAndRadius(
+      Rect.fromCenter(center: Offset.zero, width: s * 0.055, height: s * 0.032),
+      Radius.circular(s * 0.008),
+    );
+    canvas.drawRRect(head, Paint()..color = const Color(0xFF3B3B3B));
+    canvas.drawRRect(
+      head,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..color = Colors.white.withValues(alpha: 0.22),
+    );
+    canvas.restore();
+
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _ToneArmPainter oldDelegate) =>
+      oldDelegate.angle != angle;
 }
 
 class _RotatingArtwork extends StatefulWidget {
