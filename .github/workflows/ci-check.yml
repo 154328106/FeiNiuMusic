@@ -36,18 +36,8 @@ jobs:
       - name: flutter pub get
         run: flutter pub get
 
-      # 不做全仓 dart format 门禁：CI 的 Flutter 自带的 formatter 版本比仓库
-      # 当初格式化时新，未改动的上游代码就会被判定为「需要重排」。只检查本
-      # 分支新增/改动的文件，避免制造与上游冲突的全量重排 diff。
-      - name: dart format（仅本分支改动的文件）
-        run: |
-          BASE=$(git merge-base origin/main HEAD 2>/dev/null || echo "")
-          if [ -z "$BASE" ]; then echo "no merge-base, skip"; exit 0; fi
-          FILES=$(git diff --name-only --diff-filter=ACMR "$BASE" HEAD -- 'lib/**.dart' 'test/**.dart')
-          if [ -z "$FILES" ]; then echo "no dart changes"; exit 0; fi
-          echo "$FILES"
-          dart format --output=none --set-exit-if-changed $FILES
-
+      # analyze / test 是实质门禁，排在最前面：即使后面的格式检查挂了，
+      # 也已经拿到了编译与单测的结论，一轮 CI 拿全部信号。
       - name: flutter analyze
         run: flutter analyze
 
@@ -57,4 +47,26 @@ jobs:
       # 未签名 debug APK：只验证 Android 侧（Kotlin/Gradle/AGP）能编过，
       # 不上传产物，避免占用 artifact 配额。
       - name: flutter build apk --debug
+        if: always()
         run: flutter build apk --debug
+
+      # 不做全仓 dart format 门禁：CI 的 Flutter 自带的 formatter 版本比仓库
+      # 当初格式化时新，未改动的上游代码就会被判定为「需要重排」。只检查本
+      # 分支新增/改动的文件，避免制造与上游冲突的全量重排 diff。
+      # 直接打印 diff，方便在没有本地 Dart 工具链时照着改。
+      - name: dart format（仅本分支改动的文件）
+        if: always()
+        run: |
+          BASE=$(git merge-base origin/main HEAD 2>/dev/null || echo "")
+          if [ -z "$BASE" ]; then echo "no merge-base, skip"; exit 0; fi
+          FILES=$(git diff --name-only --diff-filter=ACMR "$BASE" HEAD -- 'lib/**.dart' 'test/**.dart')
+          if [ -z "$FILES" ]; then echo "no dart changes"; exit 0; fi
+          echo "检查以下文件："
+          echo "$FILES"
+          dart format $FILES
+          if ! git diff --quiet -- $FILES; then
+            echo "::error::以下文件需要重新格式化，diff 如下"
+            git --no-pager diff -- $FILES
+            exit 1
+          fi
+          echo "格式 OK"
