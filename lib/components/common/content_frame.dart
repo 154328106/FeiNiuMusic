@@ -32,7 +32,6 @@ enum AppContentFrameStyle {
       );
 }
 
-
 /// 描边实际用色：优先自定义颜色，否则跟随主题的 outlineVariant；
 /// 两种情况都再乘上用户设定的不透明度。
 Color _frameBorderColor(BuildContext context, {double scale = 1.0}) {
@@ -75,28 +74,25 @@ class AppContentFrame extends StatelessWidget {
       builder: (context, style, child) {
         if (style != AppContentFrameStyle.outlined) return child!;
         return _watchFrameSettings(context, (context) {
-        final isDark = Theme.of(context).brightness == Brightness.dark;
-        return Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(borderRadius),
-            border: Border.all(
-              color: _frameBorderColor(context),
-              width: 1.2,
+          final isDark = Theme.of(context).brightness == Brightness.dark;
+          return Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(borderRadius),
+              border: Border.all(color: _frameBorderColor(context), width: 1.2),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.20 : 0.05),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.20 : 0.05),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          // 描边是圆角的，内容也要跟着裁，否则行的点击高亮会顶出圆角。
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(borderRadius - 1.2),
-            child: child,
-          ),
-        );
+            // 描边是圆角的，内容也要跟着裁，否则行的点击高亮会顶出圆角。
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(borderRadius - 1.2),
+              child: child,
+            ),
+          );
         });
       },
       child: child,
@@ -125,59 +121,59 @@ class AppContentRow extends StatelessWidget {
       builder: (context, style, child) {
         if (style == AppContentFrameStyle.none) return child!;
         return _watchFrameSettings(context, (context) {
-        final theme = Theme.of(context);
-        final scheme = theme.colorScheme;
-        final isDark = theme.brightness == Brightness.dark;
-        switch (style) {
-          case AppContentFrameStyle.none:
-            return child!;
-          case AppContentFrameStyle.outlined:
-            if (isLast) return child!;
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                child!,
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Divider(
-                    height: 1,
-                    thickness: 1,
-                    // 分隔线比外框淡一档，不然一列横线太抢眼。
-                    color: _frameBorderColor(context, scale: 0.6),
-                  ),
-                ),
-              ],
-            );
-          case AppContentFrameStyle.cards:
-            return Padding(
-              padding: EdgeInsets.only(bottom: isLast ? 0 : 8),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? scheme.surfaceContainerHighest.withValues(alpha: 0.45)
-                      : Colors.white.withValues(alpha: 0.75),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: _frameBorderColor(context, scale: 0.75),
-                    width: 1,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(
-                        alpha: isDark ? 0.18 : 0.05,
-                      ),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
+          final theme = Theme.of(context);
+          final scheme = theme.colorScheme;
+          final isDark = theme.brightness == Brightness.dark;
+          switch (style) {
+            case AppContentFrameStyle.none:
+              return child!;
+            case AppContentFrameStyle.outlined:
+              if (isLast) return child!;
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  child!,
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Divider(
+                      height: 1,
+                      thickness: 1,
+                      // 分隔线比外框淡一档，不然一列横线太抢眼。
+                      color: _frameBorderColor(context, scale: 0.6),
                     ),
-                  ],
+                  ),
+                ],
+              );
+            case AppContentFrameStyle.cards:
+              return Padding(
+                padding: EdgeInsets.only(bottom: isLast ? 0 : 8),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? scheme.surfaceContainerHighest.withValues(alpha: 0.45)
+                        : Colors.white.withValues(alpha: 0.75),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: _frameBorderColor(context, scale: 0.75),
+                      width: 1,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(
+                          alpha: isDark ? 0.18 : 0.05,
+                        ),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(13),
+                    child: child,
+                  ),
                 ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(13),
-                  child: child,
-                ),
-              ),
-            );
-        }
+              );
+          }
         });
       },
       child: child,
