@@ -36,6 +36,7 @@ import '../../pages/library/playlists_page.dart';
 import '../../pages/library/genres_page.dart';
 import '../../pages/library/folders_page.dart';
 import '../../pages/search/search_page.dart';
+import '../../pages/netease/netease_search_page.dart';
 import '../../pages/songs/batch_match_page.dart';
 import '../../app/state/settings_state.dart';
 import '../../app/state/song_state.dart';
@@ -82,6 +83,7 @@ class AppRoutes {
   static const metadataMatchSettings = '/settings/metadata-match';
   static const transcodeSettings = '/settings/transcode';
   static const dlnaSettings = '/settings/dlna';
+  static const neteaseSearch = '/netease/search';
 }
 
 class AppRouter {
@@ -134,6 +136,7 @@ class AppRouter {
     AppRoutes.metadataMatchSettings: (_) => const MetadataMatchSettingsPage(),
     AppRoutes.transcodeSettings: (_) => const TranscodeSettingsPage(),
     AppRoutes.dlnaSettings: (_) => const DlnaSettingsPage(),
+    AppRoutes.neteaseSearch: (_) => const NetEaseSearchPage(),
   };
 }
 
