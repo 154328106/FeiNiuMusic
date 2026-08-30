@@ -912,7 +912,7 @@ class _HomePageState extends State<HomePage>
                   child: AnimatedSwitcher(
                   duration: const Duration(milliseconds: 420),
                   child: HomeHeroBanner(
-                    key: ValueKey(heroSong?.id ?? 'roam-empty'),
+                    key: ValueKey(heroSong.id),
                     song: heroSong,
                     onPlay: _togglePlayRoam,
                     isPlaying: _heroIsPlaying,

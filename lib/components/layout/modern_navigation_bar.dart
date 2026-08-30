@@ -150,7 +150,6 @@ class ModernNavigationBar extends StatelessWidget {
   Widget _buildOriginal(BuildContext context, int currentIndex) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final isDark = theme.brightness == Brightness.dark;
     // Follow the same panel blur slider used by cards/setting panels so
     // the bottom bar visually belongs to the same surface family.
     return ListenableBuilder(

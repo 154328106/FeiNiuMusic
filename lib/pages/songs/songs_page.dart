@@ -12,6 +12,7 @@ import '../../app/router/app_router.dart';
 import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/feiniu/track_service.dart';
 import '../../app/services/player_service.dart';
+import '../../app/state/settings_background_state.dart';
 import '../../app/state/settings_layout_state.dart';
 import '../../app/state/settings_lyric_companion.dart';
 import '../../app/state/song_state.dart';
