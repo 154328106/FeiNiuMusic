@@ -93,17 +93,21 @@ class _ArtworkWidgetState extends State<ArtworkWidget> with SignalsMixin {
       // 构造同一个 URL → 共享同一份磁盘缓存与解码缓存。此前按显示尺寸×DPR
       // 动态请求（列表 120 起步、播放页 800），同一封面在不同页面产生多个
       // 不同 URL 的缓存，已显示过的地方命中缓存、另一处仍在转圈下载。
-      final coverUrl =
-          FeiNiuApiClient.instance.coverUrl(
-            coverId,
-            size: FeiNiuApiClient.coverRequestSize,
-            updatedAt: widget.song.updatedAt,
-          );
+      // 网易云的封面本身就是公网直链，coverId 里存的是完整 URL：直接用，
+      // 且**不能带飞牛的认证头**（跨域发 Cookie 到网易云 CDN 会被拒）。
+      final isRemoteUrl = widget.song.isNetease || coverId.startsWith('http');
+      final coverUrl = isRemoteUrl
+          ? coverId
+          : FeiNiuApiClient.instance.coverUrl(
+              coverId,
+              size: FeiNiuApiClient.coverRequestSize,
+              updatedAt: widget.song.updatedAt,
+            );
       child = ClipRRect(
         borderRadius: BorderRadius.circular(borderRadius),
         child: CachedNetworkImage(
           imageUrl: coverUrl,
-          httpHeaders: _authHeaders(),
+          httpHeaders: isRemoteUrl ? null : _authHeaders(),
           width: size,
           height: size,
           fit: BoxFit.cover,

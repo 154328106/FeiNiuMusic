@@ -55,8 +55,7 @@ class NetEaseSong {
       if (pic != null && pic.isNotEmpty) cover = pic;
     }
 
-    final durationMs =
-        (json['duration'] as int?) ?? (json['dt'] as int?) ?? 0;
+    final durationMs = (json['duration'] as int?) ?? (json['dt'] as int?) ?? 0;
 
     return NetEaseSong(
       id: id,

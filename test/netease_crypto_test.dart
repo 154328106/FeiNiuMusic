@@ -11,10 +11,9 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   group('NetEaseCrypto.weapi', () {
     test('固定随机密钥下 params/encSecKey 与 OpenSSL 参考实现逐字节一致', () {
-      final result = NetEaseCrypto.weapi(
-        {'type': 3},
-        secretKeyOverride: 'abcdefghijklmnop',
-      );
+      final result = NetEaseCrypto.weapi({
+        'type': 3,
+      }, secretKeyOverride: 'abcdefghijklmnop');
 
       expect(result['params'], 'KvY3feRTl6uX5m5cjNDgaQOWOzCp89c7N5+8+KFFOZ4=');
       expect(
@@ -49,7 +48,9 @@ void main() {
 
   group('NetEaseCrypto.eapi', () {
     test('params 与 OpenSSL 参考实现逐字节一致', () {
-      final result = NetEaseCrypto.eapi({'type': 3}, '/api/login/qrcode/unikey');
+      final result = NetEaseCrypto.eapi({
+        'type': 3,
+      }, '/api/login/qrcode/unikey');
 
       expect(
         result['params'],
@@ -72,7 +73,9 @@ void main() {
     });
 
     test('只产出 params 一个字段（eapi 不带 encSecKey）', () {
-      final result = NetEaseCrypto.eapi({'type': 3}, '/api/login/qrcode/unikey');
+      final result = NetEaseCrypto.eapi({
+        'type': 3,
+      }, '/api/login/qrcode/unikey');
       expect(result.keys.toList(), ['params']);
     });
   });

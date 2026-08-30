@@ -21,6 +21,7 @@ import 'feiniu/auth_service.dart';
 import 'feiniu/cue_service.dart';
 import 'feiniu/track_service.dart';
 import 'feiniu/transcode_service.dart';
+import 'netease/netease_playback_service.dart';
 import 'player/just_audio_engine.dart';
 import 'player/media_kit_engine.dart';
 import 'player/playback_router.dart';
@@ -963,6 +964,21 @@ class PlayerService with WidgetsBindingObserver {
     SongEntity song, {
     bool waitForLocal = false,
   }) async {
+    // 网易云：临时直链 + 网易云 CDN 的 Referer，不碰飞牛的缓存/CUE 逻辑。
+    if (song.isNetease) {
+      final neteaseId = song.neteaseId;
+      final url = neteaseId == null
+          ? null
+          : await NetEasePlaybackService.instance.resolveStreamUrl(neteaseId);
+      if (url == null) {
+        throw StateError('网易云歌曲无可用播放地址：${song.title}');
+      }
+      return mk.Media(
+        url,
+        httpHeaders: NetEasePlaybackService.streamHeaders(),
+      );
+    }
+
     // CUE 整轨曲目：跳过本地缓存（命中会拿到整轨文件，缺失会让后台把整轨
     // 下载一份），直连流 + Media(start/end) 裁剪定位。offset 解析失败时退化为
     // 不裁剪（整轨从头播，保持现状容错）。
@@ -3640,6 +3656,21 @@ class PlayerService with WidgetsBindingObserver {
     SongEntity song, {
     bool forceRefresh = false,
   }) async {
+    // 网易云：地址有时效，不能用 song.uri 里存的那份，必须重新解析。
+    if (song.isNetease) {
+      final neteaseId = song.neteaseId;
+      final url = neteaseId == null
+          ? null
+          : await NetEasePlaybackService.instance.resolveStreamUrl(
+              neteaseId,
+              force: forceRefresh,
+            );
+      if (url == null) {
+        throw StateError('网易云歌曲无可用播放地址：${song.title}');
+      }
+      return Uri.parse(url);
+    }
+
     final rawUri = (song.uri ?? '').trim();
     if (!rawUri.startsWith('http')) {
       return Uri.file(rawUri);
@@ -3781,10 +3812,44 @@ class PlayerService with WidgetsBindingObserver {
     }
   }
 
+  /// 网易云歌曲的 just_audio 播放源。
+  ///
+  /// 不走 [StreamCacheService] / 转码 / CUE：网易云给的是带签名的**临时**
+  /// 直链，缓存键会随地址变化失效；转码是飞牛服务端的能力；CUE 是本地整轨
+  /// 概念。这里每次都重新解析地址，并带上网易云 CDN 要求的 Referer。
+  ///
+  /// 返回 null 表示这首拿不到地址（灰色/无版权/需要会员），由调用方跳过。
+  Future<AudioSource?> _neteaseSourceForSong(
+    SongEntity song, {
+    bool forceRefresh = false,
+  }) async {
+    final neteaseId = song.neteaseId;
+    if (neteaseId == null) return null;
+    final url = await NetEasePlaybackService.instance.resolveStreamUrl(
+      neteaseId,
+      force: forceRefresh,
+    );
+    if (url == null) return null;
+    return AudioSource.uri(
+      Uri.parse(url),
+      headers: NetEasePlaybackService.streamHeaders(),
+    );
+  }
+
   Future<AudioSource> _sourceForSong(
     SongEntity song, {
     bool forceRefresh = false,
   }) async {
+    // 网易云歌曲：完全绕开飞牛的缓存/转码链路，直接用解析出的临时直链。
+    if (song.isNetease) {
+      final source = await _neteaseSourceForSong(
+        song,
+        forceRefresh: forceRefresh,
+      );
+      if (source != null) return source;
+      throw StateError('网易云歌曲无可用播放地址：${song.title}');
+    }
+
     final api = FeiNiuApiClient.instance;
     if (api.baseUrl.isNotEmpty) {
       // 播放出错重试时删除损坏/过期的缓存，强制走远端

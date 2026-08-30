@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'song_source.dart';
+
 class SongEntity {
   final String id;
   final String title;
@@ -46,6 +48,15 @@ class SongEntity {
     this.cueOffsetMs,
     this.isAudioFileDeleted = false,
   });
+
+  /// 歌曲来源，由 [id] 前缀推导。见 [SongSource]。
+  SongSource get source => SongSource.fromSongId(id);
+
+  /// 是否来自网易云（播放/封面链路要走完全不同的取址方式）。
+  bool get isNetease => source == SongSource.netease;
+
+  /// 网易云歌曲的数字 id；非网易云歌曲为 null。
+  int? get neteaseId => SongSource.decodeNetease(id);
 
   /// 解析 artist JSON 获取歌手显示名
   String get artistDisplayName {

@@ -249,7 +249,9 @@ class NetEaseApiClient {
       if (unreserved.contains(char)) {
         buffer.write(char);
       } else {
-        buffer.write('%${byte.toRadixString(16).padLeft(2, '0').toUpperCase()}');
+        buffer.write(
+          '%${byte.toRadixString(16).padLeft(2, '0').toUpperCase()}',
+        );
       }
     }
     return buffer.toString();
@@ -298,9 +300,10 @@ class NetEaseApiClient {
       .map((e) => '${e.key}=${Uri.encodeComponent('${e.value}')}')
       .join('; ');
 
-  static String _randomHex(int length) =>
-      List.generate(length, (_) => '0123456789abcdef'[_random.nextInt(16)])
-          .join();
+  static String _randomHex(int length) => List.generate(
+    length,
+    (_) => '0123456789abcdef'[_random.nextInt(16)],
+  ).join();
 
   static String _randomLowercase(int length) => List.generate(
     length,

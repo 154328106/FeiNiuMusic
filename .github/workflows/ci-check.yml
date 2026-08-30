@@ -38,10 +38,38 @@ jobs:
 
       # analyze / test 是实质门禁，排在最前面：即使后面的格式检查挂了，
       # 也已经拿到了编译与单测的结论，一轮 CI 拿全部信号。
-      - name: flutter analyze
-        run: flutter analyze
+      #
+      # 全仓只拦 error：CI 的 Flutter 比仓库开发时新，新增的 lint 会在未改动
+      # 的上游代码上报出几十条 warning/info（截至接入时 48 条，0 条 error）。
+      # 把它们当门禁等于要求先给整个上游做一遍 lint 清理，不现实。
+      - name: flutter analyze（全仓，仅 error 阻断）
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      # 本分支改动的文件按零容忍要求：新代码不许留 warning/info。
+      - name: flutter analyze（本分支改动的文件，零容忍）
+        if: always()
+        run: |
+          BASE=$(git merge-base origin/main HEAD 2>/dev/null || echo "")
+          if [ -z "$BASE" ]; then echo "no merge-base, skip"; exit 0; fi
+          FILES=$(git diff --name-only --diff-filter=ACMR "$BASE" HEAD -- 'lib/**.dart' 'test/**.dart')
+          if [ -z "$FILES" ]; then echo "no dart changes"; exit 0; fi
+          echo "检查以下文件："; echo "$FILES"
+          # analyze 的输出是「… • 路径:行:列 • 规则名」，按路径过滤出本分支的行。
+          flutter analyze --no-fatal-infos --no-fatal-warnings > analyze.txt 2>&1 || true
+          HITS=""
+          for f in $FILES; do
+            MATCH=$(grep -F " • $f:" analyze.txt || true)
+            if [ -n "$MATCH" ]; then HITS="$HITS$MATCH"$'\n'; fi
+          done
+          if [ -n "$HITS" ]; then
+            echo "::error::本分支改动的文件存在 analyze 问题"
+            echo "$HITS"
+            exit 1
+          fi
+          echo "本分支改动的文件 analyze 干净"
 
       - name: flutter test
+        if: always()
         run: flutter test
 
       # 未签名 debug APK：只验证 Android 侧（Kotlin/Gradle/AGP）能编过，
