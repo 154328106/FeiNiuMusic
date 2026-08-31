@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/services/netease/netease_playback_service.dart';
 import '../../app/services/player_service.dart';
 import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';
@@ -45,6 +46,21 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
       _songs = songs;
       _loading = false;
     });
+  }
+
+  /// 起播。网易云队列先筛掉取不到地址的歌，否则会卡在第一首不动。
+  Future<void> _play(int index) async {
+    var queue = _songs;
+    var start = index;
+    if (_source.id == 'netease') {
+      final tapped = _songs[index];
+      queue = await NetEasePlaybackService.instance.prepareQueue(_songs);
+      if (!mounted || queue.isEmpty) return;
+      // 筛完索引会变，按歌曲 id 重新定位；点中的那首若被筛掉就从头播。
+      final moved = queue.indexWhere((s) => s.id == tapped.id);
+      start = moved >= 0 ? moved : 0;
+    }
+    await _player.playQueue(queue, start);
   }
 
   @override
@@ -101,7 +117,7 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-            onTap: () => _player.playQueue(_songs, index),
+            onTap: () => _play(index),
           ),
         );
       },

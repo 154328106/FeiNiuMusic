@@ -105,6 +105,71 @@ class NetEasePlaybackService {
     }
   }
 
+  /// 播放前筛掉取不到地址的歌，并把能播的地址预热进缓存。
+  ///
+  /// 为什么必须先筛：取不到地址时 `_sourceForSong` 会抛异常，而那发生在
+  /// **构建播放源**阶段 —— 播放器的错误恢复挂在引擎错误流上，这时引擎还没
+  /// 见到这首歌，于是既不报错也不跳过，整个队列就卡在第一首不动。收藏夹里
+  /// 存着几首下架歌就足以让「播放收藏」完全没反应。
+  ///
+  /// 取地址的接口支持批量，所以整队只要一次请求；顺带把结果写进缓存，
+  /// 真正播放时不用再问一遍。
+  Future<List<SongEntity>> prepareQueue(List<SongEntity> songs) async {
+    final ids = <int>[];
+    for (final song in songs) {
+      final id = song.neteaseId;
+      // 已经缓存过地址的不用再问。
+      if (id != null && !(_cache[id]?.isExpired == false)) ids.add(id);
+    }
+    if (ids.isEmpty) return songs;
+
+    Map<int, NetEaseSongUrl> result;
+    try {
+      result = await NetEaseApiClient.instance.songUrls(ids, level: level);
+    } on NetEaseApiException catch (e) {
+      // 批量失败就不要在这里拦人，交给播放时逐首解析。
+      debugPrint('[NetEase] 批量取地址失败，跳过预筛：${e.message}');
+      return songs;
+    }
+
+    final playable = <SongEntity>[];
+    var dropped = 0;
+    for (final song in songs) {
+      final id = song.neteaseId;
+      if (id == null) {
+        playable.add(song);
+        continue;
+      }
+      final cached = _cache[id];
+      if (cached != null && !cached.isExpired) {
+        playable.add(song);
+        continue;
+      }
+      final info = result[id];
+      var url = info?.url;
+      if (url == null || info!.freeTrial) {
+        final unblocked = await UnblockSourceService.instance.resolve(
+          platform: 'wy',
+          songId: '$id',
+        );
+        if (unblocked != null) url = unblocked;
+      }
+      if (url == null) {
+        dropped++;
+        continue;
+      }
+      final secure = url.startsWith('http://')
+          ? url.replaceFirst('http://', 'https://')
+          : url;
+      _cache[id] = _ResolvedUrl(secure, DateTime.now());
+      playable.add(song);
+    }
+    if (dropped > 0) {
+      debugPrint('[NetEase] 队列中 $dropped 首取不到地址，已跳过');
+    }
+    return playable;
+  }
+
   /// 丢弃某首歌的地址缓存（播放失败后重取用）。
   void invalidate(int neteaseId) => _cache.remove(neteaseId);
 

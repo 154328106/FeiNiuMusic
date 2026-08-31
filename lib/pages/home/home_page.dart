@@ -11,6 +11,7 @@ import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/feiniu/api_models.dart';
 import '../../app/services/feiniu/auth_service.dart';
 import '../../app/services/feiniu/track_service.dart';
+import '../../app/services/netease/netease_playback_service.dart';
 import '../../app/services/player_service.dart';
 import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';
@@ -691,6 +692,12 @@ class _HomePageState extends State<HomePage>
       }
     }
     if (!mounted) return;
+    // 网易云队列里可能夹着下架/无版权的歌，取不到地址会让整队卡住不动，
+    // 起播前先批量筛一遍（一次请求）。
+    if (_source.id == 'netease') {
+      queue = await NetEasePlaybackService.instance.prepareQueue(queue);
+      if (!mounted || queue.isEmpty) return;
+    }
     // 记下这次播放的来源与队列，供卡片按钮判断播放/暂停图标。
     _activePlaySource = source;
     _activeQueueIds = {for (final s in queue) s.id};
