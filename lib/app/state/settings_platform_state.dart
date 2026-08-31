@@ -94,10 +94,8 @@ class AppPlatformSettings {
       SubsonicServerStore.instance.config.value.isConfigured;
 
   /// 门控要监听的全部来源。
-  static Listenable get sessionListenable => Listenable.merge([
-    active,
-    SubsonicServerStore.instance.config,
-  ]);
+  static Listenable get sessionListenable =>
+      Listenable.merge([active, SubsonicServerStore.instance.config]);
 
   static Future<void> setActive(AppPlatform platform) async {
     active.value = platform;
