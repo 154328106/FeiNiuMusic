@@ -871,9 +871,8 @@ class _LoginPageState extends State<LoginPage> {
       );
       if (!mounted) return;
       setState(() => _subsonicBusy = false);
-      Navigator.of(
-        context,
-      ).pushReplacementNamed(AppRoutes.subsonicLibrary);
+      // 不用手动跳转：门控监听着平台 + 服务器配置，配好即重建成 Subsonic
+      // 会话。手动 pushReplacement 反而会绕开门控，做出一个退不出去的页面。
     } on SubsonicApiException catch (e) {
       if (!mounted) return;
       setState(() {

@@ -5,6 +5,7 @@ import '../../app/services/player_service.dart';
 import '../../app/services/subsonic/subsonic_api_client.dart';
 import '../../app/services/subsonic/subsonic_server.dart';
 import '../../app/services/subsonic/subsonic_track_mapper.dart';
+import '../../app/state/settings_platform_state.dart';
 import '../../app/state/song_state.dart';
 import '../../components/index.dart';
 
@@ -83,6 +84,13 @@ class _SubsonicLibraryPageState extends State<SubsonicLibraryPage> {
     }
   }
 
+  /// 切回飞牛：门控随即重建 —— 飞牛已登录就进主界面，没登录就回登录页。
+  ///
+  /// 只改「当前平台」，不清 Subsonic 服务器配置：下次再切回来不用重填。
+  Future<void> _switchPlatform() async {
+    await AppPlatformSettings.setActive(AppPlatform.feiniu);
+  }
+
   void _runSearch() {
     final keyword = _controller.text.trim();
     if (keyword.isEmpty) return;
@@ -104,6 +112,13 @@ class _SubsonicLibraryPageState extends State<SubsonicLibraryPage> {
               if (!mounted) return;
               _bootstrap();
             },
+          ),
+          // 这页是 Subsonic 会话的**根页面**（门控直接渲染它），没有可 pop 的
+          // 上一页。不给出口就成了死路 —— iOS 上更是连系统返回键都没有。
+          IconButton(
+            tooltip: '切换平台',
+            icon: const Icon(Icons.swap_horiz_rounded),
+            onPressed: _switchPlatform,
           ),
         ],
       ),

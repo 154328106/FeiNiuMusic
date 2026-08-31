@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/subsonic/subsonic_server.dart';
+
 /// 登录页可选的音乐平台。
 ///
 /// 除飞牛外，其余几个说的都是 **Subsonic 协议**，共用同一套客户端
@@ -81,6 +83,21 @@ class AppPlatformSettings {
       active.value = AppPlatform.fromName(prefs.getString(_prefsKey));
     } catch (_) {}
   }
+
+  /// 当前是不是一个「可用的 Subsonic 会话」：选了 Subsonic 系平台，且服务器
+  /// 已经配好。
+  ///
+  /// 门控用它决定进不进主界面 —— 否则每次冷启动都会因为「飞牛没登录」而退回
+  /// 登录页，逼用户把服务器信息重填一遍。
+  static bool get hasSubsonicSession =>
+      active.value.isSubsonic &&
+      SubsonicServerStore.instance.config.value.isConfigured;
+
+  /// 门控要监听的全部来源。
+  static Listenable get sessionListenable => Listenable.merge([
+    active,
+    SubsonicServerStore.instance.config,
+  ]);
 
   static Future<void> setActive(AppPlatform platform) async {
     active.value = platform;

@@ -8,6 +8,7 @@ import '../components/dialog/app_update_dialog.dart';
 import '../components/focus/tv_focus_scope.dart';
 import '../components/layout/tablet_layout_host.dart';
 import '../pages/login/login_page.dart';
+import '../pages/subsonic/subsonic_library_page.dart';
 import '../pages/onboarding/onboarding_page.dart';
 import 'navigator_key.dart';
 import 'router/app_page_route.dart';
@@ -15,6 +16,7 @@ import 'router/app_router.dart';
 import 'services/app_update_service.dart';
 import 'services/feiniu/account_store.dart';
 import 'services/feiniu/auth_service.dart';
+import 'state/settings_platform_state.dart';
 import 'state/settings_state.dart';
 import 'theme/app_styles.dart';
 import 'theme/app_visual_theme.dart';
@@ -364,9 +366,19 @@ class _AppStartupGateState extends State<_AppStartupGate> {
         if (!onboardingCompleted) {
           return const OnboardingPage();
         }
-        return ValueListenableBuilder<bool>(
-          valueListenable: AuthService.instance.isLoggedIn,
-          builder: (context, isLoggedIn, _) {
+        return ListenableBuilder(
+          listenable: Listenable.merge([
+            AuthService.instance.isLoggedIn,
+            AppPlatformSettings.sessionListenable,
+          ]),
+          builder: (context, _) {
+            final isLoggedIn = AuthService.instance.isLoggedIn.value;
+            // Subsonic 会话：选了 Subsonic 系平台且服务器已配好，就直接进它的
+            // 音乐库。不看飞牛登录态 —— 否则冷启动会因为「飞牛没登录」退回
+            // 登录页，逼用户把服务器信息重填一遍。
+            if (AppPlatformSettings.hasSubsonicSession) {
+              return const SubsonicLibraryPage();
+            }
             if (!isLoggedIn) {
               return const LoginPage();
             }
