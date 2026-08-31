@@ -15,6 +15,7 @@ import '../../components/layout/modern_navigation_bar.dart';
 /// [primaryTabIndex] 与 [onPrimaryTabActivated]。
 mixin PrimaryTabRefreshMixin<T extends StatefulWidget> on State<T> {
   int? _lastSeenIndex;
+  bool _skipFirstActivation = false;
 
   /// 本页在底栏中的序号（0~4）。
   int get primaryTabIndex;
@@ -31,6 +32,11 @@ mixin PrimaryTabRefreshMixin<T extends StatefulWidget> on State<T> {
     _lastSeenIndex = context
         .getInheritedWidgetOfExactType<PrimaryNavigationScope>()
         ?.currentIndex;
+    // 建出来时前台是别的 tab —— 说明这页是导航壳后台预热建的（见
+    // _scheduleWarmup）。initState 里已经拉过一次数据，用户第一次切过来时
+    // 不该再拉一遍：那正是「歌曲页的加载行成对出现、请求量翻倍」的来源。
+    _skipFirstActivation =
+        _lastSeenIndex != null && _lastSeenIndex != primaryTabIndex;
   }
 
   @override
@@ -45,6 +51,10 @@ mixin PrimaryTabRefreshMixin<T extends StatefulWidget> on State<T> {
     }
     if (_lastSeenIndex == primaryTabIndex) return; // 本来就在当前 tab
     _lastSeenIndex = primaryTabIndex;
+    if (_skipFirstActivation) {
+      _skipFirstActivation = false;
+      return;
+    }
     if (mounted) unawaited(onPrimaryTabActivated());
   }
 }

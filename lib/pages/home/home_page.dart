@@ -202,13 +202,43 @@ class _HomePageState extends State<HomePage>
     if (mounted) await _loadAll();
   }
 
+  /// 整页刷新的重入闸。
+  ///
+  /// 触发口有四个：initState、tab 激活、下拉刷新、换源。换源那条尤其容易
+  /// 连响两次（`setCurrent` 动 current，登录回调又动 revision），两趟完整
+  /// 刷新并发跑，日志里所有行成对出现、请求量翻倍，界面还被连着覆盖两次。
+  bool _loadInFlight = false;
+
   Future<void> _loadAll({bool forceRefresh = false}) async {
+    if (_loadInFlight) return;
+    _loadInFlight = true;
+    try {
+      var force = forceRefresh;
+      // 换源正好撞上另一趟刷新时，光靠上面的闸会把新源那次请求丢掉，首页
+      // 就停在旧源的内容上。所以刷完再对一次源：变了就补一趟。
+      for (var round = 0; round < 3; round++) {
+        final loadedSource = _source.id;
+        await _runLoadAll(forceRefresh: force);
+        if (!mounted || _source.id == loadedSource) break;
+        force = true;
+      }
+    } finally {
+      _loadInFlight = false;
+    }
+  }
+
+  Future<void> _runLoadAll({bool forceRefresh = false}) async {
     const homeCacheScope = 'home';
     final homeCacheKey = 'dashboard_${_source.id}';
 
     // 缓存永久保留（读取 ignoreTtl，TTL 不淘汰），但只用于快速渲染：
     // 命中后立即展示，同时继续在后台异步刷新数据，完成后覆盖缓存。
-    if (!forceRefresh) {
+    //
+    // 只在**首次加载**（_loading 还是 true）读它。从别的页面回到首页时内存
+    // 里已经是同一批数据，再套一遍缓存等于把每个列表换成一份反序列化出来的
+    // 新对象，列表整体重建、封面控件跟着重新挂载 —— 就是「回首页后最新歌曲
+    // 的封面闪一下重刷」。
+    if (!forceRefresh && _loading.value) {
       final cachedJson = await ApiCacheManager.instance.getPersisted(
         homeCacheScope,
         homeCacheKey,
@@ -289,60 +319,62 @@ class _HomePageState extends State<HomePage>
     if (!mounted) return;
     final api = FeiNiuApiClient.instance;
     final headers = FeiNiuApiClient.imageAuthHeaders();
+
+    // 把 coverId 变成真正会被请求的地址，规则必须和 ArtworkWidget 一致。
+    //
+    // 非飞牛的源（网易云）在 coverId 里存的就是公网直链。之前这里一律套
+    // api.coverUrl()，拼出 `…/static/cover?coverId=http%3A//p4.music…`
+    // 这种 NAS 一律 400 的地址：预热的是错地址，真正要显示的那批一张都没
+    // 预热到 —— 换网易云后首页封面每次都得现下。返回值第二项表示是不是
+    // 公网直链，直链不能带飞牛的鉴权头。
+    (String, bool) coverOf(String coverId, {int? updatedAt}) {
+      if (coverId.startsWith('http')) return (coverId, true);
+      return (
+        api.coverUrl(
+          coverId,
+          size: FeiNiuApiClient.coverRequestSize,
+          updatedAt: updatedAt,
+        ),
+        false,
+      );
+    }
+
     // 预加载首页所有可见封面（最多 40 张）
-    final coverUrls = <String>[
+    final covers = <(String, bool)>[
       // Hero Banner 主视觉 — 大尺寸首帧
       if (_heroSong != null &&
           _heroSong!.coverId != null &&
           _heroSong!.coverId!.isNotEmpty)
-        api.coverUrl(
-          _heroSong!.coverId!,
-          size: FeiNiuApiClient.coverRequestSize,
-          updatedAt: _heroSong!.updatedAt,
-        ),
+        coverOf(_heroSong!.coverId!, updatedAt: _heroSong!.updatedAt),
       // 收藏歌曲封面
       for (final s in _favoriteSongs.value.take(9))
         if (s.coverId != null && s.coverId!.isNotEmpty)
-          api.coverUrl(
-            s.coverId!,
-            size: FeiNiuApiClient.coverRequestSize,
-            updatedAt: s.updatedAt,
-          ),
+          coverOf(s.coverId!, updatedAt: s.updatedAt),
       // 最近播放封面
       for (final s in _recentSongs.value.take(9))
         if (s.coverId != null && s.coverId!.isNotEmpty)
-          api.coverUrl(
-            s.coverId!,
-            size: FeiNiuApiClient.coverRequestSize,
-            updatedAt: s.updatedAt,
-          ),
+          coverOf(s.coverId!, updatedAt: s.updatedAt),
       // 最近添加歌曲封面
       for (final s in _recentTracks.value.take(9))
         if (s.coverId != null && s.coverId!.isNotEmpty)
-          api.coverUrl(
-            s.coverId!,
-            size: FeiNiuApiClient.coverRequestSize,
-            updatedAt: s.updatedAt,
-          ),
+          coverOf(s.coverId!, updatedAt: s.updatedAt),
       // 专辑封面 — FeiNiuAlbum 无 updatedAt
       for (final a in _recentAlbums.value.take(10))
-        if (a.coverId != null && a.coverId!.isNotEmpty)
-          api.coverUrl(a.coverId!, size: FeiNiuApiClient.coverRequestSize),
+        if (a.coverId != null && a.coverId!.isNotEmpty) coverOf(a.coverId!),
       // 歌单封面
       for (final p in _playlists.value.take(10))
         if (p.coverId != null && p.coverId!.isNotEmpty)
-          api.coverUrl(
-            p.coverId!,
-            size: FeiNiuApiClient.coverRequestSize,
-            updatedAt: p.updatedAt,
-          ),
+          coverOf(p.coverId!, updatedAt: p.updatedAt),
     ];
-    for (final url in coverUrls) {
+    for (final (url, isRemote) in covers) {
       if (!mounted) break;
       try {
         unawaited(
           precacheImage(
-            CachedNetworkImageProvider(url, headers: headers),
+            CachedNetworkImageProvider(
+              url,
+              headers: isRemote ? null : headers,
+            ),
             context,
           ),
         );
@@ -391,15 +423,33 @@ class _HomePageState extends State<HomePage>
     _roamQueue.value = hero.queue;
   }
 
+  /// 两批歌是不是同一批（按 id 逐个比）。
+  ///
+  /// 每次刷新拿到的都是**新构造**的 SongEntity 列表，直接赋值必定触发重建，
+  /// 列表行连带封面控件一起重新挂载，已经缓存好的图也会先闪一下占位图 ——
+  /// 「从别的页面回首页，最新歌曲的封面重刷一遍」就是这么来的。后台刷新
+  /// 绝大多数时候结果和屏幕上的一模一样，这时候什么都不做才对。
+  static bool _sameSongs(List<SongEntity> a, List<SongEntity> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id) return false;
+    }
+    return true;
+  }
+
   Future<void> _loadFavorites() async {
     // 首页只展示前几首；点播放时再按队列上限拉完整列表。
     final songs = await _source.feed(HomeFeed.favorites);
-    if (mounted) _favoriteSongs.value = songs;
+    if (mounted && !_sameSongs(_favoriteSongs.value, songs)) {
+      _favoriteSongs.value = songs;
+    }
   }
 
   Future<void> _loadRecentHistory() async {
     final songs = await _source.feed(HomeFeed.recentPlayed);
-    if (mounted) _recentSongs.value = songs;
+    if (mounted && !_sameSongs(_recentSongs.value, songs)) {
+      _recentSongs.value = songs;
+    }
   }
 
   Future<void> _loadRecentAlbums() async {
@@ -435,7 +485,9 @@ class _HomePageState extends State<HomePage>
 
   Future<void> _loadRecentTracks() async {
     final songs = await _source.feed(HomeFeed.latestSongs);
-    if (mounted) _recentTracks.value = songs;
+    if (mounted && !_sameSongs(_recentTracks.value, songs)) {
+      _recentTracks.value = songs;
+    }
   }
 
   /// 长按歌曲 → 弹出与歌曲页同款的长按面板

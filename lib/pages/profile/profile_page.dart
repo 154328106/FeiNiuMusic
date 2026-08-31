@@ -140,10 +140,18 @@ class _MusicSourceSection extends StatelessWidget {
     if (!source.isAvailable && source.id == 'netease') {
       await Navigator.pushNamed(context, AppRoutes.neteaseLogin);
       NetEaseSource.instance.reset();
-      registry.notifyContentChanged();
       // 登录成功就顺手切过去，省一步。
-      if (NetEaseApiClient.instance.isLoggedIn) {
+      //
+      // 切换本身已经会让首页重拉，所以两条通知只能响一条：切过去就不再补
+      // notifyContentChanged，否则 current 和 revision 前后脚各响一次，
+      // 首页整整刷两遍（日志里所有行成对出现、请求量翻倍）。
+      final willSwitch =
+          NetEaseApiClient.instance.isLoggedIn &&
+          !identical(registry.current.value, source);
+      if (willSwitch) {
         await registry.setCurrent(source);
+      } else {
+        registry.notifyContentChanged();
       }
       return;
     }

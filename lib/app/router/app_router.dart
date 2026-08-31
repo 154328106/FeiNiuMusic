@@ -190,7 +190,9 @@ class _PrimaryNavigationShellState extends State<_PrimaryNavigationShell> {
   }
 
   void _select(int index) {
-    if (_currentIndex == index || index < 0 || index > 4) return;
+    if (_currentIndex == index || index < 0 || index >= _pages.length) {
+      return;
+    }
     setState(() {
       _pages[index] ??= _buildPage(index);
       _currentIndex = index;
@@ -214,13 +216,13 @@ class _PrimaryNavigationShellState extends State<_PrimaryNavigationShell> {
       _warmOne(1, delay: const Duration(milliseconds: 250));
       _warmOne(2, delay: const Duration(milliseconds: 700));
       _warmOne(3, delay: const Duration(milliseconds: 1100));
-      _warmOne(4, delay: const Duration(milliseconds: 1500));
     });
   }
 
   void _warmOne(int index, {required Duration delay}) {
     Future<void>.delayed(delay, () {
       if (!mounted) return;
+      if (index >= _pages.length) return;
       if (_pages[index] != null) return;
       setState(() {
         _pages[index] = _buildPage(index);
