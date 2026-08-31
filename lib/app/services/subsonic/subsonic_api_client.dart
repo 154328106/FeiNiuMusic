@@ -61,8 +61,7 @@ class SubsonicApiClient {
   }
 
   /// 歌曲播放直链。稳定，可持久化。
-  String streamUrl(String songId) =>
-      buildUrl('stream.view', {'id': songId});
+  String streamUrl(String songId) => buildUrl('stream.view', {'id': songId});
 
   /// 封面地址。[size] 传 0 表示原图。
   String coverUrl(String coverArtId, {int size = 512}) => buildUrl(
@@ -132,7 +131,9 @@ class SubsonicApiClient {
 
     if (subsonicStr(flat['status']) == 'failed') {
       final err = flat['error'];
-      final errMap = err is Map<String, Object?> ? err : const <String, Object?>{};
+      final errMap = err is Map<String, Object?>
+          ? err
+          : const <String, Object?>{};
       throw SubsonicApiException(
         subsonicStr(errMap['message'], fallback: '未知错误'),
         code: subsonicInt(errMap['code'], fallback: -1),
