@@ -76,15 +76,19 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
       _testing = true;
       _result = null;
     });
-    // 周杰伦《晴天》，网易云 id 186016 —— 常年 VIP，适合验证解锁是否生效。
-    final url = await _service.resolve(platform: 'wy', songId: '186016');
+    // 梦然《少年》，网易云 id 347230。
+    // 不要用《晴天》(186016) 之类的热门 VIP 曲做探针：上游源对个别歌曲本来
+    // 就没货，会返回 `code 500 / returned no URL`，看着像密钥无效，实际是
+    // 这一首取不到 —— 我自己就被这个误导过一轮。
+    final url = await _service.resolve(platform: 'wy', songId: '347230');
     if (!mounted) return;
     setState(() {
       _testing = false;
       _resultOk = url != null;
       _result = url != null
           ? '连接成功，已取到播放地址'
-          : '未取到地址。检查密钥是否有效、额度是否用尽，详情见「查看日志」';
+          : '未取到地址。可能是密钥无效或额度用尽；也可能只是这首歌上游没货，'
+                '换首歌再试。详情见「查看日志」';
     });
   }
 

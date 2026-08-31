@@ -25,6 +25,7 @@ import '../library/playlists_page.dart';
 import '../search/search_page.dart';
 import '../songs/song_detail_sheet.dart';
 import '../songs/songs_page.dart';
+import 'source_feed_page.dart';
 import 'widgets/home_cover_carousel.dart';
 import 'widgets/home_hero_banner.dart';
 import 'widgets/home_large_layout.dart';
@@ -580,13 +581,25 @@ class _HomePageState extends State<HomePage>
     Navigator.of(context).pushNamed(AppRoutes.genres);
   }
 
-  void _openRecentPage() {
-    Navigator.of(context).pushNamed(AppRoutes.recent);
+  /// 飞牛走原有的收藏页 / 最近播放页（分页、多选、删历史都在那里）；
+  /// 其它源没有对应能力，给一个通用的只读列表页。
+  void _openFeedPage(HomeFeed kind, String title, String feiniuRoute) {
+    if (_source.id == 'feiniu') {
+      Navigator.of(context).pushNamed(feiniuRoute);
+      return;
+    }
+    Navigator.of(context).push(
+      buildAppPageRoute<void>(
+        (_) => SourceFeedPage(kind: kind, title: title),
+      ),
+    );
   }
 
-  void _openFavoritePage() {
-    Navigator.of(context).pushNamed(AppRoutes.favorites);
-  }
+  void _openRecentPage() =>
+      _openFeedPage(HomeFeed.recentPlayed, '最近播放', AppRoutes.recent);
+
+  void _openFavoritePage() =>
+      _openFeedPage(HomeFeed.favorites, '收藏', AppRoutes.favorites);
 
   /// 直接播放一个列表（收藏/最近播放）。列表为空时退回漫游随机播放。
   ///

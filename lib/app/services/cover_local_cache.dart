@@ -62,11 +62,17 @@ class CoverLocalCache {
     );
     if (await target.exists()) return target.path;
 
-    final url = FeiNiuApiClient.instance.coverUrl(
-      coverId,
-      size: size,
-      updatedAt: updatedAt,
-    );
+    // 非飞牛的源（网易云等）在 coverId 里存的就是完整公网直链，直接用。
+    // 不判断的话会拼出
+    // `…/static/cover?coverId=http://p4.music.126.net/…` 这种地址，
+    // NAS 一律返回 400，表现为通知栏 / 锁屏没有封面。
+    final url = coverId.startsWith('http')
+        ? coverId
+        : FeiNiuApiClient.instance.coverUrl(
+            coverId,
+            size: size,
+            updatedAt: updatedAt,
+          );
     // 目标尺寸未缓存时，先尝试复用同封面其它已缓存尺寸（App UI 的
     // CachedNetworkImage 与 _coverCache 是同一个 DefaultCacheManager 单例，
     // 播放页/列表页通常已把该封面以某个尺寸下载过）。直接磁盘拷贝，避免
