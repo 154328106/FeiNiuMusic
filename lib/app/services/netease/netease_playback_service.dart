@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../state/song_source.dart';
 import '../../state/song_state.dart';
+import '../unblock/unblock_source.dart';
 import 'netease_api_client.dart';
 import 'netease_models.dart';
 
@@ -68,12 +69,27 @@ class NetEasePlaybackService {
         neteaseId,
       ], level: level);
       final info = result[neteaseId];
-      final url = info?.url;
+      var url = info?.url;
+
+      // 官方给不出地址（灰色/无版权/需要会员），或只给了试听片段 → 问第三方
+      // 音源。没配密钥时 resolve 直接返回 null，一个请求都不会发。
+      final needsUnblock = url == null || (info?.freeTrial ?? false);
+      if (needsUnblock) {
+        final unblocked = await UnblockSourceService.instance.resolve(
+          platform: 'wy',
+          songId: '$neteaseId',
+        );
+        if (unblocked != null) {
+          debugPrint('[NetEase] $neteaseId 由第三方音源提供地址');
+          url = unblocked;
+        }
+      }
+
       if (url == null) {
         debugPrint('[NetEase] $neteaseId 无可用播放地址（灰色/无版权/需要会员）');
         return null;
       }
-      if (info!.freeTrial) {
+      if ((info?.freeTrial ?? false) && identical(url, info?.url)) {
         debugPrint('[NetEase] $neteaseId 只返回了试听片段');
       }
       // 网易云返回的直链有 http 和 https 两种，统一升到 https：

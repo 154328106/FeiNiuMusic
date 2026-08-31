@@ -26,6 +26,7 @@ import '../../pages/settings/version_info_page.dart';
 import '../../pages/settings/volume_settings_page.dart';
 import '../../pages/settings/launch_settings_page.dart';
 import '../../pages/settings/transcode_settings_page.dart';
+import '../../pages/settings/unblock_source_page.dart';
 import '../../pages/settings/search_source_page.dart';
 import '../../pages/settings/match_settings_page.dart';
 import '../../pages/settings/metadata_match_settings_page.dart';
@@ -86,6 +87,7 @@ class AppRoutes {
   static const dlnaSettings = '/settings/dlna';
   static const neteaseSearch = '/netease/search';
   static const neteaseLogin = '/netease/login';
+  static const unblockSource = '/settings/unblock-source';
 }
 
 class AppRouter {
@@ -140,6 +142,7 @@ class AppRouter {
     AppRoutes.dlnaSettings: (_) => const DlnaSettingsPage(),
     AppRoutes.neteaseSearch: (_) => const NetEaseSearchPage(),
     AppRoutes.neteaseLogin: (_) => const NetEaseLoginPage(),
+    AppRoutes.unblockSource: (_) => const UnblockSourcePage(),
   };
 }
 

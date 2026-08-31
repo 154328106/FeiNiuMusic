@@ -189,6 +189,13 @@ class _SettingsPageState extends State<SettingsPage> {
                         Navigator.pushNamed(context, AppRoutes.dlnaSettings),
                   ),
                   AppSettingTile(
+                    title: '第三方音源',
+                    subtitle: '灰色/会员歌曲的播放地址来源，需自备密钥',
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () =>
+                        Navigator.pushNamed(context, AppRoutes.unblockSource),
+                  ),
+                  AppSettingTile(
                     title: '网易云音乐',
                     subtitle: '搜索并播放网易云曲库',
                     trailing: const Icon(Icons.chevron_right_rounded),

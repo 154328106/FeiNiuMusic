@@ -51,15 +51,21 @@ class NetEaseSource implements MusicSource {
     _likedPlaylistId = null;
   }
 
+  /// 最近一次失败原因，供首页在区块为空时给出可读提示。
+  String? lastError;
+
   Future<int?> _ensureUid() async {
     final cached = _uid;
     if (cached != null) return cached;
     try {
       final user = await _api.account();
       _uid = user.userId;
+      debugPrint('[NetEaseSource] uid=$_uid nickname=${user.nickname}');
       return _uid;
     } on NetEaseApiException catch (e) {
-      debugPrint('[NetEaseSource] account error: ${e.message}');
+      // 收藏 / 最近播放全靠 uid，这里失败会让两块同时空掉，必须记下来。
+      lastError = '获取账号信息失败：${e.message}';
+      debugPrint('[NetEaseSource] account error: ${e.message} code=${e.code}');
       return null;
     }
   }
@@ -72,10 +78,19 @@ class NetEaseSource implements MusicSource {
     if (uid == null) return null;
     try {
       final lists = await _api.userPlaylists(uid);
-      if (lists.isEmpty) return null;
+      debugPrint('[NetEaseSource] userPlaylists count=${lists.length}');
+      if (lists.isEmpty) {
+        lastError = '账号下没有歌单';
+        return null;
+      }
       _likedPlaylistId = lists.first.id;
+      debugPrint(
+        '[NetEaseSource] liked playlist=${lists.first.name} '
+        'id=$_likedPlaylistId count=${lists.first.trackCount}',
+      );
       return _likedPlaylistId;
     } on NetEaseApiException catch (e) {
+      lastError = '读取歌单失败：${e.message}';
       debugPrint('[NetEaseSource] userPlaylists error: ${e.message}');
       return null;
     }
@@ -123,19 +138,41 @@ class NetEaseSource implements MusicSource {
         case HomeFeed.favorites:
           final playlistId = await _ensureLikedPlaylist();
           if (playlistId == null) return const [];
-          return _toEntities(await _api.playlistTracks(playlistId));
+          final songs = await _api.playlistTracks(playlistId);
+          debugPrint('[NetEaseSource] favorites tracks=${songs.length}');
+          return _toEntities(songs);
         case HomeFeed.recentPlayed:
           final uid = await _ensureUid();
           if (uid == null) return const [];
-          return _toEntities(await _api.playRecord(uid));
+          var songs = await _api.playRecord(uid);
+          // 有些账号把「听歌排行」设成了隐私，全部历史会返回空；
+          // 退一步取一周榜，那份通常还在。
+          if (songs.isEmpty) {
+            debugPrint('[NetEaseSource] allData 为空，改取一周榜');
+            songs = await _api.playRecord(uid, weekly: true);
+          }
+          debugPrint('[NetEaseSource] playRecord tracks=${songs.length}');
+          if (songs.isEmpty) {
+            lastError = '播放记录为空（账号可能设置了隐私）';
+          }
+          return _toEntities(songs);
         case HomeFeed.latestSongs:
           return _toEntities(await _api.newSongs(limit: limit));
       }
     } on NetEaseApiException catch (e) {
-      debugPrint('[NetEaseSource] feed $kind error: ${e.message}');
+      lastError = '${_feedName(kind)}读取失败：${e.message}';
+      debugPrint(
+        '[NetEaseSource] feed $kind error: ${e.message} code=${e.code}',
+      );
       return const [];
     }
   }
+
+  static String _feedName(HomeFeed kind) => switch (kind) {
+    HomeFeed.favorites => '收藏',
+    HomeFeed.recentPlayed => '最近播放',
+    HomeFeed.latestSongs => '最新歌曲',
+  };
 
   @override
   Future<List<SourcePlaylist>> playlists({int limit = 10}) async {

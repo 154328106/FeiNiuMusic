@@ -30,6 +30,7 @@ import 'app/state/settings_island_lyric.dart';
 import 'app/state/settings_lyric_companion.dart';
 import 'app/state/settings_match.dart';
 import 'app/services/source/music_source_registry.dart';
+import 'app/services/unblock/unblock_source.dart';
 import 'app/state/settings_state.dart';
 
 Future<void> main() async {
@@ -122,6 +123,7 @@ Future<void> main() async {
   // 设置懒加载（IslandLyricSettings.ensureLoaded）由设置页与 start 内部处理，
   // 默认关闭不打扰。
   await MusicSourceRegistry.instance.ensureLoaded();
+  await UnblockSourceService.instance.load();
   await IslandLyricSettings.ensureLoaded();
   if (Platform.isAndroid) {
     IslandLyricService.start();
