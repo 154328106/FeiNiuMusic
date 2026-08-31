@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../app/services/player_service.dart';
 import '../../../app/state/settings_state.dart';
 import '../../../app/utils/primary_shell_scope.dart';
 import 'app_background.dart';
@@ -190,7 +191,12 @@ class AppPageScaffoldState extends State<AppPageScaffold>
     final bottomBar = hasBottomNav && !PrimaryShellMarker.isInside(context)
         ? ModernNavigationBar(onTap: widget.onBottomNavTap!)
         : null;
-    final miniPlayer = widget.showMiniPlayer
+    // 「仅播放时显示」：暂停/停止就把这条收起来。用 PlayerService.isPlaying
+    // 而不是 currentSong —— 用户要的是「不播就不占地方」。
+    final hideWhilePaused =
+        AppBackgroundSettings.miniPlayerOnlyWhilePlaying.value &&
+        !PlayerService.instance.isPlaying.value;
+    final miniPlayer = widget.showMiniPlayer && !hideWhilePaused
         ? MiniPlayerBar(
             padding: hasBottomNav
                 ? const EdgeInsets.fromLTRB(16, 4, 16, 0)
@@ -232,6 +238,9 @@ class AppPageScaffoldState extends State<AppPageScaffold>
         AppLayoutSettings.effectiveTabletModeNotifier,
         AppGlassSettings.liquidGlassEnabled,
         AppLayoutSettings.tvMode,
+        // 「仅播放时显示迷你播放条」要随播放状态实时显隐。
+        AppBackgroundSettings.miniPlayerOnlyWhilePlaying,
+        PlayerService.instance.isPlaying,
       ]),
       builder: (context, _) {
         final tabletMode =

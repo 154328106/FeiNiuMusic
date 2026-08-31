@@ -183,7 +183,8 @@ class StreamAudioCacheSource extends StreamAudioSource {
           }
           request.complete(StreamAudioResponse(
             rangeRequestsSupported: true,
-            sourceLength: request.start != null ? _sourceLength : null,
+            // 同上：拿到了就报，不要因为是首次请求就藏起来。
+            sourceLength: _sourceLength,
             contentLength:
                 effectiveEnd != null ? effectiveEnd - effectiveStart : null,
             offset: request.start,
@@ -273,7 +274,11 @@ class StreamAudioCacheSource extends StreamAudioSource {
       final length = cacheFile.lengthSync();
       return StreamAudioResponse(
         rangeRequestsSupported: true,
-        sourceLength: start != null ? length : null,
+        // 总长已知就一定要报，哪怕这是首次（start == null）的整流请求。
+        // 报 null 等于告诉播放器「长度未知」，它就没法做字节↔时间换算，
+        // 只能按码率估算 —— VBR 文件估算必然偏，表现为拖动进度条后声音
+        // 和进度对不上（歌词跟的是进度，于是看着像歌词不同步）。
+        sourceLength: length,
         contentLength: (end ?? length) - (start ?? 0),
         offset: start,
         contentType: _readCachedMime(),

@@ -21,6 +21,8 @@ class AppBackgroundSettings {
       'setting_content_frame_opacity';
   static const String _prefsNavBarColor = 'setting_nav_bar_color';
   static const String _prefsNavBarOpacity = 'setting_nav_bar_opacity';
+  static const String _prefsMiniPlayerOnlyWhilePlaying =
+      'setting_mini_player_only_while_playing';
 
   static final ValueNotifier<String?> backgroundImagePath = ValueNotifier(null);
   static final ValueNotifier<double> backgroundMaskOpacity = ValueNotifier(
@@ -51,6 +53,13 @@ class AppBackgroundSettings {
 
   /// 底部导航栏底色深浅度（不透明度）0~1。
   static final ValueNotifier<double> navBarOpacity = ValueNotifier(0.85);
+
+  /// 迷你播放条仅在播放时显示，暂停/停止时隐藏。
+  ///
+  /// 注意：开启后暂停就看不到这条，想恢复播放得进播放页或从列表点。
+  static final ValueNotifier<bool> miniPlayerOnlyWhilePlaying = ValueNotifier(
+    false,
+  );
 
   /// 生效的高斯模糊强度：总开关关闭时恒为 0。
   static double get effectivePanelBlur {
@@ -86,6 +95,8 @@ class AppBackgroundSettings {
     navBarColor.value = navColor == null ? null : Color(navColor);
     navBarOpacity.value =
         (prefs.getDouble(_prefsNavBarOpacity) ?? 0.85).clamp(0.0, 1.0);
+    miniPlayerOnlyWhilePlaying.value =
+        prefs.getBool(_prefsMiniPlayerOnlyWhilePlaying) ?? false;
   }
 
   static Future<void> setBackgroundImagePath(String? path) async {
@@ -152,6 +163,12 @@ class AppBackgroundSettings {
       await prefs.setInt(_prefsNavBarColor, color.toARGB32());
     }
     navBarColor.value = color;
+  }
+
+  static Future<void> setMiniPlayerOnlyWhilePlaying(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsMiniPlayerOnlyWhilePlaying, value);
+    miniPlayerOnlyWhilePlaying.value = value;
   }
 
   static Future<void> setNavBarOpacity(double value) async {

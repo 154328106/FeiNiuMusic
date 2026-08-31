@@ -706,6 +706,21 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                   );
                 },
               ),
+              ValueListenableBuilder<bool>(
+                valueListenable:
+                    AppBackgroundSettings.miniPlayerOnlyWhilePlaying,
+                builder: (context, only, _) {
+                  return AppSettingSwitchTile(
+                    title: '仅播放时显示播放条',
+                    subtitle: only
+                        ? '暂停后播放条会收起，需从播放页或列表恢复播放'
+                        : '播放条常驻底部',
+                    value: only,
+                    onChanged: AppBackgroundSettings
+                        .setMiniPlayerOnlyWhilePlaying,
+                  );
+                },
+              ),
               ValueListenableBuilder<Color?>(
                 valueListenable: AppBackgroundSettings.navBarColor,
                 builder: (context, navColor, _) {
