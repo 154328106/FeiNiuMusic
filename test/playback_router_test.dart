@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:feiniu_music/app/services/player/player_engine.dart';
 import 'package:feiniu_music/app/services/player/playback_router.dart';
+import 'package:feiniu_music/app/state/settings_transcode_state.dart';
 import 'package:feiniu_music/app/state/song_state.dart';
 
 /// 构造带 format/codec 的歌曲（两者都显式给值 → routeForSong 零网络开销）。
@@ -17,6 +18,28 @@ SongEntity _song(String id, {String? format, String? codec}) {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  // 「优先 FFmpeg 解码」默认开启，开着的话一切格式都返回 mediaKit，
+  // 下面这组用例考的是**格式/codec → 引擎**的映射，必须先关掉全局覆盖
+  // 才测得到那条路径。
+  setUp(() => AppTranscodeSettings.preferFfmpegDecoder.value = false);
+  tearDown(() => AppTranscodeSettings.preferFfmpegDecoder.value = true);
+
+  group('优先 FFmpeg 解码（全局覆盖）', () {
+    test('开启后普通格式也走 mediaKit', () {
+      AppTranscodeSettings.preferFfmpegDecoder.value = true;
+      expect(routeForFormat('mp3', codec: 'mp3'), EngineKind.mediaKit);
+      expect(routeForFormat('flac', codec: 'flac'), EngineKind.mediaKit);
+      expect(routeForFormat(null), EngineKind.mediaKit);
+    });
+
+    test('关闭后回到按格式路由', () {
+      AppTranscodeSettings.preferFfmpegDecoder.value = false;
+      expect(routeForFormat('mp3', codec: 'mp3'), EngineKind.justAudio);
+      // 黑名单格式仍然走 mediaKit，与全局开关无关。
+      expect(routeForFormat('dsf'), EngineKind.mediaKit);
+    });
+  });
 
   group('routeForFormat（codec 感知）', () {
     test('M4A + EAC3 → mediaKit（本次无声 bug 场景）', () {
