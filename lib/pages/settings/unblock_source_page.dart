@@ -118,8 +118,8 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                       ? '上面的音源没配或没命中时，再试 GD Studio / 酷狗 / 酷我'
                       : '关闭后只用上面配置的音源',
                   value: on,
-                  onChanged: UnblockSourceService.instance
-                      .setFreeFallbackEnabled,
+                  onChanged:
+                      UnblockSourceService.instance.setFreeFallbackEnabled,
                 ),
               ),
             ],
