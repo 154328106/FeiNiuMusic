@@ -37,6 +37,13 @@ class NetEasePlaybackService {
   final Map<int, _ResolvedUrl> _cache = {};
   final Map<int, Future<String?>> _inflight = {};
 
+  /// 确认取不到地址的歌（下架 / 无版权，且音源也没有）。
+  ///
+  /// 没有这份记录，每次起播都会把这些歌重新走一遍完整流程：eapi → weapi
+  /// 兜底 → 降级 standard → 逐个问音源。实测 5 首这样的歌就要 4.4 秒，
+  /// 表现为「点收藏要等五秒才出声，切下一首还是等五秒」。
+  final Set<int> _unresolvable = {};
+
   /// 当前音质档位。免费账号拿不到 lossless 会自动降级。
   String level = 'exhigh';
 
@@ -64,6 +71,8 @@ class NetEasePlaybackService {
   }
 
   Future<String?> _fetch(int neteaseId) async {
+    // 已确认取不到的，直接返回，不再走一整套请求。
+    if (_unresolvable.contains(neteaseId)) return null;
     try {
       final result = await NetEaseApiClient.instance.songUrls([
         neteaseId,
@@ -86,6 +95,7 @@ class NetEasePlaybackService {
       }
 
       if (url == null) {
+        _unresolvable.add(neteaseId);
         debugPrint('[NetEase] $neteaseId 无可用播放地址（灰色/无版权/需要会员）');
         return null;
       }
@@ -118,27 +128,50 @@ class NetEasePlaybackService {
     final ids = <int>[];
     for (final song in songs) {
       final id = song.neteaseId;
-      // 已经缓存过地址的不用再问。
-      if (id != null && !(_cache[id]?.isExpired == false)) ids.add(id);
+      if (id == null) continue;
+      // 已缓存地址的、以及已确认取不到的，都不用再问。
+      if (_cache[id]?.isExpired == false) continue;
+      if (_unresolvable.contains(id)) continue;
+      ids.add(id);
     }
-    if (ids.isEmpty) return songs;
+    if (ids.isEmpty) {
+      // 全部有结论了，直接按结论过滤，一个网络请求都不发。
+      return songs
+          .where((s) => !_unresolvable.contains(s.neteaseId ?? -1))
+          .toList();
+    }
 
     Map<int, NetEaseSongUrl> result;
     try {
       result = await NetEaseApiClient.instance.songUrls(ids, level: level);
-      // 高音质档位不是每首都有，缺档时服务端可能直接不给地址。
-      // 一首都没解析出来就降到 standard 再试一次。
-      if (result.values.every((e) => e.url == null) && level != 'standard') {
-        debugPrint('[NetEase] $level 无结果，降级 standard 重试');
-        result = await NetEaseApiClient.instance.songUrls(
-          ids,
-          level: 'standard',
-        );
-      }
+      // 曾经在这里加过「全空就降级 standard 重试」。实测无用：eapi 本身
+      // 工作正常（48/54 有地址），取不到的那几首是真下架，换音质也一样是空。
+      // 留着只会让每次起播多打一轮请求，去掉。
     } on NetEaseApiException catch (e) {
       // 批量失败就不要在这里拦人，交给播放时逐首解析。
       debugPrint('[NetEase] 批量取地址失败，跳过预筛：${e.message}');
       return songs;
+    }
+
+    // 官方给不出地址的，统一交给音源 —— **并行**问。串行的话每首约 0.7 秒，
+    // 收藏里几首下架歌就能把起播拖到四五秒。
+    final needUnblock = <int>[
+      for (final id in ids)
+        if (result[id]?.url == null || (result[id]?.freeTrial ?? false)) id,
+    ];
+    final unblocked = <int, String>{};
+    if (needUnblock.isNotEmpty) {
+      final resolved = await Future.wait([
+        for (final id in needUnblock)
+          UnblockSourceService.instance.resolve(
+            platform: 'wy',
+            songId: '$id',
+          ),
+      ]);
+      for (var i = 0; i < needUnblock.length; i++) {
+        final url = resolved[i];
+        if (url != null) unblocked[needUnblock[i]] = url;
+      }
     }
 
     final playable = <SongEntity>[];
@@ -154,16 +187,16 @@ class NetEasePlaybackService {
         playable.add(song);
         continue;
       }
-      final info = result[id];
-      var url = info?.url;
-      if (url == null || info!.freeTrial) {
-        final unblocked = await UnblockSourceService.instance.resolve(
-          platform: 'wy',
-          songId: '$id',
-        );
-        if (unblocked != null) url = unblocked;
+      if (_unresolvable.contains(id)) {
+        dropped++;
+        continue;
       }
+      final url = result[id]?.freeTrial == true
+          ? (unblocked[id] ?? result[id]?.url)
+          : (result[id]?.url ?? unblocked[id]);
       if (url == null) {
+        // 官方和音源都没有 → 记下来，之后不再为它发请求。
+        _unresolvable.add(id);
         dropped++;
         continue;
       }
@@ -177,8 +210,8 @@ class NetEasePlaybackService {
     // 只有零星几首给不出 → 那几首本来就下架了。
     final official = result.values.where((e) => e.url != null).length;
     debugPrint(
-      '[NetEase] 队列 ${songs.length} 首：官方 $official 首有地址，'
-      '可播 ${playable.length} 首，跳过 $dropped 首',
+      '[NetEase] 队列 ${songs.length} 首：本次问了 ${ids.length} 首，'
+      '官方 $official 首有地址，可播 ${playable.length} 首，跳过 $dropped 首',
     );
     return playable;
   }
@@ -186,7 +219,11 @@ class NetEasePlaybackService {
   /// 丢弃某首歌的地址缓存（播放失败后重取用）。
   void invalidate(int neteaseId) => _cache.remove(neteaseId);
 
-  void clear() => _cache.clear();
+  void clear() {
+    _cache.clear();
+    // 负缓存也要清：换了账号、或者刚配好音源密钥，这些歌值得再试一次。
+    _unresolvable.clear();
+  }
 
   /// 播放网易云歌曲时要带的请求头。
   ///

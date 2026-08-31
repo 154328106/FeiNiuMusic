@@ -396,22 +396,12 @@ class NetEaseApiClient {
   }) async {
     if (ids.isEmpty) return {};
 
-    var result = await _songUrlsVia(_Scheme.eapi, ids, level);
-    var resolved = result.values.where((e) => e.url != null).length;
-    debugPrint('[NetEase] songUrls eapi: $resolved/${ids.length} 有地址');
-
-    // eapi 一首都没解析出来 → 很可能这条路的登录态没生效（服务端按游客处理，
-    // VIP 歌一律不给地址）。换 weapi 再试一次：收藏、播放记录都走 weapi 且
-    // 正常，说明那条路的凭据是好的。
-    if (resolved == 0) {
-      final viaWeapi = await _songUrlsVia(_Scheme.weapi, ids, level);
-      final weapiResolved = viaWeapi.values.where((e) => e.url != null).length;
-      debugPrint('[NetEase] songUrls weapi 兜底: $weapiResolved/${ids.length}');
-      if (weapiResolved > 0) {
-        result = viaWeapi;
-        resolved = weapiResolved;
-      }
-    }
+    // 只走 eapi。曾怀疑过 eapi 带不上登录态（收藏走 weapi 正常、取地址失败），
+    // 加过 weapi 兜底；实测 eapi 是好的（48/54 有地址），取不到的那几首在
+    // weapi 上同样是 0，纯属下架。兜底已去掉，免得每次多打一轮请求。
+    final result = await _songUrlsVia(_Scheme.eapi, ids, level);
+    final resolved = result.values.where((e) => e.url != null).length;
+    debugPrint('[NetEase] songUrls: $resolved/${ids.length} 有地址');
     return result;
   }
 
