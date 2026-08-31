@@ -101,9 +101,7 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
             children: [
               AppSettingSwitchTile(
                 title: '启用第三方音源',
-                subtitle: _enabled
-                    ? '官方无法播放时自动尝试音源'
-                    : '关闭后灰色/会员歌曲将直接跳过',
+                subtitle: _enabled ? '官方无法播放时自动尝试音源' : '关闭后灰色/会员歌曲将直接跳过',
                 value: _enabled,
                 onChanged: (v) => setState(() => _enabled = v),
               ),
