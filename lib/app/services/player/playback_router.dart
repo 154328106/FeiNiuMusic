@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../feiniu/transcode_service.dart';
+import '../../state/settings_transcode_state.dart';
 import '../../state/song_state.dart';
 import 'player_engine.dart';
 
@@ -33,6 +34,11 @@ EngineKind routeForFormat(String? format, {String? codec}) {
       (defaultTargetPlatform == TargetPlatform.windows ||
           defaultTargetPlatform == TargetPlatform.macOS ||
           defaultTargetPlatform == TargetPlatform.linux)) {
+    return EngineKind.mediaKit;
+  }
+  // 用户全局选择 FFmpeg 解码：一律走 media_kit。系统解码器 seek 网络 VBR
+  // MP3 时按码率估算落点，误差随方向随机；FFmpeg 建帧索引，落点准确。
+  if (AppTranscodeSettings.preferFfmpegDecoder.value) {
     return EngineKind.mediaKit;
   }
   // codec 判断优先：eac3/ac3/alac 等 ExoPlayer 设备解码不可靠的编码直接

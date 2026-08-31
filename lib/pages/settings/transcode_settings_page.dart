@@ -36,6 +36,26 @@ class _TranscodeSettingsPageState extends State<TranscodeSettingsPage> {
         padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
         children: [
           AppSettingSection(
+            title: '解码器',
+            children: [
+              ValueListenableBuilder<bool>(
+                valueListenable: AppTranscodeSettings.preferFfmpegDecoder,
+                builder: (context, prefer, _) {
+                  return AppSettingSwitchTile(
+                    title: '优先 FFmpeg 解码',
+                    subtitle: prefer
+                        ? '全部歌曲用 FFmpeg 解码，进度条定位更准，耗电略高'
+                        : '用系统解码器；拖动进度条后声音与进度对不上时打开这个',
+                    value: prefer,
+                    onChanged:
+                        AppTranscodeSettings.setPreferFfmpegDecoder,
+                  );
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          AppSettingSection(
             title: '转码',
             children: [
               ValueListenableBuilder<bool>(

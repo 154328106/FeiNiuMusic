@@ -19,12 +19,21 @@ class AppTranscodeSettings {
   static const String _prefsTranscodeAll = 'transcode_all';
   static const String _prefsThresholdMb = 'transcode_threshold_mb';
   static const String _prefsFormat = 'transcode_format';
+  static const String _prefsPreferFfmpeg = 'prefer_ffmpeg_decoder';
 
   static const int defaultThresholdMb = 80;
   static const int minThresholdMb = 20;
   static const int maxThresholdMb = 500;
 
   static final ValueNotifier<bool> enabled = ValueNotifier(false);
+
+  /// 全局优先用 FFmpeg（media_kit）解码，而不是系统解码器。
+  ///
+  /// 移动端默认走系统解码（iOS 是 AVPlayer、Android 是 ExoPlayer）。系统解码
+  /// 器对**网络上的 VBR MP3** 只能按码率估算 seek 落点，误差方向随机 ——
+  /// 表现为拖完进度条后声音与进度对不上（歌词跟进度，于是看着像歌词错位）。
+  /// FFmpeg 会建帧索引，seek 落点准确。桌面端本来就恒用 media_kit。
+  static final ValueNotifier<bool> preferFfmpegDecoder = ValueNotifier(false);
   static final ValueNotifier<bool> transcodeAll = ValueNotifier(true);
   static final ValueNotifier<int> thresholdMb = ValueNotifier(defaultThresholdMb);
   static final ValueNotifier<TranscodeFormat> format =
@@ -37,6 +46,7 @@ class AppTranscodeSettings {
   static Future<void> _doLoad() async {
     final prefs = await SharedPreferences.getInstance();
     enabled.value = prefs.getBool(_prefsEnabled) ?? false;
+    preferFfmpegDecoder.value = prefs.getBool(_prefsPreferFfmpeg) ?? false;
     transcodeAll.value = prefs.getBool(_prefsTranscodeAll) ?? true;
     thresholdMb.value =
         (prefs.getInt(_prefsThresholdMb) ?? defaultThresholdMb)
@@ -46,6 +56,12 @@ class AppTranscodeSettings {
       (f) => f.name == saved,
       orElse: () => TranscodeFormat.flac,
     );
+  }
+
+  static Future<void> setPreferFfmpegDecoder(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsPreferFfmpeg, value);
+    preferFfmpegDecoder.value = value;
   }
 
   static Future<void> setEnabled(bool value) async {
