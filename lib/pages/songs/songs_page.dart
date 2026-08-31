@@ -640,6 +640,9 @@ class _SongsPageState extends State<SongsPage>
 
                           return AppContentRow(
                             isLast: index == songs.length - 1,
+                            // _SongListTile 只有纵向 padding，卡片模式下不留
+                            // 横向内缩的话封面会贴到描边上。
+                            horizontalInset: 10,
                             child: _SongListTile(
                               song: song,
                               isCurrent: isCurrent,

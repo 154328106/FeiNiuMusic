@@ -265,12 +265,14 @@ class ModernNavigationBar extends StatelessWidget {
               ),
         // 悬浮：胶囊上下各留 kGlassNavPillTopGap 空隙（槽位 56 + 14×2 = 84），
         // 内容从胶囊四周透出，视觉上像 demo（GlassScaffold 底栏）一样飘浮。
-        barHeight: 56,
+        // 与上方迷你播放条对齐：那条是 horizontal:16 内边距、内高 54
+        // （estimatedHeight 70 减去上下各 8）。两条宽窄不一会很扎眼。
+        barHeight: 54,
         // 圆角矩形而非胶囊：包的默认 barBorderRadius 是
         // GlassDefaults.capsuleRadius（9999），两端会被拉成半圆。
         barBorderRadius: 20,
         verticalPadding: kGlassNavPillTopGap,
-        horizontalPadding: 20,
+        horizontalPadding: 16,
         indicatorColor: pillColor,
       ),
     );

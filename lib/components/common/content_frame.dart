@@ -72,13 +72,27 @@ class AppContentFrame extends StatelessWidget {
     return ValueListenableBuilder<AppContentFrameStyle>(
       valueListenable: AppBackgroundSettings.contentFrameStyle,
       builder: (context, style, child) {
-        if (style != AppContentFrameStyle.outlined) return child!;
+        if (style == AppContentFrameStyle.none) return child!;
         return _watchFrameSettings(context, (context) {
-          final isDark = Theme.of(context).brightness == Brightness.dark;
+          final theme = Theme.of(context);
+          final isDark = theme.brightness == Brightness.dark;
+          // 「逐行卡片」下，独立区块（漫游卡、快捷入口）也要有卡片外观 ——
+          // 它们不是列表行，走不到 AppContentRow，只靠这里出框。
+          final isCards = style == AppContentFrameStyle.cards;
           return Container(
             decoration: BoxDecoration(
+              color: isCards
+                  ? (isDark
+                        ? theme.colorScheme.surfaceContainerHighest.withValues(
+                            alpha: 0.45,
+                          )
+                        : Colors.white.withValues(alpha: 0.75))
+                  : null,
               borderRadius: BorderRadius.circular(borderRadius),
-              border: Border.all(color: _frameBorderColor(context), width: 1.2),
+              border: Border.all(
+                color: _frameBorderColor(context, scale: isCards ? 0.75 : 1.0),
+                width: isCards ? 1 : 1.2,
+              ),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: isDark ? 0.20 : 0.05),
@@ -112,7 +126,16 @@ class AppContentRow extends StatelessWidget {
   /// 是否是所在列表的最后一行（决定要不要画分隔线 / 留底部间距）。
   final bool isLast;
 
-  const AppContentRow({super.key, required this.child, this.isLast = false});
+  /// 卡片内的横向内缩。行本身没有横向 padding 时（如歌曲页的
+  /// `_SongListTile`），不留这个内缩封面会直接贴到卡片描边上。
+  final double horizontalInset;
+
+  const AppContentRow({
+    super.key,
+    required this.child,
+    this.isLast = false,
+    this.horizontalInset = 0,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -169,7 +192,12 @@ class AppContentRow extends StatelessWidget {
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(13),
-                    child: child,
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: horizontalInset,
+                      ),
+                      child: child,
+                    ),
                   ),
                 ),
               );

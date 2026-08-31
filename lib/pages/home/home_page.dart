@@ -992,7 +992,8 @@ class _HomePageState extends State<HomePage>
               // 3. 我的歌单 — 横向封面轮播（尺寸小于专辑）
               if (_playlists.value.isNotEmpty) ...[
                 HomeSectionHeader(title: '我的歌单', onViewAll: _openPlaylistsPage),
-                HomeCoverCarousel(
+                AppContentFrame(
+                  child: HomeCoverCarousel(
                   coverSize: AppLayoutSettings.tvMode.value ? 140 : 100,
                   borderRadius: 14,
                   centerText: true,
@@ -1007,6 +1008,7 @@ class _HomePageState extends State<HomePage>
                         onTap: () => _openPlaylistDetail(p),
                       ),
                   ],
+                ),
                 ),
                 const SizedBox(height: 16),
               ],
@@ -1064,7 +1066,8 @@ class _CompactSongList extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final isTv = AppLayoutSettings.tvMode.value;
     final artworkSize = isTv ? 56.0 : 44.0;
-    final displaySongs = songs.take(5).toList();
+    // 固定 4 首：5 首时最后一行会被底部迷你播放条 + 导航栏盖住。
+    final displaySongs = songs.take(4).toList();
     return Column(
       children: List.generate(displaySongs.length, (i) {
         final song = displaySongs[i];
