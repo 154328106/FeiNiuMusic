@@ -76,14 +76,23 @@ class _ProfileAccountCardInner extends StatelessWidget {
                   ],
                 ),
                 alignment: Alignment.center,
-                child: Text(
-                  account.username.isNotEmpty
-                      ? account.username.characters.first
-                      : '?',
-                  style: TextStyle(
-                    color: scheme.primary,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 22,
+                clipBehavior: Clip.antiAlias,
+                // 这张卡就是「飞牛音乐」这个源本身，直接挂品牌图标；
+                // 图标缺失时退回原来的首字母头像。
+                child: Image.asset(
+                  'assets/source/feiniu.png',
+                  width: 56,
+                  height: 56,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => Text(
+                    account.username.isNotEmpty
+                        ? account.username.characters.first
+                        : '?',
+                    style: TextStyle(
+                      color: scheme.primary,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 22,
+                    ),
                   ),
                 ),
               ),

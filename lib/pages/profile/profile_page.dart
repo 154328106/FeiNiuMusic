@@ -56,6 +56,7 @@ class ProfilePage extends StatelessWidget {
                   _navTile(
                     context,
                     icon: Icons.bar_chart_rounded,
+                    assetIcon: 'assets/icon/stats.png',
                     title: '听歌统计',
                     subtitle: '本地播放数据概览',
                     route: AppRoutes.listeningStats,
@@ -73,18 +74,32 @@ class ProfilePage extends StatelessWidget {
     );
   }
 
+  /// [assetIcon] 给了就用图片，[icon] 退为加载失败时的兜底。
   Widget _navTile(
     BuildContext context, {
     required IconData icon,
     required String title,
     String? subtitle,
     required String route,
+    String? assetIcon,
   }) {
     final scheme = Theme.of(context).colorScheme;
     return AppSettingTile(
       title: title,
       subtitle: subtitle,
-      leading: Container(
+      leading: assetIcon != null
+          ? ClipRRect(
+              borderRadius: BorderRadius.circular(11),
+              child: Image.asset(
+                assetIcon,
+                width: 38,
+                height: 38,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) =>
+                    Icon(icon, size: 20, color: scheme.primary),
+              ),
+            )
+          : Container(
         width: 38,
         height: 38,
         alignment: Alignment.center,

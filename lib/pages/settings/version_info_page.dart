@@ -19,6 +19,11 @@ class VersionInfoPage extends StatefulWidget {
 }
 
 class _VersionInfoPageState extends State<VersionInfoPage> {
+  /// 自用构建：把「应用信息」整段藏起来（应用名/版本/项目地址/检查更新在
+  /// 自己编自己装的场景里没意义），这页就当调试面板用。代码原样留着，
+  /// 想恢复把这里改回 true 即可。
+  static final bool _showAppInfo = false;
+
   static const String _appName = '飞牛音乐';
   static const String _iconAsset = 'assets/icon/app_icon.png';
   static const String _projectUrl = 'https://github.com/kuilei0926/FeiNiuMusic';
@@ -125,7 +130,7 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
     return AppPageScaffold(
       extendBodyBehindAppBar: true,
       appBar: const AppTopBar(
-        title: '版本信息',
+        title: '调试模式',
         backgroundColor: Colors.transparent,
         elevation: 0,
       ),
@@ -133,9 +138,10 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
       body: ListView(
         padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
         children: [
-          AppSettingSection(
-            title: '应用信息',
-            children: [
+          if (_showAppInfo) ...[
+            AppSettingSection(
+              title: '应用信息',
+              children: [
               AppSettingTile(
                 title: '应用名称',
                 subtitle: _appName,
@@ -187,9 +193,10 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
                   );
                 },
               ),
-            ],
-          ),
-          const SizedBox(height: 16),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
           AppSettingSection(
             title: '调试',
             children: [

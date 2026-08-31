@@ -115,12 +115,19 @@ class _CarouselCard extends StatelessWidget {
                   ? ClipRRect(
                       borderRadius: BorderRadius.circular(borderRadius),
                       child: CachedNetworkImage(
-                        imageUrl: FeiNiuApiClient.instance.coverUrl(
-                          coverId,
-                          size: FeiNiuApiClient.coverRequestSize,
-                          updatedAt: item.updatedAt,
-                        ),
-                        httpHeaders: authHeaders,
+                        // 非飞牛的源（网易云歌单）coverId 存的就是公网直链，
+                        // 再套 coverUrl() 会拼成 NAS 一律 400 的地址。规则与
+                        // ArtworkWidget 一致：直链原样用，且不带飞牛鉴权头。
+                        imageUrl: coverId.startsWith('http')
+                            ? coverId
+                            : FeiNiuApiClient.instance.coverUrl(
+                                coverId,
+                                size: FeiNiuApiClient.coverRequestSize,
+                                updatedAt: item.updatedAt,
+                              ),
+                        httpHeaders: coverId.startsWith('http')
+                            ? null
+                            : authHeaders,
                         width: coverSize,
                         height: coverSize,
                         fit: BoxFit.cover,

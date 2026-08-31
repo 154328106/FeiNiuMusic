@@ -37,6 +37,7 @@ import '../../pages/library/playlists_page.dart';
 import '../../pages/library/genres_page.dart';
 import '../../pages/library/folders_page.dart';
 import '../../pages/search/search_page.dart';
+import '../../pages/search/search_tab.dart';
 import '../../pages/netease/netease_login_page.dart';
 import '../../pages/netease/netease_search_page.dart';
 import '../../pages/songs/batch_match_page.dart';
@@ -164,7 +165,7 @@ class _PrimaryNavigationShellState extends State<_PrimaryNavigationShell> {
     return switch (index) {
       0 => const HomePage(),
       1 => const SongsPage(),
-      2 => const SearchPage(),
+      2 => const SearchTab(),
       3 => const ProfilePage(),
       _ => const SizedBox.shrink(),
     };

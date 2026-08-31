@@ -9,6 +9,7 @@ import '../../app/services/player_service.dart';
 import '../../app/services/source/music_source_registry.dart';
 import '../../app/services/source/netease_source.dart';
 import '../../app/state/song_state.dart';
+import '../../components/index.dart';
 
 /// 网易云搜索页。
 ///
@@ -16,7 +17,11 @@ import '../../app/state/song_state.dart';
 /// `FeiNiuTrack` 强类型（guid / coverId / FeiNiuAlbum），塞进第二个数据源
 /// 要动 30 多个文件。等这条链路验证稳了再谈两边合流。
 class NetEaseSearchPage extends StatefulWidget {
-  const NetEaseSearchPage({super.key});
+  /// 作为底部导航的「搜索」页使用时置 true：套 [AppPageScaffold]、挂上底栏
+  /// 与迷你播放器、去掉返回键。单独 push 进来时保持独立页的样子。
+  final bool embedded;
+
+  const NetEaseSearchPage({super.key, this.embedded = false});
 
   @override
   State<NetEaseSearchPage> createState() => _NetEaseSearchPageState();
@@ -123,47 +128,63 @@ class _NetEaseSearchPageState extends State<NetEaseSearchPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('网易云音乐'),
-        actions: [
-          // 登录入口。不登录只有搜索能用 —— 收藏、每日推荐、播放记录都是
-          // 账号维度的数据，首页切到网易云也只能显示「推荐新歌」。
-          IconButton(
-            tooltip: _api.isLoggedIn ? '账号（已登录）' : '扫码登录',
-            icon: Icon(
-              _api.isLoggedIn
-                  ? Icons.account_circle_rounded
-                  : Icons.login_rounded,
-              color: _api.isLoggedIn ? theme.colorScheme.primary : null,
-            ),
-            onPressed: _openLogin,
-          ),
-        ],
+    // 登录入口。不登录只有搜索能用 —— 收藏、每日推荐、播放记录都是账号
+    // 维度的数据，首页切到网易云也只能显示「推荐新歌」。
+    final loginAction = IconButton(
+      tooltip: _api.isLoggedIn ? '账号（已登录）' : '扫码登录',
+      icon: Icon(
+        _api.isLoggedIn ? Icons.account_circle_rounded : Icons.login_rounded,
+        color: _api.isLoggedIn ? theme.colorScheme.primary : null,
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: TextField(
-              controller: _controller,
-              textInputAction: TextInputAction.search,
-              onSubmitted: (_) => _runSearch(),
-              decoration: InputDecoration(
-                hintText: '搜索歌曲',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.arrow_forward),
-                  onPressed: _runSearch,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+      onPressed: _openLogin,
+    );
+    final body = Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: TextField(
+            controller: _controller,
+            textInputAction: TextInputAction.search,
+            onSubmitted: (_) => _runSearch(),
+            decoration: InputDecoration(
+              hintText: '搜索歌曲',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.arrow_forward),
+                onPressed: _runSearch,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
               ),
             ),
           ),
-          Expanded(child: _buildBody(theme)),
-        ],
+        ),
+        Expanded(child: _buildBody(theme)),
+      ],
+    );
+
+    if (!widget.embedded) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('网易云音乐'),
+          actions: [loginAction],
+        ),
+        body: body,
+      );
+    }
+
+    return AppNavigationModeBuilder(
+      builder: (context, useBottomNavigation) => AppPageScaffold(
+        appBar: AppTopBar(
+          title: '搜索 · 网易云',
+          showBackButton: !useBottomNavigation,
+          actions: [loginAction],
+        ),
+        bottomNavIndex: useBottomNavigation ? 2 : null,
+        onBottomNavTap: useBottomNavigation
+            ? (index) => navigateToPrimaryDestination(context, index)
+            : null,
+        body: body,
       ),
     );
   }
@@ -199,6 +220,11 @@ class _NetEaseSearchPageState extends State<NetEaseSearchPage> {
     }
 
     return ListView.builder(
+      padding: EdgeInsets.only(
+        bottom: widget.embedded
+            ? AppPageScaffold.scrollableBottomPadding(context)
+            : 0,
+      ),
       itemCount: _results.length,
       itemBuilder: (context, index) {
         final song = _results[index];

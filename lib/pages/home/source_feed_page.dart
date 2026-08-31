@@ -14,9 +14,22 @@ import '../../components/index.dart';
 /// 与其把那两个页面改成半通用，不如给非飞牛的源一个干净的只读列表 ——
 /// 先让「点收藏能看到收藏」成立，再谈功能对齐。
 class SourceFeedPage extends StatefulWidget {
-  const SourceFeedPage({super.key, required this.kind, required this.title});
+  const SourceFeedPage({
+    super.key,
+    this.kind,
+    this.playlistId,
+    required this.title,
+  }) : assert(
+         kind != null || playlistId != null,
+         'kind 与 playlistId 至少给一个',
+       );
 
-  final HomeFeed kind;
+  /// 首页那几条流之一。给了 [playlistId] 时为 null。
+  final HomeFeed? kind;
+
+  /// 歌单 id（带源前缀）。给了它就展示这个歌单，而不是某条流。
+  final String? playlistId;
+
   final String title;
 
   @override
@@ -39,8 +52,11 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    // 这里要完整列表，不是首页那份 10 首的预览。
-    final songs = await _source.fullFeed(widget.kind, limit: 500);
+    // 这里要完整列表，不是首页那份预览。
+    final playlistId = widget.playlistId;
+    final songs = playlistId != null
+        ? await _source.playlistSongs(playlistId)
+        : await _source.fullFeed(widget.kind!, limit: 500);
     if (!mounted) return;
     setState(() {
       _songs = songs;

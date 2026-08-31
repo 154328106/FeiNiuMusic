@@ -236,8 +236,8 @@ class _SettingsPageState extends State<SettingsPage> {
                         Navigator.pushNamed(context, AppRoutes.backupRestore),
                   ),
                   AppSettingTile(
-                    title: '版本信息',
-                    subtitle: '版本号、检查更新与调试日志',
+                    title: '调试模式',
+                    subtitle: '调试日志的开关、清空与导出',
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () =>
                         Navigator.pushNamed(context, AppRoutes.versionInfo),

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -116,7 +117,7 @@ class _HomePageState extends State<HomePage>
   bool _roamAutoBusy = false;
 
   /// 轮播间隔。每一跳都是一次 roam-next 网络请求，太密既费流量也没意义。
-  static const Duration _roamAutoInterval = Duration(seconds: 12);
+  static const Duration _roamAutoInterval = Duration(seconds: 30);
 
   late final _loading = createSignal(true);
   late final _roamSong = createSignal<SongEntity?>(null);
@@ -127,6 +128,20 @@ class _HomePageState extends State<HomePage>
   late final _recentAlbums = createSignal<List<FeiNiuAlbum>>([]);
   late final _playlists = createSignal<List<FeiNiuPlaylist>>([]);
   late final _recentTracks = createSignal<List<SongEntity>>([]);
+
+  /// 非飞牛源的歌单（网易云等）。飞牛那份是 [FeiNiuPlaylist] 强类型，
+  /// 详情页也只吃飞牛的 guid，两边共用一个 signal 会串味，分开放。
+  late final _sourcePlaylists = createSignal<List<SourcePlaylist>>([]);
+
+  /// 「最新歌曲」的候选池：接口拉一大把，首页只露 [_latestVisible] 首，
+  /// 每 [_latestShuffleInterval] 从池子里重新抽一批 —— 只拉 4 首的话
+  /// 首页永远是同样那几首。
+  List<SongEntity> _latestPool = const [];
+  static const int _latestVisible = 4;
+  static const int _latestPoolSize = 40;
+  static const Duration _latestShuffleInterval = Duration(seconds: 30);
+  Timer? _latestShuffleTimer;
+  final Random _random = Random();
   late final _isRefreshing = createSignal(false);
 
   /// 首页顶部大图的标签：飞牛是「漫游 · 随心听」，网易云是「私人 FM」等。
@@ -141,6 +156,10 @@ class _HomePageState extends State<HomePage>
     _loadAll();
     _maybeShowTvEdgeHint();
     _roamAutoTimer = Timer.periodic(_roamAutoInterval, (_) => _autoRoamTick());
+    _latestShuffleTimer = Timer.periodic(
+      _latestShuffleInterval,
+      (_) => _shuffleLatestTick(),
+    );
     MusicSourceRegistry.instance.current.addListener(_onSourceChanged);
     // 登录 / 登出后源没换但内容变了，也要重拉。
     MusicSourceRegistry.instance.revision.addListener(_onSourceChanged);
@@ -151,6 +170,7 @@ class _HomePageState extends State<HomePage>
     if (!mounted) return;
     _activePlaySource = null;
     _activeQueueIds = const <String>{};
+    _latestPool = const [];
     _loading.value = true;
     unawaited(_loadAll(forceRefresh: true));
   }
@@ -158,6 +178,7 @@ class _HomePageState extends State<HomePage>
   @override
   void dispose() {
     _roamAutoTimer?.cancel();
+    _latestShuffleTimer?.cancel();
     MusicSourceRegistry.instance.current.removeListener(_onSourceChanged);
     MusicSourceRegistry.instance.revision.removeListener(_onSourceChanged);
     super.dispose();
@@ -276,7 +297,7 @@ class _HomePageState extends State<HomePage>
     // 后台异步刷新最新数据（缓存渲染后继续执行），完成后写回缓存
     _isRefreshing.value = !_loading.value; // 非首次加载才显示右上角转圈
     await Future.wait([
-      _loadRoam(),
+      _loadRoam(force: forceRefresh),
       _loadFavorites(),
       _loadRecentHistory(),
       _loadRecentAlbums(),
@@ -387,7 +408,11 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  Future<void> _loadRoam() async {
+  Future<void> _loadRoam({bool force = false}) async {
+    // 大图已经有内容就不重取。从别的页面回首页会走一次整页刷新，那时候把
+    // 大图换掉等于「一切页面回来歌就变了」。换源和下拉刷新才强制重取，
+    // 常规的自动换一首交给 _autoRoamTick。
+    if (!force && _roamSong.value != null) return;
     final hero = await _source.hero();
     if (!mounted) return;
     if (hero == null) {
@@ -473,8 +498,18 @@ class _HomePageState extends State<HomePage>
   Future<void> _loadPlaylists() async {
     if (_source.id != 'feiniu') {
       if (mounted) _playlists.value = const [];
+      // 非飞牛的源走中性的 SourcePlaylist：登录了给自己的歌单，
+      // 没登录退推荐歌单。
+      try {
+        final lists = await _source.playlists(limit: 12);
+        if (mounted) _sourcePlaylists.value = lists;
+      } catch (e, stack) {
+        debugPrint('[HomePage] source playlists error: $e
+$stack');
+      }
       return;
     }
+    if (mounted) _sourcePlaylists.value = const [];
     try {
       final pageData = await _api.getPlaylistList(page: 1, size: 10);
       if (mounted) _playlists.value = pageData.list;
@@ -484,10 +519,48 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _loadRecentTracks() async {
-    final songs = await _source.feed(HomeFeed.latestSongs);
-    if (mounted && !_sameSongs(_recentTracks.value, songs)) {
-      _recentTracks.value = songs;
+    final songs = await _source.feed(
+      HomeFeed.latestSongs,
+      limit: _latestPoolSize,
+    );
+    if (!mounted) return;
+    _latestPool = songs;
+    // 正在展示的那批还在池子里就别动 —— 每次回首页都换一批同样是闪。
+    // 换歌交给 30 秒的定时器。
+    final poolIds = {for (final s in songs) s.id};
+    final current = _recentTracks.value;
+    final stillValid =
+        current.isNotEmpty && current.every((s) => poolIds.contains(s.id));
+    if (!stillValid) _pickLatestSample();
+  }
+
+  /// 从候选池里随机抽 [_latestVisible] 首铺到首页。
+  void _pickLatestSample() {
+    if (!mounted) return;
+    final pool = _latestPool;
+    if (pool.length <= _latestVisible) {
+      if (!_sameSongs(_recentTracks.value, pool)) _recentTracks.value = pool;
+      return;
     }
+    // 抽到和当前一模一样时再试两次，免得「换一批」看着像没动。
+    var sample = const <SongEntity>[];
+    for (var attempt = 0; attempt < 3; attempt++) {
+      sample = (List<SongEntity>.of(pool)..shuffle(
+        _random,
+      )).take(_latestVisible).toList();
+      if (!_sameSongs(_recentTracks.value, sample)) break;
+    }
+    if (!_sameSongs(_recentTracks.value, sample)) _recentTracks.value = sample;
+  }
+
+  /// 定时换一批。首页不在前台时不动，免得用户回来时内容已经变了。
+  void _shuffleLatestTick() {
+    if (!mounted || _latestPool.length <= _latestVisible) return;
+    if (primaryNavigationShellActive && primaryNavigationIndex.value != 0) {
+      return;
+    }
+    if (AppLayoutSettings.playerRouteActive.value) return;
+    _pickLatestSample();
   }
 
   /// 长按歌曲 → 弹出与歌曲页同款的长按面板
@@ -579,6 +652,16 @@ class _HomePageState extends State<HomePage>
     );
   }
 
+  /// 打开非飞牛源的歌单（网易云等）。飞牛的详情页只吃自家 guid，
+  /// 这里用通用的只读列表页。
+  void _openSourcePlaylist(SourcePlaylist playlist) {
+    Navigator.of(context).push(
+      buildAppPageRoute<void>(
+        (_) => SourceFeedPage(playlistId: playlist.id, title: playlist.name),
+      ),
+    );
+  }
+
   void _openPlaylistDetail(FeiNiuPlaylist playlist) {
     Navigator.of(context).push(
       buildAppPageRoute<void>(
@@ -601,8 +684,12 @@ class _HomePageState extends State<HomePage>
     Navigator.of(context).pushNamed(AppRoutes.playlists);
   }
 
-  /// 右上角搜索 → 综合搜索页。
+  /// 右上角搜索 → 综合搜索页。搜的是当前源：网易云走网易云的搜索页。
   void _openSearch() {
+    if (_source.id == 'netease') {
+      Navigator.pushNamed(context, AppRoutes.neteaseSearch);
+      return;
+    }
     Navigator.pushNamed(
       context,
       AppRoutes.search,
@@ -1014,6 +1101,29 @@ class _HomePageState extends State<HomePage>
                       ),
                   ],
                 ),
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // 3b. 非飞牛源的歌单 —— 同一套轮播，数据走 SourcePlaylist。
+              if (_source.id != 'feiniu' &&
+                  _sourcePlaylists.value.isNotEmpty) ...[
+                HomeSectionHeader(title: '${_source.label}歌单'),
+                AppContentFrame(
+                  child: HomeCoverCarousel(
+                    coverSize: AppLayoutSettings.tvMode.value ? 140 : 100,
+                    borderRadius: 14,
+                    centerText: true,
+                    items: [
+                      for (final p in _sourcePlaylists.value)
+                        HomeCoverItem(
+                          coverId: p.coverId,
+                          title: p.name,
+                          subtitle: '',
+                          onTap: () => _openSourcePlaylist(p),
+                        ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 16),
               ],
