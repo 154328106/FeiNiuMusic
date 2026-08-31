@@ -65,7 +65,8 @@ class FeiniuSource implements MusicSource {
     try {
       final deviceId = await AuthService.instance.ensureDeviceId();
       final current = _roamId;
-      if (current == null || current.isEmpty) return hero();
+      // 必须 await：不加的话这个 Future 的异常会绕过下面的 catch。
+      if (current == null || current.isEmpty) return await hero();
       final next = await _api.getRoamNext(deviceId, current);
       final upcoming = next.next;
       if (upcoming == null) return null;
