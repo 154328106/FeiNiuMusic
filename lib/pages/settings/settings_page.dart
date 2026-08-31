@@ -50,19 +50,8 @@ class _SettingsPageState extends State<SettingsPage> {
           body: ListView(
             padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
             children: [
-              AppSettingSection(
-                title: '账号',
-                children: [
-                  AppSettingTile(
-                    title: '账号管理',
-                    subtitle: '切换、重命名或添加已保存的账号',
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () =>
-                        Navigator.pushNamed(context, AppRoutes.accounts),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
+              // 「账号管理」只留在「我的」页面顶部那张账号卡片上：
+              // 它、我的页的同名条目、这里的入口原本都指向同一个页面。
               AppSettingSection(
                 title: '外观',
                 children: [

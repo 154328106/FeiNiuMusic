@@ -41,19 +41,8 @@ class ProfilePage extends StatelessWidget {
               const SizedBox(height: 20),
               // 「资源库」（专辑/歌手/风格）与「最近播放」已从这里移除：
               // 首页的快捷入口和功能卡片里都有，放两份只是重复。
-              AppSettingSection(
-                title: '账号',
-                children: [
-                  _navTile(
-                    context,
-                    icon: Icons.manage_accounts_rounded,
-                    title: '账号管理',
-                    subtitle: '切换、重命名或添加已保存的账号',
-                    route: AppRoutes.accounts,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
+              // 「账号管理」也去掉了：上面那张 ProfileAccountCard 点进去就是
+              // 同一个 AppRoutes.accounts，两个入口紧挨着更像是漏删。
               AppSettingSection(
                 title: '更多',
                 children: [
