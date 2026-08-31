@@ -4,6 +4,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'free_unblock_sources.dart';
+
 /// 第三方音源（解锁灰色 / 会员歌曲的播放地址）。
 ///
 /// 协议照聆澜音源，与 Beans-Music 1.5.9 一致：
@@ -109,6 +111,12 @@ class UnblockSourceService {
     ),
   );
 
+  /// 免费兜底音源的开关。默认开：不要密钥、不要账号，聆澜没配或没命中时
+  /// 还能救回一部分歌。
+  final ValueNotifier<bool> freeFallbackEnabled = ValueNotifier(true);
+
+  static const String _prefsFreeKey = 'unblock.source.freeFallback';
+
   bool get isUsable => config.value.isUsable;
 
   Future<void> load() async {
@@ -117,6 +125,7 @@ class UnblockSourceService {
     try {
       final prefs = await SharedPreferences.getInstance();
       _preferredKeyIndex = prefs.getInt(_prefsPreferredKey) ?? 0;
+      freeFallbackEnabled.value = prefs.getBool(_prefsFreeKey) ?? true;
       final raw = prefs.getString(_prefsKey);
       if (raw == null || raw.isEmpty) return;
       final decoded = jsonDecode(raw);
@@ -136,6 +145,14 @@ class UnblockSourceService {
     } catch (_) {}
   }
 
+  Future<void> setFreeFallbackEnabled(bool value) async {
+    freeFallbackEnabled.value = value;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefsFreeKey, value);
+    } catch (_) {}
+  }
+
   Future<void> _rememberKey(int index) async {
     if (_preferredKeyIndex == index) return;
     _preferredKeyIndex = index;
@@ -149,31 +166,48 @@ class UnblockSourceService {
   ///
   /// [platform] 用平台代号（`wy` / `tx` / `kg`）。拿不到返回 null，调用方
   /// 应当跳过这首而不是反复重试。
+  ///
+  /// [keyword]（「歌名 歌手」）和 [durationMs] 只有免费兜底音源用得上 ——
+  /// 酷狗、酷我那两家是按关键词搜的，没有时长就没法从搜索结果里挑对版本，
+  /// 很容易匹配到现场版或翻唱。
   Future<String?> resolve({
     required String platform,
     required String songId,
+    String? keyword,
+    int durationMs = 0,
   }) async {
     await load();
     final cfg = config.value;
-    if (!cfg.isUsable) return null;
 
-    final keys = cfg.apiKeys;
-    // 从上次命中的那个开始轮，命中率最高的先试。
-    for (var offset = 0; offset < keys.length; offset++) {
-      final index = (_preferredKeyIndex + offset) % keys.length;
-      final url = await _requestOnce(
-        cfg: cfg,
-        platform: platform,
-        songId: songId,
-        apiKey: keys[index],
-      );
-      if (url != null) {
-        await _rememberKey(index);
-        return url;
+    if (cfg.isUsable) {
+      final keys = cfg.apiKeys;
+      // 从上次命中的那个开始轮，命中率最高的先试。
+      for (var offset = 0; offset < keys.length; offset++) {
+        final index = (_preferredKeyIndex + offset) % keys.length;
+        final url = await _requestOnce(
+          cfg: cfg,
+          platform: platform,
+          songId: songId,
+          apiKey: keys[index],
+        );
+        if (url != null) {
+          await _rememberKey(index);
+          return url;
+        }
       }
+      debugPrint('[Unblock] ${keys.length} 个密钥全部未命中：$platform/$songId');
     }
-    debugPrint('[Unblock] ${keys.length} 个密钥全部未命中：$platform/$songId');
-    return null;
+
+    // 聆澜没配、或者这首它也没有 —— 再试一遍免费的那几家。
+    // 目前只做了网易云：另外两家的原始 id 对不上 GD Studio 的入参。
+    if (!freeFallbackEnabled.value || platform != 'wy') return null;
+    final numericId = int.tryParse(songId);
+    if (numericId == null) return null;
+    return FreeUnblockSources.resolve(
+      neteaseId: numericId,
+      keyword: keyword ?? '',
+      durationMs: durationMs,
+    );
   }
 
   Future<String?> _requestOnce({

@@ -1,15 +1,18 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
-import '../../../app/services/feiniu/api_client.dart';
 import '../../../app/state/song_state.dart';
+import '../../../app/utils/cover_dominant_color.dart';
 import '../../../app/utils/route_visibility.dart';
+
+// averageImageColor 已搬去 app/utils/cover_dominant_color.dart（那边还带按
+// 来源分流的取色缓存）。这里 re-export，老的引用方不用改。
+export '../../../app/utils/cover_dominant_color.dart' show averageImageColor;
 
 /// 播放页封面样式。
 ///
@@ -249,10 +252,6 @@ class PlayerTheme extends StatelessWidget {
 }
 
 class _PlayerBackgroundState extends State<PlayerBackground> {
-  static const int _dominantCacheLimit = 128;
-  static final Map<String, Color> _dominantCache = {};
-  static final Map<String, Future<Color?>> _dominantInflight = {};
-
   String? _lastCoverPath;
   Color? _dominantColor;
 
@@ -318,79 +317,17 @@ class _PlayerBackgroundState extends State<PlayerBackground> {
   }
 
   Future<void> _loadDominantColor(String coverPath) async {
-    final cached = _dominantCache[coverPath];
+    final cached = CoverDominantColor.cached(coverPath);
     if (cached != null) {
       if (!mounted) return;
       setState(() => _dominantColor = cached);
       return;
     }
-    final future =
-        _dominantInflight[coverPath] ??
-        (_dominantInflight[coverPath] = _computeDominantColor(coverPath));
-    final color = await future;
-    _dominantInflight.remove(coverPath);
+    final color = await CoverDominantColor.resolve(coverPath);
     if (!mounted) return;
     if (_lastCoverPath != coverPath) return;
-    if (color != null) {
-      if (_dominantCache.length >= _dominantCacheLimit) {
-        // Insertion-ordered map: evict the oldest entry to bound memory.
-        _dominantCache.remove(_dominantCache.keys.first);
-      }
-      _dominantCache[coverPath] = color;
-    }
     setState(() => _dominantColor = color);
   }
-
-  Future<Color?> _computeDominantColor(String coverId) async {
-    try {
-      final api = FeiNiuApiClient.instance;
-      // 仅用于取主色调的下采样（非显示），刻意用小图 40px 节省带宽与解码；
-      // 不参与封面显示的缓存复用。
-      final url = api.coverUrl(coverId, size: 40);
-      final dio = Dio();
-      final response = await dio.get(
-        url,
-        options: Options(
-          responseType: ResponseType.bytes,
-          headers: api.authHeaders(),
-        ),
-      );
-      final bytes = response.data as Uint8List;
-      return averageImageColor(bytes);
-    } catch (_) {
-      return null;
-    }
-  }
-}
-
-/// Average (dominant) color of decoded image [bytes], downscaled for speed.
-/// Shared by the live cover probe and the asset-based preview probe.
-Future<Color?> averageImageColor(Uint8List bytes) async {
-  if (bytes.isEmpty) return null;
-  final codec = await ui.instantiateImageCodec(
-    bytes,
-    targetWidth: 40,
-    targetHeight: 40,
-  );
-  final frame = await codec.getNextFrame();
-  final image = frame.image;
-  final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
-  if (data == null) return null;
-  final list = data.buffer.asUint8List();
-  int r = 0;
-  int g = 0;
-  int b = 0;
-  int count = 0;
-  for (var i = 0; i + 3 < list.length; i += 4) {
-    final a = list[i + 3];
-    if (a < 10) continue;
-    r += list[i];
-    g += list[i + 1];
-    b += list[i + 2];
-    count += 1;
-  }
-  if (count == 0) return null;
-  return Color.fromARGB(255, r ~/ count, g ~/ count, b ~/ count);
 }
 
 /// Dominant color of a bundled asset image, for previews that want the aurora to

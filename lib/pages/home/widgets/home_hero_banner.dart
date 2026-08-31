@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../../app/services/feiniu/api_client.dart';
 import '../../../app/state/settings_layout_state.dart';
 import '../../../app/state/song_state.dart';
+import '../../../app/utils/cover_dominant_color.dart';
 import '../../../components/focus/tv_focusable.dart';
 
 /// 封面地址：非飞牛的源（网易云等）在 coverId 里存的就是完整公网直链，
@@ -233,93 +234,241 @@ class HomeHeroBanner extends StatelessWidget {
     );
     return centered;
   }
-  /// 紧凑横向卡片（手机端默认）：左侧小封面 + 歌名/歌手 + 右侧圆形按钮。
+  /// 紧凑横向卡片（手机端默认）：左侧小封面 + 歌名/歌手 + 右侧雷达按钮。
   ///
   /// 取代原先 16:9 的全出血大图 —— 大图把首页第一屏占掉近一半，下面的
   /// 快捷入口和列表都被挤到折叠线以下。
   Widget _buildCompact(BuildContext context) {
+    return _CompactHeroCard(
+      song: song,
+      onPlay: onPlay,
+      onRefresh: onRefresh,
+      isPlaying: isPlaying,
+    );
+  }
+}
+
+/// 手机端漫游卡。
+///
+/// 有状态是因为两件事都得跟着歌走：卡片底色取自当前封面的主色调，
+/// 播放时还有一道掠光左右来回扫。
+class _CompactHeroCard extends StatefulWidget {
+  const _CompactHeroCard({
+    required this.song,
+    required this.onPlay,
+    required this.onRefresh,
+    required this.isPlaying,
+  });
+
+  final SongEntity? song;
+  final VoidCallback onPlay;
+  final VoidCallback? onRefresh;
+  final bool isPlaying;
+
+  @override
+  State<_CompactHeroCard> createState() => _CompactHeroCardState();
+}
+
+class _CompactHeroCardState extends State<_CompactHeroCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _sweep = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 4200),
+  );
+
+  Color? _tint;
+  String? _tintCoverId;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolveTint();
+    if (widget.isPlaying) _sweep.repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(covariant _CompactHeroCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.song?.coverId != oldWidget.song?.coverId) _resolveTint();
+    if (widget.isPlaying == oldWidget.isPlaying) return;
+    if (widget.isPlaying) {
+      _sweep.repeat(reverse: true);
+    } else {
+      _sweep.stop();
+      _sweep.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _sweep.dispose();
+    super.dispose();
+  }
+
+  Future<void> _resolveTint() async {
+    final coverId = widget.song?.coverId;
+    if (coverId == null || coverId.isEmpty) {
+      _tintCoverId = null;
+      if (mounted && _tint != null) setState(() => _tint = null);
+      return;
+    }
+    _tintCoverId = coverId;
+    // 算过的同步给出，换歌时不会先闪一下默认色再变。
+    final cached = CoverDominantColor.cached(coverId);
+    if (cached != null) {
+      if (mounted) setState(() => _tint = cached);
+      return;
+    }
+    final color = await CoverDominantColor.resolve(coverId);
+    if (!mounted || _tintCoverId != coverId) return;
+    setState(() => _tint = color);
+  }
+
+  /// 卡片底色的两个端点。
+  ///
+  /// 封面主色不能直接铺：浅色主题下容易糊成一团，深色下又会把标题吃掉。
+  /// 压进表面色里薄薄一层，明暗两套主题都还读得动。
+  (Color, Color) _cardColors(ColorScheme scheme, bool isDark) {
+    final tint = _tint;
+    if (tint == null) {
+      return (
+        scheme.surfaceContainerHighest,
+        Color.alphaBlend(
+          scheme.primary.withValues(alpha: 0.10),
+          scheme.surfaceContainerHigh,
+        ),
+      );
+    }
+    return (
+      Color.alphaBlend(
+        tint.withValues(alpha: isDark ? 0.34 : 0.20),
+        scheme.surfaceContainerHighest,
+      ),
+      Color.alphaBlend(
+        tint.withValues(alpha: isDark ? 0.15 : 0.08),
+        scheme.surfaceContainerHigh,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final song = widget.song;
     final coverId = song?.coverId;
+    final (top, bottom) = _cardColors(scheme, isDark);
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
-      child: Container(
-        height: 96,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-          // 跟随主题的表面色做斜向渐变，深浅色都自然。
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              scheme.surfaceContainerHighest,
-              Color.alphaBlend(
-                scheme.primary.withValues(alpha: 0.10),
-                scheme.surfaceContainerHigh,
-              ),
-            ],
-          ),
-        ),
-        child: Row(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: SizedBox(
-                width: 68,
-                height: 68,
-                child: (coverId != null && coverId.isNotEmpty)
-                    ? CachedNetworkImage(
-                        imageUrl: _heroCoverUrl(coverId, song),
-                        httpHeaders: _heroCoverHeaders(coverId),
-                        fit: BoxFit.cover,
-                        placeholder: (_, _) => _HeroFallback(song: song),
-                        errorWidget: (_, _, _) => _HeroFallback(song: song),
-                      )
-                    : _HeroFallback(song: song),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [top, bottom],
+                ),
               ),
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
+          ),
+          // 掠光只在播放时跑：不播还扫来扫去反而分散注意力。
+          if (widget.isPlaying)
+            Positioned.fill(child: IgnorePointer(child: _buildSweep(isDark))),
+          SizedBox(
+            height: 96,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
                 children: [
-                  Text(
-                    song?.title ?? '随机播放',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 19,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.2,
-                      color: scheme.onSurface,
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: SizedBox(
+                      width: 68,
+                      height: 68,
+                      child: (coverId != null && coverId.isNotEmpty)
+                          ? CachedNetworkImage(
+                              imageUrl: _heroCoverUrl(coverId, song),
+                              httpHeaders: _heroCoverHeaders(coverId),
+                              fit: BoxFit.cover,
+                              placeholder: (_, _) => _HeroFallback(song: song),
+                              errorWidget: (_, _, _) =>
+                                  _HeroFallback(song: song),
+                            )
+                          : _HeroFallback(song: song),
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    song?.artistDisplayName ?? '今天想听点什么',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: scheme.onSurfaceVariant,
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          song?.title ?? '随机播放',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
+                            color: scheme.onSurface,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          song?.artistDisplayName ?? '今天想听点什么',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
                     ),
+                  ),
+                  const SizedBox(width: 8),
+                  // 一个雷达按钮顶掉原来的「刷新 + 播放」两个：没在播就播
+                  // 这首，正在播就换一首，播放时向外扩散。
+                  _RadarButton(
+                    isPlaying: widget.isPlaying,
+                    onPlay: widget.onPlay,
+                    onRefresh: widget.onRefresh,
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 8),
-            // 一个雷达按钮顶掉原来的「刷新 + 播放」两个：没在播就播这首，
-            // 正在播就换一首，播放时向外扩散。
-            _RadarButton(
-              isPlaying: isPlaying,
-              onPlay: onPlay,
-              onRefresh: onRefresh,
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
+    );
+  }
+
+  /// 一道比卡片窄的高光斜带，左右来回掠过。
+  Widget _buildSweep(bool isDark) {
+    return AnimatedBuilder(
+      animation: _sweep,
+      builder: (context, _) {
+        final t = Curves.easeInOut.transform(_sweep.value);
+        final x = -1.4 + t * 2.8;
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment(x - 0.55, -1),
+              end: Alignment(x + 0.55, 1),
+              colors: [
+                Colors.white.withValues(alpha: 0),
+                Colors.white.withValues(alpha: isDark ? 0.10 : 0.20),
+                Colors.white.withValues(alpha: 0),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -489,7 +638,9 @@ class _RadarButtonState extends State<_RadarButton>
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
     return Semantics(
       button: true,
       label: widget.isPlaying ? '换一首' : '播放',
@@ -497,13 +648,16 @@ class _RadarButtonState extends State<_RadarButton>
         behavior: HitTestBehavior.opaque,
         onTap: _handleTap,
         child: SizedBox(
-          width: 62,
-          height: 62,
+          width: 48,
+          height: 48,
           child: AnimatedBuilder(
             animation: _controller,
             builder: (context, _) => CustomPaint(
               painter: _RadarPainter(
                 color: scheme.onSurface,
+                surface: scheme.surfaceContainerHighest,
+                accent: scheme.primary,
+                isDark: isDark,
                 progress: widget.isPlaying ? _controller.value : null,
               ),
             ),
@@ -515,9 +669,24 @@ class _RadarButtonState extends State<_RadarButton>
 }
 
 class _RadarPainter extends CustomPainter {
-  _RadarPainter({required this.color, required this.progress});
+  _RadarPainter({
+    required this.color,
+    required this.surface,
+    required this.accent,
+    required this.isDark,
+    required this.progress,
+  });
 
+  /// 前景色（弧线与中心点）。
   final Color color;
+
+  /// 按钮盘面的底色。
+  final Color surface;
+
+  /// 播放时给盘面染一点主色，看着「活着」。
+  final Color accent;
+
+  final bool isDark;
 
   /// null 表示静止；0~1 循环，驱动向外扩散的波。
   final double? progress;
@@ -525,23 +694,74 @@ class _RadarPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.shortestSide / 2;
+    final radius = size.shortestSide / 2 - 1.5;
+    final playing = progress != null;
 
-    // 外轮廓：让这块区域看着是个可点的按钮。
+    // 1) 投影：盘面往下沉一点，和卡片背景拉开层次。
+    canvas.drawCircle(
+      center.translate(0, 2.2),
+      radius,
+      Paint()
+        ..color = Colors.black.withValues(alpha: isDark ? 0.34 : 0.16)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
+    );
+
+    // 2) 盘面：左上亮右下暗的斜向渐变，做出凸起的球面感。
+    final base = playing
+        ? Color.alphaBlend(accent.withValues(alpha: 0.20), surface)
+        : surface;
+    final rect = Rect.fromCircle(center: center, radius: radius);
     canvas.drawCircle(
       center,
-      radius - 1,
+      radius,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color.alphaBlend(
+              Colors.white.withValues(alpha: isDark ? 0.16 : 0.55),
+              base,
+            ),
+            Color.alphaBlend(
+              Colors.black.withValues(alpha: isDark ? 0.24 : 0.08),
+              base,
+            ),
+          ],
+        ).createShader(rect),
+    );
+
+    // 3) 外描边 + 上缘高光：两层边才有「厚度」，只画一圈会显得是贴纸。
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..color = color.withValues(alpha: isDark ? 0.20 : 0.12),
+    );
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius - 1.1),
+      math.pi * 1.15,
+      math.pi * 0.7,
+      false,
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.2
-        ..color = color.withValues(alpha: 0.16),
+        ..strokeCap = StrokeCap.round
+        ..color = Colors.white.withValues(alpha: isDark ? 0.22 : 0.75),
     );
-    // 中心点
+
+    // 4) 中心点：自带一小圈光晕，像个发射源。
+    final dot = playing ? accent : color;
     canvas.drawCircle(
       center,
-      3.4,
-      Paint()..color = color.withValues(alpha: 0.85),
+      5.5,
+      Paint()
+        ..color = dot.withValues(alpha: 0.22)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
     );
+    canvas.drawCircle(center, 2.8, Paint()..color = dot.withValues(alpha: 0.9));
 
     final p = progress;
     if (p == null) {
@@ -549,25 +769,25 @@ class _RadarPainter extends CustomPainter {
         _drawWings(
           canvas,
           center,
-          9.0 + i * 7.5,
-          color.withValues(alpha: 0.5 - i * 0.18),
-          1.6,
+          7.0 + i * 5.5,
+          color.withValues(alpha: 0.45 - i * 0.16),
+          1.4,
         );
       }
       return;
     }
 
-    // 两道波错开半个周期，依次从中心扩到外圈并淡出。
+    // 播放中：两道波错开半个周期，依次从中心扩到边缘并淡出。
     for (var i = 0; i < 2; i++) {
       final t = (p + i / 2) % 1.0;
-      final alpha = (1 - t) * 0.6;
+      final alpha = (1 - t) * 0.62;
       if (alpha <= 0.02) continue;
       _drawWings(
         canvas,
         center,
-        8.0 + t * (radius - 11),
-        color.withValues(alpha: alpha),
-        1.8,
+        6.5 + t * (radius - 8),
+        accent.withValues(alpha: alpha),
+        1.5,
       );
     }
   }
@@ -587,5 +807,9 @@ class _RadarPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_RadarPainter oldDelegate) =>
-      oldDelegate.progress != progress || oldDelegate.color != color;
+      oldDelegate.progress != progress ||
+      oldDelegate.color != color ||
+      oldDelegate.surface != surface ||
+      oldDelegate.accent != accent ||
+      oldDelegate.isDark != isDark;
 }

@@ -159,11 +159,22 @@ class NetEasePlaybackService {
       for (final id in ids)
         if (result[id]?.url == null || (result[id]?.freeTrial ?? false)) id,
     ];
+    // 免费兜底音源（酷狗/酷我）是按关键词搜的，得把歌名歌手和时长递过去，
+    // 否则很容易匹配到现场版或翻唱。
+    final byId = <int, SongEntity>{
+      for (final song in songs)
+        if (song.neteaseId != null) song.neteaseId!: song,
+    };
     final unblocked = <int, String>{};
     if (needUnblock.isNotEmpty) {
       final resolved = await Future.wait([
         for (final id in needUnblock)
-          UnblockSourceService.instance.resolve(platform: 'wy', songId: '$id'),
+          UnblockSourceService.instance.resolve(
+            platform: 'wy',
+            songId: '$id',
+            keyword: _searchKeyword(byId[id]),
+            durationMs: byId[id]?.durationMs ?? 0,
+          ),
       ]);
       for (var i = 0; i < needUnblock.length; i++) {
         final url = resolved[i];
@@ -211,6 +222,13 @@ class NetEasePlaybackService {
       '官方 $official 首有地址，可播 ${playable.length} 首，跳过 $dropped 首',
     );
     return playable;
+  }
+
+  /// 「歌名 歌手」，给按关键词搜索的兜底音源用。
+  static String _searchKeyword(SongEntity? song) {
+    if (song == null) return '';
+    final artist = song.artistDisplayName;
+    return artist.isEmpty ? song.title : '${song.title} $artist';
   }
 
   /// 丢弃某首歌的地址缓存（播放失败后重取用）。

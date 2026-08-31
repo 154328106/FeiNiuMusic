@@ -108,6 +108,21 @@ class NetEaseApiClient {
     }
   }
 
+  /// 续一次登录态。
+  ///
+  /// 网易云的 MUSIC_U 会过期，过期后表现很隐蔽：收藏、播放记录忽然变空，
+  /// 但界面上还是「已登录」。启动时打一发，服务端会把新的 Cookie 从
+  /// Set-Cookie 回给我们（`_request` 里已经在吸收了）。失败不用管 ——
+  /// 真过期了后面的接口会报 301，那边有既有的处理。
+  Future<void> refreshLogin() async {
+    if (!isLoggedIn) return;
+    try {
+      await _request('/api/login/token/refresh', const {}, _Scheme.weapi);
+    } catch (_) {
+      // 续期失败不影响本次使用。
+    }
+  }
+
   Future<void> logout() async {
     _cookies = {};
     try {

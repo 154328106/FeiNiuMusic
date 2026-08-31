@@ -109,6 +109,19 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                 value: _enabled,
                 onChanged: (v) => setState(() => _enabled = v),
               ),
+              ValueListenableBuilder<bool>(
+                valueListenable:
+                    UnblockSourceService.instance.freeFallbackEnabled,
+                builder: (context, on, _) => AppSettingSwitchTile(
+                  title: '免费兜底音源',
+                  subtitle: on
+                      ? '上面的音源没配或没命中时，再试 GD Studio / 酷狗 / 酷我'
+                      : '关闭后只用上面配置的音源',
+                  value: on,
+                  onChanged: UnblockSourceService.instance
+                      .setFreeFallbackEnabled,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 16),

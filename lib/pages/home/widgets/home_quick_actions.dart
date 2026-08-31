@@ -92,14 +92,15 @@ class _QuickActionCard extends StatelessWidget {
             onTap: action.onTap,
             child: Stack(
               children: [
-                // 大号水印图标（右下背景）
+                // 水印图标（右下背景）。原来 92 太大，爱心几乎占满整张卡，
+                // 喧宾夺主；缩到 58 并收回边内，回到"底纹"的分量。
                 Positioned(
-                  right: -6,
-                  bottom: -14,
+                  right: 10,
+                  bottom: -6,
                   child: Icon(
                     action.icon,
-                    size: 92,
-                    color: accent.withValues(alpha: 0.12),
+                    size: 58,
+                    color: accent.withValues(alpha: 0.14),
                   ),
                 ),
                 // 文字：垂直居中。有播放按钮时右侧给它让位，没有就铺满。

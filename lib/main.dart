@@ -30,6 +30,7 @@ import 'app/state/settings_island_lyric.dart';
 import 'app/state/settings_lyric_companion.dart';
 import 'app/state/settings_match.dart';
 import 'app/services/source/music_source_registry.dart';
+import 'app/services/netease/netease_api_client.dart';
 import 'app/services/unblock/unblock_source.dart';
 import 'app/state/settings_state.dart';
 
@@ -124,6 +125,10 @@ Future<void> main() async {
   // 默认关闭不打扰。
   await MusicSourceRegistry.instance.ensureLoaded();
   await UnblockSourceService.instance.load();
+  // 网易云的 MUSIC_U 会过期，过期后表现很隐蔽：收藏、播放记录忽然变空，
+  // 界面上却还是「已登录」。启动时续一发，不等它 —— 续期慢不该拖开屏。
+  await NetEaseApiClient.instance.load();
+  unawaited(NetEaseApiClient.instance.refreshLogin());
   await IslandLyricSettings.ensureLoaded();
   if (Platform.isAndroid) {
     IslandLyricService.start();
