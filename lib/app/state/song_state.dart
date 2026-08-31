@@ -58,6 +58,12 @@ class SongEntity {
   /// 网易云歌曲的数字 id；非网易云歌曲为 null。
   int? get neteaseId => SongSource.decodeNetease(id);
 
+  /// 是否来自 Subsonic 服务端（Navidrome / 4000 端口那个）。
+  bool get isSubsonic => source == SongSource.subsonic;
+
+  /// Subsonic 的曲目 id；非 Subsonic 歌曲为 null。
+  String? get subsonicId => SongSource.decodeSubsonic(id);
+
   /// 解析 artist JSON 获取歌手显示名
   String get artistDisplayName {
     try {

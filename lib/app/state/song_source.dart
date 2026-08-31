@@ -10,14 +10,21 @@
 /// 冒号不会与飞牛 GUID 冲突（GUID 是 hex + 连字符）。
 enum SongSource {
   feiniu,
-  netease;
+  netease,
+  subsonic;
 
   /// 网易云 id 前缀。选 `ne:` 而不是 `netease:` 是为了让缓存文件名短一些。
   static const String neteasePrefix = 'ne:';
 
+  /// Subsonic 协议服务端（Navidrome / NAS 上 4000 端口那个）的 id 前缀。
+  static const String subsonicPrefix = 'ss:';
+
   /// 从 `SongEntity.id` 反推来源。无法识别的一律当飞牛，保证老数据行为不变。
-  static SongSource fromSongId(String songId) =>
-      songId.startsWith(neteasePrefix) ? SongSource.netease : SongSource.feiniu;
+  static SongSource fromSongId(String songId) {
+    if (songId.startsWith(neteasePrefix)) return SongSource.netease;
+    if (songId.startsWith(subsonicPrefix)) return SongSource.subsonic;
+    return SongSource.feiniu;
+  }
 
   /// 把网易云的数字 id 编码成 `SongEntity.id`。
   static String encodeNetease(int neteaseId) => '$neteasePrefix$neteaseId';
@@ -26,5 +33,14 @@ enum SongSource {
   static int? decodeNetease(String songId) {
     if (!songId.startsWith(neteasePrefix)) return null;
     return int.tryParse(songId.substring(neteasePrefix.length));
+  }
+
+  /// Subsonic 的曲目 id 本身就是字符串，编解码只是加/去前缀。
+  static String encodeSubsonic(String subsonicId) =>
+      '$subsonicPrefix$subsonicId';
+
+  static String? decodeSubsonic(String songId) {
+    if (!songId.startsWith(subsonicPrefix)) return null;
+    return songId.substring(subsonicPrefix.length);
   }
 }

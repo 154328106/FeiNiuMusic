@@ -964,6 +964,15 @@ class PlayerService with WidgetsBindingObserver {
     SongEntity song, {
     bool waitForLocal = false,
   }) async {
+    // Subsonic：稳定直链，鉴权在 query 里，不需要额外请求头。
+    if (song.isSubsonic) {
+      final uri = (song.uri ?? '').trim();
+      if (uri.isEmpty) {
+        throw StateError('Subsonic 歌曲缺少播放地址：${song.title}');
+      }
+      return mk.Media(uri);
+    }
+
     // 网易云：临时直链 + 网易云 CDN 的 Referer，不碰飞牛的缓存/CUE 逻辑。
     if (song.isNetease) {
       final neteaseId = song.neteaseId;
@@ -3653,6 +3662,15 @@ class PlayerService with WidgetsBindingObserver {
     SongEntity song, {
     bool forceRefresh = false,
   }) async {
+    // Subsonic：uri 稳定，直接用。
+    if (song.isSubsonic) {
+      final uri = (song.uri ?? '').trim();
+      if (uri.isEmpty) {
+        throw StateError('Subsonic 歌曲缺少播放地址：${song.title}');
+      }
+      return Uri.parse(uri);
+    }
+
     // 网易云：地址有时效，不能用 song.uri 里存的那份，必须重新解析。
     if (song.isNetease) {
       final neteaseId = song.neteaseId;
@@ -3837,6 +3855,16 @@ class PlayerService with WidgetsBindingObserver {
     SongEntity song, {
     bool forceRefresh = false,
   }) async {
+    // Subsonic（Navidrome / NAS 4000 端口）：uri 是带鉴权参数的稳定直链，
+    // 建库时就存好了，直接播。不走飞牛的缓存/转码链路。
+    if (song.isSubsonic) {
+      final uri = (song.uri ?? '').trim();
+      if (uri.isEmpty) {
+        throw StateError('Subsonic 歌曲缺少播放地址：${song.title}');
+      }
+      return AudioSource.uri(Uri.parse(uri));
+    }
+
     // 网易云歌曲：完全绕开飞牛的缓存/转码链路，直接用解析出的临时直链。
     if (song.isNetease) {
       final source = await _neteaseSourceForSong(
