@@ -12,9 +12,6 @@ import '../../app/services/feiniu/auth_service.dart';
 import '../../app/services/feiniu/fn_connection_probe_service.dart';
 import '../../app/services/feiniu/fn_models.dart';
 import '../../app/services/login_pair_server.dart';
-import '../../app/services/subsonic/subsonic_api_client.dart';
-import '../../app/services/subsonic/subsonic_server.dart';
-import '../../app/state/settings_platform_state.dart';
 import '../../app/state/settings_state.dart';
 import '../../app/router/app_router.dart';
 import '../../components/feedback/probe_overlay.dart';
@@ -40,11 +37,6 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final _serverUrlController = TextEditingController();
-  final _subsonicUrlController = TextEditingController();
-  final _subsonicUserController = TextEditingController();
-  final _subsonicPasswordController = TextEditingController();
-  bool _subsonicBusy = false;
-  String? _subsonicError;
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
@@ -173,9 +165,6 @@ class _LoginPageState extends State<LoginPage> {
   void dispose() {
     _exitResetTimer?.cancel();
     _serverUrlController.dispose();
-    _subsonicUrlController.dispose();
-    _subsonicUserController.dispose();
-    _subsonicPasswordController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
     _nameController.dispose();
@@ -502,13 +491,7 @@ class _LoginPageState extends State<LoginPage> {
   Widget _buildSavedAccounts(BuildContext context) {
     return ValueListenableBuilder<List<AccountEntry>>(
       valueListenable: AccountStore.instance.accounts,
-      builder: (context, allAccounts, _) {
-        // 只列当前平台的账号：飞牛账号和 Subsonic 账号混在一个下拉里，
-        // 点了对不上表单，反而更乱。
-        final platformName = AppPlatformSettings.active.value.name;
-        final accounts = allAccounts
-            .where((a) => a.platform == platformName)
-            .toList();
+      builder: (context, accounts, _) {
         if (accounts.isEmpty) return const SizedBox.shrink();
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -593,13 +576,7 @@ class _LoginPageState extends State<LoginPage> {
                     if (picked == null || !mounted) return;
                     final account = AccountStore.instance.byId(picked);
                     if (account == null) return;
-                    if (account.platform != AppPlatform.feiniu.name) {
-                      _subsonicUrlController.text = account.serverUrl;
-                      _subsonicUserController.text = account.username;
-                      _subsonicPasswordController.text = account.password ?? '';
-                    } else {
-                      _fillAccount(account);
-                    }
+                    _fillAccount(account);
                     // 复位下拉，避免误以为仍是选中状态
                     setState(() => _selectedAccountId = null);
                   },
@@ -638,250 +615,6 @@ class _LoginPageState extends State<LoginPage> {
     ).pushNamed(AppRoutes.accounts);
   }
 
-  /// 平台下拉框。放在「已保存账号」上面，样式与那个下拉一致。
-  ///
-  /// 选中哪个平台，页面顶部的图标/名称、以及下面的表单整套跟着换。
-  Widget _buildPlatformPicker(BuildContext context, AppPlatform current) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          '平台',
-          style: theme.textTheme.labelLarge?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-        const SizedBox(height: 8),
-        // 与账号下拉同样用 showMenu 自定义定位：菜单固定从输入框正下方弹出，
-        // 不受系统 Dropdown 的自动上/下定位影响。
-        Builder(
-          builder: (btnContext) {
-            final scheme = Theme.of(btnContext).colorScheme;
-            return InkWell(
-              borderRadius: BorderRadius.circular(12),
-              onTap: () async {
-                final box = btnContext.findRenderObject() as RenderBox?;
-                if (box == null) return;
-                final overlay = Overlay.of(btnContext, rootOverlay: true);
-                final overlayBox =
-                    overlay.context.findRenderObject() as RenderBox?;
-                if (overlayBox == null) return;
-                final topLeft = box.localToGlobal(
-                  Offset.zero,
-                  ancestor: overlayBox,
-                );
-                final position = RelativeRect.fromLTRB(
-                  topLeft.dx,
-                  topLeft.dy + box.size.height,
-                  overlayBox.size.width - topLeft.dx - box.size.width,
-                  overlayBox.size.height - topLeft.dy,
-                );
-                final picked = await showMenu<AppPlatform>(
-                  context: btnContext,
-                  position: position,
-                  color: scheme.surfaceContainerHigh,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  elevation: 8,
-                  items: [
-                    for (final platform in AppPlatform.values)
-                      PopupMenuItem<AppPlatform>(
-                        value: platform,
-                        height: 52,
-                        child: Row(
-                          children: [
-                            Icon(
-                              platform.icon,
-                              size: 22,
-                              color: platform.accent,
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    platform.label,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  Text(
-                                    platform.subtitle,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: scheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            if (platform == current)
-                              Icon(
-                                Icons.check_rounded,
-                                size: 18,
-                                color: scheme.primary,
-                              ),
-                          ],
-                        ),
-                      ),
-                  ],
-                );
-                if (picked == null || !mounted) return;
-                await AppPlatformSettings.setActive(picked);
-              },
-              child: InputDecorator(
-                decoration: InputDecoration(
-                  prefixIcon: Icon(current.icon, color: current.accent),
-                  suffixIcon: const Icon(Icons.arrow_drop_down_rounded),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: Text(
-                  current.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            );
-          },
-        ),
-        const SizedBox(height: 16),
-      ],
-    );
-  }
-
-  /// Subsonic 系平台的登录表单（地址 / 用户名 / 密码）。
-  ///
-  /// 与飞牛表单是二选一：飞牛那套有 FNID、已保存账号、备注等飞牛专属概念，
-  /// 混在一起只会让两边都别扭。
-  Widget _buildSubsonicForm(BuildContext context, AppPlatform platform) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        TextFormField(
-          controller: _subsonicUrlController,
-          keyboardType: TextInputType.url,
-          autocorrect: false,
-          decoration: const InputDecoration(
-            labelText: '服务器地址',
-            hintText: '例如 192.168.1.10:4533',
-            prefixIcon: Icon(Icons.dns_rounded),
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextFormField(
-          controller: _subsonicUserController,
-          autocorrect: false,
-          decoration: const InputDecoration(
-            labelText: '用户名',
-            prefixIcon: Icon(Icons.person_outline_rounded),
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextFormField(
-          controller: _subsonicPasswordController,
-          obscureText: true,
-          decoration: const InputDecoration(
-            labelText: '密码',
-            prefixIcon: Icon(Icons.lock_outline_rounded),
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 20),
-        SizedBox(
-          height: 48,
-          child: FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: platform.accent),
-            onPressed: _subsonicBusy ? null : _connectSubsonic,
-            child: _subsonicBusy
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Text('连接'),
-          ),
-        ),
-        if (_subsonicError != null) ...[
-          const SizedBox(height: 12),
-          Text(
-            _subsonicError!,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.error,
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  /// 连接 Subsonic 服务端：存配置 → ping 验证 → 进音乐库。
-  Future<void> _connectSubsonic() async {
-    var url = _subsonicUrlController.text.trim();
-    if (url.isEmpty) {
-      setState(() => _subsonicError = '请填写服务器地址');
-      return;
-    }
-    // 只填了 IP:端口时补 http://，省得每次手打。
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      url = 'http://$url';
-    }
-    setState(() {
-      _subsonicBusy = true;
-      _subsonicError = null;
-    });
-
-    // 先存再测：客户端从 store 读配置。认证方式重置回 token —— 换了服务器，
-    // 上次降级成密码模式的结论不一定还成立。
-    await SubsonicServerStore.instance.save(
-      SubsonicServerConfig(
-        baseUrl: url,
-        username: _subsonicUserController.text.trim(),
-        password: _subsonicPasswordController.text,
-      ),
-    );
-
-    try {
-      await SubsonicApiClient.instance.ping();
-      // 连通了才落账号库：存一条连不上的进去只会让下拉里多个坑。
-      // 与飞牛账号同一份存储、同一个管理页，platform 字段区分。
-      final platform = AppPlatformSettings.active.value;
-      await AccountStore.instance.addOrUpdate(
-        AccountEntry(
-          id: '${platform.name}:$url:${_subsonicUserController.text.trim()}',
-          serverUrl: url,
-          username: _subsonicUserController.text.trim(),
-          password: _subsonicPasswordController.text,
-          createdAt: DateTime.now(),
-          platform: platform.name,
-        ),
-      );
-      if (!mounted) return;
-      setState(() => _subsonicBusy = false);
-      // 不用手动跳转：门控监听着平台 + 服务器配置，配好即重建成 Subsonic
-      // 会话。手动 pushReplacement 反而会绕开门控，做出一个退不出去的页面。
-    } on SubsonicApiException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _subsonicBusy = false;
-        _subsonicError = e.code == 40 ? '用户名或密码错误' : '连接失败：${e.message}';
-      });
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -912,110 +645,49 @@ class _LoginPageState extends State<LoginPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // 品牌头 + 表单都跟着选中的平台走：默认飞牛，选了别的就整体
-                  // 换成那个平台的图标、名称与登录方式。
-                  ValueListenableBuilder<AppPlatform>(
-                    valueListenable: AppPlatformSettings.active,
-                    builder: (context, platform, _) {
-                      final isFeiniu = platform == AppPlatform.feiniu;
-                      return Column(
-                        children: [
-                          // Logo：飞牛用自带图标，其余平台用带主色的图形标识
-                          // （不搬各家官方 logo，那是别人的商标资源）。
-                          isFeiniu
-                              ? ClipRRect(
-                                  borderRadius: BorderRadius.circular(20),
-                                  child: Image.asset(
-                                    'assets/icon/app_icon.png',
-                                    width: 80,
-                                    height: 80,
-                                    fit: BoxFit.cover,
-                                  ),
-                                )
-                              : Container(
-                                  width: 80,
-                                  height: 80,
-                                  decoration: BoxDecoration(
-                                    color: platform.accent.withValues(
-                                      alpha: 0.16,
-                                    ),
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(
-                                      color: platform.accent.withValues(
-                                        alpha: 0.6,
-                                      ),
-                                      width: 1.5,
-                                    ),
-                                  ),
-                                  child: Icon(
-                                    platform.icon,
-                                    size: 40,
-                                    color: platform.accent,
-                                  ),
-                                ),
-                          const SizedBox(height: 16),
-                          Text(
-                            platform.label,
-                            style: theme.textTheme.headlineMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: isFeiniu
-                                  ? theme.colorScheme.primary
-                                  : platform.accent,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            platform.subtitle,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: isDark
-                                  ? Colors.grey[400]
-                                  : Colors.grey[600],
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.secondaryContainer,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              platform.hint,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: theme.colorScheme.onSecondaryContainer,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          // 添加/编辑飞牛账号时不显示平台切换：那两个模式是
-                          // 从账号页进来专门管飞牛账号的，切平台没有意义。
-                          if (!widget.isAddMode && widget.editAccount == null)
-                            _buildPlatformPicker(context, platform),
-                          // 「已保存账号」对两种平台都要显示（内部按平台过滤），
-                          // 所以放在这里而不是飞牛专属那一段里。
-                          if (!widget.isAddMode &&
-                              widget.editAccount == null &&
-                              !isFeiniu)
-                            _buildSavedAccounts(context),
-                          if (!isFeiniu) _buildSubsonicForm(context, platform),
-                        ],
-                      );
-                    },
+                  // Logo
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: Image.asset(
+                      'assets/icon/app_icon.png',
+                      width: 80,
+                      height: 80,
+                      fit: BoxFit.cover,
+                    ),
                   ),
-
-                  // 以下是飞牛专属表单，选了别的平台就整体隐藏。
-                  ValueListenableBuilder<AppPlatform>(
-                    valueListenable: AppPlatformSettings.active,
-                    builder: (context, platform, child) =>
-                        platform == AppPlatform.feiniu
-                        ? child!
-                        : const SizedBox.shrink(),
-                    child: Column(
-                      children: [
+                  const SizedBox(height: 16),
+                  Text(
+                    '飞牛音乐',
+                    style: theme.textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
                   const SizedBox(height: 8),
+                  Text(
+                    'FeiNiu Music',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: isDark ? Colors.grey[400] : Colors.grey[600],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.secondaryContainer,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '支持输入服务器地址或 FNID 快速连接',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSecondaryContainer,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
 
                   // 已保存账号（可一键切换 / 管理）；添加/编辑账号时隐藏，避免干扰
                   if (!widget.isAddMode && widget.editAccount == null)
@@ -1166,9 +838,6 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       );
                     },
-                  ),
-                      ],
-                    ),
                   ),
                 ],
               ),

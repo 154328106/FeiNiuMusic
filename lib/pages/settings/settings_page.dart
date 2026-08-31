@@ -206,13 +206,6 @@ class _SettingsPageState extends State<SettingsPage> {
                     onTap: () =>
                         Navigator.pushNamed(context, AppRoutes.neteaseSearch),
                   ),
-                  AppSettingTile(
-                    title: 'Subsonic 音乐库',
-                    subtitle: 'Navidrome / NAS 4000 端口等 Subsonic 服务',
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () =>
-                        Navigator.pushNamed(context, AppRoutes.subsonicLibrary),
-                  ),
                 ],
               ),
               const SizedBox(height: 16),

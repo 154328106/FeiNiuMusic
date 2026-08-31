@@ -37,8 +37,6 @@ import '../../pages/library/genres_page.dart';
 import '../../pages/library/folders_page.dart';
 import '../../pages/search/search_page.dart';
 import '../../pages/netease/netease_search_page.dart';
-import '../../pages/subsonic/subsonic_library_page.dart';
-import '../../pages/subsonic/subsonic_server_page.dart';
 import '../../pages/songs/batch_match_page.dart';
 import '../../app/state/settings_state.dart';
 import '../../app/state/song_state.dart';
@@ -86,8 +84,6 @@ class AppRoutes {
   static const transcodeSettings = '/settings/transcode';
   static const dlnaSettings = '/settings/dlna';
   static const neteaseSearch = '/netease/search';
-  static const subsonicLibrary = '/subsonic';
-  static const subsonicServer = '/subsonic/server';
 }
 
 class AppRouter {
@@ -141,8 +137,6 @@ class AppRouter {
     AppRoutes.transcodeSettings: (_) => const TranscodeSettingsPage(),
     AppRoutes.dlnaSettings: (_) => const DlnaSettingsPage(),
     AppRoutes.neteaseSearch: (_) => const NetEaseSearchPage(),
-    AppRoutes.subsonicLibrary: (_) => const SubsonicLibraryPage(),
-    AppRoutes.subsonicServer: (_) => const SubsonicServerPage(),
   };
 }
 

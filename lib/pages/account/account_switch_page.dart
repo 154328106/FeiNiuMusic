@@ -4,8 +4,6 @@ import '../../app/services/feiniu/account_entry.dart';
 import '../../app/services/feiniu/account_store.dart';
 import '../../app/services/feiniu/auth_service.dart';
 import '../../app/services/player_service.dart';
-import '../../app/services/subsonic/subsonic_server.dart';
-import '../../app/state/settings_platform_state.dart';
 import '../../components/index.dart';
 import '../login/login_page.dart';
 
@@ -330,29 +328,6 @@ class _AccountSwitchPageState extends State<AccountSwitchPage> {
     if (_switching) return;
     setState(() => _switching = true);
     try {
-      // Subsonic 系账号不能走飞牛的登录流程 —— 它没有飞牛 token，
-      // switchTo 必然失败并弹「该账号未登录」。改为切平台 + 套用它的服务器
-      // 配置，门控会据此重建到对应平台。
-      final entry = AccountStore.instance.byId(id);
-      if (entry != null && entry.platform != AppPlatform.feiniu.name) {
-        await SubsonicServerStore.instance.save(
-          SubsonicServerConfig(
-            baseUrl: entry.serverUrl,
-            username: entry.username,
-            password: entry.password ?? '',
-          ),
-        );
-        await AppPlatformSettings.setActive(
-          AppPlatform.fromName(entry.platform),
-        );
-        if (!context.mounted) return;
-        Navigator.of(context).pop();
-        return;
-      }
-      // 切回飞牛账号：先把平台切回飞牛，否则门控仍认为处于 Subsonic 会话。
-      if (AppPlatformSettings.active.value != AppPlatform.feiniu) {
-        await AppPlatformSettings.setActive(AppPlatform.feiniu);
-      }
       final ok = await AccountStore.instance.switchTo(id);
       if (!context.mounted) return;
       if (ok) {
