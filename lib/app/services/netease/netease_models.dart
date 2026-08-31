@@ -142,3 +142,49 @@ enum NetEaseQrStatus {
     _ => NetEaseQrStatus.unknown,
   };
 }
+
+/// 网易云歌单。
+class NetEasePlaylist {
+  const NetEasePlaylist({
+    required this.id,
+    required this.name,
+    required this.coverUrl,
+    required this.trackCount,
+    required this.creatorName,
+  });
+
+  final int id;
+  final String name;
+  final String? coverUrl;
+  final int trackCount;
+  final String creatorName;
+
+  /// 用户歌单 / 歌单广场返回的形状：封面在 `coverImgUrl`。
+  static NetEasePlaylist? fromJson(Map<String, dynamic> json) {
+    final id = json['id'];
+    if (id is! int) return null;
+    final cover = json['coverImgUrl'] as String?;
+    return NetEasePlaylist(
+      id: id,
+      name: json['name'] as String? ?? '',
+      coverUrl: (cover == null || cover.isEmpty) ? null : cover,
+      trackCount: (json['trackCount'] as int?) ?? 0,
+      creatorName:
+          (json['creator'] as Map?)?['nickname'] as String? ?? '',
+    );
+  }
+
+  /// 「推荐歌单」接口的形状不一样：封面在 `picUrl`，也没有 trackCount。
+  static NetEasePlaylist? fromPersonalizedJson(Map<String, dynamic> json) {
+    final id = json['id'];
+    if (id is! int) return null;
+    final cover = json['picUrl'] as String?;
+    return NetEasePlaylist(
+      id: id,
+      name: json['name'] as String? ?? '',
+      coverUrl: (cover == null || cover.isEmpty) ? null : cover,
+      trackCount: 0,
+      creatorName: '',
+    );
+  }
+}

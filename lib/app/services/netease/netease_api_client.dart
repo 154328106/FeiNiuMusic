@@ -432,4 +432,153 @@ class NetEaseApiClient {
       translated: (json['tlyric'] as Map?)?['lyric'] as String?,
     );
   }
+
+  // ---------------------------------------------------------------------
+  // 首页内容
+  //
+  // 除「推荐歌单 / 新歌」外都需要登录：网易云的收藏、播放记录、每日推荐都是
+  // 账号维度的数据，未登录时服务端直接返回失败。
+  // ---------------------------------------------------------------------
+
+  /// 用户歌单。第一个通常是「我喜欢的音乐」（红心歌单）。
+  Future<List<NetEasePlaylist>> userPlaylists(int uid) async {
+    final json = await _request('/api/user/playlist', {
+      'uid': uid,
+      'limit': 1000,
+      'offset': 0,
+      'includeVideo': true,
+    }, _Scheme.weapi);
+    final list = json['playlist'] as List? ?? const [];
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(NetEasePlaylist.fromJson)
+        .whereType<NetEasePlaylist>()
+        .toList();
+  }
+
+  /// 歌单内的歌曲。走 eapi —— weapi 的 playlist/detail 对大歌单会截断。
+  Future<List<NetEaseSong>> playlistTracks(int playlistId) async {
+    final json = await _request('/api/v6/playlist/detail', {
+      'id': playlistId,
+      'n': 100000,
+      's': 8,
+    }, _Scheme.eapi);
+    final playlist = json['playlist'];
+    if (playlist is! Map) return const [];
+    final tracks = playlist['tracks'] as List? ?? const [];
+    return tracks
+        .whereType<Map<String, dynamic>>()
+        .map(NetEaseSong.fromJson)
+        .whereType<NetEaseSong>()
+        .toList();
+  }
+
+  /// 每日推荐歌曲。需要登录。
+  Future<List<NetEaseSong>> dailyRecommend() async {
+    final json = await _request(
+      '/api/v3/discovery/recommend/songs',
+      const {},
+      _Scheme.weapi,
+    );
+    final data = json['data'];
+    if (data is! Map) return const [];
+    final songs = data['dailySongs'] as List? ?? const [];
+    return songs
+        .whereType<Map<String, dynamic>>()
+        .map(NetEaseSong.fromJson)
+        .whereType<NetEaseSong>()
+        .toList();
+  }
+
+  /// 播放记录。[weekly] 为 true 取一周内，否则取全部历史。
+  Future<List<NetEaseSong>> playRecord(int uid, {bool weekly = false}) async {
+    final type = weekly ? 1 : 0;
+    final json = await _request('/api/v1/play/record', {
+      'uid': uid,
+      'type': type,
+      // 两种类型的返回上限不同，照网易云客户端的取值。
+      'limit': weekly ? 100 : 1000,
+    }, _Scheme.weapi);
+    // 周榜在 weekData、全部在 allData，键名跟着 type 变。
+    final list = json[weekly ? 'weekData' : 'allData'] as List? ?? const [];
+    final songs = <NetEaseSong>[];
+    for (final item in list.whereType<Map<String, dynamic>>()) {
+      final songJson = item['song'];
+      if (songJson is! Map<String, dynamic>) continue;
+      final song = NetEaseSong.fromJson(songJson);
+      if (song != null) songs.add(song);
+    }
+    return songs;
+  }
+
+  /// 推荐歌单。不需要登录。
+  Future<List<NetEasePlaylist>> personalizedPlaylists({int limit = 20}) async {
+    final json = await _request('/api/personalized/playlist', {
+      'limit': limit,
+      'n': limit,
+    }, _Scheme.weapi);
+    final list = json['result'] as List? ?? const [];
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(NetEasePlaylist.fromPersonalizedJson)
+        .whereType<NetEasePlaylist>()
+        .toList();
+  }
+
+  /// 推荐新歌。不需要登录。
+  ///
+  /// 返回里歌曲有时裹在 `song` 字段下、有时就是条目本身，两种都认。
+  Future<List<NetEaseSong>> newSongs({int limit = 20}) async {
+    final json = await _request('/api/personalized/newsong', {
+      'type': 0,
+      'limit': limit,
+    }, _Scheme.weapi);
+    final list = json['result'] as List? ?? const [];
+    final songs = <NetEaseSong>[];
+    for (final item in list.whereType<Map<String, dynamic>>()) {
+      final nested = item['song'];
+      final song = nested is Map<String, dynamic>
+          ? NetEaseSong.fromJson(nested)
+          : NetEaseSong.fromJson(item);
+      if (song != null) songs.add(song);
+    }
+    return songs;
+  }
+
+  /// 私人 FM。需要登录，每次返回几首，播完再取。
+  Future<List<NetEaseSong>> personalFm() async {
+    final json = await _request('/api/v1/radio/get', const {}, _Scheme.weapi);
+    final data = json['data'] as List? ?? const [];
+    return data
+        .whereType<Map<String, dynamic>>()
+        .map(NetEaseSong.fromJson)
+        .whereType<NetEaseSong>()
+        .toList();
+  }
+
+  /// 红心 / 取消红心。
+  ///
+  /// 网易云这个接口对参数形状不稳定，按顺序试三种，任一返回 200 即成功
+  /// （做法取自 Beans-Music 1.5.8 的修复）。
+  Future<bool> like(int songId, {required bool liked}) async {
+    final time = DateTime.now().millisecondsSinceEpoch.toString();
+    final payloads = <Map<String, dynamic>>[
+      {'alg': 'itembased', 'trackId': songId, 'like': liked, 'time': time},
+      {'trackId': songId, 'like': liked},
+      {'songId': songId, 'like': liked},
+    ];
+    for (final payload in payloads) {
+      try {
+        final json = await _request(
+          '/api/song/like?t=$liked',
+          payload,
+          _Scheme.weapi,
+        );
+        if (json['code'] == 200) return true;
+      } on NetEaseApiException catch (e) {
+        debugPrint('[NetEase] like 尝试失败：${e.message}');
+      }
+    }
+    return false;
+  }
 }
