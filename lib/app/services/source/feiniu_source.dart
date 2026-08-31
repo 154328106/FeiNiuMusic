@@ -91,10 +91,7 @@ class FeiniuSource implements MusicSource {
       fullFeed(kind, limit: limit);
 
   @override
-  Future<List<SongEntity>> fullFeed(
-    HomeFeed kind, {
-    required int limit,
-  }) async {
+  Future<List<SongEntity>> fullFeed(HomeFeed kind, {required int limit}) async {
     try {
       final page = switch (kind) {
         HomeFeed.favorites => await _api.getFavoriteList(size: limit),

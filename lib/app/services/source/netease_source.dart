@@ -91,11 +91,7 @@ class NetEaseSource implements MusicSource {
       final fm = await _api.personalFm();
       if (fm.isNotEmpty) {
         final queue = _toEntities(fm);
-        return SourceHero(
-          song: queue.first,
-          queue: queue,
-          label: '私人 FM',
-        );
+        return SourceHero(song: queue.first, queue: queue, label: '私人 FM');
       }
     } on NetEaseApiException catch (e) {
       debugPrint('[NetEaseSource] personalFm error: ${e.message}');
@@ -104,11 +100,7 @@ class NetEaseSource implements MusicSource {
       final daily = await _api.dailyRecommend();
       if (daily.isEmpty) return null;
       final queue = _toEntities(daily);
-      return SourceHero(
-        song: queue.first,
-        queue: queue,
-        label: '每日推荐',
-      );
+      return SourceHero(song: queue.first, queue: queue, label: '每日推荐');
     } on NetEaseApiException catch (e) {
       debugPrint('[NetEaseSource] dailyRecommend error: ${e.message}');
       return null;
@@ -122,10 +114,7 @@ class NetEaseSource implements MusicSource {
   }
 
   @override
-  Future<List<SongEntity>> fullFeed(
-    HomeFeed kind, {
-    required int limit,
-  }) async {
+  Future<List<SongEntity>> fullFeed(HomeFeed kind, {required int limit}) async {
     try {
       switch (kind) {
         case HomeFeed.favorites:
