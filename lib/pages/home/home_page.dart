@@ -924,8 +924,7 @@ class _HomePageState extends State<HomePage>
               if (heroSong != null) const SizedBox(height: 16),
 
               // 1.5 快捷菜单 — 歌单 / 歌手 / 专辑 / 风格（4×1）
-              AppContentFrame(
-                child: HomeShortcutMenu(
+              HomeShortcutMenu(
                 items: [
                   HomeShortcutItem(
                     icon: Icons.queue_music_rounded,
@@ -952,7 +951,6 @@ class _HomePageState extends State<HomePage>
                     onTap: _openGenresPage,
                   ),
                 ],
-                ),
               ),
 
               const SizedBox(height: 16),
@@ -1017,6 +1015,8 @@ class _HomePageState extends State<HomePage>
               if (_recentTracks.value.isNotEmpty) ...[
                 HomeSectionHeader(title: '最新歌曲', onViewAll: _openSongsPage),
                 AppContentFrame(
+                  // 行自带卡片，卡片模式下别再套外框。
+                  wrapsRows: true,
                   child: _CompactSongList(
                     songs: _recentTracks.value,
                     onTap: (song) => _playHomeSong(

@@ -61,10 +61,17 @@ class AppContentFrame extends StatelessWidget {
   final Widget child;
   final double borderRadius;
 
+  /// 子树是不是「每一行自己会用 [AppContentRow] 出卡片」的列表。
+  ///
+  /// 是的话，「逐行卡片」模式下这里必须**不画**——否则一堆行卡片外面再套一个
+  /// 大框，成了双层。「整块描边」模式下仍然要画，那正是它的用途。
+  final bool wrapsRows;
+
   const AppContentFrame({
     super.key,
     required this.child,
     this.borderRadius = 20,
+    this.wrapsRows = false,
   });
 
   @override
@@ -73,6 +80,7 @@ class AppContentFrame extends StatelessWidget {
       valueListenable: AppBackgroundSettings.contentFrameStyle,
       builder: (context, style, child) {
         if (style == AppContentFrameStyle.none) return child!;
+        if (style == AppContentFrameStyle.cards && wrapsRows) return child!;
         return _watchFrameSettings(context, (context) {
           final theme = Theme.of(context);
           final isDark = theme.brightness == Brightness.dark;

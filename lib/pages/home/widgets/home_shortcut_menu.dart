@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../components/common/content_frame.dart';
+
 /// 首页功能入口卡片数据
 class HomeShortcutItem {
   final IconData icon;
@@ -47,9 +49,14 @@ class HomeShortcutMenu extends StatelessWidget {
                 for (var c = 0; c < 2; c++) ...[
                   if (c > 0) const SizedBox(width: 8),
                   Expanded(
-                    child: _ShortcutItem(
-                      item: items[r * 2 + c],
-                      scheme: scheme,
+                    // 每个入口各自出框：四个套一个大框时，方格之间的分隔
+                    // 全没了，看着是一整块。
+                    child: AppContentFrame(
+                      borderRadius: 16,
+                      child: _ShortcutItem(
+                        item: items[r * 2 + c],
+                        scheme: scheme,
+                      ),
                     ),
                   ),
                 ],
@@ -64,7 +71,10 @@ class HomeShortcutMenu extends StatelessWidget {
         for (var i = 0; i < items.length; i++) ...[
           if (i > 0) const SizedBox(width: 8),
           Expanded(
-            child: _ShortcutItem(item: items[i], scheme: scheme),
+            child: AppContentFrame(
+              borderRadius: 16,
+              child: _ShortcutItem(item: items[i], scheme: scheme),
+            ),
           ),
         ],
       ],
