@@ -106,18 +106,12 @@ class _HomePageState extends State<HomePage>
 
   /// 最近一次由首页卡片发起播放的来源，以及当时送进播放器的队列 id 集合。
   ///
-  /// 卡片上的播放按钮要显示暂停图标时，光看播放器是否在播是不够的——用户
-  /// 完全可能从歌曲页或搜索页换了歌，那时首页卡片仍显示暂停就是错的。
-  /// 记下队列后即可判断「现在放的这首是不是这张卡放出去的」。
-  _HomePlaySource? _activePlaySource;
-  Set<String> _activeQueueIds = const <String>{};
-
   /// 漫游大图自动轮播的定时器。
   Timer? _roamAutoTimer;
   bool _roamAutoBusy = false;
 
   /// 轮播间隔。每一跳都是一次 roam-next 网络请求，太密既费流量也没意义。
-  static const Duration _roamAutoInterval = Duration(seconds: 30);
+  static const Duration _roamAutoInterval = Duration(minutes: 2);
 
   late final _loading = createSignal(true);
   late final _roamSong = createSignal<SongEntity?>(null);
@@ -129,17 +123,13 @@ class _HomePageState extends State<HomePage>
   late final _playlists = createSignal<List<FeiNiuPlaylist>>([]);
   late final _recentTracks = createSignal<List<SongEntity>>([]);
 
-  /// 非飞牛源的歌单（网易云等）。飞牛那份是 [FeiNiuPlaylist] 强类型，
-  /// 详情页也只吃飞牛的 guid，两边共用一个 signal 会串味，分开放。
-  late final _sourcePlaylists = createSignal<List<SourcePlaylist>>([]);
-
   /// 「最新歌曲」的候选池：接口拉一大把，首页只露 [_latestVisible] 首，
   /// 每 [_latestShuffleInterval] 从池子里重新抽一批 —— 只拉 4 首的话
-  /// 首页永远是同样那几首。
+  /// 首页永远是同样那几首。换得太勤反而晃眼，两分钟一次。
   List<SongEntity> _latestPool = const [];
   static const int _latestVisible = 4;
   static const int _latestPoolSize = 40;
-  static const Duration _latestShuffleInterval = Duration(seconds: 30);
+  static const Duration _latestShuffleInterval = Duration(minutes: 2);
   Timer? _latestShuffleTimer;
   final Random _random = Random();
   late final _isRefreshing = createSignal(false);
@@ -168,8 +158,6 @@ class _HomePageState extends State<HomePage>
   /// 换源后整页重新拉取。清掉播放来源标记，否则卡片按钮会残留上一个源的状态。
   void _onSourceChanged() {
     if (!mounted) return;
-    _activePlaySource = null;
-    _activeQueueIds = const <String>{};
     _latestPool = const [];
     _loading.value = true;
     unawaited(_loadAll(forceRefresh: true));
@@ -497,18 +485,11 @@ class _HomePageState extends State<HomePage>
 
   Future<void> _loadPlaylists() async {
     if (_source.id != 'feiniu') {
+      // 歌单区块只做飞牛。用同一套封面轮播渲染网易云歌单试过了，混在
+      // 首页里不好看，去掉；真要做得单开一页而不是塞成一排。
       if (mounted) _playlists.value = const [];
-      // 非飞牛的源走中性的 SourcePlaylist：登录了给自己的歌单，
-      // 没登录退推荐歌单。
-      try {
-        final lists = await _source.playlists(limit: 12);
-        if (mounted) _sourcePlaylists.value = lists;
-      } catch (e) {
-        debugPrint('[HomePage] source playlists error: $e');
-      }
       return;
     }
-    if (mounted) _sourcePlaylists.value = const [];
     try {
       final pageData = await _api.getPlaylistList(page: 1, size: 10);
       if (mounted) _playlists.value = pageData.list;
@@ -598,11 +579,6 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _extendAndPlay(SongEntity first) async {
-    // 漫游是独立来源：它绕开 _playListWithFullFetch 直接 playQueue，不清掉
-    // 上一次卡片来源的话，「收藏 / 最近播放」卡片会继续显示暂停——看起来
-    // 就像大图和收藏卡是联动的。
-    _activePlaySource = null;
-    _activeQueueIds = const <String>{};
     try {
       // 直接用 banner 当前漫游链：_loadRoam 已用 getRoamStart 拿到
       // current（显示歌）+ next，并存于 _roamQueue / _roamId。用这套队列
@@ -647,16 +623,6 @@ class _HomePageState extends State<HomePage>
     Navigator.of(context).push(
       buildAppPageRoute<void>(
         (_) => AlbumDetailPage(albumName: album.name, albumGuid: album.guid),
-      ),
-    );
-  }
-
-  /// 打开非飞牛源的歌单（网易云等）。飞牛的详情页只吃自家 guid，
-  /// 这里用通用的只读列表页。
-  void _openSourcePlaylist(SourcePlaylist playlist) {
-    Navigator.of(context).push(
-      buildAppPageRoute<void>(
-        (_) => SourceFeedPage(playlistId: playlist.id, title: playlist.name),
       ),
     );
   }
@@ -744,34 +710,6 @@ class _HomePageState extends State<HomePage>
   ///
   /// [source] 指定首页数据源：列表只是 10 首预览，播放时按队列上限
   /// 请求完整列表填充队列，而不是只播预览的 10 首。
-  /// 判断某个来源当前是否正在播放。
-  ///
-  /// 不能只看播放器在不在播：用户可能从歌曲页/搜索页换了歌，那时首页卡片
-  /// 再显示暂停就是错的。所以要求「当前在播的歌确实来自本卡片发起的队列」。
-  bool _isSourcePlaying(_HomePlaySource source) {
-    if (_activePlaySource != source) return false;
-    if (!_player.isPlayingSignal.value) return false;
-    final current = _player.currentSongSignal.value;
-    return current != null && _activeQueueIds.contains(current.id);
-  }
-
-  /// 当前在播的是否就是本卡片发起的队列（不论播放还是暂停）。
-  bool _isSourceActive(_HomePlaySource source) {
-    if (_activePlaySource != source) return false;
-    final current = _player.currentSongSignal.value;
-    return current != null && _activeQueueIds.contains(current.id);
-  }
-
-  /// 卡片播放按钮：已经在放本卡片的队列就切换播放/暂停（不重建队列，
-  /// 否则会从头再播一遍），否则重新发起播放。
-  void _togglePlayFromList(List<SongEntity> songs, _HomePlaySource source) {
-    if (_isSourceActive(source)) {
-      unawaited(_player.togglePlayPause());
-      return;
-    }
-    _playFromList(songs, source);
-  }
-
   /// hero 大图按钮：正在放这首 hero 歌就切换播放/暂停，否则起播漫游。
   void _togglePlayRoam() {
     final hero = _heroSong;
@@ -836,9 +774,6 @@ class _HomePageState extends State<HomePage>
       queue = await NetEasePlaybackService.instance.prepareQueue(queue);
       if (!mounted || queue.isEmpty) return;
     }
-    // 记下这次播放的来源与队列，供卡片按钮判断播放/暂停图标。
-    _activePlaySource = source;
-    _activeQueueIds = {for (final s in queue) s.id};
     if (song != null) {
       final idx = queue.indexWhere((s) => s.id == song.id);
       _player.playQueue(queue, idx >= 0 ? idx : 0);
@@ -1046,7 +981,8 @@ class _HomePageState extends State<HomePage>
 
               const SizedBox(height: 16),
 
-              // 2. 功能入口 — 收藏 / 最近播放，各带直接播放按钮
+              // 2. 功能入口 — 收藏 / 最近播放。只是入口，点进去再挑歌；
+              // 卡片上的直接播放按钮去掉了。
               HomeQuickActions(
                 actions: [
                   HomeQuickAction(
@@ -1055,11 +991,6 @@ class _HomePageState extends State<HomePage>
                     subtitle: '接着上次听',
                     accent: const Color(0xFF14B8A6),
                     onTap: _openRecentPage,
-                    isPlaying: _isSourcePlaying(_HomePlaySource.recentHistory),
-                    onPlay: () => _togglePlayFromList(
-                      _recentSongs.value,
-                      _HomePlaySource.recentHistory,
-                    ),
                   ),
                   HomeQuickAction(
                     icon: Icons.favorite_rounded,
@@ -1067,11 +998,6 @@ class _HomePageState extends State<HomePage>
                     subtitle: '我的最爱',
                     accent: const Color(0xFFEC4899),
                     onTap: _openFavoritePage,
-                    isPlaying: _isSourcePlaying(_HomePlaySource.favorites),
-                    onPlay: () => _togglePlayFromList(
-                      _favoriteSongs.value,
-                      _HomePlaySource.favorites,
-                    ),
                   ),
                 ],
               ),
@@ -1100,29 +1026,6 @@ class _HomePageState extends State<HomePage>
                       ),
                   ],
                 ),
-                ),
-                const SizedBox(height: 16),
-              ],
-
-              // 3b. 非飞牛源的歌单 —— 同一套轮播，数据走 SourcePlaylist。
-              if (_source.id != 'feiniu' &&
-                  _sourcePlaylists.value.isNotEmpty) ...[
-                HomeSectionHeader(title: '${_source.label}歌单'),
-                AppContentFrame(
-                  child: HomeCoverCarousel(
-                    coverSize: AppLayoutSettings.tvMode.value ? 140 : 100,
-                    borderRadius: 14,
-                    centerText: true,
-                    items: [
-                      for (final p in _sourcePlaylists.value)
-                        HomeCoverItem(
-                          coverId: p.coverId,
-                          title: p.name,
-                          subtitle: '',
-                          onTap: () => _openSourcePlaylist(p),
-                        ),
-                    ],
-                  ),
                 ),
                 const SizedBox(height: 16),
               ],

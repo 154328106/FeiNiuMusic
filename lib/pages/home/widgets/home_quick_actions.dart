@@ -102,9 +102,14 @@ class _QuickActionCard extends StatelessWidget {
                     color: accent.withValues(alpha: 0.12),
                   ),
                 ),
-                // 文字：垂直居中（右侧留出播放按钮的空间）
+                // 文字：垂直居中。有播放按钮时右侧给它让位，没有就铺满。
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 60, 0),
+                  padding: EdgeInsets.fromLTRB(
+                    16,
+                    0,
+                    onPlay != null ? 60 : 16,
+                    0,
+                  ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.start,

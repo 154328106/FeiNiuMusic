@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
@@ -307,79 +309,15 @@ class HomeHeroBanner extends StatelessWidget {
                 ],
               ),
             ),
-            // 「换一首」保留：Banner 虽然会自动轮播，但手动换一首仍有用。
-            if (onRefresh != null)
-              IconButton(
-                iconSize: 20,
-                visualDensity: VisualDensity.compact,
-                tooltip: '换一首',
-                onPressed: onRefresh,
-                icon: Icon(
-                  Icons.refresh_rounded,
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            const SizedBox(width: 2),
-            _CompactPlayButton(onPlay: onPlay, isPlaying: isPlaying),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 播放按钮：Material 自身已可聚焦（主题 focusColor 染出焦点）。
-/// 紧凑卡片右侧的圆形播放/暂停按钮。
-///
-/// 与 [_TvPlayButton] 分开：那个是压在封面上的白底大按钮（靠白色和背景拉开
-/// 对比），这里按钮在卡片表面上，得用主题色才不突兀。
-class _CompactPlayButton extends StatelessWidget {
-  final VoidCallback onPlay;
-  final bool isPlaying;
-
-  const _CompactPlayButton({required this.onPlay, required this.isPlaying});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: 48,
-      height: 48,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            scheme.primaryContainer,
-            Color.alphaBlend(
-              Colors.black.withValues(alpha: 0.10),
-              scheme.primaryContainer,
+            const SizedBox(width: 8),
+            // 一个雷达按钮顶掉原来的「刷新 + 播放」两个：没在播就播这首，
+            // 正在播就换一首，播放时向外扩散。
+            _RadarButton(
+              isPlaying: isPlaying,
+              onPlay: onPlay,
+              onRefresh: onRefresh,
             ),
           ],
-        ),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.22),
-          width: 1,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: scheme.primary.withValues(alpha: 0.28),
-            blurRadius: 12,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onPlay,
-          child: Icon(
-            isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-            color: scheme.onPrimaryContainer,
-            size: 26,
-          ),
         ),
       ),
     );
@@ -486,4 +424,168 @@ class _HeroFallback extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 漫游卡右侧的雷达按钮。
+///
+/// 静止时是个 `((·))`，播放时一圈圈向外扩散。点击语义随状态变：没在播就
+/// 播这首，正在播就换一首 —— 所以它一个顶掉了原来「刷新 + 播放」两个按钮。
+class _RadarButton extends StatefulWidget {
+  const _RadarButton({
+    required this.isPlaying,
+    required this.onPlay,
+    required this.onRefresh,
+  });
+
+  final bool isPlaying;
+  final VoidCallback onPlay;
+
+  /// 换一首。为 null 时正在播放态下点击退化成播放/暂停。
+  final VoidCallback? onRefresh;
+
+  @override
+  State<_RadarButton> createState() => _RadarButtonState();
+}
+
+class _RadarButtonState extends State<_RadarButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2600),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.isPlaying) _controller.repeat();
+  }
+
+  @override
+  void didUpdateWidget(covariant _RadarButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isPlaying == oldWidget.isPlaying) return;
+    if (widget.isPlaying) {
+      _controller.repeat();
+    } else {
+      _controller.stop();
+      _controller.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _handleTap() {
+    final refresh = widget.onRefresh;
+    if (widget.isPlaying && refresh != null) {
+      refresh();
+      return;
+    }
+    widget.onPlay();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      button: true,
+      label: widget.isPlaying ? '换一首' : '播放',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _handleTap,
+        child: SizedBox(
+          width: 62,
+          height: 62,
+          child: AnimatedBuilder(
+            animation: _controller,
+            builder: (context, _) => CustomPaint(
+              painter: _RadarPainter(
+                color: scheme.onSurface,
+                progress: widget.isPlaying ? _controller.value : null,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RadarPainter extends CustomPainter {
+  _RadarPainter({required this.color, required this.progress});
+
+  final Color color;
+
+  /// null 表示静止；0~1 循环，驱动向外扩散的波。
+  final double? progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.shortestSide / 2;
+
+    // 外轮廓：让这块区域看着是个可点的按钮。
+    canvas.drawCircle(
+      center,
+      radius - 1,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2
+        ..color = color.withValues(alpha: 0.16),
+    );
+    // 中心点
+    canvas.drawCircle(
+      center,
+      3.4,
+      Paint()..color = color.withValues(alpha: 0.85),
+    );
+
+    final p = progress;
+    if (p == null) {
+      for (var i = 0; i < 2; i++) {
+        _drawWings(
+          canvas,
+          center,
+          9.0 + i * 7.5,
+          color.withValues(alpha: 0.5 - i * 0.18),
+          1.6,
+        );
+      }
+      return;
+    }
+
+    // 两道波错开半个周期，依次从中心扩到外圈并淡出。
+    for (var i = 0; i < 2; i++) {
+      final t = (p + i / 2) % 1.0;
+      final alpha = (1 - t) * 0.6;
+      if (alpha <= 0.02) continue;
+      _drawWings(
+        canvas,
+        center,
+        8.0 + t * (radius - 11),
+        color.withValues(alpha: alpha),
+        1.8,
+      );
+    }
+  }
+
+  /// 左右两道对称的弧 —— 雷达的「翅膀」。
+  void _drawWings(Canvas canvas, Offset center, double r, Color c, double w) {
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w
+      ..strokeCap = StrokeCap.round
+      ..color = c;
+    final rect = Rect.fromCircle(center: center, radius: r);
+    const sweep = 1.74; // 约 100°
+    canvas.drawArc(rect, -sweep / 2, sweep, false, paint);
+    canvas.drawArc(rect, math.pi - sweep / 2, sweep, false, paint);
+  }
+
+  @override
+  bool shouldRepaint(_RadarPainter oldDelegate) =>
+      oldDelegate.progress != progress || oldDelegate.color != color;
 }
