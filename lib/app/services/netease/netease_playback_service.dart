@@ -163,10 +163,7 @@ class NetEasePlaybackService {
     if (needUnblock.isNotEmpty) {
       final resolved = await Future.wait([
         for (final id in needUnblock)
-          UnblockSourceService.instance.resolve(
-            platform: 'wy',
-            songId: '$id',
-          ),
+          UnblockSourceService.instance.resolve(platform: 'wy', songId: '$id'),
       ]);
       for (var i = 0; i < needUnblock.length; i++) {
         final url = resolved[i];
