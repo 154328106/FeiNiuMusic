@@ -6,6 +6,24 @@ import '../../../app/state/settings_layout_state.dart';
 import '../../../app/state/song_state.dart';
 import '../../../components/focus/tv_focusable.dart';
 
+/// 封面地址：非飞牛的源（网易云等）在 coverId 里存的就是完整公网直链，
+/// 直接用；飞牛的才去拼 `/static/cover`。
+///
+/// 与 `ArtworkWidget` 同一套判断 —— 这里漏了分流，就会出现「歌能播、
+/// 下面列表有图、唯独大图没图」。
+String _heroCoverUrl(String coverId, SongEntity? song) {
+  if (coverId.startsWith('http')) return coverId;
+  return FeiNiuApiClient.instance.coverUrl(
+    coverId,
+    size: FeiNiuApiClient.coverRequestSize,
+    updatedAt: song?.updatedAt,
+  );
+}
+
+/// 公网直链**不能带飞牛的认证头**，跨域发 Cookie 会被拒。
+Map<String, String>? _heroCoverHeaders(String coverId) =>
+    coverId.startsWith('http') ? null : FeiNiuApiClient.imageAuthHeaders();
+
 /// 首页顶部 100% 宽 Hero Banner。
 ///
 /// 漫游/今日推荐歌曲封面铺满整卡，底部渐变遮罩保证文字可读，
@@ -62,12 +80,8 @@ class HomeHeroBanner extends StatelessWidget {
           // 封面铺满
           if (coverId != null && coverId.isNotEmpty)
             CachedNetworkImage(
-              imageUrl: FeiNiuApiClient.instance.coverUrl(
-                coverId,
-                size: FeiNiuApiClient.coverRequestSize,
-                updatedAt: song?.updatedAt,
-              ),
-              httpHeaders: FeiNiuApiClient.imageAuthHeaders(),
+              imageUrl: _heroCoverUrl(coverId, song),
+              httpHeaders: _heroCoverHeaders(coverId),
               fit: BoxFit.cover,
               placeholder: (_, _) => _HeroFallback(song: song),
               errorWidget: (_, _, _) => _HeroFallback(song: song),
@@ -254,12 +268,8 @@ class HomeHeroBanner extends StatelessWidget {
                 height: 68,
                 child: (coverId != null && coverId.isNotEmpty)
                     ? CachedNetworkImage(
-                        imageUrl: FeiNiuApiClient.instance.coverUrl(
-                          coverId,
-                          size: FeiNiuApiClient.coverRequestSize,
-                          updatedAt: song?.updatedAt,
-                        ),
-                        httpHeaders: FeiNiuApiClient.imageAuthHeaders(),
+                        imageUrl: _heroCoverUrl(coverId, song),
+                        httpHeaders: _heroCoverHeaders(coverId),
                         fit: BoxFit.cover,
                         placeholder: (_, _) => _HeroFallback(song: song),
                         errorWidget: (_, _, _) => _HeroFallback(song: song),

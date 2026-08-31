@@ -1,10 +1,12 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
+import '../../app/router/app_router.dart';
 import '../../app/services/netease/netease_api_client.dart';
 import '../../app/services/netease/netease_models.dart';
 import '../../app/services/netease/netease_playback_service.dart';
 import '../../app/services/player_service.dart';
+import '../../app/services/source/netease_source.dart';
 import '../../app/state/song_state.dart';
 
 /// 网易云搜索页。
@@ -36,6 +38,39 @@ class _NetEaseSearchPageState extends State<NetEaseSearchPage> {
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  /// 打开扫码登录。已登录时点它给个退出登录的入口。
+  Future<void> _openLogin() async {
+    if (_api.isLoggedIn) {
+      final logout = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('网易云账号'),
+          content: const Text('已登录。退出后首页的收藏、每日推荐将不可用。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('退出登录'),
+            ),
+          ],
+        ),
+      );
+      if (logout != true) return;
+      await _api.logout();
+      // 清掉源里缓存的 uid / 红心歌单 id，换账号不会读到上一个人的数据。
+      NetEaseSource.instance.reset();
+      if (mounted) setState(() {});
+      return;
+    }
+    await Navigator.pushNamed(context, AppRoutes.neteaseLogin);
+    if (!mounted) return;
+    NetEaseSource.instance.reset();
+    setState(() {});
   }
 
   Future<void> _runSearch() async {
@@ -85,7 +120,23 @@ class _NetEaseSearchPageState extends State<NetEaseSearchPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('网易云音乐')),
+      appBar: AppBar(
+        title: const Text('网易云音乐'),
+        actions: [
+          // 登录入口。不登录只有搜索能用 —— 收藏、每日推荐、播放记录都是
+          // 账号维度的数据，首页切到网易云也只能显示「推荐新歌」。
+          IconButton(
+            tooltip: _api.isLoggedIn ? '账号（已登录）' : '扫码登录',
+            icon: Icon(
+              _api.isLoggedIn
+                  ? Icons.account_circle_rounded
+                  : Icons.login_rounded,
+              color: _api.isLoggedIn ? theme.colorScheme.primary : null,
+            ),
+            onPressed: _openLogin,
+          ),
+        ],
+      ),
       body: Column(
         children: [
           Padding(
