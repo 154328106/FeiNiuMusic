@@ -12,6 +12,9 @@ import '../../app/services/feiniu/auth_service.dart';
 import '../../app/services/feiniu/fn_connection_probe_service.dart';
 import '../../app/services/feiniu/fn_models.dart';
 import '../../app/services/login_pair_server.dart';
+import '../../app/services/subsonic/subsonic_api_client.dart';
+import '../../app/services/subsonic/subsonic_server.dart';
+import '../../app/state/settings_platform_state.dart';
 import '../../app/state/settings_state.dart';
 import '../../app/router/app_router.dart';
 import '../../components/feedback/probe_overlay.dart';
@@ -37,6 +40,11 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final _serverUrlController = TextEditingController();
+  final _subsonicUrlController = TextEditingController();
+  final _subsonicUserController = TextEditingController();
+  final _subsonicPasswordController = TextEditingController();
+  bool _subsonicBusy = false;
+  String? _subsonicError;
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
@@ -165,6 +173,9 @@ class _LoginPageState extends State<LoginPage> {
   void dispose() {
     _exitResetTimer?.cancel();
     _serverUrlController.dispose();
+    _subsonicUrlController.dispose();
+    _subsonicUserController.dispose();
+    _subsonicPasswordController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
     _nameController.dispose();
@@ -615,6 +626,181 @@ class _LoginPageState extends State<LoginPage> {
     ).pushNamed(AppRoutes.accounts);
   }
 
+  /// 平台选择器：一行可横向滚动的卡片，选中的那张高亮。
+  ///
+  /// 放在登录页顶部，让「配哪个服务器」和「用哪个账号登录」在同一处完成，
+  /// 不必去设置里另找一个页面。
+  Widget _buildPlatformPicker(BuildContext context, AppPlatform current) {
+    final theme = Theme.of(context);
+    return SizedBox(
+      height: 92,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        itemCount: AppPlatform.values.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 10),
+        itemBuilder: (context, index) {
+          final platform = AppPlatform.values[index];
+          final selected = platform == current;
+          return GestureDetector(
+            onTap: () => AppPlatformSettings.setActive(platform),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              width: 96,
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              decoration: BoxDecoration(
+                color: selected
+                    ? platform.accent.withValues(alpha: 0.16)
+                    : theme.colorScheme.surfaceContainerHighest.withValues(
+                        alpha: 0.5,
+                      ),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: selected
+                      ? platform.accent
+                      : theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+                  width: selected ? 1.6 : 1,
+                ),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(platform.icon, size: 28, color: platform.accent),
+                  const SizedBox(height: 6),
+                  Text(
+                    platform.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      color: selected
+                          ? platform.accent
+                          : theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// Subsonic 系平台的登录表单（地址 / 用户名 / 密码）。
+  ///
+  /// 与飞牛表单是二选一：飞牛那套有 FNID、已保存账号、备注等飞牛专属概念，
+  /// 混在一起只会让两边都别扭。
+  Widget _buildSubsonicForm(BuildContext context, AppPlatform platform) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextFormField(
+          controller: _subsonicUrlController,
+          keyboardType: TextInputType.url,
+          autocorrect: false,
+          decoration: const InputDecoration(
+            labelText: '服务器地址',
+            hintText: '例如 192.168.1.10:4533',
+            prefixIcon: Icon(Icons.dns_rounded),
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextFormField(
+          controller: _subsonicUserController,
+          autocorrect: false,
+          decoration: const InputDecoration(
+            labelText: '用户名',
+            prefixIcon: Icon(Icons.person_outline_rounded),
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextFormField(
+          controller: _subsonicPasswordController,
+          obscureText: true,
+          decoration: const InputDecoration(
+            labelText: '密码',
+            prefixIcon: Icon(Icons.lock_outline_rounded),
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 20),
+        SizedBox(
+          height: 48,
+          child: FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: platform.accent),
+            onPressed: _subsonicBusy ? null : _connectSubsonic,
+            child: _subsonicBusy
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Text('连接'),
+          ),
+        ),
+        if (_subsonicError != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            _subsonicError!,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.error,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// 连接 Subsonic 服务端：存配置 → ping 验证 → 进音乐库。
+  Future<void> _connectSubsonic() async {
+    var url = _subsonicUrlController.text.trim();
+    if (url.isEmpty) {
+      setState(() => _subsonicError = '请填写服务器地址');
+      return;
+    }
+    // 只填了 IP:端口时补 http://，省得每次手打。
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'http://$url';
+    }
+    setState(() {
+      _subsonicBusy = true;
+      _subsonicError = null;
+    });
+
+    // 先存再测：客户端从 store 读配置。认证方式重置回 token —— 换了服务器，
+    // 上次降级成密码模式的结论不一定还成立。
+    await SubsonicServerStore.instance.save(
+      SubsonicServerConfig(
+        baseUrl: url,
+        username: _subsonicUserController.text.trim(),
+        password: _subsonicPasswordController.text,
+      ),
+    );
+
+    try {
+      await SubsonicApiClient.instance.ping();
+      if (!mounted) return;
+      setState(() => _subsonicBusy = false);
+      Navigator.of(
+        context,
+      ).pushReplacementNamed(AppRoutes.subsonicLibrary);
+    } on SubsonicApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _subsonicBusy = false;
+        _subsonicError = e.code == 40 ? '用户名或密码错误' : '连接失败：${e.message}';
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -645,49 +831,106 @@ class _LoginPageState extends State<LoginPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Logo
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(20),
-                    child: Image.asset(
-                      'assets/icon/app_icon.png',
-                      width: 80,
-                      height: 80,
-                      fit: BoxFit.cover,
-                    ),
+                  // 品牌头 + 表单都跟着选中的平台走：默认飞牛，选了别的就整体
+                  // 换成那个平台的图标、名称与登录方式。
+                  ValueListenableBuilder<AppPlatform>(
+                    valueListenable: AppPlatformSettings.active,
+                    builder: (context, platform, _) {
+                      final isFeiniu = platform == AppPlatform.feiniu;
+                      return Column(
+                        children: [
+                          // Logo：飞牛用自带图标，其余平台用带主色的图形标识
+                          // （不搬各家官方 logo，那是别人的商标资源）。
+                          isFeiniu
+                              ? ClipRRect(
+                                  borderRadius: BorderRadius.circular(20),
+                                  child: Image.asset(
+                                    'assets/icon/app_icon.png',
+                                    width: 80,
+                                    height: 80,
+                                    fit: BoxFit.cover,
+                                  ),
+                                )
+                              : Container(
+                                  width: 80,
+                                  height: 80,
+                                  decoration: BoxDecoration(
+                                    color: platform.accent.withValues(
+                                      alpha: 0.16,
+                                    ),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(
+                                      color: platform.accent.withValues(
+                                        alpha: 0.6,
+                                      ),
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                  child: Icon(
+                                    platform.icon,
+                                    size: 40,
+                                    color: platform.accent,
+                                  ),
+                                ),
+                          const SizedBox(height: 16),
+                          Text(
+                            platform.label,
+                            style: theme.textTheme.headlineMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: isFeiniu
+                                  ? theme.colorScheme.primary
+                                  : platform.accent,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            platform.subtitle,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: isDark
+                                  ? Colors.grey[400]
+                                  : Colors.grey[600],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.secondaryContainer,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              platform.hint,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.onSecondaryContainer,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          // 添加/编辑飞牛账号时不显示平台切换：那两个模式是
+                          // 从账号页进来专门管飞牛账号的，切平台没有意义。
+                          if (!widget.isAddMode && widget.editAccount == null)
+                            _buildPlatformPicker(context, platform),
+                          const SizedBox(height: 16),
+                          if (!isFeiniu)
+                            _buildSubsonicForm(context, platform),
+                        ],
+                      );
+                    },
                   ),
-                  const SizedBox(height: 16),
-                  Text(
-                    '飞牛音乐',
-                    style: theme.textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: theme.colorScheme.primary,
-                    ),
-                  ),
+
+                  // 以下是飞牛专属表单，选了别的平台就整体隐藏。
+                  ValueListenableBuilder<AppPlatform>(
+                    valueListenable: AppPlatformSettings.active,
+                    builder: (context, platform, child) =>
+                        platform == AppPlatform.feiniu
+                        ? child!
+                        : const SizedBox.shrink(),
+                    child: Column(
+                      children: [
                   const SizedBox(height: 8),
-                  Text(
-                    'FeiNiu Music',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: isDark ? Colors.grey[400] : Colors.grey[600],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.secondaryContainer,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      '支持输入服务器地址或 FNID 快速连接',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.onSecondaryContainer,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
 
                   // 已保存账号（可一键切换 / 管理）；添加/编辑账号时隐藏，避免干扰
                   if (!widget.isAddMode && widget.editAccount == null)
@@ -838,6 +1081,9 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       );
                     },
+                  ),
+                      ],
+                    ),
                   ),
                 ],
               ),
