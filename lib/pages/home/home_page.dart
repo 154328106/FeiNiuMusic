@@ -12,6 +12,8 @@ import '../../app/services/feiniu/api_models.dart';
 import '../../app/services/feiniu/auth_service.dart';
 import '../../app/services/feiniu/track_service.dart';
 import '../../app/services/player_service.dart';
+import '../../app/services/source/music_source.dart';
+import '../../app/services/source/music_source_registry.dart';
 import '../../app/state/settings_state.dart';
 import '../../app/state/song_state.dart';
 import '../../app/tv/tv_layout.dart';
@@ -125,17 +127,34 @@ class _HomePageState extends State<HomePage>
   late final _recentTracks = createSignal<List<SongEntity>>([]);
   late final _isRefreshing = createSignal(false);
 
+  /// 首页顶部大图的标签：飞牛是「漫游 · 随心听」，网易云是「私人 FM」等。
+  late final _heroLabel = createSignal<String>('漫游 · 随心听');
+
+  /// 当前音乐源。首页所有数据都从它取，不再直接调飞牛接口。
+  MusicSource get _source => MusicSourceRegistry.instance.current.value;
+
   @override
   void initState() {
     super.initState();
     _loadAll();
     _maybeShowTvEdgeHint();
     _roamAutoTimer = Timer.periodic(_roamAutoInterval, (_) => _autoRoamTick());
+    MusicSourceRegistry.instance.current.addListener(_onSourceChanged);
+  }
+
+  /// 换源后整页重新拉取。清掉播放来源标记，否则卡片按钮会残留上一个源的状态。
+  void _onSourceChanged() {
+    if (!mounted) return;
+    _activePlaySource = null;
+    _activeQueueIds = const <String>{};
+    _loading.value = true;
+    unawaited(_loadAll(forceRefresh: true));
   }
 
   @override
   void dispose() {
     _roamAutoTimer?.cancel();
+    MusicSourceRegistry.instance.current.removeListener(_onSourceChanged);
     super.dispose();
   }
 
@@ -180,7 +199,7 @@ class _HomePageState extends State<HomePage>
 
   Future<void> _loadAll({bool forceRefresh = false}) async {
     const homeCacheScope = 'home';
-    const homeCacheKey = 'dashboard';
+    final homeCacheKey = 'dashboard_${_source.id}';
 
     // 缓存永久保留（读取 ignoreTtl，TTL 不淘汰），但只用于快速渲染：
     // 命中后立即展示，同时继续在后台异步刷新数据，完成后覆盖缓存。
@@ -332,32 +351,18 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _loadRoam() async {
-    try {
-      final deviceId = await AuthService.instance.ensureDeviceId();
-      final response = await _api.getRoamStart(deviceId);
-      final roamId = response.current.roamId;
-      final track = _trackService.trackToSongEntity(
-        response.current.track.toJson(),
-      );
-      // 把起始曲和下一曲都加到漫游队列
-      final queue = <SongEntity>[track];
-      if (response.next != null) {
-        queue.add(
-          _trackService.trackToSongEntity(response.next!.track.toJson()),
-        );
-      }
-      debugPrint(
-        '[HomePage] loadRoam roamId=$roamId current=${track.id} '
-        'queue=[${queue.map((s) => s.id).join(',')}]',
-      );
-      if (mounted) {
-        _roamId.value = roamId;
-        _roamSong.value = track;
-        _roamQueue.value = queue;
-      }
-    } catch (e, stack) {
-      debugPrint('[HomePage] roam error: $e\n$stack');
+    final hero = await _source.hero();
+    if (!mounted) return;
+    if (hero == null) {
+      _roamSong.value = null;
+      _roamQueue.value = const [];
+      _roamId.value = null;
+      return;
     }
+    _roamId.value = hero.chainId;
+    _roamSong.value = hero.song;
+    _roamQueue.value = hero.queue;
+    _heroLabel.value = hero.label;
   }
 
   /// 漫游刷新：换一首漫游歌曲（不打断播放）。
@@ -367,82 +372,37 @@ class _HomePageState extends State<HomePage>
   /// 队列会重建当前 run，打断正在播放的音乐。需要播放新歌时由用户点 Banner
   /// 触发 [_extendAndPlay]（以当前显示歌为队首重开队列）。
   Future<void> _refreshRoam({bool silent = false}) async {
-    final currentRoamId = _roamId.value;
-    try {
-      final deviceId = await AuthService.instance.ensureDeviceId();
-      final song = await _fetchNextRoamSong(
-        deviceId,
-        currentRoamId,
-        silent: silent,
-      );
-      if (song == null || !mounted) return;
-      _roamSong.value = song;
-      // 无论是否正在播放，_roamQueue 都以「当前显示的漫游歌」为队首：
-      // 点播放时播的就是 Banner 上这首歌。此前播放中刷新会把新歌 append
-      // 进 _roamQueue，队列变成 [旧歌, 新歌]，点播放仍从旧歌开始——表现为
-      // 「刷新后点播放，播的还是上一次刷新的歌」。
-      _roamQueue.value = [song];
-    } catch (e, stack) {
-      debugPrint('[HomePage] refresh roam error: $e\n$stack');
-    }
-  }
-
-  /// 拉取下一首漫游歌曲并推进 roamId。
-  /// 无 roamId 时用 roam-start 取起始曲（fallback），否则 roam-next。
-  Future<SongEntity?> _fetchNextRoamSong(
-    String deviceId,
-    String? currentRoamId, {
-    /// 自动轮播触发时为 true：失败只记日志，不弹 toast（每 12 秒弹一次
-    /// 「获取漫游歌曲失败」会把界面刷爆）。
-    bool silent = false,
-  }) async {
-    try {
-      if (currentRoamId == null || currentRoamId.isEmpty) {
-        final start = await _api.getRoamStart(deviceId);
-        _roamId.value = start.current.roamId;
-        return _trackService.trackToSongEntity(start.current.track.toJson());
+    final hero = await _source.refreshHero();
+    if (hero == null || !mounted) {
+      if (!silent && mounted) {
+        AppToast.showGlobal('获取推荐歌曲失败', type: ToastType.error);
       }
-      final next = await _api.getRoamNext(deviceId, currentRoamId);
-      if (next.next == null) return null;
-      // 推进 roamId：roam-next 返回 previous/current/next。下一次请求应基于
-      // current 的 roamId（与 PlayerService 实测一致），用 next.roamId 会跳过歌曲。
-      _roamId.value = next.current?.roamId ?? next.next!.roamId;
-      return _trackService.trackToSongEntity(next.next!.track.toJson());
-    } catch (e) {
-      debugPrint('[HomePage] fetch next roam error: $e');
-      if (!silent) {
-        AppToast.showGlobal('获取漫游歌曲失败', type: ToastType.error);
-      }
-      return null;
+      return;
     }
+    _roamId.value = hero.chainId;
+    _roamSong.value = hero.song;
+    _heroLabel.value = hero.label;
+    // 队列以「当前显示的这首」为队首：点播放时播的就是大图上这首。
+    _roamQueue.value = hero.queue;
   }
 
   Future<void> _loadFavorites() async {
-    try {
-      // 首页只展示前几首，轻量加载 10 首；点播放时再按队列上限拉完整列表
-      final pageData = await _api.getFavoriteList(size: 10);
-      final songs = pageData.list
-          .map((t) => _trackService.trackToSongEntity(t.toJson()))
-          .toList();
-      if (mounted) _favoriteSongs.value = songs;
-    } catch (e, stack) {
-      debugPrint('[HomePage] favorites error: $e\n$stack');
-    }
+    // 首页只展示前几首；点播放时再按队列上限拉完整列表。
+    final songs = await _source.feed(HomeFeed.favorites);
+    if (mounted) _favoriteSongs.value = songs;
   }
 
   Future<void> _loadRecentHistory() async {
-    try {
-      final pageData = await _api.getPlayHistory(page: 1, size: 10);
-      final songs = pageData.list
-          .map((t) => _trackService.trackToSongEntity(t.toJson()))
-          .toList();
-      if (mounted) _recentSongs.value = songs;
-    } catch (e, stack) {
-      debugPrint('[HomePage] history error: $e\n$stack');
-    }
+    final songs = await _source.feed(HomeFeed.recentPlayed);
+    if (mounted) _recentSongs.value = songs;
   }
 
   Future<void> _loadRecentAlbums() async {
+    // 专辑目前只有飞牛实现（大屏布局在用），其它源直接跳过。
+    if (_source.id != 'feiniu') {
+      if (mounted) _recentAlbums.value = const [];
+      return;
+    }
     try {
       final pageData = await _api.getAlbumList(
         page: 1,
@@ -456,6 +416,10 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _loadPlaylists() async {
+    if (_source.id != 'feiniu') {
+      if (mounted) _playlists.value = const [];
+      return;
+    }
     try {
       final pageData = await _api.getPlaylistList(page: 1, size: 10);
       if (mounted) _playlists.value = pageData.list;
@@ -465,19 +429,8 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _loadRecentTracks() async {
-    try {
-      final pageData = await _api.getTrackList(
-        page: 1,
-        size: 10,
-        sort: 'createdAt,desc',
-      );
-      final songs = pageData.list
-          .map((t) => _trackService.trackToSongEntity(t.toJson()))
-          .toList();
-      if (mounted) _recentTracks.value = songs;
-    } catch (e, stack) {
-      debugPrint('[HomePage] recent tracks error: $e\n$stack');
-    }
+    final songs = await _source.feed(HomeFeed.latestSongs);
+    if (mounted) _recentTracks.value = songs;
   }
 
   /// 长按歌曲 → 弹出与歌曲页同款的长按面板
@@ -507,27 +460,12 @@ class _HomePageState extends State<HomePage>
   }
 
   /// 漫游队列扩展器 — 每次队列快播完时调用 roam-next 获取新歌曲追加
+  /// 队列快播完时追加：飞牛走 roam-next，其它源取下一批推荐。
   Future<List<SongEntity>> _roamQueueExtender() async {
-    try {
-      final roamId = _roamId.value;
-      if (roamId == null || roamId.isEmpty) return [];
-
-      final deviceId = await AuthService.instance.ensureDeviceId();
-      final response = await _api.getRoamNext(deviceId, roamId);
-      if (response.next == null) return [];
-
-      // 更新 roamId 以便下一次扩展：基于 current 的 roamId（与 PlayerService
-      // 一致），用 next.roamId 会跳过歌曲。
-      _roamId.value = response.current?.roamId ?? response.next!.roamId;
-
-      final song = _trackService.trackToSongEntity(
-        response.next!.track.toJson(),
-      );
-      return [song];
-    } catch (e) {
-      debugPrint('[HomePage] roam extend error: $e');
-      return [];
-    }
+    final hero = await _source.refreshHero();
+    if (hero == null) return const [];
+    if (mounted) _roamId.value = hero.chainId;
+    return hero.queue;
   }
 
   Future<void> _extendAndPlay(SongEntity first) async {
@@ -754,21 +692,12 @@ class _HomePageState extends State<HomePage>
     _HomePlaySource source,
     int limit,
   ) async {
-    final tracks = switch (source) {
-      _HomePlaySource.favorites => await _api.getFavoriteList(size: limit),
-      _HomePlaySource.recentHistory => await _api.getPlayHistory(
-        page: 1,
-        size: limit,
-      ),
-      _HomePlaySource.recentTracks => await _api.getTrackList(
-        page: 1,
-        size: limit,
-        sort: 'createdAt,desc',
-      ),
+    final kind = switch (source) {
+      _HomePlaySource.favorites => HomeFeed.favorites,
+      _HomePlaySource.recentHistory => HomeFeed.recentPlayed,
+      _HomePlaySource.recentTracks => HomeFeed.latestSongs,
     };
-    return tracks.list
-        .map((t) => _trackService.trackToSongEntity(t.toJson()))
-        .toList();
+    return _source.fullFeed(kind, limit: limit);
   }
 
   @override
@@ -914,6 +843,7 @@ class _HomePageState extends State<HomePage>
                   child: HomeHeroBanner(
                     key: ValueKey(heroSong.id),
                     song: heroSong,
+                    label: _heroLabel.value,
                     onPlay: _togglePlayRoam,
                     isPlaying: _heroIsPlaying,
                     onRefresh: _refreshRoam,
@@ -988,7 +918,9 @@ class _HomePageState extends State<HomePage>
               const SizedBox(height: 20),
 
               // 3. 我的歌单 — 横向封面轮播（尺寸小于专辑）
-              if (_playlists.value.isNotEmpty) ...[
+              // 歌单区块暂时只支持飞牛：详情页与缓存仍是飞牛强类型。
+              // 换源后显示飞牛歌单会是错的，先隐藏。
+              if (_source.id == 'feiniu' && _playlists.value.isNotEmpty) ...[
                 HomeSectionHeader(title: '我的歌单', onViewAll: _openPlaylistsPage),
                 AppContentFrame(
                   child: HomeCoverCarousel(
