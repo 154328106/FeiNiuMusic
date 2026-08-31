@@ -34,6 +34,13 @@ class AccountEntry {
 
   final DateTime createdAt;
 
+  /// 该账号属于哪个平台（`AppPlatform.name`）。
+  ///
+  /// 历史数据没有这个字段，缺省当飞牛 —— 保证老账号行为不变。Subsonic 系的
+  /// 账号（Navidrome / 道理鱼 / Subsonic）也存在这里，与飞牛账号共用同一份
+  /// 账号库和管理页。
+  final String platform;
+
   const AccountEntry({
     required this.id,
     this.name = '',
@@ -45,6 +52,7 @@ class AccountEntry {
     this.accessCode,
     this.fnId,
     required this.createdAt,
+    this.platform = 'feiniu',
   });
 
   /// 去重键：同一 FNID + 同一用户名视为同一账号；无 FNID 时回退
@@ -110,6 +118,7 @@ class AccountEntry {
         if (accessCode != null) 'accessCode': accessCode,
         if (fnId != null) 'fnId': fnId,
         'createdAtMs': createdAt.millisecondsSinceEpoch,
+        'platform': platform,
       };
 
   factory AccountEntry.fromJson(Map<String, dynamic> json) {
@@ -127,6 +136,7 @@ class AccountEntry {
       createdAt: rawCreatedAt is int
           ? DateTime.fromMillisecondsSinceEpoch(rawCreatedAt)
           : DateTime.fromMillisecondsSinceEpoch(0),
+      platform: json['platform'] as String? ?? 'feiniu',
     );
   }
 
@@ -141,6 +151,7 @@ class AccountEntry {
     String? Function()? accessCode,
     String? Function()? fnId,
     DateTime? createdAt,
+    String? platform,
   }) {
     return AccountEntry(
       id: id ?? this.id,
@@ -153,6 +164,7 @@ class AccountEntry {
       accessCode: accessCode != null ? accessCode() : this.accessCode,
       fnId: fnId != null ? fnId() : this.fnId,
       createdAt: createdAt ?? this.createdAt,
+          platform: platform ?? this.platform,
     );
   }
 

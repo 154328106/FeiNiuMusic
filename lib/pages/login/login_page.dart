@@ -502,7 +502,13 @@ class _LoginPageState extends State<LoginPage> {
   Widget _buildSavedAccounts(BuildContext context) {
     return ValueListenableBuilder<List<AccountEntry>>(
       valueListenable: AccountStore.instance.accounts,
-      builder: (context, accounts, _) {
+      builder: (context, allAccounts, _) {
+        // 只列当前平台的账号：飞牛账号和 Subsonic 账号混在一个下拉里，
+        // 点了对不上表单，反而更乱。
+        final platformName = AppPlatformSettings.active.value.name;
+        final accounts = allAccounts
+            .where((a) => a.platform == platformName)
+            .toList();
         if (accounts.isEmpty) return const SizedBox.shrink();
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -587,7 +593,13 @@ class _LoginPageState extends State<LoginPage> {
                     if (picked == null || !mounted) return;
                     final account = AccountStore.instance.byId(picked);
                     if (account == null) return;
-                    _fillAccount(account);
+                    if (account.platform != AppPlatform.feiniu.name) {
+                      _subsonicUrlController.text = account.serverUrl;
+                      _subsonicUserController.text = account.username;
+                      _subsonicPasswordController.text = account.password ?? '';
+                    } else {
+                      _fillAccount(account);
+                    }
                     // 复位下拉，避免误以为仍是选中状态
                     setState(() => _selectedAccountId = null);
                   },
@@ -626,64 +638,121 @@ class _LoginPageState extends State<LoginPage> {
     ).pushNamed(AppRoutes.accounts);
   }
 
-  /// 平台选择器：一行可横向滚动的卡片，选中的那张高亮。
+  /// 平台下拉框。放在「已保存账号」上面，样式与那个下拉一致。
   ///
-  /// 放在登录页顶部，让「配哪个服务器」和「用哪个账号登录」在同一处完成，
-  /// 不必去设置里另找一个页面。
+  /// 选中哪个平台，页面顶部的图标/名称、以及下面的表单整套跟着换。
   Widget _buildPlatformPicker(BuildContext context, AppPlatform current) {
     final theme = Theme.of(context);
-    return SizedBox(
-      height: 92,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        itemCount: AppPlatform.values.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 10),
-        itemBuilder: (context, index) {
-          final platform = AppPlatform.values[index];
-          final selected = platform == current;
-          return GestureDetector(
-            onTap: () => AppPlatformSettings.setActive(platform),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              width: 96,
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              decoration: BoxDecoration(
-                color: selected
-                    ? platform.accent.withValues(alpha: 0.16)
-                    : theme.colorScheme.surfaceContainerHighest.withValues(
-                        alpha: 0.5,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          '平台',
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 8),
+        // 与账号下拉同样用 showMenu 自定义定位：菜单固定从输入框正下方弹出，
+        // 不受系统 Dropdown 的自动上/下定位影响。
+        Builder(
+          builder: (btnContext) {
+            final scheme = Theme.of(btnContext).colorScheme;
+            return InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () async {
+                final box = btnContext.findRenderObject() as RenderBox?;
+                if (box == null) return;
+                final overlay = Overlay.of(btnContext, rootOverlay: true);
+                final overlayBox =
+                    overlay.context.findRenderObject() as RenderBox?;
+                if (overlayBox == null) return;
+                final topLeft = box.localToGlobal(
+                  Offset.zero,
+                  ancestor: overlayBox,
+                );
+                final position = RelativeRect.fromLTRB(
+                  topLeft.dx,
+                  topLeft.dy + box.size.height,
+                  overlayBox.size.width - topLeft.dx - box.size.width,
+                  overlayBox.size.height - topLeft.dy,
+                );
+                final picked = await showMenu<AppPlatform>(
+                  context: btnContext,
+                  position: position,
+                  color: scheme.surfaceContainerHigh,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  elevation: 8,
+                  items: [
+                    for (final platform in AppPlatform.values)
+                      PopupMenuItem<AppPlatform>(
+                        value: platform,
+                        height: 52,
+                        child: Row(
+                          children: [
+                            Icon(
+                              platform.icon,
+                              size: 22,
+                              color: platform.accent,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    platform.label,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  Text(
+                                    platform.subtitle,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: scheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (platform == current)
+                              Icon(
+                                Icons.check_rounded,
+                                size: 18,
+                                color: scheme.primary,
+                              ),
+                          ],
+                        ),
                       ),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: selected
-                      ? platform.accent
-                      : theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
-                  width: selected ? 1.6 : 1,
+                  ],
+                );
+                if (picked == null || !mounted) return;
+                await AppPlatformSettings.setActive(picked);
+              },
+              child: InputDecorator(
+                decoration: InputDecoration(
+                  prefixIcon: Icon(current.icon, color: current.accent),
+                  suffixIcon: const Icon(Icons.arrow_drop_down_rounded),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: Text(
+                  current.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(platform.icon, size: 28, color: platform.accent),
-                  const SizedBox(height: 6),
-                  Text(
-                    platform.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                      color: selected
-                          ? platform.accent
-                          : theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
+            );
+          },
+        ),
+        const SizedBox(height: 16),
+      ],
     );
   }
 
@@ -787,6 +856,19 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       await SubsonicApiClient.instance.ping();
+      // 连通了才落账号库：存一条连不上的进去只会让下拉里多个坑。
+      // 与飞牛账号同一份存储、同一个管理页，platform 字段区分。
+      final platform = AppPlatformSettings.active.value;
+      await AccountStore.instance.addOrUpdate(
+        AccountEntry(
+          id: '${platform.name}:$url:${_subsonicUserController.text.trim()}',
+          serverUrl: url,
+          username: _subsonicUserController.text.trim(),
+          password: _subsonicPasswordController.text,
+          createdAt: DateTime.now(),
+          platform: platform.name,
+        ),
+      );
       if (!mounted) return;
       setState(() => _subsonicBusy = false);
       Navigator.of(
@@ -913,9 +995,13 @@ class _LoginPageState extends State<LoginPage> {
                           // 从账号页进来专门管飞牛账号的，切平台没有意义。
                           if (!widget.isAddMode && widget.editAccount == null)
                             _buildPlatformPicker(context, platform),
-                          const SizedBox(height: 16),
-                          if (!isFeiniu)
-                            _buildSubsonicForm(context, platform),
+                          // 「已保存账号」对两种平台都要显示（内部按平台过滤），
+                          // 所以放在这里而不是飞牛专属那一段里。
+                          if (!widget.isAddMode &&
+                              widget.editAccount == null &&
+                              !isFeiniu)
+                            _buildSavedAccounts(context),
+                          if (!isFeiniu) _buildSubsonicForm(context, platform),
                         ],
                       );
                     },
