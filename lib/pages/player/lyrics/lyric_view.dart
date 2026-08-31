@@ -241,6 +241,21 @@ class _PlayerLyricsViewState extends State<PlayerLyricsView> with SignalsMixin {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        // 歌词时间轴校准：歌词和音频对不上时手动挪。
+                        AppSettingSection(
+                          title: '时间轴校准',
+                          showDividers: false,
+                          children: [
+                            ValueListenableBuilder<int>(
+                              valueListenable:
+                                  LyricsService.instance.lyricOffsetMs,
+                              builder: (context, offsetMs, _) {
+                                return _LyricOffsetRow(offsetMs: offsetMs);
+                              },
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
                         AppSettingSection(
                           title: '样式',
                           showDividers: false,
@@ -1164,5 +1179,76 @@ class _LyricsHueSliderState extends State<_LyricsHueSlider> {
       _dragValue = next;
     });
     widget.onChanged(next);
+  }
+}
+
+/// 歌词时间轴校准的一行控件：−0.5s / 数值 / +0.5s，点数值归零。
+///
+/// 正值＝歌词提前，负值＝歌词延后。步进 0.5 秒 —— 再细人耳分辨不出，
+/// 再粗又调不准。
+class _LyricOffsetRow extends StatelessWidget {
+  final int offsetMs;
+
+  const _LyricOffsetRow({required this.offsetMs});
+
+  static const int _stepMs = 500;
+
+  String get _label {
+    if (offsetMs == 0) return '同步';
+    final seconds = (offsetMs / 1000).toStringAsFixed(1);
+    return offsetMs > 0 ? '歌词提前 ${seconds}s' : '歌词延后 ${(-offsetMs / 1000).toStringAsFixed(1)}s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final service = LyricsService.instance;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      child: Row(
+        children: [
+          IconButton.filledTonal(
+            tooltip: '歌词延后 0.5 秒',
+            onPressed: () => service.setLyricOffsetMs(offsetMs - _stepMs),
+            icon: const Icon(Icons.fast_rewind_rounded),
+          ),
+          Expanded(
+            child: GestureDetector(
+              onTap: offsetMs == 0
+                  ? null
+                  : () => service.setLyricOffsetMs(0),
+              behavior: HitTestBehavior.opaque,
+              child: Column(
+                children: [
+                  Text(
+                    _label,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    offsetMs == 0 ? '歌词对不上时点两侧按钮微调' : '点这里恢复同步',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          IconButton.filledTonal(
+            tooltip: '歌词提前 0.5 秒',
+            onPressed: () => service.setLyricOffsetMs(offsetMs + _stepMs),
+            icon: const Icon(Icons.fast_forward_rounded),
+          ),
+        ],
+      ),
+    );
   }
 }

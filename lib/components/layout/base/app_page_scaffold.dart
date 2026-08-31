@@ -7,7 +7,13 @@ import '../../player/mini_player/mini_player_bar.dart';
 import '../modern_navigation_bar.dart';
 
 class AppPageScaffold extends StatefulWidget {
-  static const double modernNavHeight = 84.0;
+  /// 玻璃底栏占的槽位高度 = 胶囊高 + 上下各留一段空隙。
+  ///
+  /// **必须由 [kGlassNavBarHeight] 推导，不能写死**：之前这里硬编码 84
+  /// （对应胶囊 56），把胶囊调到 62 之后槽位不够，胶囊撑出槽位顶到了上方的
+  /// 迷你播放条，两条粘在一起。
+  static const double modernNavHeight =
+      kGlassNavBarHeight + kGlassNavPillTopGap * 2;
 
   static double scrollableBottomPadding(
     BuildContext context, {
@@ -194,7 +200,7 @@ class AppPageScaffoldState extends State<AppPageScaffold>
 
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     // 有底栏时迷你播放器停在胶囊上方，此值即与胶囊顶的间隙（贴近不重叠）。
-    const miniPlayerLift = 5.0;
+    const miniPlayerLift = 10.0;
     // 无底栏时底部没有胶囊，迷你播放器需要额外抬离底部，避开系统手势条 /
     // 大圆角边缘，悬浮更透气。
     const miniPlayerBottomLift = 10.0;

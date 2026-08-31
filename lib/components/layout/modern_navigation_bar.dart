@@ -27,6 +27,10 @@ const _primaryNavigationRoutes = <String>[
 /// 底栏的间隙（观感上离得远）。
 const double kGlassNavPillTopGap = 14;
 
+/// 玻璃胶囊本身的高度。与上方迷你播放条的可见高度对齐：
+/// 那条是封面 48 + 内边距 7×2 = 62。
+const double kGlassNavBarHeight = 62;
+
 /// 非液体玻璃分支（实色/高斯模糊栏）的底栏高度。
 ///
 /// 玻璃分支槽位仍是 [AppPageScaffold.modernNavHeight]（56 胶囊 + 14×2 空隙），
@@ -265,10 +269,7 @@ class ModernNavigationBar extends StatelessWidget {
               ),
         // 悬浮：胶囊上下各留 kGlassNavPillTopGap 空隙（槽位 56 + 14×2 = 84），
         // 内容从胶囊四周透出，视觉上像 demo（GlassScaffold 底栏）一样飘浮。
-        // 与上方迷你播放条对齐：那条的可见高度是封面 48 + 内边距 7×2 = 62。
-        // 之前按 estimatedHeight-16 算成 54，比它矮一截；同样是 20 的圆角，
-        // 条越矮看着越圆，所以还显得「角更圆」。
-        barHeight: 62,
+        barHeight: kGlassNavBarHeight,
         // 圆角矩形而非胶囊：包的默认 barBorderRadius 是
         // GlassDefaults.capsuleRadius（9999），两端会被拉成半圆。
         barBorderRadius: 20,

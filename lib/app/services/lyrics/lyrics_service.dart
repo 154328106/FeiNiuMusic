@@ -102,6 +102,46 @@ class LyricsService {
   int _meizuLastIndex = -1;
   bool _viewForceKaraoke = false;
 
+  static const String _prefsLyricOffset = 'lyrics_offset_ms';
+
+  /// 用户手动的歌词时间轴偏移（毫秒）。
+  ///
+  /// 正值＝歌词提前（等于把播放进度往后推着去查行号），负值＝歌词延后。
+  /// 和 LRC 自带的 `[offset:]` 标签**相加**，不是覆盖 —— 见
+  /// [_applyLyricOffset]。
+  final ValueNotifier<int> lyricOffsetMs = ValueNotifier(0);
+
+  /// 当前歌词文件自带的 offset，换歌时更新。
+  int _modelOffsetMs = 0;
+
+  /// 把「文件自带 offset + 用户偏移」写进控制器。
+  ///
+  /// controller.loadLyricModel 内部会把 lyricOffset 重置成文件的 offset，
+  /// 所以每次载入模型后都要重新调用这里，否则用户设的偏移会被悄悄清掉。
+  void _applyLyricOffset() {
+    controller.lyricOffset = _modelOffsetMs + lyricOffsetMs.value;
+    // 立刻按新偏移重算当前行，不用等下一次位置回调（暂停时不会有回调）。
+    controller.setProgress(_player.position.value);
+  }
+
+  Future<void> setLyricOffsetMs(int value) async {
+    final clamped = value.clamp(-10000, 10000);
+    lyricOffsetMs.value = clamped;
+    _applyLyricOffset();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_prefsLyricOffset, clamped);
+    } catch (_) {}
+  }
+
+  Future<void> _loadLyricOffset() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      lyricOffsetMs.value = prefs.getInt(_prefsLyricOffset) ?? 0;
+      _applyLyricOffset();
+    } catch (_) {}
+  }
+
   LyricsService._internal() {
     snapshot.addListener(() => snapshotSignal.value = snapshot.value);
     viewSettingsTick.addListener(
@@ -130,6 +170,7 @@ class LyricsService {
     viewSettingsTick.addListener(_reloadViewColorPrefs);
     refreshSettings();
     _reloadViewColorPrefs();
+    _loadLyricOffset();
     _onSongChanged();
   }
 
@@ -269,6 +310,10 @@ class LyricsService {
         );
       }
       controller.loadLyricModel(model);
+      // loadLyricModel 把 lyricOffset 重置成了文件自带的 offset，
+      // 这里把用户偏移叠回去。
+      _modelOffsetMs = model.offset;
+      _applyLyricOffset();
       _updateCurrentLineText(controller.activeIndexNotifiter.value);
       snapshot.value = snapshot.value.copyWith(
         status: LyricsLoadStatus.loaded,
