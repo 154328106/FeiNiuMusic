@@ -126,6 +126,15 @@ class NetEasePlaybackService {
     Map<int, NetEaseSongUrl> result;
     try {
       result = await NetEaseApiClient.instance.songUrls(ids, level: level);
+      // 高音质档位不是每首都有，缺档时服务端可能直接不给地址。
+      // 一首都没解析出来就降到 standard 再试一次。
+      if (result.values.every((e) => e.url == null) && level != 'standard') {
+        debugPrint('[NetEase] $level 无结果，降级 standard 重试');
+        result = await NetEaseApiClient.instance.songUrls(
+          ids,
+          level: 'standard',
+        );
+      }
     } on NetEaseApiException catch (e) {
       // 批量失败就不要在这里拦人，交给播放时逐首解析。
       debugPrint('[NetEase] 批量取地址失败，跳过预筛：${e.message}');
@@ -164,9 +173,13 @@ class NetEasePlaybackService {
       _cache[id] = _ResolvedUrl(secure, DateTime.now());
       playable.add(song);
     }
-    if (dropped > 0) {
-      debugPrint('[NetEase] 队列中 $dropped 首取不到地址，已跳过');
-    }
+    // 官方能给出地址的比例是关键诊断：几乎全给不出 → 多半是登录态没生效；
+    // 只有零星几首给不出 → 那几首本来就下架了。
+    final official = result.values.where((e) => e.url != null).length;
+    debugPrint(
+      '[NetEase] 队列 ${songs.length} 首：官方 $official 首有地址，'
+      '可播 ${playable.length} 首，跳过 $dropped 首',
+    );
     return playable;
   }
 
