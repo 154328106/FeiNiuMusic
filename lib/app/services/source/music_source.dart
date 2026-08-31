@@ -71,6 +71,9 @@ abstract class MusicSource {
   IconData get icon;
   Color get accent;
 
+  /// 品牌图标资源路径。用它渲染，[icon] 只作为加载失败时的兜底。
+  String get assetIcon;
+
   /// 是否可用（已登录 / 已配置）。不可用时首页显示 [unavailableHint]。
   bool get isAvailable;
 

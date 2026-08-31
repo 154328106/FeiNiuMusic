@@ -140,6 +140,8 @@ class _HomePageState extends State<HomePage>
     _maybeShowTvEdgeHint();
     _roamAutoTimer = Timer.periodic(_roamAutoInterval, (_) => _autoRoamTick());
     MusicSourceRegistry.instance.current.addListener(_onSourceChanged);
+    // 登录 / 登出后源没换但内容变了，也要重拉。
+    MusicSourceRegistry.instance.revision.addListener(_onSourceChanged);
   }
 
   /// 换源后整页重新拉取。清掉播放来源标记，否则卡片按钮会残留上一个源的状态。
@@ -155,6 +157,7 @@ class _HomePageState extends State<HomePage>
   void dispose() {
     _roamAutoTimer?.cancel();
     MusicSourceRegistry.instance.current.removeListener(_onSourceChanged);
+    MusicSourceRegistry.instance.revision.removeListener(_onSourceChanged);
     super.dispose();
   }
 

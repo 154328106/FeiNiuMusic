@@ -3,8 +3,11 @@ import 'package:flutter/material.dart';
 import '../../app/router/app_router.dart';
 import '../../app/state/settings_layout_state.dart';
 import '../../components/account/profile_account_card.dart';
+import '../../app/router/app_router.dart' show AppRoutes;
+import '../../app/services/netease/netease_api_client.dart';
 import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';
+import '../../app/services/source/netease_source.dart';
 import '../../components/index.dart';
 
 /// 底部导航第 4 项「我的」入口页。
@@ -107,9 +110,11 @@ class _MusicSourceSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final registry = MusicSourceRegistry.instance;
-    return ValueListenableBuilder<MusicSource>(
-      valueListenable: registry.current,
-      builder: (context, current, _) {
+    // revision 也要监听：登录 / 登出后源没换，但「是否可用」变了。
+    return ListenableBuilder(
+      listenable: Listenable.merge([registry.current, registry.revision]),
+      builder: (context, _) {
+        final current = registry.current.value;
         return AppSettingSection(
           title: '音乐来源',
           children: [
@@ -117,12 +122,32 @@ class _MusicSourceSection extends StatelessWidget {
               _SourceTile(
                 source: source,
                 selected: identical(source, current),
-                onTap: () => registry.setCurrent(source),
+                onTap: () => _onTap(context, source, registry),
               ),
           ],
         );
       },
     );
+  }
+
+  /// 未登录的源点一下直接去登录，不用再翻设置页 —— 之前登录入口藏在
+  /// 「设置 → 网易云音乐」的顶栏里，基本找不到。
+  Future<void> _onTap(
+    BuildContext context,
+    MusicSource source,
+    MusicSourceRegistry registry,
+  ) async {
+    if (!source.isAvailable && source.id == 'netease') {
+      await Navigator.pushNamed(context, AppRoutes.neteaseLogin);
+      NetEaseSource.instance.reset();
+      registry.notifyContentChanged();
+      // 登录成功就顺手切过去，省一步。
+      if (NetEaseApiClient.instance.isLoggedIn) {
+        await registry.setCurrent(source);
+      }
+      return;
+    }
+    await registry.setCurrent(source);
   }
 }
 
@@ -143,21 +168,26 @@ class _SourceTile extends StatelessWidget {
     final available = source.isAvailable;
     return AppSettingTile(
       title: source.label,
-      // 不可用时把原因写在副标题上，而不是让用户切过去看到一片空白。
-      subtitle: available ? (selected ? '当前使用中' : '点击切换') : source.unavailableHint,
+      // 不可用时把原因和下一步写在副标题上，而不是让用户切过去看到一片空白。
+      subtitle: available
+          ? (selected ? '当前使用中' : '点击切换')
+          : '${source.unavailableHint} · 点击登录',
       onTap: onTap,
-      trailing: SizedBox(
-        width: 60,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            Icon(source.icon, size: 20, color: source.accent),
-            const SizedBox(width: 6),
-            if (selected)
-              Icon(Icons.check_rounded, size: 18, color: scheme.primary),
-          ],
+      leading: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.asset(
+          source.assetIcon,
+          width: 32,
+          height: 32,
+          fit: BoxFit.cover,
+          // 资源缺失时退回图标，不至于整行报红。
+          errorBuilder: (_, _, _) =>
+              Icon(source.icon, size: 26, color: source.accent),
         ),
       ),
+      trailing: selected
+          ? Icon(Icons.check_rounded, size: 20, color: scheme.primary)
+          : null,
     );
   }
 }

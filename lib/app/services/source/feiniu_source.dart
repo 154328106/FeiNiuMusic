@@ -28,6 +28,9 @@ class FeiniuSource implements MusicSource {
   IconData get icon => Icons.dns_rounded;
 
   @override
+  String get assetIcon => 'assets/source/feiniu.png';
+
+  @override
   Color get accent => const Color(0xFFE5405A);
 
   @override

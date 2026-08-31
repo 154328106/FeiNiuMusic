@@ -34,6 +34,9 @@ class NetEaseSource implements MusicSource {
   IconData get icon => Icons.cloud_rounded;
 
   @override
+  String get assetIcon => 'assets/source/netease.png';
+
+  @override
   Color get accent => const Color(0xFFD33A31);
 
   @override

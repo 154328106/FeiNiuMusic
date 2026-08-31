@@ -27,6 +27,14 @@ class MusicSourceRegistry {
     FeiniuSource.instance,
   );
 
+  /// 当前源的**内容**发生变化（登录 / 登出）时自增。
+  ///
+  /// 光监听 [current] 不够：源没换、但登录了，首页照样得重新拉一次 ——
+  /// 否则登录完回到首页，收藏和最近播放还是登录前那份空数据。
+  final ValueNotifier<int> revision = ValueNotifier(0);
+
+  void notifyContentChanged() => revision.value++;
+
   Future<void>? _loading;
 
   Future<void> ensureLoaded() => _loading ??= _load();

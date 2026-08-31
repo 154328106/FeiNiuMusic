@@ -6,6 +6,7 @@ import '../../app/services/netease/netease_api_client.dart';
 import '../../app/services/netease/netease_models.dart';
 import '../../app/services/netease/netease_playback_service.dart';
 import '../../app/services/player_service.dart';
+import '../../app/services/source/music_source_registry.dart';
 import '../../app/services/source/netease_source.dart';
 import '../../app/state/song_state.dart';
 
@@ -64,12 +65,15 @@ class _NetEaseSearchPageState extends State<NetEaseSearchPage> {
       await _api.logout();
       // 清掉源里缓存的 uid / 红心歌单 id，换账号不会读到上一个人的数据。
       NetEaseSource.instance.reset();
+      MusicSourceRegistry.instance.notifyContentChanged();
       if (mounted) setState(() {});
       return;
     }
     await Navigator.pushNamed(context, AppRoutes.neteaseLogin);
     if (!mounted) return;
     NetEaseSource.instance.reset();
+    // 通知首页重拉：登录后收藏 / 最近播放 / 每日推荐才有内容。
+    MusicSourceRegistry.instance.notifyContentChanged();
     setState(() {});
   }
 
