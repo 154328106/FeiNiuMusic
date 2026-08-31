@@ -33,7 +33,10 @@ class AppTranscodeSettings {
   /// 器对**网络上的 VBR MP3** 只能按码率估算 seek 落点，误差方向随机 ——
   /// 表现为拖完进度条后声音与进度对不上（歌词跟进度，于是看着像歌词错位）。
   /// FFmpeg 会建帧索引，seek 落点准确。桌面端本来就恒用 media_kit。
-  static final ValueNotifier<bool> preferFfmpegDecoder = ValueNotifier(false);
+  ///
+  /// **默认开启**：已实测确认，关闭时拖动进度条后声音与进度必然错开。
+  /// 代价是软解耗电略高于系统硬解，介意的话可以关掉。
+  static final ValueNotifier<bool> preferFfmpegDecoder = ValueNotifier(true);
   static final ValueNotifier<bool> transcodeAll = ValueNotifier(true);
   static final ValueNotifier<int> thresholdMb = ValueNotifier(defaultThresholdMb);
   static final ValueNotifier<TranscodeFormat> format =
@@ -46,7 +49,7 @@ class AppTranscodeSettings {
   static Future<void> _doLoad() async {
     final prefs = await SharedPreferences.getInstance();
     enabled.value = prefs.getBool(_prefsEnabled) ?? false;
-    preferFfmpegDecoder.value = prefs.getBool(_prefsPreferFfmpeg) ?? false;
+    preferFfmpegDecoder.value = prefs.getBool(_prefsPreferFfmpeg) ?? true;
     transcodeAll.value = prefs.getBool(_prefsTranscodeAll) ?? true;
     thresholdMb.value =
         (prefs.getInt(_prefsThresholdMb) ?? defaultThresholdMb)

@@ -3885,19 +3885,9 @@ class PlayerService with WidgetsBindingObserver {
         if (hls != null) return hls;
       }
 
-      // 未缓存 → **不再**把播放接进自写的「边下边播」音源。
-      //
-      // 那个音源用 StreamAudioSource 自己应答字节区间请求，seek 之后
-      // ExoPlayer 拿到的字节↔时间映射对不上：从头顺播一切正常，一旦拖动
-      // 进度条，声音落点和播放器自报的位置就错开（歌词跟的是自报位置，
-      // 于是表现为「拖完歌词就不同步」）。飞牛网页版 / 其它客户端都是把
-      // URL 直接交给播放器，由播放器自己发 Range 请求，从不出这个问题。
-      //
-      // 改为：播放走直连 URL（下方分支），缓存退成纯后台整首下载。下载完
-      // 之后仍然走上面的「完整缓存 → AudioSource.file」分支本地秒播，
-      // 只是第一遍会多花一份流量。正确性优先于这点带宽。
       if (!isCue && StreamCacheService.instance.isEnabled) {
-        StreamCacheService.instance.cacheSong(song);
+        // 未缓存 → 缓存源（播放时边播边下载，缓存命中后次次秒播）
+        return StreamCacheService.instance.sourceForSong(song);
       }
       final streamUrl = api.streamUrl(song.id);
       final headers = FeiNiuApiClient.imageAuthHeaders();

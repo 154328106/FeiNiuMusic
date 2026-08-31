@@ -44,8 +44,8 @@ class _TranscodeSettingsPageState extends State<TranscodeSettingsPage> {
                   return AppSettingSwitchTile(
                     title: '优先 FFmpeg 解码',
                     subtitle: prefer
-                        ? '全部歌曲用 FFmpeg 解码，进度条定位更准，耗电略高'
-                        : '用系统解码器；拖动进度条后声音与进度对不上时打开这个',
+                        ? '进度条定位准确，耗电略高于系统硬解'
+                        : '系统解码器拖动进度条后声音与进度会错开，建议保持开启',
                     value: prefer,
                     onChanged:
                         AppTranscodeSettings.setPreferFfmpegDecoder,
