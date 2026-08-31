@@ -16,6 +16,7 @@ import '../../app/services/netease/netease_playback_service.dart';
 import '../../app/services/player_service.dart';
 import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';
+import '../../app/services/source/netease_source.dart';
 import '../../app/state/settings_state.dart';
 import '../../app/state/song_state.dart';
 import '../../app/tv/tv_layout.dart';
@@ -28,6 +29,7 @@ import '../search/search_page.dart';
 import '../songs/song_detail_sheet.dart';
 import '../songs/songs_page.dart';
 import 'source_feed_page.dart';
+import 'source_playlists_page.dart';
 import 'widgets/home_cover_carousel.dart';
 import 'widgets/home_hero_banner.dart';
 import 'widgets/home_large_layout.dart';
@@ -649,6 +651,109 @@ class _HomePageState extends State<HomePage>
     Navigator.of(context).pushNamed(AppRoutes.playlists);
   }
 
+  /// 四个快捷入口。飞牛是曲库维度（歌单/歌手/专辑/风格），网易云换成它
+  /// 自己有的那几样，没有的一律不放 —— 摆个点进去是空的入口更糟。
+  List<HomeShortcutItem> _shortcutItems() {
+    if (_source.id != 'netease') {
+      return [
+        HomeShortcutItem(
+          icon: Icons.queue_music_rounded,
+          label: '歌单',
+          accent: const Color(0xFF3B82F6),
+          onTap: _openPlaylistsPage,
+        ),
+        HomeShortcutItem(
+          icon: Icons.people_rounded,
+          label: '歌手',
+          accent: const Color(0xFF14B8A6),
+          onTap: _openArtistsPage,
+        ),
+        HomeShortcutItem(
+          icon: Icons.album_rounded,
+          label: '专辑',
+          accent: const Color(0xFFA855F7),
+          onTap: _openAlbumsPage,
+        ),
+        HomeShortcutItem(
+          icon: Icons.music_video_rounded,
+          label: '风格',
+          accent: const Color(0xFFF97316),
+          onTap: _openGenresPage,
+        ),
+      ];
+    }
+    final source = NetEaseSource.instance;
+    return [
+      HomeShortcutItem(
+        icon: Icons.wb_sunny_rounded,
+        label: '每日推荐',
+        accent: const Color(0xFFF97316),
+        onTap: () => _playNetEaseList('每日推荐', source.dailyRecommend),
+      ),
+      HomeShortcutItem(
+        icon: Icons.radio_rounded,
+        label: '私人FM',
+        accent: const Color(0xFF14B8A6),
+        onTap: () => _playNetEaseList('私人 FM', source.personalFm),
+      ),
+      HomeShortcutItem(
+        icon: Icons.leaderboard_rounded,
+        label: '排行榜',
+        accent: const Color(0xFFEC4899),
+        onTap: () => _openSourcePlaylists('排行榜', source.toplists),
+      ),
+      HomeShortcutItem(
+        icon: Icons.queue_music_rounded,
+        label: '歌单',
+        accent: const Color(0xFF3B82F6),
+        onTap: () => _openSourcePlaylists(
+          '歌单',
+          () => source.playlists(limit: 50),
+          emptyHint: '登录网易云后这里是你的歌单；未登录时给的是推荐歌单。',
+        ),
+      ),
+    ];
+  }
+
+  void _openSourcePlaylists(
+    String title,
+    Future<List<SourcePlaylist>> Function() loader, {
+    String? emptyHint,
+  }) {
+    Navigator.of(context).push(
+      buildAppPageRoute<void>(
+        (_) => SourcePlaylistsPage(
+          title: title,
+          loader: loader,
+          emptyHint: emptyHint,
+        ),
+      ),
+    );
+  }
+
+  /// 拉一批网易云的歌直接开播（每日推荐 / 私人 FM）。
+  ///
+  /// 这两样没有对应的列表页 —— 点了就是要听，先筛掉拿不到地址的再起播，
+  /// 否则队列会卡在第一首不动。
+  Future<void> _playNetEaseList(
+    String label,
+    Future<List<SongEntity>> Function() loader,
+  ) async {
+    final songs = await loader();
+    if (!mounted) return;
+    if (songs.isEmpty) {
+      AppToast.showGlobal('$label暂无内容', type: ToastType.error);
+      return;
+    }
+    final queue = await NetEasePlaybackService.instance.prepareQueue(songs);
+    if (!mounted) return;
+    if (queue.isEmpty) {
+      AppToast.showGlobal('$label里的歌都取不到播放地址', type: ToastType.error);
+      return;
+    }
+    _player.playQueue(queue, 0);
+  }
+
   /// 右上角搜索 → 综合搜索页。搜的是当前源：网易云走网易云的搜索页。
   void _openSearch() {
     if (_source.id == 'netease') {
@@ -949,35 +1054,9 @@ class _HomePageState extends State<HomePage>
 
               if (heroSong != null) const SizedBox(height: 16),
 
-              // 1.5 快捷菜单 — 歌单 / 歌手 / 专辑 / 风格（4×1）
-              HomeShortcutMenu(
-                items: [
-                  HomeShortcutItem(
-                    icon: Icons.queue_music_rounded,
-                    label: '歌单',
-                    accent: const Color(0xFF3B82F6),
-                    onTap: _openPlaylistsPage,
-                  ),
-                  HomeShortcutItem(
-                    icon: Icons.people_rounded,
-                    label: '歌手',
-                    accent: const Color(0xFF14B8A6),
-                    onTap: _openArtistsPage,
-                  ),
-                  HomeShortcutItem(
-                    icon: Icons.album_rounded,
-                    label: '专辑',
-                    accent: const Color(0xFFA855F7),
-                    onTap: _openAlbumsPage,
-                  ),
-                  HomeShortcutItem(
-                    icon: Icons.music_video_rounded,
-                    label: '风格',
-                    accent: const Color(0xFFF97316),
-                    onTap: _openGenresPage,
-                  ),
-                ],
-              ),
+              // 1.5 快捷菜单（4×1）。四个入口跟着当前源走 —— 歌手/专辑/风格
+              // 都是飞牛曲库的概念，换到网易云还摆在那儿点进去必然是空的。
+              HomeShortcutMenu(items: _shortcutItems()),
 
               const SizedBox(height: 16),
 

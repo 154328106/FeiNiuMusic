@@ -548,6 +548,20 @@ class NetEaseApiClient {
   }
 
   /// 推荐歌单。不需要登录。
+  /// 排行榜列表（飙升榜、新歌榜、原创榜……）。
+  ///
+  /// 返回的每一项本质就是个歌单，拿 id 走 [playlistTracks] 就能取歌，
+  /// 所以复用 [NetEasePlaylist]。这个接口不需要登录。
+  Future<List<NetEasePlaylist>> toplists() async {
+    final json = await _request('/api/toplist', const {}, _Scheme.weapi);
+    final list = json['list'] as List? ?? const [];
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(NetEasePlaylist.fromJson)
+        .whereType<NetEasePlaylist>()
+        .toList();
+  }
+
   Future<List<NetEasePlaylist>> personalizedPlaylists({int limit = 20}) async {
     final json = await _request('/api/personalized/playlist', {
       'limit': limit,

@@ -174,6 +174,48 @@ class NetEaseSource implements MusicSource {
     HomeFeed.latestSongs => '最新歌曲',
   };
 
+  /// 排行榜。对网易云来说榜单本身就是歌单，点进去照样走 [playlistSongs]。
+  /// 这个接口不需要登录。
+  Future<List<SourcePlaylist>> toplists() async {
+    try {
+      return [
+        for (final p in await _api.toplists())
+          SourcePlaylist(
+            id: SongSource.encodeNetease(p.id),
+            name: p.name,
+            coverId: p.coverUrl,
+            trackCount: p.trackCount,
+          ),
+      ];
+    } on NetEaseApiException catch (e) {
+      debugPrint('[NetEaseSource] toplists error: ${e.message}');
+      return const [];
+    }
+  }
+
+  /// 私人 FM。每次调用给一批新的，播完再要。
+  Future<List<SongEntity>> personalFm() async {
+    try {
+      return _toEntities(await _api.personalFm());
+    } on NetEaseApiException catch (e) {
+      lastError = '私人 FM 读取失败：${e.message}';
+      debugPrint('[NetEaseSource] personalFm error: ${e.message}');
+      return const [];
+    }
+  }
+
+  /// 每日推荐（要登录）。首页「最新歌曲」用的是不需要登录的推荐新歌，
+  /// 这条是账号维度的那份。
+  Future<List<SongEntity>> dailyRecommend() async {
+    try {
+      return _toEntities(await _api.dailyRecommend());
+    } on NetEaseApiException catch (e) {
+      lastError = '每日推荐读取失败：${e.message}';
+      debugPrint('[NetEaseSource] dailyRecommend error: ${e.message}');
+      return const [];
+    }
+  }
+
   @override
   Future<List<SourcePlaylist>> playlists({int limit = 10}) async {
     try {

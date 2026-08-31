@@ -283,20 +283,13 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
   void initState() {
     super.initState();
     _resolveTint();
-    if (widget.isPlaying) _sweep.repeat(reverse: true);
+    _sweep.repeat(reverse: true);
   }
 
   @override
   void didUpdateWidget(covariant _CompactHeroCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.song?.coverId != oldWidget.song?.coverId) _resolveTint();
-    if (widget.isPlaying == oldWidget.isPlaying) return;
-    if (widget.isPlaying) {
-      _sweep.repeat(reverse: true);
-    } else {
-      _sweep.stop();
-      _sweep.value = 0;
-    }
   }
 
   @override
@@ -320,8 +313,19 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
       return;
     }
     final color = await CoverDominantColor.resolve(coverId);
+    debugPrint('[HeroCard] 取色 ${color == null ? '失败' : '成功'}：$coverId');
     if (!mounted || _tintCoverId != coverId) return;
     setState(() => _tint = color);
+  }
+
+  /// 整张封面的平均色多半是灰扑扑的一坨，直接拿来染色几乎看不出变化。
+  /// 拉一把饱和度、把明度收进中段，才像「这首歌的颜色」。
+  static Color _vivid(Color c) {
+    final hsl = HSLColor.fromColor(c);
+    return hsl
+        .withSaturation((hsl.saturation * 1.9).clamp(0.32, 0.85))
+        .withLightness(hsl.lightness.clamp(0.34, 0.62))
+        .toColor();
   }
 
   /// 卡片底色的两个端点。
@@ -329,8 +333,8 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
   /// 封面主色不能直接铺：浅色主题下容易糊成一团，深色下又会把标题吃掉。
   /// 压进表面色里薄薄一层，明暗两套主题都还读得动。
   (Color, Color) _cardColors(ColorScheme scheme, bool isDark) {
-    final tint = _tint;
-    if (tint == null) {
+    final raw = _tint;
+    if (raw == null) {
       return (
         scheme.surfaceContainerHighest,
         Color.alphaBlend(
@@ -339,13 +343,14 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
         ),
       );
     }
+    final tint = _vivid(raw);
     return (
       Color.alphaBlend(
-        tint.withValues(alpha: isDark ? 0.34 : 0.20),
+        tint.withValues(alpha: isDark ? 0.46 : 0.34),
         scheme.surfaceContainerHighest,
       ),
       Color.alphaBlend(
-        tint.withValues(alpha: isDark ? 0.15 : 0.08),
+        tint.withValues(alpha: isDark ? 0.20 : 0.14),
         scheme.surfaceContainerHigh,
       ),
     );
@@ -375,9 +380,9 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
               ),
             ),
           ),
-          // 掠光只在播放时跑：不播还扫来扫去反而分散注意力。
-          if (widget.isPlaying)
-            Positioned.fill(child: IgnorePointer(child: _buildSweep(isDark))),
+          // 掠光。播放时明显一些，不播时留一道很淡的 —— 全关掉的话卡片
+          // 会显得是张死图，也没法一眼确认这层生效了没有。
+          Positioned.fill(child: IgnorePointer(child: _buildSweep(isDark))),
           SizedBox(
             height: 96,
             child: Padding(
@@ -455,6 +460,9 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
       builder: (context, _) {
         final t = Curves.easeInOut.transform(_sweep.value);
         final x = -1.4 + t * 2.8;
+        final peak = widget.isPlaying
+            ? (isDark ? 0.16 : 0.30)
+            : (isDark ? 0.06 : 0.12);
         return DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -462,7 +470,7 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
               end: Alignment(x + 0.55, 1),
               colors: [
                 Colors.white.withValues(alpha: 0),
-                Colors.white.withValues(alpha: isDark ? 0.10 : 0.20),
+                Colors.white.withValues(alpha: peak),
                 Colors.white.withValues(alpha: 0),
               ],
             ),
