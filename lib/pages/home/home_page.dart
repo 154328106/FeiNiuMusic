@@ -503,9 +503,8 @@ class _HomePageState extends State<HomePage>
       try {
         final lists = await _source.playlists(limit: 12);
         if (mounted) _sourcePlaylists.value = lists;
-      } catch (e, stack) {
-        debugPrint('[HomePage] source playlists error: $e
-$stack');
+      } catch (e) {
+        debugPrint('[HomePage] source playlists error: $e');
       }
       return;
     }

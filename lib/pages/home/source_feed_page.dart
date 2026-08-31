@@ -19,10 +19,7 @@ class SourceFeedPage extends StatefulWidget {
     this.kind,
     this.playlistId,
     required this.title,
-  }) : assert(
-         kind != null || playlistId != null,
-         'kind 与 playlistId 至少给一个',
-       );
+  }) : assert(kind != null || playlistId != null, 'kind 与 playlistId 至少给一个');
 
   /// 首页那几条流之一。给了 [playlistId] 时为 null。
   final HomeFeed? kind;

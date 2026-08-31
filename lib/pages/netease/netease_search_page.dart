@@ -165,10 +165,7 @@ class _NetEaseSearchPageState extends State<NetEaseSearchPage> {
 
     if (!widget.embedded) {
       return Scaffold(
-        appBar: AppBar(
-          title: const Text('网易云音乐'),
-          actions: [loginAction],
-        ),
+        appBar: AppBar(title: const Text('网易云音乐'), actions: [loginAction]),
         body: body,
       );
     }
