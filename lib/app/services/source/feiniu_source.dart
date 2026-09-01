@@ -153,4 +153,13 @@ class FeiniuSource implements MusicSource {
       return const [];
     }
   }
+
+  /// 飞牛的流地址是稳定的（凭 Cookie 认证），起播前不用预取，原样返回。
+  @override
+  Future<List<SongEntity>> prepareQueue(List<SongEntity> songs) async => songs;
+
+  /// 飞牛有自己那套强类型搜索页（SearchPage），不走这个通用入口。
+  @override
+  Future<List<SongEntity>> search(String keyword, {int limit = 30}) async =>
+      const [];
 }

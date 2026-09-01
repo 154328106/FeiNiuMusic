@@ -127,6 +127,8 @@ flutter:
     # 音乐来源图标（「我的 → 音乐来源」用）
     - assets/source/feiniu.png
     - assets/source/netease.png
+    - assets/source/qq.png
+    - assets/source/kugou.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
