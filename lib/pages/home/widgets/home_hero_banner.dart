@@ -316,6 +316,9 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
     _tintFuture = CoverDominantColor.resolve(coverId);
   }
 
+  static String _hex(Color c) =>
+      '#${c.toARGB32().toRadixString(16).padLeft(8, '0')}';
+
   /// 把主色收进一个适合当底色的明度区间。
   ///
   /// 取色走 ColorScheme.fromImageProvider，出来的已经是量化过的主色、不是
@@ -343,15 +346,15 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
       );
     }
     final tint = _vivid(raw);
+    // 排查用的极端值：直接铺满不透明度，故意刺眼。
+    //
+    // 现状是「取色成功、颜色也是真的，但屏幕上看不出变化」，剩两种可能：
+    // 这层画出来了只是混色太淡，或者根本没画在屏幕上（画的是别的 widget）。
+    // 满色能一次把两者劈开 —— 确认之后再调回 alphaBlend 的柔和版本。
+    final hsl = HSLColor.fromColor(tint);
     return (
-      Color.alphaBlend(
-        tint.withValues(alpha: isDark ? 0.46 : 0.34),
-        scheme.surfaceContainerHighest,
-      ),
-      Color.alphaBlend(
-        tint.withValues(alpha: isDark ? 0.20 : 0.14),
-        scheme.surfaceContainerHigh,
-      ),
+      tint,
+      hsl.withLightness((hsl.lightness * 0.62).clamp(0.0, 1.0)).toColor(),
     );
   }
 
@@ -369,6 +372,13 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
       initialData: coverId == null ? null : CoverDominantColor.cached(coverId),
       builder: (context, snapshot) {
         final (top, bottom) = _cardColors(scheme, isDark, snapshot.data);
+        // 探针：FutureBuilder 到底有没有拿到颜色、算出来的底色是什么。
+        // 「取色成功但界面没变」只可能断在这两处之一。
+        debugPrint(
+          '[HeroCard] 上色 data='
+          '${snapshot.data == null ? 'null' : _hex(snapshot.data!)}'
+          ' top=${_hex(top)}',
+        );
         return _buildCard(
           scheme: scheme,
           isDark: isDark,
