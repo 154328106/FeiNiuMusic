@@ -246,9 +246,7 @@ class UnblockSourceService {
     if (response.statusCode == 429) {
       // 限流：歇一会儿，别拿剩下的请求继续撞。
       _rateLimitedUntil = DateTime.now().add(_rateLimitCooldown);
-      debugPrint(
-        '[Unblock] 被限流（429），${_rateLimitCooldown.inSeconds} 秒内改走免费音源',
-      );
+      debugPrint('[Unblock] 被限流（429），${_rateLimitCooldown.inSeconds} 秒内改走免费音源');
       return null;
     }
     if (response.statusCode != 200) {
