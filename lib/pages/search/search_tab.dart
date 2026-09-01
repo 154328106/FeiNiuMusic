@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/services/source/music_source_registry.dart';
 import '../netease/netease_search_page.dart';
 import 'search_page.dart';
+import 'source_search_page.dart';
 
 /// 底部导航第 3 项「搜索」。
 ///
@@ -19,10 +20,17 @@ class SearchTab extends StatelessWidget {
     return ValueListenableBuilder(
       valueListenable: registry.current,
       builder: (context, source, _) {
+        // key 带上源 id：换源时强制重建，不会把上一个源的搜索结果留在屏幕上。
         if (source.id == 'netease') {
-          // key 带上源 id：换源时强制重建，不会把上一个源的搜索结果留在屏幕上。
+          // 网易云单独一页：它还挂着扫码登录入口。
           return const NetEaseSearchPage(
             key: ValueKey('search-netease'),
+            embedded: true,
+          );
+        }
+        if (source.id != 'feiniu') {
+          return SourceSearchPage(
+            key: ValueKey('search-${source.id}'),
             embedded: true,
           );
         }

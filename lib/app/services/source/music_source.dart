@@ -97,4 +97,16 @@ abstract class MusicSource {
 
   /// 歌单内的歌曲。
   Future<List<SongEntity>> playlistSongs(String playlistId);
+
+  /// 起播前的预处理，默认原样返回。
+  ///
+  /// 公网源（网易云 / QQ）必须重写：它们的播放地址是带签名的临时链接，
+  /// 取不到地址时构建播放源那步会抛异常，而那发生在**引擎见到这首歌之前**，
+  /// 播放器挂在引擎错误流上的恢复逻辑根本不会触发 —— 整个队列就卡在第一首
+  /// 不动。所以要先批量取一遍地址、把取不到的筛掉。
+  Future<List<SongEntity>> prepareQueue(List<SongEntity> songs) async => songs;
+
+  /// 按关键字搜歌。默认不支持（飞牛有自己那套强类型搜索页）。
+  Future<List<SongEntity>> search(String keyword, {int limit = 30}) async =>
+      const [];
 }

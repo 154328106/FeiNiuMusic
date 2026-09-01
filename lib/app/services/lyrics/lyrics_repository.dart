@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../state/song_state.dart';
 import '../feiniu/api_client.dart';
 import '../netease/netease_api_client.dart';
+import '../qq/qq_api_client.dart';
 
 class LyricsRepository {
   /// 加载歌词，优先从缓存读取，未命中则从 API 获取
@@ -23,6 +24,8 @@ class LyricsRepository {
     try {
       final lyricText = song.isNetease
           ? await _neteaseLrc(song)
+          : song.isQQ
+          ? await _qqLrc(song)
           : await FeiNiuApiClient.instance.getLyricText(song.id);
       if (lyricText != null && lyricText.trim().isNotEmpty) {
         await _writeToCache(song.id, lyricText);
@@ -33,6 +36,13 @@ class LyricsRepository {
     }
 
     return null;
+  }
+
+  /// QQ 音乐歌词。接口直接给明文 LRC（nobase64=1），不用再解码。
+  Future<String?> _qqLrc(SongEntity song) async {
+    final mid = song.qqMid;
+    if (mid == null) return null;
+    return QQApiClient.instance.lyric(mid);
   }
 
   /// 网易云歌词。有翻译就按「原文 / 译文」逐行合并成一份 LRC。

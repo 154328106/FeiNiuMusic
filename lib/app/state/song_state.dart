@@ -65,6 +65,16 @@ class SongEntity {
   /// 网易云歌曲的数字 id；非网易云歌曲为 null。
   int? get neteaseId => SongSource.decodeNetease(id);
 
+  /// 是否来自 QQ 音乐。
+  bool get isQQ => source == SongSource.qq;
+
+  /// QQ 歌曲的 mid；非 QQ 歌曲为 null。
+  String? get qqMid => SongSource.decodeQQ(id);
+
+  /// 来自公网源（网易云 / QQ）：封面是直链、播放地址是带签名的临时链接，
+  /// 两条链路都不能按飞牛那套处理。
+  bool get isRemoteSource => isNetease || isQQ;
+
   /// 解析 artist JSON 获取歌手显示名
   String get artistDisplayName {
     try {

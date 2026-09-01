@@ -11,7 +11,6 @@ import '../../app/router/app_page_route.dart';
 import '../../app/router/app_router.dart';
 import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/feiniu/track_service.dart';
-import '../../app/services/netease/netease_playback_service.dart';
 import '../../app/services/player_service.dart';
 import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';
@@ -454,10 +453,9 @@ class _SongsPageState extends State<SongsPage>
   void _playSong(int index) {
     final songs = _songs.value;
     if (songs.isEmpty) return;
-    if (_source.id == 'netease') {
-      // 网易云队列里可能夹着下架 / 无版权的歌，取不到地址会让整队卡住，
-      // 起播前先批量筛一遍。
-      unawaited(_playNetEase(songs, index));
+    if (!_isFeiniu) {
+      // 公网源的队列里可能夹着取不到地址的歌，会让整队卡住，先筛一遍。
+      unawaited(_playFromSource(songs, index));
       return;
     }
     // 已加载数据不足队列上限时，自动分页拉取后续歌曲填充到上限
@@ -479,9 +477,9 @@ class _SongsPageState extends State<SongsPage>
     );
   }
 
-  Future<void> _playNetEase(List<SongEntity> songs, int index) async {
+  Future<void> _playFromSource(List<SongEntity> songs, int index) async {
     final tapped = songs[index];
-    final queue = await NetEasePlaybackService.instance.prepareQueue(songs);
+    final queue = await _source.prepareQueue(songs);
     if (!mounted || queue.isEmpty) return;
     // 筛完索引会变，按 id 重新定位；点中的那首若被筛掉就从头播。
     final moved = queue.indexWhere((s) => s.id == tapped.id);

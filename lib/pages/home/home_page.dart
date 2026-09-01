@@ -12,7 +12,6 @@ import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/feiniu/api_models.dart';
 import '../../app/services/feiniu/auth_service.dart';
 import '../../app/services/feiniu/track_service.dart';
-import '../../app/services/netease/netease_playback_service.dart';
 import '../../app/services/player_service.dart';
 import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';
@@ -26,6 +25,7 @@ import '../../components/index.dart';
 import '../library/library_detail_pages.dart';
 import '../library/playlists_page.dart';
 import '../search/search_page.dart';
+import '../search/source_search_page.dart';
 import '../songs/song_detail_sheet.dart';
 import '../songs/songs_page.dart';
 import 'source_feed_page.dart';
@@ -765,7 +765,7 @@ class _HomePageState extends State<HomePage>
       AppToast.showGlobal('$label暂无内容', type: ToastType.error);
       return;
     }
-    final queue = await NetEasePlaybackService.instance.prepareQueue(songs);
+    final queue = await _source.prepareQueue(songs);
     if (!mounted) return;
     if (queue.isEmpty) {
       AppToast.showGlobal('$label里的歌都取不到播放地址', type: ToastType.error);
@@ -778,6 +778,12 @@ class _HomePageState extends State<HomePage>
   void _openSearch() {
     if (_source.id == 'netease') {
       Navigator.pushNamed(context, AppRoutes.neteaseSearch);
+      return;
+    }
+    if (_source.id != 'feiniu') {
+      Navigator.of(context).push(
+        buildAppPageRoute<void>((_) => const SourceSearchPage()),
+      );
       return;
     }
     Navigator.pushNamed(
@@ -893,12 +899,10 @@ class _HomePageState extends State<HomePage>
       }
     }
     if (!mounted) return;
-    // 网易云队列里可能夹着下架/无版权的歌，取不到地址会让整队卡住不动，
-    // 起播前先批量筛一遍（一次请求）。
-    if (_source.id == 'netease') {
-      queue = await NetEasePlaybackService.instance.prepareQueue(queue);
-      if (!mounted || queue.isEmpty) return;
-    }
+    // 公网源的队列里可能夹着取不到地址的歌，会让整队卡住不动，起播前先
+    // 批量筛一遍。飞牛的 prepareQueue 是原样返回，不用分支判断。
+    queue = await _source.prepareQueue(queue);
+    if (!mounted || queue.isEmpty) return;
     if (song != null) {
       final idx = queue.indexWhere((s) => s.id == song.id);
       _player.playQueue(queue, idx >= 0 ? idx : 0);

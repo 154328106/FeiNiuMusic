@@ -271,6 +271,20 @@ class NetEaseSource implements MusicSource {
   }
 
   @override
+  Future<List<SongEntity>> prepareQueue(List<SongEntity> songs) =>
+      NetEasePlaybackService.instance.prepareQueue(songs);
+
+  @override
+  Future<List<SongEntity>> search(String keyword, {int limit = 30}) async {
+    try {
+      return _toEntities(await _api.searchSongs(keyword, limit: limit));
+    } on NetEaseApiException catch (e) {
+      debugPrint('[NetEaseSource] search error: ${e.message}');
+      return const [];
+    }
+  }
+
+  @override
   Future<List<SourcePlaylist>> playlists({int limit = 10}) async {
     try {
       final uid = await _ensureUid();

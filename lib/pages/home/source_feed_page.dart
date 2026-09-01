@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../app/services/netease/netease_playback_service.dart';
 import '../../app/services/player_service.dart';
 import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';
@@ -78,13 +77,13 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
     if (_preparing) return; // 准备中再点没有意义，反而各发一轮请求
     var queue = _songs;
     var start = index;
-    if (_source.id == 'netease') {
+    if (_source.id != 'feiniu') {
       final tapped = _songs[index];
       // 从点中的位置往后取一段，别把整张歌单都问一遍。
       final window = _songs.skip(index).take(_prepareWindow).toList();
       setState(() => _preparing = true);
       try {
-        queue = await NetEasePlaybackService.instance.prepareQueue(window);
+        queue = await _source.prepareQueue(window);
       } finally {
         if (mounted) setState(() => _preparing = false);
       }

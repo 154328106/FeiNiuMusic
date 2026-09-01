@@ -10,14 +10,31 @@
 /// 冒号不会与飞牛 GUID 冲突（GUID 是 hex + 连字符）。
 enum SongSource {
   feiniu,
-  netease;
+  netease,
+  qq;
 
   /// 网易云 id 前缀。选 `ne:` 而不是 `netease:` 是为了让缓存文件名短一些。
   static const String neteasePrefix = 'ne:';
 
+  /// QQ 音乐 id 前缀。QQ 的主键是字符串 mid，不是数字。
+  static const String qqPrefix = 'qq:';
+
   /// 从 `SongEntity.id` 反推来源。无法识别的一律当飞牛，保证老数据行为不变。
-  static SongSource fromSongId(String songId) =>
-      songId.startsWith(neteasePrefix) ? SongSource.netease : SongSource.feiniu;
+  static SongSource fromSongId(String songId) {
+    if (songId.startsWith(neteasePrefix)) return SongSource.netease;
+    if (songId.startsWith(qqPrefix)) return SongSource.qq;
+    return SongSource.feiniu;
+  }
+
+  /// 把 QQ 的 mid 编码成 `SongEntity.id`。
+  static String encodeQQ(String mid) => '$qqPrefix$mid';
+
+  /// 从 `SongEntity.id` 取回 QQ 的 mid；不是 QQ 歌曲则返回 null。
+  static String? decodeQQ(String songId) {
+    if (!songId.startsWith(qqPrefix)) return null;
+    final mid = songId.substring(qqPrefix.length);
+    return mid.isEmpty ? null : mid;
+  }
 
   /// 把网易云的数字 id 编码成 `SongEntity.id`。
   static String encodeNetease(int neteaseId) => '$neteasePrefix$neteaseId';

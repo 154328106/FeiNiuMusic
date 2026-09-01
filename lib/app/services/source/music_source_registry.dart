@@ -5,6 +5,7 @@ import '../player_service.dart';
 import 'feiniu_source.dart';
 import 'music_source.dart';
 import 'netease_source.dart';
+import 'qq_source.dart';
 
 /// 当前音乐数据源。
 ///
@@ -22,6 +23,7 @@ class MusicSourceRegistry {
   static final List<MusicSource> all = [
     FeiniuSource.instance,
     NetEaseSource.instance,
+    QQSource.instance,
   ];
 
   final ValueNotifier<MusicSource> current = ValueNotifier(

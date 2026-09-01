@@ -22,6 +22,7 @@ import 'feiniu/cue_service.dart';
 import 'feiniu/track_service.dart';
 import 'feiniu/transcode_service.dart';
 import 'netease/netease_playback_service.dart';
+import 'qq/qq_playback_service.dart';
 import 'player/just_audio_engine.dart';
 import 'player/media_kit_engine.dart';
 import 'player/playback_router.dart';
@@ -983,6 +984,21 @@ class PlayerService with WidgetsBindingObserver {
         throw StateError('网易云歌曲无可用播放地址：${song.title}');
       }
       return mk.Media(url, httpHeaders: NetEasePlaybackService.streamHeaders());
+    }
+
+    // QQ 音乐：同样是带签名的临时直链 + 自家 CDN 的 Referer。
+    if (song.isQQ) {
+      final mid = song.qqMid;
+      final url = mid == null
+          ? null
+          : await QQPlaybackService.instance.resolveStreamUrl(
+              mid,
+              mediaMid: song.audioSpec,
+            );
+      if (url == null) {
+        throw StateError('QQ 音乐无可用播放地址：${song.title}');
+      }
+      return mk.Media(url, httpHeaders: QQPlaybackService.streamHeaders());
     }
 
     // CUE 整轨曲目：跳过本地缓存（命中会拿到整轨文件，缺失会让后台把整轨
@@ -3680,6 +3696,21 @@ class PlayerService with WidgetsBindingObserver {
       return Uri.parse(url);
     }
 
+    // QQ 音乐：vkey 也有时效，同样不能用 song.uri 里那份占位地址。
+    if (song.isQQ) {
+      final mid = song.qqMid;
+      final url = mid == null
+          ? null
+          : await QQPlaybackService.instance.resolveStreamUrl(
+              mid,
+              mediaMid: song.audioSpec,
+            );
+      if (url == null) {
+        throw StateError('QQ 音乐无可用播放地址：${song.title}');
+      }
+      return Uri.parse(url);
+    }
+
     final rawUri = (song.uri ?? '').trim();
     if (!rawUri.startsWith('http')) {
       return Uri.file(rawUri);
@@ -3857,6 +3888,24 @@ class PlayerService with WidgetsBindingObserver {
       );
       if (source != null) return source;
       throw StateError('网易云歌曲无可用播放地址：${song.title}');
+    }
+
+    // QQ 音乐：同样绕开飞牛的缓存/转码链路。
+    if (song.isQQ) {
+      final mid = song.qqMid;
+      final url = mid == null
+          ? null
+          : await QQPlaybackService.instance.resolveStreamUrl(
+              mid,
+              mediaMid: song.audioSpec,
+            );
+      if (url == null) {
+        throw StateError('QQ 音乐无可用播放地址：${song.title}');
+      }
+      return AudioSource.uri(
+        Uri.parse(url),
+        headers: QQPlaybackService.streamHeaders(),
+      );
     }
 
     final api = FeiNiuApiClient.instance;

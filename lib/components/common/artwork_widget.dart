@@ -95,7 +95,8 @@ class _ArtworkWidgetState extends State<ArtworkWidget> with SignalsMixin {
       // 不同 URL 的缓存，已显示过的地方命中缓存、另一处仍在转圈下载。
       // 网易云的封面本身就是公网直链，coverId 里存的是完整 URL：直接用，
       // 且**不能带飞牛的认证头**（跨域发 Cookie 到网易云 CDN 会被拒）。
-      final isRemoteUrl = widget.song.isNetease || coverId.startsWith('http');
+      final isRemoteUrl =
+          widget.song.isRemoteSource || coverId.startsWith('http');
       final coverUrl = isRemoteUrl
           ? coverId
           : FeiNiuApiClient.instance.coverUrl(

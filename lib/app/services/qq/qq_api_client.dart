@@ -1,0 +1,288 @@
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
+
+import 'qq_models.dart';
+
+class QQApiException implements Exception {
+  QQApiException(this.message, {this.code});
+
+  final String message;
+  final int? code;
+
+  @override
+  String toString() =>
+      'QQApiException($message${code == null ? '' : ', code=$code'})';
+}
+
+/// QQ 音乐接口。
+///
+/// 和网易云最大的不同：**这边根本没有加密**。网易云要 AES-128-CBC 两轮加
+/// RSA 裸幂运算，QQ 就是往 `musicu.fcg` 发一段普通 JSON，`comm` 块里写上
+/// 客户端版本就行。签名（`g_tk`）只有账号级的写操作才要，浏览、搜索、
+/// 取播放地址都不需要登录。
+///
+/// 参考 Beans-Music 的 QQMusicAPI.swift。
+class QQApiClient {
+  QQApiClient._();
+
+  static final QQApiClient instance = QQApiClient._();
+
+  static const String _musicu = 'https://u.y.qq.com/cgi-bin/musicu.fcg';
+
+  /// 取播放地址要带一个设备 guid。QQ 只校验格式（纯数字），不校验来源，
+  /// 所以进程内随机生成一个用到底即可。
+  static final String _guid = (Random().nextInt(900000000) + 100000000)
+      .toString();
+
+  final Dio _dio = Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 10),
+      responseType: ResponseType.plain,
+      validateStatus: (_) => true,
+      headers: {
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) '
+            'Gecko/20100101 Firefox/80.0',
+        'Referer': 'https://y.qq.com/',
+        'Cookie': 'uin=0; qqmusic_fromtag=66',
+      },
+    ),
+  );
+
+  /// 往 musicu.fcg 发一段 JSON。
+  ///
+  /// 走 GET + `data=<json>`：这个接口 GET/POST 都收，GET 少一次预检，
+  /// 且和 Beans 那边取 vkey 的方式一致。
+  Future<Map<String, dynamic>> _musicuCall(Map<String, Object?> payload) async {
+    final Response<String> response;
+    try {
+      response = await _dio.get<String>(
+        _musicu,
+        queryParameters: {'format': 'json', 'data': jsonEncode(payload)},
+      );
+    } on DioException catch (e) {
+      throw QQApiException('网络请求失败：${e.message ?? e.type.name}');
+    }
+    if (response.statusCode != 200) {
+      throw QQApiException('HTTP ${response.statusCode}', code: response.statusCode);
+    }
+    final decoded = jsonDecode(response.data ?? '{}');
+    if (decoded is! Map<String, dynamic>) {
+      throw QQApiException('响应格式异常');
+    }
+    return decoded;
+  }
+
+  Future<Map<String, dynamic>> _getJson(String url) async {
+    final Response<String> response;
+    try {
+      response = await _dio.get<String>(url);
+    } on DioException catch (e) {
+      throw QQApiException('网络请求失败：${e.message ?? e.type.name}');
+    }
+    if (response.statusCode != 200) {
+      throw QQApiException('HTTP ${response.statusCode}', code: response.statusCode);
+    }
+    // 部分接口会用 jsonpCallback(...) 包一层，这里剥掉。
+    var body = (response.data ?? '').trim();
+    final start = body.indexOf('{');
+    final end = body.lastIndexOf('}');
+    if (start > 0 && end > start) body = body.substring(start, end + 1);
+    final decoded = jsonDecode(body);
+    if (decoded is! Map<String, dynamic>) throw QQApiException('响应格式异常');
+    return decoded;
+  }
+
+  /// 按点分路径取值，中途缺一层就返回 null。
+  static Object? _at(Map<String, dynamic> root, List<String> path) {
+    Object? node = root;
+    for (final key in path) {
+      if (node is Map && node.containsKey(key)) {
+        node = node[key];
+      } else {
+        return null;
+      }
+    }
+    return node;
+  }
+
+  // ---------------------------------------------------------------------
+  // 搜索
+  // ---------------------------------------------------------------------
+
+  Future<List<QQSong>> searchSongs(String keyword, {int limit = 30}) async {
+    if (keyword.trim().isEmpty) return const [];
+    final json = await _musicuCall({
+      'comm': {'ct': 19, 'cv': 1859, 'uin': '0', 'format': 'json'},
+      'req_1': {
+        'module': 'music.search.SearchCgiService',
+        'method': 'DoSearchForQQMusicDesktop',
+        'param': {
+          'query': keyword,
+          'num_per_page': limit,
+          'page_num': 1,
+          'search_type': 0,
+          'grp': 1,
+        },
+      },
+    });
+    final list = _at(json, ['req_1', 'data', 'body', 'song', 'list']) as List?;
+    return _toSongs(list);
+  }
+
+  // ---------------------------------------------------------------------
+  // 歌单
+  // ---------------------------------------------------------------------
+
+  /// 推荐歌单。不需要登录。
+  Future<List<QQPlaylist>> recommendPlaylists({int limit = 12}) async {
+    final json = await _musicuCall({
+      'comm': {'ct': 24, 'cv': 0},
+      'req_1': {
+        'module': 'music.srfDissInfo.RecommendPlaylist',
+        'method': 'GetRecommendPlaylist',
+        'param': {'uin': 0, 'lastDissid': 0, 'songtype': 1, 'scene': 0},
+      },
+    });
+    final list = _at(json, ['req_1', 'data', 'v_playlist']) as List? ?? const [];
+    final result = <QQPlaylist>[];
+    for (final item in list.whereType<Map<String, dynamic>>()) {
+      final id = (item['tid'] as int?) ?? (item['id'] as int?);
+      if (id == null) continue;
+      result.add(
+        QQPlaylist(
+          id: id,
+          name: item['title'] as String? ?? '',
+          coverUrl: _normalizeImage(item['cover'] ?? item['pic_url']),
+          trackCount: (item['songnum'] as int?) ?? 0,
+        ),
+      );
+      if (result.length >= limit) break;
+    }
+    return result;
+  }
+
+  /// 歌单内的歌。
+  Future<List<QQSong>> playlistSongs(int tid) async {
+    final json = await _musicuCall({
+      'comm': {'ct': 24, 'cv': 0},
+      'req_1': {
+        'module': 'music.playlist.PlayListDetail',
+        'method': 'get_playlist_detail',
+        'param': {'disstid': tid, 'onlysonglist': 1, 'song_begin': 0,
+          'song_num': 300},
+      },
+    });
+    final list = _at(json, ['req_1', 'data', 'songlist']) as List?;
+    return _toSongs(list);
+  }
+
+  // ---------------------------------------------------------------------
+  // 播放地址 / 歌词
+  // ---------------------------------------------------------------------
+
+  /// 取播放地址。
+  ///
+  /// QQ 的文件名要靠 `前缀 + songmid + media_mid + 扩展名` 拼出来，一次可以
+  /// 提交多个候选，服务端挑得到哪个给哪个 —— 所以这里把几种历史格式都塞
+  /// 进去，别为「拼错一种就没地址」再跑一轮。
+  Future<String?> songUrl(String mid, {String? mediaMid}) async {
+    // M500 是 128k mp3：免费账号最稳的一档。更高音质要会员，拿不到就白跑。
+    const prefix = 'M500';
+    final preferred = (mediaMid != null && mediaMid.isNotEmpty)
+        ? mediaMid
+        : mid;
+    final filenames = <String>{
+      '$prefix$mid$preferred.mp3',
+      '$prefix$preferred.mp3',
+      '$prefix$mid$mid.mp3',
+      '$prefix$mid.mp3',
+    }.toList();
+
+    final json = await _musicuCall({
+      'comm': {'uin': 0, 'format': 'json', 'ct': 24, 'cv': 0},
+      'req': {
+        'module': 'CDN.SrfCdnDispatchServer',
+        'method': 'GetCdnDispatch',
+        'param': {'guid': _guid, 'calltype': 0, 'userip': ''},
+      },
+      'req_0': {
+        'module': 'vkey.GetVkeyServer',
+        'method': 'CgiGetVkey',
+        'param': {
+          'filename': filenames,
+          'guid': _guid,
+          'songmid': List.filled(filenames.length, mid),
+          'songtype': List.filled(filenames.length, 0),
+          'uin': '0',
+          'loginflag': 1,
+          'platform': '20',
+        },
+      },
+    });
+
+    final data = _at(json, ['req_0', 'data']);
+    if (data is! Map) return null;
+    final infos = (data['midurlinfo'] as List?) ?? const [];
+    String? purl;
+    for (final info in infos.whereType<Map>()) {
+      final value = info['purl'] as String?;
+      if (value != null && value.isNotEmpty) {
+        purl = value;
+        break;
+      }
+    }
+    if (purl == null) {
+      debugPrint('[QQ] $mid 无可播地址（多半是会员曲）');
+      return null;
+    }
+    if (purl.startsWith('http')) return purl;
+    final sips = (data['sip'] as List?)?.whereType<String>().toList();
+    final base = (sips == null || sips.isEmpty)
+        ? 'https://isure.stream.qqmusic.qq.com/'
+        : sips.first;
+    return '$base$purl';
+  }
+
+  /// 歌词。`nobase64=1` 直接给明文 LRC，省一次解码。
+  Future<String?> lyric(String mid) async {
+    final json = await _getJson(
+      'https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg'
+      '?songmid=${Uri.encodeQueryComponent(mid)}'
+      '&format=json&nobase64=1&g_tk=5381',
+    );
+    final lyric = json['lyric'] as String?;
+    if (lyric == null || lyric.isEmpty) return null;
+    return lyric;
+  }
+
+  // ---------------------------------------------------------------------
+
+  static List<QQSong> _toSongs(List? list) {
+    if (list == null) return const [];
+    final songs = <QQSong>[];
+    for (final item in list.whereType<Map<String, dynamic>>()) {
+      // 歌单接口有时把歌塞在 songInfo 里再包一层。
+      final raw = (item['songInfo'] as Map<String, dynamic>?) ?? item;
+      final song = QQSong.fromJson(raw);
+      if (song != null) songs.add(song);
+    }
+    return songs;
+  }
+
+  /// QQ 返回的图片地址有裸路径、`//` 开头等好几种写法，统一补成完整 https。
+  static String? _normalizeImage(Object? value) {
+    if (value is! String || value.isEmpty) return null;
+    if (value.startsWith('https://')) return value;
+    if (value.startsWith('http://')) {
+      return 'https://${value.substring(7)}';
+    }
+    if (value.startsWith('//')) return 'https:$value';
+    if (value.startsWith('/')) return 'https://y.gtimg.cn$value';
+    return 'https://y.gtimg.cn/${value.replaceAll(RegExp(r'^/+'), '')}';
+  }
+}
