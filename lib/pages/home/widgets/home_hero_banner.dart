@@ -64,8 +64,18 @@ class HomeHeroBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // 手机端用紧凑横向卡片（大屏仍用全出血大图：横向空间够，大图才成立）。
-    if (!AppLayoutSettings.tvMode.value &&
-        !AppLayoutSettings.effectiveTabletMode) {
+    final compact =
+        !AppLayoutSettings.tvMode.value &&
+        !AppLayoutSettings.effectiveTabletMode;
+    // 探针：取色和掠光都只做在紧凑卡里，而线上一条 [HeroCard] 日志都没有。
+    // 先确认走的到底是哪条分支 —— 若这里报 compact=false，那底色没生效就
+    // 不是取色的问题，是根本没走那段代码。
+    debugPrint(
+      '[HeroCard] 分支 compact=$compact '
+      'tv=${AppLayoutSettings.tvMode.value} '
+      'tablet=${AppLayoutSettings.effectiveTabletMode}',
+    );
+    if (compact) {
       return _buildCompact(context);
     }
     final theme = Theme.of(context);
@@ -281,6 +291,7 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
   @override
   void initState() {
     super.initState();
+    debugPrint('[HeroCard] initState cover=${widget.song?.coverId}');
     _resolveTint();
     _sweep.repeat(reverse: true);
   }
