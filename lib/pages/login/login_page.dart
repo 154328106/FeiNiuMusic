@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../app/services/source/music_source_registry.dart';
+import '../../app/state/settings_guest_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../app/services/feiniu/access_code_service.dart';
@@ -636,6 +638,18 @@ class _LoginPageState extends State<LoginPage> {
     ).pushNamed(AppRoutes.accounts);
   }
 
+  /// 跳过飞牛登录直接进 App，并把音乐源切到网易云。
+  ///
+  /// 不切源的话进去是飞牛的空首页 —— 没连服务器，什么都拉不到。
+  Future<void> _enterAsGuest() async {
+    await AppGuestSettings.setEnabled(true);
+    final netease = MusicSourceRegistry.all.firstWhere(
+      (s) => s.id == 'netease',
+      orElse: () => MusicSourceRegistry.all.first,
+    );
+    await MusicSourceRegistry.instance.setCurrent(netease);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -862,6 +876,17 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       );
                     },
+                  ),
+                  const SizedBox(height: 10),
+                  // 不连飞牛也能进：网易云不登录就能听推荐新歌、推荐歌单和
+                  // 排行榜。想连 NAS 时再回「我的 → 音乐来源」补上。
+                  SizedBox(
+                    width: double.infinity,
+                    height: 44,
+                    child: TextButton(
+                      onPressed: _enterAsGuest,
+                      child: const Text('先不连，随便听听'),
+                    ),
                   ),
                 ],
               ),

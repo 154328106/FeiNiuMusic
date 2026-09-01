@@ -154,6 +154,12 @@ class _MusicSourceSection extends StatelessWidget {
     MusicSource source,
     MusicSourceRegistry registry,
   ) async {
+    // 飞牛还没连上就切过去，首页只会是一片空白 —— 先去添加账号。
+    // 访客模式进来的人就是这个状态。
+    if (source.id == 'feiniu' && !source.isAvailable) {
+      await Navigator.pushNamed(context, AppRoutes.accounts);
+      return;
+    }
     await registry.setCurrent(source);
   }
 

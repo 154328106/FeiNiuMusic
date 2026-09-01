@@ -15,6 +15,7 @@ import 'router/app_router.dart';
 import 'services/app_update_service.dart';
 import 'services/feiniu/account_store.dart';
 import 'services/feiniu/auth_service.dart';
+import 'state/settings_guest_state.dart';
 import 'state/settings_state.dart';
 import 'theme/app_styles.dart';
 import 'theme/app_visual_theme.dart';
@@ -253,6 +254,7 @@ class FeiNiuMusicApp extends StatelessWidget {
               },
             );
           },
+          ),
         );
       },
     );
@@ -364,10 +366,14 @@ class _AppStartupGateState extends State<_AppStartupGate> {
         if (!onboardingCompleted) {
           return const OnboardingPage();
         }
+        // 访客模式：没连飞牛也放行 —— 网易云那条线不登录就能听（推荐新歌、
+        // 推荐歌单、排行榜、搜索都不要账号），没道理把人挡在登录页外面。
         return ValueListenableBuilder<bool>(
-          valueListenable: AuthService.instance.isLoggedIn,
-          builder: (context, isLoggedIn, _) {
-            if (!isLoggedIn) {
+          valueListenable: AppGuestSettings.enabled,
+          builder: (context, guest, _) => ValueListenableBuilder<bool>(
+            valueListenable: AuthService.instance.isLoggedIn,
+            builder: (context, isLoggedIn, _) {
+            if (!isLoggedIn && !guest) {
               return const LoginPage();
             }
             // 已登录进入主界面：首帧后自动检查更新（仅一次/会话，开关开启且有
