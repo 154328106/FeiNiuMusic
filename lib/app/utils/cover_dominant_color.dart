@@ -74,7 +74,12 @@ class CoverDominantColor {
         _cache.remove(_cache.keys.first);
       }
       _cache[coverId] = color;
-      debugPrint('[CoverColor] 取色成功 $color');
+      // Color.toString() 在 release 下只给 "Instance of 'Color'"，
+      // 打十六进制才看得出取到的是什么颜色。
+      debugPrint(
+        '[CoverColor] 取色成功 #'
+        '${color.toARGB32().toRadixString(16).padLeft(8, '0')}',
+      );
       return color;
     } catch (e) {
       debugPrint('[CoverColor] 取色失败 $url：$e');

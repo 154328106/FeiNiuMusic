@@ -275,21 +275,26 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
     duration: const Duration(milliseconds: 4200),
   );
 
-  Color? _tint;
+  /// 当前封面的取色 Future，交给 [FutureBuilder] 去驱动重建。
+  ///
+  /// 之前是 `await` 完再 setState。那条路上取色明明成功了（日志里
+  /// `[CoverColor] 取色成功` 有），await 之后那行却从来不执行 —— 续体没跑，
+  /// 颜色自然也就没写进 State。与其继续查续体为什么不恢复，不如干脆不要
+  /// 续体：Future 交给框架，重建由 FutureBuilder 负责。
+  Future<Color?>? _tintFuture;
   String? _tintCoverId;
 
   @override
   void initState() {
     super.initState();
-    debugPrint('[HeroCard] initState cover=${widget.song?.coverId}');
-    _resolveTint();
+    _syncTintFuture();
     _sweep.repeat(reverse: true);
   }
 
   @override
   void didUpdateWidget(covariant _CompactHeroCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.song?.coverId != oldWidget.song?.coverId) _resolveTint();
+    if (widget.song?.coverId != oldWidget.song?.coverId) _syncTintFuture();
   }
 
   @override
@@ -298,48 +303,24 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
     super.dispose();
   }
 
-  Future<void> _resolveTint() async {
+  /// 封面变了就换一个取色 Future。同一张封面不重复发起。
+  void _syncTintFuture() {
     final coverId = widget.song?.coverId;
     if (coverId == null || coverId.isEmpty) {
-      // 每个分支都打日志：上一版只在「真去取了」那条打，结果线上一行都没有，
-      // 反而说不清是没走到、还是命中了缓存直接返回。
-      debugPrint('[HeroCard] 取色跳过：这首没有封面');
       _tintCoverId = null;
-      if (mounted && _tint != null) setState(() => _tint = null);
+      _tintFuture = null;
       return;
     }
+    if (_tintCoverId == coverId && _tintFuture != null) return;
     _tintCoverId = coverId;
-    // 算过的同步给出，换歌时不会先闪一下默认色再变。
-    final cached = CoverDominantColor.cached(coverId);
-    if (cached != null) {
-      debugPrint('[HeroCard] 取色命中缓存 $cached');
-      if (mounted) setState(() => _tint = cached);
-      return;
-    }
-    final color = await CoverDominantColor.resolve(coverId);
-    debugPrint('[HeroCard] 取色${color == null ? '失败' : '成功 $color'}：$coverId');
-    if (!mounted || _tintCoverId != coverId) return;
-    setState(() => _tint = color);
-  }
-
-  /// 把主色收进一个适合当底色的明度区间。
-  ///
-  /// 取色现在走 ColorScheme.fromImageProvider，出来的已经是量化过的主色、
-  /// 不是灰扑扑的平均色，所以只需要压明度，不用再硬拉饱和度。
-  static Color _vivid(Color c) {
-    final hsl = HSLColor.fromColor(c);
-    return hsl
-        .withSaturation(hsl.saturation.clamp(0.30, 0.90))
-        .withLightness(hsl.lightness.clamp(0.36, 0.60))
-        .toColor();
+    _tintFuture = CoverDominantColor.resolve(coverId);
   }
 
   /// 卡片底色的两个端点。
   ///
   /// 封面主色不能直接铺：浅色主题下容易糊成一团，深色下又会把标题吃掉。
   /// 压进表面色里薄薄一层，明暗两套主题都还读得动。
-  (Color, Color) _cardColors(ColorScheme scheme, bool isDark) {
-    final raw = _tint;
+  (Color, Color) _cardColors(ColorScheme scheme, bool isDark, Color? raw) {
     if (raw == null) {
       return (
         scheme.surfaceContainerHighest,
@@ -369,8 +350,33 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
     final isDark = theme.brightness == Brightness.dark;
     final song = widget.song;
     final coverId = song?.coverId;
-    final (top, bottom) = _cardColors(scheme, isDark);
 
+    return FutureBuilder<Color?>(
+      future: _tintFuture,
+      // 算过的同步给出，换歌时不会先闪一下默认色再变。
+      initialData: coverId == null ? null : CoverDominantColor.cached(coverId),
+      builder: (context, snapshot) {
+        final (top, bottom) = _cardColors(scheme, isDark, snapshot.data);
+        return _buildCard(
+          scheme: scheme,
+          isDark: isDark,
+          song: song,
+          coverId: coverId,
+          top: top,
+          bottom: bottom,
+        );
+      },
+    );
+  }
+
+  Widget _buildCard({
+    required ColorScheme scheme,
+    required bool isDark,
+    required SongEntity? song,
+    required String? coverId,
+    required Color top,
+    required Color bottom,
+  }) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
       child: Stack(
