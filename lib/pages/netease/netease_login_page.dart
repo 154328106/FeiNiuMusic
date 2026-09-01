@@ -148,8 +148,7 @@ class _NetEaseLoginPageState extends State<NetEaseLoginPage> {
               ],
               const SizedBox(height: 12),
               Text(
-                '登录后才能读取你的收藏、每日推荐和播放记录。
-'
+                '登录后才能读取你的收藏、每日推荐和播放记录。\n'
                 '不登录也能搜索和播放，只是这几块是空的。',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
