@@ -363,6 +363,11 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
+    // build 里再同步一次。_syncTintFuture 是幂等的（封面没变就直接返回），
+    // 但放在这里能兜住 initState / didUpdateWidget 漏掉的情况 —— 现在的现象
+    // 正是「取色成功了，FutureBuilder 却一直拿不到值」，最像的就是那个
+    // Future 压根没挂上去。
+    _syncTintFuture();
     final song = widget.song;
     final coverId = song?.coverId;
 
@@ -375,9 +380,10 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
         // 探针：FutureBuilder 到底有没有拿到颜色、算出来的底色是什么。
         // 「取色成功但界面没变」只可能断在这两处之一。
         debugPrint(
-          '[HeroCard] 上色 data='
-          '${snapshot.data == null ? 'null' : _hex(snapshot.data!)}'
-          ' top=${_hex(top)}',
+          '[HeroCard] 上色 cover=$coverId'
+          ' future=${_tintFuture == null ? 'null' : 'yes'}'
+          ' state=${snapshot.connectionState.name}'
+          ' data=${snapshot.data == null ? 'null' : _hex(snapshot.data!)}',
         );
         return _buildCard(
           scheme: scheme,
