@@ -1153,9 +1153,15 @@ class _HomePageState extends State<HomePage>
               // （HomeLargeLayout）使用，故保留数据加载。
 
               // 空状态
+              // 判空要把所有区块都算上。原来只看收藏 / 最近播放 / 专辑，
+              // 网易云下这三样常常是空的（收藏没登录、专辑压根没有），
+              // 于是明明大图和最新歌曲都有内容，底下还挂着「还没有数据」。
               if (_favoriteSongs.value.isEmpty &&
                   _recentSongs.value.isEmpty &&
-                  _recentAlbums.value.isEmpty)
+                  _recentAlbums.value.isEmpty &&
+                  _recentTracks.value.isEmpty &&
+                  _playlists.value.isEmpty &&
+                  heroSong == null)
                 const _HomeEmptyState(text: '还没有数据，下拉刷新试试'),
             ],
           ),

@@ -250,12 +250,13 @@ class ModernNavigationBar extends StatelessWidget {
     // 玻璃胶囊在浅色壁纸上几乎没有边界，整条底栏"看不见"。垫一层很薄的
     // 底板（半透明表面色 + 发丝描边 + 轻投影）给它一个轮廓 —— 玻璃效果
     // 照旧从上面透过来，只是不再糊进背景里。
+    // 上一版这层太克制，浅色壁纸下还是几乎看不见，再加一档。
     final plate = isDark
-        ? Colors.black.withValues(alpha: 0.22)
-        : Colors.white.withValues(alpha: 0.42);
+        ? Colors.black.withValues(alpha: 0.42)
+        : Colors.white.withValues(alpha: 0.74);
     final plateBorder = isDark
-        ? Colors.white.withValues(alpha: 0.14)
-        : Colors.black.withValues(alpha: 0.08);
+        ? Colors.white.withValues(alpha: 0.22)
+        : Colors.black.withValues(alpha: 0.14);
     return SafeArea(
       top: false,
       child: Padding(
@@ -267,12 +268,12 @@ class ModernNavigationBar extends StatelessWidget {
           decoration: BoxDecoration(
             color: plate,
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: plateBorder, width: 0.8),
+            border: Border.all(color: plateBorder, width: 1),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.30 : 0.10),
-                blurRadius: 14,
-                offset: const Offset(0, 4),
+                color: Colors.black.withValues(alpha: isDark ? 0.40 : 0.18),
+                blurRadius: 18,
+                offset: const Offset(0, 6),
               ),
             ],
           ),

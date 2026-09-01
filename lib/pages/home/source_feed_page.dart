@@ -39,6 +39,18 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
   List<SongEntity> _songs = const [];
   bool _loading = true;
 
+  /// 正在为起播做准备（网易云要先批量问播放地址）。
+  ///
+  /// 没有这个标记时，点一首要等好几秒才出声，期间界面毫无反应，看着就像
+  /// 「点了没用」，于是用户会连点好几下 —— 每一下又各自发一轮请求，更慢。
+  bool _preparing = false;
+
+  /// 一次最多为多少首歌准备地址。
+  ///
+  /// 整张歌单几百首全问一遍要好几秒，而且后面那些等真播到了早过期了。
+  /// 从点中的位置往后取一段就够，播完这段会自然续。
+  static const int _prepareWindow = 60;
+
   MusicSource get _source => MusicSourceRegistry.instance.current.value;
 
   @override
@@ -63,11 +75,19 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
 
   /// 起播。网易云队列先筛掉取不到地址的歌，否则会卡在第一首不动。
   Future<void> _play(int index) async {
+    if (_preparing) return; // 准备中再点没有意义，反而各发一轮请求
     var queue = _songs;
     var start = index;
     if (_source.id == 'netease') {
       final tapped = _songs[index];
-      queue = await NetEasePlaybackService.instance.prepareQueue(_songs);
+      // 从点中的位置往后取一段，别把整张歌单都问一遍。
+      final window = _songs.skip(index).take(_prepareWindow).toList();
+      setState(() => _preparing = true);
+      try {
+        queue = await NetEasePlaybackService.instance.prepareQueue(window);
+      } finally {
+        if (mounted) setState(() => _preparing = false);
+      }
       if (!mounted || queue.isEmpty) return;
       // 筛完索引会变，按歌曲 id 重新定位；点中的那首若被筛掉就从头播。
       final moved = queue.indexWhere((s) => s.id == tapped.id);
@@ -90,7 +110,19 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
           ),
         ],
       ),
-      body: _buildBody(scheme),
+      body: Stack(
+        children: [
+          _buildBody(scheme),
+          // 准备播放地址时顶一条细进度条：点下去立刻有反馈。
+          if (_preparing)
+            const Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              child: LinearProgressIndicator(minHeight: 2),
+            ),
+        ],
+      ),
     );
   }
 
