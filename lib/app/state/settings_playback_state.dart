@@ -118,6 +118,13 @@ class AppLaunchPlaybackSettings {
 
 /// Whether to automatically check for app updates on launch and prompt the user.
 class AppLaunchUpdateSettings {
+  /// 自用构建：整套「检查更新」都关掉。
+  ///
+  /// 更新提示指向的是上游的发布页，对自己编自己装的包没有意义。注意开关
+  /// 不能只藏 UI —— 启动时的自动检查是 app.dart 里另一条独立路径，跟
+  /// 版本信息页无关；上一版只藏了那一段，结果开关没了、弹窗还在。
+  static const bool updateCheckEnabled = false;
+
   static const String _prefsAutoCheckUpdate = 'app_auto_check_update_on_launch';
 
   static final ValueNotifier<bool> autoCheckUpdateOnLaunch = ValueNotifier(

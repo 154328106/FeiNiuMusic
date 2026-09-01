@@ -471,6 +471,7 @@ class _AppStartupGateState extends State<_AppStartupGate> {
   }
 
   Future<void> _autoCheckUpdate() async {
+    if (!AppLaunchUpdateSettings.updateCheckEnabled) return;
     await AppLaunchUpdateSettings.ensureLoaded();
     if (!AppLaunchUpdateSettings.autoCheckUpdateOnLaunch.value) return;
     if (AppLaunchUpdateSettings.hasCheckedUpdateThisSession) return;
