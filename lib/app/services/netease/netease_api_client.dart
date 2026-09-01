@@ -390,15 +390,6 @@ class NetEaseApiClient {
     return null;
   }
 
-  /// 刷新登录 token。Cookie 会通过 Set-Cookie 换新，由 [_request] 吸收。
-  Future<void> refreshLogin() async {
-    try {
-      await _request('/api/login/token/refresh', const {}, _Scheme.weapi);
-    } on NetEaseApiException catch (e) {
-      debugPrint('[NetEase] 刷新登录态失败：${e.message}');
-    }
-  }
-
   // ---------------------------------------------------------------------
   // 搜索 / 播放 / 歌词
   // ---------------------------------------------------------------------
