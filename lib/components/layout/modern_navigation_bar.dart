@@ -247,9 +247,36 @@ class ModernNavigationBar extends StatelessWidget {
         : Colors.black.withValues(alpha: 0.10);
     final navTint = AppBackgroundSettings.navBarColor.value;
     final navOpacity = AppBackgroundSettings.navBarOpacity.value;
+    // 玻璃胶囊在浅色壁纸上几乎没有边界，整条底栏"看不见"。垫一层很薄的
+    // 底板（半透明表面色 + 发丝描边 + 轻投影）给它一个轮廓 —— 玻璃效果
+    // 照旧从上面透过来，只是不再糊进背景里。
+    final plate = isDark
+        ? Colors.black.withValues(alpha: 0.22)
+        : Colors.white.withValues(alpha: 0.42);
+    final plateBorder = isDark
+        ? Colors.white.withValues(alpha: 0.14)
+        : Colors.black.withValues(alpha: 0.08);
     return SafeArea(
       top: false,
-      child: GlassTabBar.bottom(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: kGlassNavPillTopGap,
+        ),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: plate,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: plateBorder, width: 0.8),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.30 : 0.10),
+                blurRadius: 14,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: GlassTabBar.bottom(
         tabs: [
           for (var i = 0; i < _labels.length; i++)
             GlassTab(
@@ -273,9 +300,12 @@ class ModernNavigationBar extends StatelessWidget {
         // 圆角矩形而非胶囊：包的默认 barBorderRadius 是
         // GlassDefaults.capsuleRadius（9999），两端会被拉成半圆。
         barBorderRadius: 20,
-        verticalPadding: kGlassNavPillTopGap,
-        horizontalPadding: 16,
-        indicatorColor: pillColor,
+            // 外边距已经由上面的底板接管，胶囊自己不再重复留白。
+            verticalPadding: 0,
+            horizontalPadding: 0,
+            indicatorColor: pillColor,
+          ),
+        ),
       ),
     );
   }

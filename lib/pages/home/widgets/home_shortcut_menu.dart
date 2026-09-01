@@ -95,39 +95,60 @@ class _ShortcutItem extends StatelessWidget {
     // 四宫格项是 Material + InkWell：本身可聚焦（Material 自带焦点环 +
     // 主题 focusColor 高亮），聚焦范围即完整卡片。不再包 TvFocusable
     // 缩放/描边，避免聚焦范围只剩图标一小块、右侧空白。
-    return Material(
-      color: scheme.surfaceContainerLow,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
+    // 底色带一点各自的强调色，别是一片白 —— 下面「最近播放 / 收藏」两张卡
+    // 就是这个路子，四宫格跟上才是一套。
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color.alphaBlend(
+              accent.withValues(alpha: 0.16),
+              scheme.surfaceContainerLow,
+            ),
+            Color.alphaBlend(
+              accent.withValues(alpha: 0.06),
+              scheme.surfaceContainerLow,
+            ),
+          ],
+        ),
         borderRadius: BorderRadius.circular(16),
-        onTap: item.onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 圆形图标容器
-              Container(
-                width: iconSize,
-                height: iconSize,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
+        border: Border.all(color: accent.withValues(alpha: 0.16)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: item.onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 圆形图标容器
+                Container(
+                  width: iconSize,
+                  height: iconSize,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.18),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(item.icon, size: iconSize * 0.5, color: accent),
                 ),
-                child: Icon(item.icon, size: iconSize * 0.5, color: accent),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                item.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: scheme.onSurfaceVariant,
+                const SizedBox(height: 6),
+                Text(
+                  item.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

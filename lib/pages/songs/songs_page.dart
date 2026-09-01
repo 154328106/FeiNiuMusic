@@ -11,7 +11,10 @@ import '../../app/router/app_page_route.dart';
 import '../../app/router/app_router.dart';
 import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/feiniu/track_service.dart';
+import '../../app/services/netease/netease_playback_service.dart';
 import '../../app/services/player_service.dart';
+import '../../app/services/source/music_source.dart';
+import '../../app/services/source/music_source_registry.dart';
 import '../../app/state/settings_background_state.dart';
 import '../../app/state/settings_layout_state.dart';
 import '../../app/state/settings_lyric_companion.dart';
@@ -116,7 +119,41 @@ class _SongsPageState extends State<SongsPage>
     }
   }
 
-  String _cacheKey() => 'page=1&size=$_pageSize&sort=${_apiSortParam()}';
+  /// 缓存键带上源 id。不带的话换到网易云会直接读出飞牛那份缓存 ——
+  /// 「歌曲页还是飞牛的歌」有一半是这么来的。
+  String _cacheKey() =>
+      'src=${_source.id}&page=1&size=$_pageSize&sort=${_apiSortParam()}';
+
+  MusicSource get _source => MusicSourceRegistry.instance.current.value;
+
+  /// 飞牛之外的源没有「整个曲库分页」这回事，一次给完。
+  bool get _isFeiniu => _source.id == 'feiniu';
+
+  /// 非飞牛源的「歌曲」= 我喜欢的音乐；没登录 / 收藏为空时退推荐新歌。
+  Future<List<SongEntity>> _fetchFromSource() async {
+    final favorites = await _source.fullFeed(HomeFeed.favorites, limit: 500);
+    final songs = favorites.isNotEmpty
+        ? favorites
+        : await _source.fullFeed(HomeFeed.latestSongs, limit: 200);
+    debugPrint('[SongsPage] 源=${_source.id} 取到 ${songs.length} 首');
+    return _sortLocally(songs);
+  }
+
+  /// 本地排序。飞牛的排序是服务端做的，其它源只能在本地排。
+  List<SongEntity> _sortLocally(List<SongEntity> songs) {
+    final asc = _ascending.value;
+    final sorted = [...songs];
+    int cmp(SongEntity a, SongEntity b) => switch (_sortKey.value) {
+      'title' => a.title.compareTo(b.title),
+      'artist' => a.artistDisplayName.compareTo(b.artistDisplayName),
+      'duration' => (a.durationMs ?? 0).compareTo(b.durationMs ?? 0),
+      _ => 0,
+    };
+    if (_sortKey.value != 'createdAt') {
+      sorted.sort((a, b) => asc ? cmp(a, b) : cmp(b, a));
+    }
+    return sorted;
+  }
 
   void _preloadCovers(List<SongEntity> songs, {int count = 20}) {
     if (songs.isEmpty || !mounted) return;
@@ -125,9 +162,14 @@ class _SongsPageState extends State<SongsPage>
     int loaded = 0, skipped = 0;
     for (final song in songs.take(count)) {
       if (song.coverId != null && song.coverId!.isNotEmpty) {
-        final url = api.coverUrl(song.coverId!, size: FeiNiuApiClient.coverRequestSize, updatedAt: song.updatedAt);
+        // 非飞牛的源 coverId 存的就是公网直链，再套 coverUrl() 会拼出 NAS
+        // 一律 400 的地址；直链也不能带飞牛的鉴权头。
+        final isRemote = song.coverId!.startsWith('http');
+        final url = isRemote
+            ? song.coverId!
+            : api.coverUrl(song.coverId!, size: FeiNiuApiClient.coverRequestSize, updatedAt: song.updatedAt);
         unawaited(precacheImage(
-          CachedNetworkImageProvider(url, headers: headers),
+          CachedNetworkImageProvider(url, headers: isRemote ? null : headers),
           context,
         ).then((_) => loaded++).catchError((e) {
           debugPrint('[SongsPage] cover precache failed song=${song.title} coverId=${song.coverId}: $e');
@@ -148,6 +190,12 @@ class _SongsPageState extends State<SongsPage>
     _hasMoreSongs = true;
 
     Future<List<SongEntity>> fetch() async {
+      if (!_isFeiniu) {
+        final songs = await _fetchFromSource();
+        _totalSongs = songs.length;
+        _hasMoreSongs = false;
+        return songs;
+      }
       final sort = _apiSortParam();
       debugPrint('[SongsPage] fetch page=1 size=$_pageSize sort=$sort');
       try {
@@ -276,6 +324,11 @@ class _SongsPageState extends State<SongsPage>
   /// 拉取下一页并追加到列表。返回是否有新增数据。
   /// 供滚动加载（_loadMoreSongs）与「按数量加载」（_loadMoreToTarget）共用。
   Future<bool> _fetchAndAppendNextPage() async {
+    // 非飞牛源一次就给完了，没有下一页。
+    if (!_isFeiniu) {
+      _hasMoreSongs = false;
+      return false;
+    }
     _currentPage++;
     try {
       final sort = _apiSortParam();
@@ -401,11 +454,18 @@ class _SongsPageState extends State<SongsPage>
   void _playSong(int index) {
     final songs = _songs.value;
     if (songs.isEmpty) return;
+    if (_source.id == 'netease') {
+      // 网易云队列里可能夹着下架 / 无版权的歌，取不到地址会让整队卡住，
+      // 起播前先批量筛一遍。
+      unawaited(_playNetEase(songs, index));
+      return;
+    }
     // 已加载数据不足队列上限时，自动分页拉取后续歌曲填充到上限
     _player.playQueueFilledToLimit(
       songs,
       index,
       fetchMore: (page) async {
+        if (!_isFeiniu) return const <SongEntity>[];
         final sort = _apiSortParam();
         final pageData = await _api.getTrackList(
           page: _currentPage + page,
@@ -417,6 +477,15 @@ class _SongsPageState extends State<SongsPage>
             .toList();
       },
     );
+  }
+
+  Future<void> _playNetEase(List<SongEntity> songs, int index) async {
+    final tapped = songs[index];
+    final queue = await NetEasePlaybackService.instance.prepareQueue(songs);
+    if (!mounted || queue.isEmpty) return;
+    // 筛完索引会变，按 id 重新定位；点中的那首若被筛掉就从头播。
+    final moved = queue.indexWhere((s) => s.id == tapped.id);
+    _player.playQueue(queue, moved >= 0 ? moved : 0);
   }
 
   void _showSortSheet() {
