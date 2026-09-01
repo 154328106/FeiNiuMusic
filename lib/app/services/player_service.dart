@@ -214,6 +214,15 @@ class PlayerService with WidgetsBindingObserver {
   /// 而不是继续顺序播放原列表。
   bool _roamStartPending = false;
 
+  /// 当前音乐源有没有「漫游链」这套东西。
+  ///
+  /// roam-start / roam-next 是飞牛独有的接口。换到网易云之后，播到队尾时
+  /// 若还去起飞牛的漫游链，会把正在放的歌整个换掉 —— 表现就是「点漫游卡
+  /// 播了一下，播放条闪一下要播的那首，然后跳去放了飞牛的歌」。
+  ///
+  /// 由 [MusicSourceRegistry] 在换源时写入，默认 true（飞牛是默认源）。
+  bool roamChainSupported = true;
+
   /// 队列代次标记：每次 playQueue/startRoamPlayback 递增。
   /// 用于丢弃仍在途的漫游追加请求，防止其覆盖用户新选择的队列。
   int _queueGeneration = 0;
@@ -2226,6 +2235,8 @@ class PlayerService with WidgetsBindingObserver {
   /// 调用。用 roam-start 拉取新漫游链替换当前队列并继续播放，实现
   /// 「列表循环 → 随机」的平滑过渡（播完当前歌后开始漫游）。
   Future<void> _startRoamFromPending() async {
+    // 双保险：非飞牛的源根本没有 roam-start，这里也别硬起。
+    if (!roamChainSupported) return;
     try {
       final deviceId = await AuthService.instance.ensureDeviceId();
       final response = await FeiNiuApiClient.instance.getRoamStart(deviceId);
@@ -2577,7 +2588,8 @@ class PlayerService with WidgetsBindingObserver {
         // 进入随机模式：run 不自动回卷，播完由逻辑层 roam 补链。
         // 若当前队列不是漫游队列（roamId 为空），标记「当前曲播完后启动漫游」，
         // 让播完/切到队尾时走 roam-start 而非继续顺序播原列表。
-        _roamStartPending = roamId == null || roamId!.isEmpty;
+        _roamStartPending =
+            roamChainSupported && (roamId == null || roamId!.isEmpty);
         await _applyPlaybackMode(mode);
       } else {
         _roamStartPending = false;
