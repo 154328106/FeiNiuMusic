@@ -14,6 +14,55 @@ class PlayerAppearanceSettingsPage extends StatefulWidget {
       _PlayerAppearanceSettingsPageState();
 }
 
+/// 封面样式的行首缩图。
+///
+/// 碟片和黑胶用真机截图裁出来的盘面 —— 光看文字说明想象不出长什么样，
+/// 引导页用的也是同一批图，两边对得上。方形和圆形一眼就懂，画个形状即可。
+Widget _coverStyleThumb(BuildContext context, PlayerCoverStyle style) {
+  final scheme = Theme.of(context).colorScheme;
+  const size = 40.0;
+  final asset = switch (style) {
+    PlayerCoverStyle.cd => 'assets/preview/cover_style_cd.jpg',
+    PlayerCoverStyle.vinyl => 'assets/preview/cover_style_vinyl.jpg',
+    _ => null,
+  };
+  if (asset != null) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Image.asset(
+        asset,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) =>
+            ColoredBox(color: scheme.surfaceContainerHighest),
+      ),
+    );
+  }
+  return Container(
+    width: size,
+    height: size,
+    alignment: Alignment.center,
+    decoration: BoxDecoration(
+      color: scheme.primary.withValues(alpha: 0.10),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Container(
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(
+        color: scheme.primary.withValues(alpha: 0.55),
+        shape: style == PlayerCoverStyle.circle
+            ? BoxShape.circle
+            : BoxShape.rectangle,
+        borderRadius: style == PlayerCoverStyle.circle
+            ? null
+            : BorderRadius.circular(5),
+      ),
+    ),
+  );
+}
+
 class _PlayerAppearanceSettingsPageState
     extends State<PlayerAppearanceSettingsPage> {
   @override
@@ -242,6 +291,7 @@ class _PlayerAppearanceSettingsPageState
                             children: [
                               for (final style in PlayerCoverStyle.values)
                                 AppSettingCheckboxTile(
+                                  leading: _coverStyleThumb(context, style),
                                   title: style.label,
                                   subtitle: style.description,
                                   value: current == style,

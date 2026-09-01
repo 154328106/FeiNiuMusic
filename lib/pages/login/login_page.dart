@@ -175,9 +175,25 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
+  /// 看着像服务器地址就补上 `http://`。
+  ///
+  /// 每次登录都要手打 `http://` 太烦。判据是「有点号或者带端口」——
+  /// `192.168.1.10:5666`、`nas.local` 都算地址；FNID 是一串不带点也不带
+  /// 冒号的字符，不会被误伤。补的是 http 而不是 https：不少 NAS 只开了
+  /// 明文端口，而服务端若强制跳转，_resolveServerAddress 会自动升到 https。
+  static String normalizeServerInput(String input) {
+    final trimmed = input.trim();
+    if (trimmed.isEmpty) return trimmed;
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      return trimmed;
+    }
+    final looksLikeHost = trimmed.contains('.') || trimmed.contains(':');
+    return looksLikeHost ? 'http://$trimmed' : trimmed;
+  }
+
   /// 判断输入是否为 FNID
   bool _isFnId(String input) {
-    final trimmed = input.trim();
+    final trimmed = normalizeServerInput(input);
     if (trimmed.isEmpty) return false;
     // 以 http/https 开头的是普通地址
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
@@ -239,7 +255,12 @@ class _LoginPageState extends State<LoginPage> {
 
     setState(() => _errorMessage = null);
 
-    var serverUrlInput = _serverUrlController.text.trim();
+    // 补完 http:// 后写回输入框：让用户看见实际要连的地址，而不是背地里
+    // 改成另一个东西。
+    var serverUrlInput = normalizeServerInput(_serverUrlController.text);
+    if (serverUrlInput != _serverUrlController.text.trim()) {
+      _serverUrlController.text = serverUrlInput;
+    }
     final username = _usernameController.text.trim();
     final password = _passwordController.text;
     final name = _nameController.text.trim();
@@ -701,7 +722,8 @@ class _LoginPageState extends State<LoginPage> {
                     autofocus: AppLayoutSettings.tvMode.value,
                     decoration: InputDecoration(
                       labelText: '服务器地址或 FNID',
-                      hintText: 'https://ip:port 或输入 FNID',
+                      hintText: '192.168.1.10:5666 或输入 FNID',
+                      helperText: '地址不用打 http://，会自动补',
                       prefixIcon: const Icon(Icons.dns_outlined),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -712,7 +734,9 @@ class _LoginPageState extends State<LoginPage> {
                       if (value == null || value.trim().isEmpty) {
                         return '请输入服务器地址或 FNID';
                       }
-                      final trimmed = value.trim();
+                      // 校验按补完 http:// 之后的样子来，否则直接填
+                      // `192.168.1.10:5666` 会被当成 FNID 去卡长度。
+                      final trimmed = normalizeServerInput(value);
                       // 以 http/https 开头的是普通地址
                       if (trimmed.startsWith('http://') ||
                           trimmed.startsWith('https://')) {

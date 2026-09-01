@@ -116,6 +116,12 @@ flutter:
   assets:
     - assets/icon/app_icon.png
     - assets/icon/stats.png
+    - assets/icon/onboard_appearance.png
+    - assets/icon/onboard_player.png
+    - assets/preview/player_style_cd.jpg
+    - assets/preview/player_style_vinyl.jpg
+    - assets/preview/cover_style_cd.jpg
+    - assets/preview/cover_style_vinyl.jpg
     - assets/preview/style_preview_cover.jpg
     - assets/preview/genre_bg.png
     # 音乐来源图标（「我的 → 音乐来源」用）

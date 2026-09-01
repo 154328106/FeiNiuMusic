@@ -148,9 +148,17 @@ class _NetEaseLoginPageState extends State<NetEaseLoginPage> {
               ],
               const SizedBox(height: 12),
               Text(
-                '登录后才能读取你的收藏、每日推荐和播放记录。',
+                '登录后才能读取你的收藏、每日推荐和播放记录。
+'
+                '不登录也能搜索和播放，只是这几块是空的。',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 8),
+              // 不登录也能用搜索、推荐新歌、推荐歌单，没必要把人卡在扫码这一步。
+              TextButton(
+                onPressed: () => Navigator.of(context).maybePop(),
+                child: const Text('暂不登录'),
               ),
             ],
           ),

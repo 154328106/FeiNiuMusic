@@ -4,7 +4,6 @@ import '../../app/state/settings_state.dart';
 import '../../components/common/setting_widgets.dart';
 import '../../components/focus/tv_focusable.dart';
 import '../../components/layout/base/app_background.dart';
-import '../../components/player/player_style_preview.dart';
 import '../player/widgets/player_background.dart';
 
 /// 首次启动引导页。
@@ -167,10 +166,14 @@ class _PageHeader extends StatelessWidget {
   final String title;
   final String subtitle;
 
+  /// 给了就用图片，[icon] 退为加载失败时的兜底。
+  final String? assetIcon;
+
   const _PageHeader({
     required this.icon,
     required this.title,
     required this.subtitle,
+    this.assetIcon,
   });
 
   @override
@@ -179,15 +182,28 @@ class _PageHeader extends StatelessWidget {
     return Column(
       children: [
         const SizedBox(height: 24),
-        Container(
-          width: 72,
-          height: 72,
-          decoration: BoxDecoration(
-            color: scheme.primary.withValues(alpha: 0.12),
+        if (assetIcon != null)
+          ClipRRect(
             borderRadius: BorderRadius.circular(22),
+            child: Image.asset(
+              assetIcon!,
+              width: 72,
+              height: 72,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) =>
+                  Icon(icon, size: 36, color: scheme.primary),
+            ),
+          )
+        else
+          Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              color: scheme.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: Icon(icon, size: 36, color: scheme.primary),
           ),
-          child: Icon(icon, size: 36, color: scheme.primary),
-        ),
         const SizedBox(height: 20),
         Text(
           title,
@@ -358,6 +374,7 @@ class _AppearancePage extends StatelessWidget {
       children: [
         const _PageHeader(
           icon: Icons.palette_outlined,
+          assetIcon: 'assets/icon/onboard_appearance.png',
           title: '应用外观',
           subtitle: '选择主题模式、主题色与导航方式',
         ),
@@ -593,39 +610,31 @@ class _PlayerAppearancePage extends StatelessWidget {
       children: [
         const _PageHeader(
           icon: Icons.play_circle_outline_rounded,
+          assetIcon: 'assets/icon/onboard_player.png',
           title: '播放器外观',
-          subtitle: '选择你喜欢的播放页样式',
+          subtitle: '选择播放页的封面样式',
         ),
-        ValueListenableBuilder<PlayerStylePreset>(
-          valueListenable: PlayerStyleSettings.stylePreset,
-          builder: (context, preset, _) => _PlayerStyleSelector(
-            selected: preset,
-            onChanged: (value) {
-              // 仅切换样式，不触碰「圆形封面」设置：海报模式下该开关被隐藏，
-              // 切回默认时保留切换前的圆形/方形状态。
-              PlayerStyleSettings.setStylePreset(value);
-            },
+        // 引导页只挑封面样式（碟片 / 黑胶），用真机截图当预览 —— 手绘的模拟图
+        // 跟实际长相差得远。方形 / 圆形以及「默认 / 海报歌词」的布局选择留在
+        // 设置页，引导流程不必把四五个选项都摊开。
+        ValueListenableBuilder<PlayerCoverStyle>(
+          valueListenable: PlayerBackgroundSettings.coverStyle,
+          builder: (context, style, _) => _CoverStyleSelector(
+            selected: style,
+            onChanged: PlayerBackgroundSettings.setCoverStyle,
           ),
         ),
-        const SizedBox(height: 24),
-        // 海报歌词为整幅大封面，圆形封面开关无意义，选中海报时隐藏
-        ValueListenableBuilder<PlayerStylePreset>(
-          valueListenable: PlayerStyleSettings.stylePreset,
-          builder: (context, preset, _) {
-            if (preset == PlayerStylePreset.poster) {
-              return const SizedBox.shrink();
-            }
-            return ValueListenableBuilder<bool>(
-              valueListenable: PlayerBackgroundSettings.roundCover,
-              builder: (context, enabled, _) => AppSettingSwitchTile(
-                title: '圆形封面',
-                subtitle: '播放页封面以圆形显示',
-                value: enabled,
-                onChanged: (value) =>
-                    PlayerBackgroundSettings.setRoundCover(value),
-              ),
-            );
-          },
+        const SizedBox(height: 16),
+        Text(
+          '方形 / 圆形封面，以及「默认 / 海报歌词」的布局，'
+          '都在「设置 → 播放器外观」里改。',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 12,
+            color: Theme.of(
+              context,
+            ).colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+          ),
         ),
       ],
     );
@@ -633,29 +642,41 @@ class _PlayerAppearancePage extends StatelessWidget {
 }
 
 /// 播放器样式二选卡片（classic / poster）。
-class _PlayerStyleSelector extends StatelessWidget {
-  final PlayerStylePreset selected;
-  final ValueChanged<PlayerStylePreset> onChanged;
+/// 引导页的封面样式二选一：碟片 / 黑胶，预览是真机截图。
+class _CoverStyleSelector extends StatelessWidget {
+  final PlayerCoverStyle selected;
+  final ValueChanged<PlayerCoverStyle> onChanged;
 
-  const _PlayerStyleSelector({required this.selected, required this.onChanged});
+  const _CoverStyleSelector({
+    required this.selected,
+    required this.onChanged,
+  });
+
+  static const _options = <(PlayerCoverStyle, String)>[
+    (PlayerCoverStyle.cd, 'assets/preview/player_style_cd.jpg'),
+    (PlayerCoverStyle.vinyl, 'assets/preview/player_style_vinyl.jpg'),
+  ];
 
   @override
   Widget build(BuildContext context) {
-    // 每张卡片等宽（Spacer 占位）+ 尾部留 10px 间距，保证两个预览图
-    // 宽度一致 → AspectRatio 高度一致，避免 classic/poster 卡片大小不一。
-    // TV/平板大屏：两卡并排 + 遥控器导航，限制整体宽度防止预览占满横屏。
     final isLarge = AppLayoutSettings.effectiveTabletMode;
     final row = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: PlayerStylePreset.values.map((preset) {
-        final isSelected = preset == selected;
-        return Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(right: 10),
-            child: _styleCard(context, preset, isSelected, onChanged),
+      children: [
+        for (final (style, asset) in _options)
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: _coverStyleCard(
+                context,
+                style,
+                asset,
+                style == selected,
+                onChanged,
+              ),
+            ),
           ),
-        );
-      }).toList(),
+      ],
     );
     if (!isLarge) return row;
     return Center(
@@ -667,36 +688,61 @@ class _PlayerStyleSelector extends StatelessWidget {
   }
 }
 
-Widget _styleCard(
+Widget _coverStyleCard(
   BuildContext context,
-  PlayerStylePreset preset,
+  PlayerCoverStyle style,
+  String asset,
   bool selected,
-  ValueChanged<PlayerStylePreset> onChanged,
+  ValueChanged<PlayerCoverStyle> onChanged,
 ) {
   final scheme = Theme.of(context).colorScheme;
+  final size = MediaQuery.sizeOf(context);
+  // 截图本身就是手机竖屏比例，卡片跟着屏幕比例走才不会被拉变形。
+  final isLarge = AppLayoutSettings.effectiveTabletMode;
+  final aspectRatio = isLarge ? 0.56 : size.shortestSide / size.longestSide;
   final card = GestureDetector(
     behavior: HitTestBehavior.opaque,
-    onTap: () => onChanged(preset),
+    onTap: () => onChanged(style),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Stack(
           children: [
-            Container(
-              clipBehavior: Clip.antiAlias,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(
-                      alpha: selected ? 0.22 : 0.12,
-                    ),
-                    blurRadius: selected ? 16 : 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: isLarge ? 412 : double.infinity,
               ),
-              child: PlayerStylePreview(preset: preset, selected: selected),
+              child: AspectRatio(
+                aspectRatio: aspectRatio,
+                child: Container(
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: selected
+                          ? scheme.primary
+                          : scheme.outlineVariant.withValues(alpha: 0.6),
+                      width: selected ? 2 : 1,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(
+                          alpha: selected ? 0.22 : 0.12,
+                        ),
+                        blurRadius: selected ? 16 : 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Image.asset(
+                    asset,
+                    fit: BoxFit.cover,
+                    alignment: Alignment.topCenter,
+                    errorBuilder: (_, _, _) =>
+                        ColoredBox(color: scheme.surfaceContainerHighest),
+                  ),
+                ),
+              ),
             ),
             if (selected)
               Positioned(
@@ -719,7 +765,7 @@ Widget _styleCard(
         ),
         const SizedBox(height: 10),
         Text(
-          preset.label,
+          style.label,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
@@ -730,8 +776,8 @@ Widget _styleCard(
         ),
         const SizedBox(height: 2),
         Text(
-          preset.description,
-          maxLines: 1,
+          style.description,
+          maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
             fontSize: 11,
@@ -741,12 +787,10 @@ Widget _styleCard(
       ],
     ),
   );
-  // TV 模式：卡片是 GestureDetector（非 Material），需 TvFocusable 焦点环
-  // 才能被遥控器聚焦；确认键（Enter）触发同样的选择。
   if (AppLayoutSettings.tvMode.value) {
     return TvFocusable(
       borderRadius: BorderRadius.circular(16),
-      onActivate: () => onChanged(preset),
+      onActivate: () => onChanged(style),
       child: card,
     );
   }

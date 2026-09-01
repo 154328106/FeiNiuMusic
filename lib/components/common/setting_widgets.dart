@@ -143,12 +143,16 @@ class AppSettingCheckboxTile extends StatelessWidget {
   final bool value;
   final ValueChanged<bool>? onChanged;
 
+  /// 行首的图。封面样式那几行用它放真机缩图。
+  final Widget? leading;
+
   const AppSettingCheckboxTile({
     super.key,
     required this.title,
     this.subtitle,
     required this.value,
     this.onChanged,
+    this.leading,
   });
 
   @override
@@ -156,6 +160,7 @@ class AppSettingCheckboxTile extends StatelessWidget {
     return AppSettingTile(
       title: title,
       subtitle: subtitle,
+      leading: leading,
       trailing: SizedBox(
         width: 40,
         child: Align(
