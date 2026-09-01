@@ -316,6 +316,18 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
     _tintFuture = CoverDominantColor.resolve(coverId);
   }
 
+  /// 把主色收进一个适合当底色的明度区间。
+  ///
+  /// 取色走 ColorScheme.fromImageProvider，出来的已经是量化过的主色、不是
+  /// 灰扑扑的平均色，所以只需要压明度，不用再硬拉饱和度。
+  static Color _vivid(Color c) {
+    final hsl = HSLColor.fromColor(c);
+    return hsl
+        .withSaturation(hsl.saturation.clamp(0.30, 0.90))
+        .withLightness(hsl.lightness.clamp(0.36, 0.60))
+        .toColor();
+  }
+
   /// 卡片底色的两个端点。
   ///
   /// 封面主色不能直接铺：浅色主题下容易糊成一团，深色下又会把标题吃掉。
