@@ -174,6 +174,11 @@ class _HomePageState extends State<HomePage>
   @override
   void dispose() {
     debugPrint('[HomePage#$_instanceId] dispose');
+    // 漫游扩展器挂在全局播放器上，不摘掉的话这个已经死了的首页还会继续被
+    // 回调，往正在播的队列里追加它那条漫游链的歌。
+    if (_player.queueExtender == _roamQueueExtender) {
+      _player.queueExtender = null;
+    }
     _roamAutoTimer?.cancel();
     _latestShuffleTimer?.cancel();
     MusicSourceRegistry.instance.current.removeListener(_onSourceChanged);

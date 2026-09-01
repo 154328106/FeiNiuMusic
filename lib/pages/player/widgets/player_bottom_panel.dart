@@ -411,12 +411,12 @@ class PlayerControls extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final isTv = AppLayoutSettings.tvMode.value;
     final iconColor = scheme.primary.withValues(alpha: 0.86);
-    // 整排收一号：原来手机上主按钮 72/64，配上左右 48 的图标占掉大半屏宽。
+    // 整排的比例：主按钮是视觉中心，左右两个只是配角，拉开差距整排才有主次。
     final mainButtonSize = switch (stylePreset) {
-      PlayerStylePreset.poster => isTv ? 80.0 : 62.0,
-      PlayerStylePreset.classic => isTv ? 72.0 : 56.0,
+      PlayerStylePreset.poster => isTv ? 86.0 : 68.0,
+      PlayerStylePreset.classic => isTv ? 78.0 : 62.0,
     };
-    final sideIconSize = isTv ? 56.0 : 40.0;
+    final sideIconSize = isTv ? 50.0 : 34.0;
     return Watch.builder(
       builder: (context) {
         final playing = player.isPlayingSignal.value;

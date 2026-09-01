@@ -416,6 +416,19 @@ class _AppStartupGateState extends State<_AppStartupGate> {
                           ? TraversalEdgeBehavior.parentScope
                           : kDefaultRouteDirectionalTraversalEdgeBehavior,
                       initialRoute: AppRouter.initialRoute,
+                      // 只为初始路由本身生成一个页面。
+                      //
+                      // Navigator 默认会把 '/home' 拆成 '/' 和 '/home' 两段，
+                      // 逐段调 onGenerateRoute 铺出一整条初始路由链；而
+                      // onGenerateRoute 对认不出的名字一律回退到首页，于是
+                      // '/' 也建了一个导航壳 —— 两个壳叠在一起，两套
+                      // HomePage / SongsPage 同时活着（下面那个永远不会
+                      // dispose），所有请求和日志都成双。
+                      onGenerateInitialRoutes: (navigator, initialRoute) => [
+                        widget.onGenerateRoute(
+                          RouteSettings(name: initialRoute),
+                        ),
+                      ],
                       onGenerateRoute: widget.onGenerateRoute,
                     ),
                   ),
