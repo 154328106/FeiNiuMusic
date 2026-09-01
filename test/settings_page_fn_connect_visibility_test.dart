@@ -45,11 +45,14 @@ void main() {
     expect(find.text('FN Connect'), findsNothing);
   });
 
-  testWidgets('其他功能项不受影响（播放器控制仍在）', (tester) async {
+  testWidgets('其他功能项不受影响（音量设置仍在）', (tester) async {
     AppFnConnectionSettings.lastFnId = null;
 
     await pumpPage(tester);
-    expect(find.text('播放器控制'), findsOneWidget);
+    // 锚点原来是「播放器控制」，那一项已经搬到「我的 → 主题外观」里了。
+    // 这条用例要验的是「FN Connect 隐藏时不误伤同单元的其它项」，
+    // 换一个还留在「功能」里的条目当锚点即可。
+    expect(find.text('音量设置'), findsOneWidget);
     expect(find.text('FN Connect'), findsNothing);
   });
 }

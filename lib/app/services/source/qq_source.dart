@@ -77,9 +77,7 @@ class QQSource implements MusicSource {
     final cached = _songCache;
     if (cached != null && cached.isNotEmpty) return cached;
     final songs = await _api.recommendSongs(limit: 60);
-    final entities = [
-      for (final s in songs) QQPlaybackService.toSongEntity(s),
-    ];
+    final entities = [for (final s in songs) QQPlaybackService.toSongEntity(s)];
     if (entities.isNotEmpty) _songCache = entities;
     debugPrint('[QQSource] 推荐歌曲 ${entities.length} 首');
     return entities;
@@ -96,11 +94,7 @@ class QQSource implements MusicSource {
       // 每次换一首。注意不能直接 shuffle 那个 list —— 它是缓存本体，
       // 打乱它就等于把首页列表的顺序也搅了。复制一份再挑。
       final shuffled = [...songs]..shuffle();
-      return SourceHero(
-        song: shuffled.first,
-        queue: shuffled,
-        label: '每日推荐',
-      );
+      return SourceHero(song: shuffled.first, queue: shuffled, label: '每日推荐');
     } on QQApiException catch (e) {
       lastError = '推荐读取失败：${e.message}';
       debugPrint('[QQSource] hero error: ${e.message}');
