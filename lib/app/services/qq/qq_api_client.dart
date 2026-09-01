@@ -68,7 +68,10 @@ class QQApiClient {
       throw QQApiException('网络请求失败：${e.message ?? e.type.name}');
     }
     if (response.statusCode != 200) {
-      throw QQApiException('HTTP ${response.statusCode}', code: response.statusCode);
+      throw QQApiException(
+        'HTTP ${response.statusCode}',
+        code: response.statusCode,
+      );
     }
     final decoded = jsonDecode(response.data ?? '{}');
     if (decoded is! Map<String, dynamic>) {
@@ -85,7 +88,10 @@ class QQApiClient {
       throw QQApiException('网络请求失败：${e.message ?? e.type.name}');
     }
     if (response.statusCode != 200) {
-      throw QQApiException('HTTP ${response.statusCode}', code: response.statusCode);
+      throw QQApiException(
+        'HTTP ${response.statusCode}',
+        code: response.statusCode,
+      );
     }
     // 部分接口会用 jsonpCallback(...) 包一层，这里剥掉。
     var body = (response.data ?? '').trim();
@@ -148,7 +154,8 @@ class QQApiClient {
         'param': {'uin': 0, 'lastDissid': 0, 'songtype': 1, 'scene': 0},
       },
     });
-    final list = _at(json, ['req_1', 'data', 'v_playlist']) as List? ?? const [];
+    final list =
+        _at(json, ['req_1', 'data', 'v_playlist']) as List? ?? const [];
     final result = <QQPlaylist>[];
     for (final item in list.whereType<Map<String, dynamic>>()) {
       final id = (item['tid'] as int?) ?? (item['id'] as int?);
@@ -173,8 +180,12 @@ class QQApiClient {
       'req_1': {
         'module': 'music.playlist.PlayListDetail',
         'method': 'get_playlist_detail',
-        'param': {'disstid': tid, 'onlysonglist': 1, 'song_begin': 0,
-          'song_num': 300},
+        'param': {
+          'disstid': tid,
+          'onlysonglist': 1,
+          'song_begin': 0,
+          'song_num': 300,
+        },
       },
     });
     final list = _at(json, ['req_1', 'data', 'songlist']) as List?;

@@ -93,10 +93,7 @@ class QQSource implements MusicSource {
   }
 
   @override
-  Future<List<SongEntity>> fullFeed(
-    HomeFeed kind, {
-    required int limit,
-  }) async {
+  Future<List<SongEntity>> fullFeed(HomeFeed kind, {required int limit}) async {
     try {
       switch (kind) {
         case HomeFeed.favorites:

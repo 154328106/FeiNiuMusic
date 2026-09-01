@@ -254,7 +254,6 @@ class FeiNiuMusicApp extends StatelessWidget {
               },
             );
           },
-          ),
         );
       },
     );
@@ -442,6 +441,7 @@ class _AppStartupGateState extends State<_AppStartupGate> {
               },
             );
           },
+          ),
         );
       },
     );

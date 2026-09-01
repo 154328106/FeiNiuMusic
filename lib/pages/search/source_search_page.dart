@@ -129,7 +129,10 @@ class _SourceSearchPageState extends State<SourceSearchPage> {
     }
     if (_results.isEmpty) {
       return Center(
-        child: Text('搜索${_source.label}曲库', style: TextStyle(color: theme.hintColor)),
+        child: Text(
+          '搜索${_source.label}曲库',
+          style: TextStyle(color: theme.hintColor),
+        ),
       );
     }
     return ListView.builder(

@@ -23,9 +23,9 @@ class VipBadge extends StatelessWidget {
       decoration: BoxDecoration(
         border: Border.all(color: color.withValues(alpha: 0.8), width: 0.8),
         borderRadius: BorderRadius.circular(3),
-        color: color.withValues(alpha: scheme.brightness == Brightness.dark
-            ? 0.14
-            : 0.10),
+        color: color.withValues(
+          alpha: scheme.brightness == Brightness.dark ? 0.14 : 0.10,
+        ),
       ),
       child: Text(
         'VIP',
