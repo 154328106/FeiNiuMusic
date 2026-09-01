@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -33,32 +32,17 @@ class CoverDominantColor {
     if (coverId.isEmpty) return Future<Color?>.value();
     final hit = _cache[coverId];
     if (hit != null) return Future<Color?>.value(hit);
-    return _inflight[coverId] ??= _compute(
-      coverId,
-    ).whenComplete(() => _inflight.remove(coverId));
-  }
-
-  /// 把封面解码成一张 [ui.Image]。
-  ///
-  /// 走的是**界面显示封面用的同一个 ImageProvider** —— 那条路已经被验证是
-  /// 通的（图能显示出来），而且图早就下好躺在缓存里，不会再发一次请求。
-  /// 之前自己拿 Dio 重下一遍，在 iOS 上会毫无征兆地悬住，连超时都不触发。
-  static Future<ui.Image> _decode(ImageProvider provider) {
-    final completer = Completer<ui.Image>();
-    final stream = provider.resolve(ImageConfiguration.empty);
-    late final ImageStreamListener listener;
-    listener = ImageStreamListener(
-      (info, _) {
-        if (!completer.isCompleted) completer.complete(info.image);
-        stream.removeListener(listener);
-      },
-      onError: (error, stack) {
-        if (!completer.isCompleted) completer.completeError(error);
-        stream.removeListener(listener);
-      },
-    );
-    stream.addListener(listener);
-    return completer.future;
+    // 超时挡在最外层。里面任何一步卡住都能兜住并留下日志 —— 之前把超时挂在
+    // 单个 await 上，卡在别处时整个 Future 悬着，连一行日志都不打。
+    return _inflight[coverId] ??= _compute(coverId)
+        .timeout(
+          _timeout,
+          onTimeout: () {
+            debugPrint('[CoverColor] 取色超时 $coverId');
+            return null;
+          },
+        )
+        .whenComplete(() => _inflight.remove(coverId));
   }
 
   static Future<Color?> _compute(String coverId) async {
@@ -73,56 +57,29 @@ class CoverDominantColor {
           );
     debugPrint('[CoverColor] 开始取色 $url');
     try {
-      final image = await _decode(
-        CachedNetworkImageProvider(
+      // 交给 SDK 自带的 ColorScheme.fromImageProvider —— 它内部会把图缩到
+      // 112px 再做 Celebi 量化，拿到的是「这张图的主色」而不是平均出来的
+      // 一坨灰。自己下图 + 求平均那两版在 iOS 上都会莫名悬住，而这条是
+      // Flutter 维护的路径。
+      final scheme = await ColorScheme.fromImageProvider(
+        provider: CachedNetworkImageProvider(
           url,
           // 公网直链不能带飞牛的鉴权头（与 ArtworkWidget 同一套判断）。
           headers: isRemote ? null : FeiNiuApiClient.imageAuthHeaders(),
         ),
-      ).timeout(_timeout);
-      final color = await _averageOf(image);
-      image.dispose();
-      if (color == null) {
-        debugPrint('[CoverColor] 解码成功但算不出颜色 $url');
-        return null;
-      }
+      );
+      final color = scheme.primary;
       if (_cache.length >= _cacheLimit) {
         // 插入有序：淘汰最早的一条，别让缓存无限涨。
         _cache.remove(_cache.keys.first);
       }
       _cache[coverId] = color;
+      debugPrint('[CoverColor] 取色成功 $color');
       return color;
     } catch (e) {
       debugPrint('[CoverColor] 取色失败 $url：$e');
       return null;
     }
-  }
-
-  /// 对一张已解码的图求平均色。
-  ///
-  /// 封面是原尺寸的（几百到上千像素），全像素遍历没必要，按步长抽样即可 ——
-  /// 平均色本来就不需要精确。
-  static Future<Color?> _averageOf(ui.Image image) async {
-    final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
-    if (data == null) return null;
-    final bytes = data.buffer.asUint8List();
-    // 目标是取够约 4096 个采样点。
-    final pixels = bytes.length ~/ 4;
-    final step = pixels <= 4096 ? 1 : pixels ~/ 4096;
-    var r = 0;
-    var g = 0;
-    var b = 0;
-    var count = 0;
-    for (var i = 0; i < pixels; i += step) {
-      final o = i * 4;
-      if (bytes[o + 3] < 10) continue; // 透明像素不参与
-      r += bytes[o];
-      g += bytes[o + 1];
-      b += bytes[o + 2];
-      count++;
-    }
-    if (count == 0) return null;
-    return Color.fromARGB(255, r ~/ count, g ~/ count, b ~/ count);
   }
 }
 

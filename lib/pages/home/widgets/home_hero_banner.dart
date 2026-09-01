@@ -322,13 +322,15 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
     setState(() => _tint = color);
   }
 
-  /// 整张封面的平均色多半是灰扑扑的一坨，直接拿来染色几乎看不出变化。
-  /// 拉一把饱和度、把明度收进中段，才像「这首歌的颜色」。
+  /// 把主色收进一个适合当底色的明度区间。
+  ///
+  /// 取色现在走 ColorScheme.fromImageProvider，出来的已经是量化过的主色、
+  /// 不是灰扑扑的平均色，所以只需要压明度，不用再硬拉饱和度。
   static Color _vivid(Color c) {
     final hsl = HSLColor.fromColor(c);
     return hsl
-        .withSaturation((hsl.saturation * 1.9).clamp(0.32, 0.85))
-        .withLightness(hsl.lightness.clamp(0.34, 0.62))
+        .withSaturation(hsl.saturation.clamp(0.30, 0.90))
+        .withLightness(hsl.lightness.clamp(0.36, 0.60))
         .toColor();
   }
 

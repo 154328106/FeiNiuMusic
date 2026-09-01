@@ -416,14 +416,13 @@ class PlayerControls extends StatelessWidget {
       PlayerStylePreset.poster => isTv ? 92.0 : 76.0,
       PlayerStylePreset.classic => isTv ? 78.0 : 62.0,
     };
-    // 海报样式：主按钮更大、侧键去掉底盘只留图标（配大封面的极简感）；
-    // 默认样式：侧键带底盘，和雷达一样有厚度。之前两者只差 6px 主按钮
-    // 尺寸，选完基本看不出区别。
+    // 海报样式整排放大一号，底盘保留 —— 上一轮把它做成「无底盘极简」是
+    // 反了：要的是同一套立体质感，只是更大。
     final isPoster = stylePreset == PlayerStylePreset.poster;
     final sideIconSize = isTv
-        ? (isPoster ? 56.0 : 50.0)
-        : (isPoster ? 40.0 : 34.0);
-    final sideGap = isTv ? 28.0 : (isPoster ? 30.0 : 20.0);
+        ? (isPoster ? 54.0 : 50.0)
+        : (isPoster ? 38.0 : 34.0);
+    final sideGap = isTv ? 28.0 : (isPoster ? 24.0 : 20.0);
     return Watch.builder(
       builder: (context) {
         final playing = player.isPlayingSignal.value;
@@ -435,7 +434,7 @@ class PlayerControls extends StatelessWidget {
             // 轻投影，让它们也有厚度，同时不改变原有尺寸与间距。
             _sideControl(
               scheme: scheme,
-              plated: !isPoster,
+              plated: true,
               iconSize: sideIconSize,
               icon: Icons.skip_previous_rounded,
               color: iconColor,
@@ -471,7 +470,7 @@ class PlayerControls extends StatelessWidget {
             SizedBox(width: sideGap),
             _sideControl(
               scheme: scheme,
-              plated: !isPoster,
+              plated: true,
               iconSize: sideIconSize,
               icon: Icons.skip_next_rounded,
               color: iconColor,
@@ -1544,54 +1543,28 @@ class PosterControls extends StatelessWidget {
               icon: Icon(modeIcon),
               onPressed: player.cyclePlaybackMode,
             ),
-            IconButton(
-              iconSize: 40,
+            _sideControl(
+              scheme: scheme,
+              plated: true,
+              iconSize: 38,
+              icon: Icons.skip_previous_rounded,
               color: iconColor,
-              icon: const Icon(Icons.skip_previous_rounded),
               onPressed: player.previous,
             ),
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                // 与经典布局同一套立体质感，尺寸更小故投影收敛一档。
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    scheme.onSurface,
-                    Color.alphaBlend(
-                      Colors.black.withValues(alpha: 0.18),
-                      scheme.onSurface,
-                    ),
-                  ],
-                ),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.18),
-                  width: 0.8,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.28),
-                    blurRadius: 12,
-                    offset: const Offset(0, 5),
-                  ),
-                ],
-              ),
-              child: IconButton(
-                iconSize: 36,
-                color: scheme.surface,
-                icon: Icon(
-                  playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                ),
-                onPressed: player.togglePlayPause,
-              ),
+            // 海报布局原来是自己拼的一个圆底播放键，和首页漫游卡、迷你条、
+            // 经典播放页那三处的雷达对不上。换成同一个 RadarPlayButton，
+            // 它自带盘面、描边和投影，外面不用再包一层。
+            RadarPlayButton(
+              isPlaying: playing,
+              size: 58,
+              onPlay: player.togglePlayPause,
             ),
-            IconButton(
-              iconSize: 40,
+            _sideControl(
+              scheme: scheme,
+              plated: true,
+              iconSize: 38,
+              icon: Icons.skip_next_rounded,
               color: iconColor,
-              icon: const Icon(Icons.skip_next_rounded),
               onPressed: player.next,
             ),
             IconButton(
