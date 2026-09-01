@@ -151,7 +151,7 @@ class _RadarPainter extends CustomPainter {
       radius,
       Paint()
         ..color = Colors.black.withValues(alpha: isDark ? 0.34 : 0.16)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5 * k),
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, 5 * k),
     );
 
     // 2) 盘面：左上亮右下暗的斜向渐变，做出凸起的球面感。
@@ -207,9 +207,13 @@ class _RadarPainter extends CustomPainter {
       5.5 * k,
       Paint()
         ..color = dot.withValues(alpha: 0.22)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3 * k),
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, 3 * k),
     );
-    canvas.drawCircle(center, 2.8 * k, Paint()..color = dot.withValues(alpha: 0.9));
+    canvas.drawCircle(
+      center,
+      2.8 * k,
+      Paint()..color = dot.withValues(alpha: 0.9),
+    );
 
     final p = progress;
     if (p == null) {
