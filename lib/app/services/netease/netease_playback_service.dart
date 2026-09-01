@@ -293,6 +293,8 @@ class NetEasePlaybackService {
       // 认出是 http 就当完整 URL 用，不去拼飞牛的 /static/cover。
       coverId: song.coverUrl,
       format: 'mp3',
+      // fee=1/4 是会员 / 付费单曲，列表上给个角标。
+      isVip: song.isVip,
     );
   }
 }

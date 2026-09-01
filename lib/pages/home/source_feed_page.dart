@@ -152,10 +152,17 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
           child: ListTile(
             contentPadding: const EdgeInsets.symmetric(horizontal: 4),
             leading: ArtworkWidget(song: song, size: 48, borderRadius: 8),
-            title: Text(
-              song.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            title: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    song.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (song.isVip) const VipBadge(),
+              ],
             ),
             subtitle: Text(
               song.artistDisplayName,

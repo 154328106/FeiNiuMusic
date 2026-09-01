@@ -25,6 +25,12 @@ class SongEntity {
   final int? cueOffsetMs; // CUE 整轨曲目在物理文件内的起始偏移（专辑上下文累计）
   final bool isAudioFileDeleted; // 失效歌曲（音频文件已删除）
 
+  /// 需要会员才能完整播放（网易云的 fee=1/4）。
+  ///
+  /// 只影响列表上的角标。能不能真播由取地址那步决定 —— 有第三方音源时
+  /// VIP 歌照样能放，所以这里只是提示，不作为可播性的判断依据。
+  final bool isVip;
+
   const SongEntity({
     required this.id,
     required this.title,
@@ -47,6 +53,7 @@ class SongEntity {
     this.isCue = false,
     this.cueOffsetMs,
     this.isAudioFileDeleted = false,
+    this.isVip = false,
   });
 
   /// 歌曲来源，由 [id] 前缀推导。见 [SongSource]。
@@ -214,6 +221,7 @@ class SongEntity {
       'isCue': isCue ? 1 : 0,
       'cueOffsetMs': cueOffsetMs,
       'isAudioFileDeleted': isAudioFileDeleted ? 1 : 0,
+      'isVip': isVip ? 1 : 0,
     };
   }
 
@@ -246,6 +254,8 @@ class SongEntity {
       cueOffsetMs: parseInt(map['cueOffsetMs']),
       isAudioFileDeleted:
           map['isAudioFileDeleted'] == true || map['isAudioFileDeleted'] == 1,
+      // 老缓存里没有这个键，缺省当非 VIP。
+      isVip: map['isVip'] == true || map['isVip'] == 1,
     );
   }
 
@@ -271,6 +281,7 @@ class SongEntity {
     bool? isCue,
     int? cueOffsetMs,
     bool? isAudioFileDeleted,
+    bool? isVip,
   }) {
     return SongEntity(
       id: id ?? this.id,
@@ -294,6 +305,7 @@ class SongEntity {
       isCue: isCue ?? this.isCue,
       cueOffsetMs: cueOffsetMs ?? this.cueOffsetMs,
       isAudioFileDeleted: isAudioFileDeleted ?? this.isAudioFileDeleted,
+      isVip: isVip ?? this.isVip,
     );
   }
 }

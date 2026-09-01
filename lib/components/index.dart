@@ -3,6 +3,7 @@ export 'common/app_list_tile.dart';
 export 'common/artwork_widget.dart';
 export 'common/content_frame.dart';
 export 'common/glass_panel.dart';
+export 'common/vip_badge.dart';
 export 'common/labeled_slider.dart';
 export 'common/playing_bars.dart';
 export 'common/setting_widgets.dart';
