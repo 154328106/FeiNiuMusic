@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../app/router/app_router.dart';
 import '../../app/services/player_service.dart';
 import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';

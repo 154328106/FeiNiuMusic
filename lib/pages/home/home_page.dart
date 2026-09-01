@@ -10,7 +10,6 @@ import '../../app/router/app_page_route.dart';
 import '../../app/router/app_router.dart';
 import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/feiniu/api_models.dart';
-import '../../app/services/feiniu/auth_service.dart';
 import '../../app/services/feiniu/track_service.dart';
 import '../../app/services/player_service.dart';
 import '../../app/services/source/music_source.dart';
@@ -101,7 +100,6 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage>
     with SignalsMixin, PrimaryTabRefreshMixin {
   final FeiNiuApiClient _api = FeiNiuApiClient.instance;
-  final FeiNiuTrackService _trackService = FeiNiuTrackService.instance;
   final PlayerService _player = PlayerService.instance;
   final GlobalKey<AppPageScaffoldState> _scaffoldKey =
       GlobalKey<AppPageScaffoldState>();
