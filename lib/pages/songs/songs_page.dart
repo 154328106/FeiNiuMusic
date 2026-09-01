@@ -481,9 +481,33 @@ class _SongsPageState extends State<SongsPage>
     final tapped = songs[index];
     final queue = await _source.prepareQueue(songs);
     if (!mounted || queue.isEmpty) return;
-    // 筛完索引会变，按 id 重新定位；点中的那首若被筛掉就从头播。
-    final moved = queue.indexWhere((s) => s.id == tapped.id);
-    _player.playQueue(queue, moved >= 0 ? moved : 0);
+    _player.playQueue(queue, _startIndexFor(songs, index, tapped, queue));
+  }
+
+  /// 筛完之后点中的那首落在哪。
+  ///
+  /// 原来「找不到就从 0 开始」。QQ 那边一半以上的歌拿不到地址，于是点谁都
+  /// 从头播 —— 看着就像「点了没反应，永远播同一首」。改成往后找**原列表里
+  /// 第一首还留着的歌**：语义上就是「这首放不了，接着往下播」。
+  int _startIndexFor(
+    List<SongEntity> original,
+    int index,
+    SongEntity tapped,
+    List<SongEntity> queue,
+  ) {
+    final direct = queue.indexWhere((s) => s.id == tapped.id);
+    if (direct >= 0) return direct;
+    final kept = {for (final s in queue) s.id};
+    for (var i = index + 1; i < original.length; i++) {
+      if (!kept.contains(original[i].id)) continue;
+      final moved = queue.indexWhere((s) => s.id == original[i].id);
+      if (moved >= 0) {
+        AppToast.showGlobal('这首暂时放不了，已跳到下一首');
+        return moved;
+      }
+    }
+    AppToast.showGlobal('这首暂时放不了');
+    return 0;
   }
 
   void _showSortSheet() {

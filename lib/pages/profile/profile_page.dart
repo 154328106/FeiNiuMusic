@@ -44,6 +44,8 @@ class ProfilePage extends StatelessWidget {
               const ProfileAccountCard(),
               const SizedBox(height: 12),
               const _MusicSourceSection(),
+              const SizedBox(height: 12),
+              const _ThemeAppearanceSection(),
               const SizedBox(height: 20),
               // 「资源库」（专辑/歌手/风格）与「最近播放」已从这里移除：
               // 首页的快捷入口和功能卡片里都有，放两份只是重复。
@@ -87,12 +89,14 @@ class ProfilePage extends StatelessWidget {
       title: title,
       subtitle: subtitle,
       leading: assetIcon != null
+          // 32×32 + 圆角 8：和「音乐来源」那排保持一致。原来 38 明显大一圈，
+          // 两块挨着看很别扭。
           ? ClipRRect(
-              borderRadius: BorderRadius.circular(11),
+              borderRadius: BorderRadius.circular(8),
               child: Image.asset(
                 assetIcon,
-                width: 38,
-                height: 38,
+                width: 32,
+                height: 32,
                 fit: BoxFit.cover,
                 errorBuilder: (_, _, _) =>
                     Icon(icon, size: 20, color: scheme.primary),
@@ -110,6 +114,108 @@ class ProfilePage extends StatelessWidget {
       ),
       trailing: const Icon(Icons.chevron_right_rounded),
       onTap: () => Navigator.pushNamed(context, route),
+    );
+  }
+}
+
+/// 「主题外观」——一个格子，点开露出三项，再点收起。
+///
+/// 这三项原本埋在「设置 → 外观 / 功能」里，是最常调的东西，翻两层才够到。
+/// 搬到「我的」页并做成折叠：平时只占一行，不跟音乐来源抢版面。
+class _ThemeAppearanceSection extends StatefulWidget {
+  const _ThemeAppearanceSection();
+
+  @override
+  State<_ThemeAppearanceSection> createState() =>
+      _ThemeAppearanceSectionState();
+}
+
+class _ThemeAppearanceSectionState extends State<_ThemeAppearanceSection> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AppSettingSection(
+      title: '主题外观',
+      children: [
+        AppSettingTile(
+          title: '主题外观',
+          subtitle: _expanded ? '收起' : '应用外观 · 播放器外观 · 播放器控制',
+          leading: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.asset(
+              'assets/icon/theme.png',
+              width: 32,
+              height: 32,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) =>
+                  Icon(Icons.palette_rounded, size: 22, color: scheme.primary),
+            ),
+          ),
+          // 箭头跟着状态转，一眼能看出是「能展开的」而不是「点进去的」。
+          trailing: AnimatedRotation(
+            turns: _expanded ? 0.25 : 0,
+            duration: const Duration(milliseconds: 180),
+            child: const Icon(Icons.chevron_right_rounded),
+          ),
+          onTap: () => setState(() => _expanded = !_expanded),
+        ),
+        // 展开的三项。用 AnimatedSize 让展开/收起是滑出来的，不是硬跳。
+        AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          alignment: Alignment.topCenter,
+          child: _expanded
+              ? Column(
+                  children: [
+                    _subTile(
+                      context,
+                      icon: Icons.color_lens_outlined,
+                      title: '应用外观',
+                      subtitle: '主题与背景设置',
+                      route: AppRoutes.appAppearanceSettings,
+                    ),
+                    _subTile(
+                      context,
+                      icon: Icons.play_circle_outline_rounded,
+                      title: '播放器外观',
+                      subtitle: '流光与播放主题',
+                      route: AppRoutes.playerAppearanceSettings,
+                    ),
+                    _subTile(
+                      context,
+                      icon: Icons.tune_rounded,
+                      title: '播放器控制',
+                      subtitle: '管理底部操作栏与按钮顺序',
+                      route: AppRoutes.playerControlsSettings,
+                    ),
+                  ],
+                )
+              : const SizedBox(width: double.infinity),
+        ),
+      ],
+    );
+  }
+
+  /// 展开项：左侧留出一段缩进，视觉上从属于上面那行。
+  Widget _subTile(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required String route,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(left: 16),
+      child: AppSettingTile(
+        title: title,
+        subtitle: subtitle,
+        leading: Icon(icon, size: 20, color: scheme.primary),
+        trailing: const Icon(Icons.chevron_right_rounded),
+        onTap: () => Navigator.pushNamed(context, route),
+      ),
     );
   }
 }

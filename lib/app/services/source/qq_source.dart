@@ -22,6 +22,12 @@ class QQSource implements MusicSource {
   /// 每次各拉一遍纯属浪费。
   List<QQPlaylist>? _playlistCache;
 
+  /// 首页推荐歌曲缓存。
+  ///
+  /// 必须缓存：点歌播放时会再拉一次完整列表当队列，两次拉到的内容和顺序
+  /// 必须一致，否则「屏幕上点的那首」和「队列里那个下标」对不上。
+  List<SongEntity>? _songCache;
+
   @override
   String get id => 'qq';
 
@@ -46,7 +52,10 @@ class QQSource implements MusicSource {
   /// 最近一次失败原因，供首页在区块为空时给出可读提示。
   String? lastError;
 
-  void reset() => _playlistCache = null;
+  void reset() {
+    _playlistCache = null;
+    _songCache = null;
+  }
 
   Future<List<QQPlaylist>> _ensurePlaylists() async {
     final cached = _playlistCache;
@@ -65,9 +74,15 @@ class QQSource implements MusicSource {
   /// musicu 模块实测返回是空的（多半要登录），榜单这条是纯 GET 的老接口，
   /// 免登录、字段稳。
   Future<List<SongEntity>> _recommendedSongs() async {
+    final cached = _songCache;
+    if (cached != null && cached.isNotEmpty) return cached;
     final songs = await _api.recommendSongs(limit: 60);
-    debugPrint('[QQSource] 推荐歌曲 ${songs.length} 首');
-    return [for (final s in songs) QQPlaybackService.toSongEntity(s)];
+    final entities = [
+      for (final s in songs) QQPlaybackService.toSongEntity(s),
+    ];
+    if (entities.isNotEmpty) _songCache = entities;
+    debugPrint('[QQSource] 推荐歌曲 ${entities.length} 首');
+    return entities;
   }
 
   @override
@@ -78,9 +93,14 @@ class QQSource implements MusicSource {
     try {
       final songs = await _recommendedSongs();
       if (songs.isEmpty) return null;
-      // 每次换一首：列表本身不变，随机取一首当大图，行为上贴近漫游。
-      songs.shuffle();
-      return SourceHero(song: songs.first, queue: songs, label: '每日推荐');
+      // 每次换一首。注意不能直接 shuffle 那个 list —— 它是缓存本体，
+      // 打乱它就等于把首页列表的顺序也搅了。复制一份再挑。
+      final shuffled = [...songs]..shuffle();
+      return SourceHero(
+        song: shuffled.first,
+        queue: shuffled,
+        label: '每日推荐',
+      );
     } on QQApiException catch (e) {
       lastError = '推荐读取失败：${e.message}';
       debugPrint('[QQSource] hero error: ${e.message}');

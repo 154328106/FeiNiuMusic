@@ -266,7 +266,14 @@ class QQApiClient {
         debugPrint('[QQ] 榜单 $topid 读取失败：${e.message}');
       }
     }
-    songs.shuffle();
+    // 按当天日期做种子打乱：每天换一批，但**同一天内顺序固定**。
+    //
+    // 之前用无参 shuffle()，每次调用顺序都不一样 —— 而点歌播放时会再拉一次
+    // 完整列表当队列，于是「屏幕上第 3 首」和「队列里第 3 首」根本不是同一
+    // 首歌，表现就是点谁都跳到别的歌。
+    final day = DateTime.now();
+    final seed = day.year * 10000 + day.month * 100 + day.day;
+    songs.shuffle(Random(seed));
     return songs.length <= limit ? songs : songs.sublist(0, limit);
   }
 

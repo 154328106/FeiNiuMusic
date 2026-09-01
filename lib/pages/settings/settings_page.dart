@@ -52,30 +52,8 @@ class _SettingsPageState extends State<SettingsPage> {
             children: [
               // 「账号管理」只留在「我的」页面顶部那张账号卡片上：
               // 它、我的页的同名条目、这里的入口原本都指向同一个页面。
-              AppSettingSection(
-                title: '外观',
-                children: [
-                  AppSettingTile(
-                    title: '应用外观',
-                    subtitle: '主题与背景设置',
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => Navigator.pushNamed(
-                      context,
-                      AppRoutes.appAppearanceSettings,
-                    ),
-                  ),
-                  AppSettingTile(
-                    title: '播放器外观',
-                    subtitle: '流光与播放主题',
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => Navigator.pushNamed(
-                      context,
-                      AppRoutes.playerAppearanceSettings,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
+              // 「外观」整个单元搬到了「我的」页（那三项是常用的，埋在设置里
+              // 太深），这里不再重复。见 ThemeAppearanceSection。
               AppSettingSection(
                 title: '功能',
                 children: [
@@ -93,15 +71,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         );
                       },
                     ),
-                  AppSettingTile(
-                    title: '播放器控制',
-                    subtitle: '管理底部操作栏与按钮顺序',
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => Navigator.pushNamed(
-                      context,
-                      AppRoutes.playerControlsSettings,
-                    ),
-                  ),
+                  // 「播放器控制」也归到「我的 → 主题外观」里了。
                   AppSettingTile(
                     title: '音量设置',
                     subtitle: '应用音量与定时音量',
