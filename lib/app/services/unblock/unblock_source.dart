@@ -96,6 +96,13 @@ class UnblockSourceService {
   /// 最近一次命中的密钥下标，下次从它开始试。
   int _preferredKeyIndex = 0;
 
+  /// 被限流到这个时刻之前，别再打聆澜了。
+  ///
+  /// 429 不是「这首没有」，是「你问太快了」。不区分的话会把整队歌都误判成
+  /// 没货，还会继续拿请求去撞墙。撞上就歇一会儿，这期间直接走免费兜底。
+  DateTime? _rateLimitedUntil;
+  static const Duration _rateLimitCooldown = Duration(seconds: 20);
+
   bool _loaded = false;
 
   final Dio _dio = Dio(
@@ -179,7 +186,11 @@ class UnblockSourceService {
     await load();
     final cfg = config.value;
 
-    if (cfg.isUsable) {
+    final limitedUntil = _rateLimitedUntil;
+    final rateLimited =
+        limitedUntil != null && DateTime.now().isBefore(limitedUntil);
+
+    if (cfg.isUsable && !rateLimited) {
       final keys = cfg.apiKeys;
       // 从上次命中的那个开始轮，命中率最高的先试。
       for (var offset = 0; offset < keys.length; offset++) {
@@ -232,6 +243,14 @@ class UnblockSourceService {
       return null;
     }
 
+    if (response.statusCode == 429) {
+      // 限流：歇一会儿，别拿剩下的请求继续撞。
+      _rateLimitedUntil = DateTime.now().add(_rateLimitCooldown);
+      debugPrint(
+        '[Unblock] 被限流（429），${_rateLimitCooldown.inSeconds} 秒内改走免费音源',
+      );
+      return null;
+    }
     if (response.statusCode != 200) {
       debugPrint('[Unblock] HTTP ${response.statusCode}');
       return null;

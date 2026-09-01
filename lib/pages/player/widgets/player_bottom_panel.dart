@@ -1,6 +1,7 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+
 import 'package:flutter_lyric/core/lyric_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
@@ -8,6 +9,7 @@ import 'package:signals_flutter/signals_flutter.dart' hide computed;
 import '../../../app/router/app_page_route.dart';
 import '../../../app/router/app_router.dart';
 import '../../../app/services/lyrics/lyrics_service.dart';
+import '../../../components/player/radar_play_button.dart';
 import '../../../app/services/player_service.dart';
 import '../../../app/state/settings_state.dart';
 import '../../../app/state/song_state.dart';
@@ -355,16 +357,39 @@ class _PlayerSeekBarState extends State<_PlayerSeekBar> with SignalsMixin {
 
 /// 次级控制按钮（上一首 / 下一首）的立体表面：浅底 + 发丝描边 + 轻投影。
 /// 与主播放按钮同一套质感，只是弱一档，避免抢焦点。
+/// 上一曲 / 下一曲的盘面。
+///
+/// 和雷达按钮同一套语言：左上→右下的渐变做出弧面，一圈发丝描边勾边，
+/// 底下压一层投影把它托起来。原来只有一层 0.28 的底色加 0.8 的描边，
+/// 和旁边的主按钮摆一起基本看不出厚度。
 BoxDecoration _secondaryControlDecoration(ColorScheme scheme) => BoxDecoration(
   shape: BoxShape.circle,
-  color: scheme.primaryContainer.withValues(alpha: 0.28),
+  gradient: LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [
+      Color.alphaBlend(
+        Colors.white.withValues(alpha: 0.18),
+        scheme.primaryContainer.withValues(alpha: 0.55),
+      ),
+      Color.alphaBlend(
+        Colors.black.withValues(alpha: 0.14),
+        scheme.primaryContainer.withValues(alpha: 0.55),
+      ),
+    ],
+  ),
   border: Border.all(
-    color: Colors.white.withValues(alpha: 0.16),
-    width: 0.8,
+    color: Colors.white.withValues(alpha: 0.28),
+    width: 1,
   ),
   boxShadow: [
     BoxShadow(
-      color: Colors.black.withValues(alpha: 0.16),
+      color: scheme.primary.withValues(alpha: 0.18),
+      blurRadius: 10,
+      offset: const Offset(0, 5),
+    ),
+    BoxShadow(
+      color: Colors.black.withValues(alpha: 0.20),
       blurRadius: 8,
       offset: const Offset(0, 3),
     ),
@@ -386,11 +411,12 @@ class PlayerControls extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final isTv = AppLayoutSettings.tvMode.value;
     final iconColor = scheme.primary.withValues(alpha: 0.86);
-    final buttonBg = scheme.primaryContainer.withValues(alpha: 0.92);
+    // 整排收一号：原来手机上主按钮 72/64，配上左右 48 的图标占掉大半屏宽。
     final mainButtonSize = switch (stylePreset) {
-      PlayerStylePreset.poster => isTv ? 88.0 : 72.0,
-      PlayerStylePreset.classic => isTv ? 80.0 : 64.0,
+      PlayerStylePreset.poster => isTv ? 80.0 : 62.0,
+      PlayerStylePreset.classic => isTv ? 72.0 : 56.0,
     };
+    final sideIconSize = isTv ? 56.0 : 40.0;
     return Watch.builder(
       builder: (context) {
         final playing = player.isPlayingSignal.value;
@@ -403,73 +429,43 @@ class PlayerControls extends StatelessWidget {
             DecoratedBox(
               decoration: _secondaryControlDecoration(scheme),
               child: IconButton(
-                iconSize: isTv ? 64 : 48,
+                iconSize: sideIconSize,
                 icon: Icon(Icons.skip_previous_rounded, color: iconColor),
                 onPressed: player.previous,
               ),
             ),
             SizedBox(width: isTv ? 28 : 20),
-            Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                // 立体感（移植自 Beans 播放页）：左上→右下渐变做出弧面，
-                // 发丝描边勾边，强调色 + 黑色两层投影让按钮浮起来。
-                // 注意 BoxDecoration 的 color 与 gradient 互斥，只能留 gradient。
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    buttonBg,
-                    Color.alphaBlend(
-                      Colors.black.withValues(alpha: 0.12),
-                      buttonBg,
-                    ),
-                  ],
-                ),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.22),
-                  width: 1,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: scheme.primary.withValues(alpha: 0.32),
-                    blurRadius: 14,
-                    offset: const Offset(0, 7),
-                  ),
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.18),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: IconButton(
-                iconSize: mainButtonSize,
-                // TV 模式进播放页默认聚焦播放按钮：OK 即暂停，下键走自然遍历。
-                autofocus: AppLayoutSettings.tvMode.value,
-                icon: loading
-                    ? SizedBox(
-                        width: mainButtonSize,
-                        height: mainButtonSize,
+            // 主按钮换成和首页漫游卡、迷你条同一个雷达。它自带盘面、描边和
+            // 投影，所以外面不用再包一层 Container 做立体。
+            loading
+                ? SizedBox(
+                    width: mainButtonSize,
+                    height: mainButtonSize,
+                    child: Center(
+                      child: SizedBox(
+                        width: mainButtonSize * 0.5,
+                        height: mainButtonSize * 0.5,
                         child: CircularProgressIndicator(
                           strokeWidth: mainButtonSize * 0.055,
                           color: scheme.onPrimaryContainer,
                         ),
-                      )
-                    : Icon(
-                        playing
-                            ? Icons.pause_rounded
-                            : Icons.play_arrow_rounded,
-                        color: scheme.onPrimaryContainer,
                       ),
-                onPressed: player.togglePlayPause,
-              ),
-            ),
+                    ),
+                  )
+                : Focus(
+                    // TV 模式进播放页默认聚焦播放按钮：OK 即暂停。
+                    autofocus: AppLayoutSettings.tvMode.value,
+                    child: RadarPlayButton(
+                      isPlaying: playing,
+                      size: mainButtonSize,
+                      onPlay: player.togglePlayPause,
+                    ),
+                  ),
             const SizedBox(width: 20),
             DecoratedBox(
               decoration: _secondaryControlDecoration(scheme),
               child: IconButton(
-                iconSize: isTv ? 64 : 48,
+                iconSize: sideIconSize,
                 icon: Icon(Icons.skip_next_rounded, color: iconColor),
                 onPressed: player.next,
               ),

@@ -145,6 +145,7 @@ class _HomePageState extends State<HomePage>
   @override
   void initState() {
     super.initState();
+    debugPrint('[HomePage#$_instanceId] initState');
     _loadAll();
     _maybeShowTvEdgeHint();
     _roamAutoTimer = Timer.periodic(_roamAutoInterval, (_) => _autoRoamTick());
@@ -161,12 +162,18 @@ class _HomePageState extends State<HomePage>
   void _onSourceChanged() {
     if (!mounted) return;
     _latestPool = const [];
+    // 漫游状态要立刻清掉。留着的话大图上还是上一个源的那首，用户这时候
+    // 点播放，放出来的就是上一个源的歌 —— 切到网易云却放了飞牛的曲子。
+    _roamSong.value = null;
+    _roamQueue.value = const [];
+    _roamId.value = null;
     _loading.value = true;
     unawaited(_loadAll(forceRefresh: true));
   }
 
   @override
   void dispose() {
+    debugPrint('[HomePage#$_instanceId] dispose');
     _roamAutoTimer?.cancel();
     _latestShuffleTimer?.cancel();
     MusicSourceRegistry.instance.current.removeListener(_onSourceChanged);
@@ -212,6 +219,14 @@ class _HomePageState extends State<HomePage>
   Future<void> onPrimaryTabActivated() async {
     if (mounted) await _loadAll();
   }
+
+  /// 活着的 HomePage 实例序号。
+  ///
+  /// 日志里每一行都成对出现，重入闸和 tab 激活那两处都排除掉之后，剩下的
+  /// 解释只有「同时存在两个 State」。把序号打进日志，一眼就能看出是同一个
+  /// 实例跑了两遍，还是两个实例各跑一遍。
+  static int _instanceSeq = 0;
+  late final int _instanceId = ++_instanceSeq;
 
   /// 整页刷新的重入闸。
   ///
@@ -299,7 +314,7 @@ class _HomePageState extends State<HomePage>
       _isRefreshing.value = false;
       _preloadHomeCovers();
       debugPrint(
-        '[HomePage] loadAll done: '
+        '[HomePage#$_instanceId] loadAll done: '
         'favorites=${_favoriteSongs.value.length} '
         'history=${_recentSongs.value.length} '
         'albums=${_recentAlbums.value.length} '

@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
 import '../../../app/services/lyrics/lyrics_service.dart';
@@ -8,6 +9,7 @@ import '../../../app/services/player_service.dart';
 import '../../../app/router/app_router.dart';
 import '../../../app/state/settings_state.dart';
 import '../../../app/state/song_state.dart';
+import '../radar_play_button.dart';
 import '../../../app/theme/app_glass_theme.dart';
 import '../../common/artwork_widget.dart';
 import '../../common/glass_gate.dart';
@@ -894,49 +896,40 @@ class MiniPlayerPlayButton extends StatelessWidget {
         return SizedBox(
           width: size,
           height: size,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: scheme.primary.withValues(alpha: 0.08),
-              shape: BoxShape.circle,
-            ),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                SizedBox(
-                  width: size,
-                  height: size,
-                  child: CircularProgressIndicator(
-                    value: enabled ? progress.clamp(0.0, 1.0) : 0.0,
-                    strokeWidth: 1.8,
-                    backgroundColor: scheme.outline.withValues(alpha: 0.12),
-                    color: scheme.primary,
-                    strokeCap: StrokeCap.round,
-                  ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // 进度环留着：这一圈是迷你条上唯一能看出播到哪儿的东西。
+              SizedBox(
+                width: size,
+                height: size,
+                child: CircularProgressIndicator(
+                  value: enabled ? progress.clamp(0.0, 1.0) : 0.0,
+                  strokeWidth: 1.8,
+                  backgroundColor: scheme.outline.withValues(alpha: 0.12),
+                  color: scheme.primary,
+                  strokeCap: StrokeCap.round,
                 ),
-                if (loading && enabled)
-                  SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.2,
-                      color: scheme.primary,
-                    ),
-                  )
-                else
-                  IconButton(
-                    icon: Icon(
-                      playing
-                          ? Icons.pause_rounded
-                          : Icons.play_arrow_rounded,
-                      color: scheme.onSurface,
-                      size: 20,
-                    ),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    onPressed: enabled ? player.togglePlayPause : null,
+              ),
+              if (loading && enabled)
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.2,
+                    color: scheme.primary,
                   ),
-              ],
-            ),
+                )
+              else
+                // 和漫游卡同一个雷达。收在进度环里面，所以要小一圈。
+                RadarPlayButton(
+                  isPlaying: playing,
+                  size: size - 8,
+                  onPlay: () {
+                    if (enabled) player.togglePlayPause();
+                  },
+                ),
+            ],
           ),
         );
       },

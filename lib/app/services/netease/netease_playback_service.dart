@@ -153,8 +153,9 @@ class NetEasePlaybackService {
       return songs;
     }
 
-    // 官方给不出地址的，统一交给音源 —— **并行**问。串行的话每首约 0.7 秒，
-    // 收藏里几首下架歌就能把起播拖到四五秒。
+    // 官方给不出地址的，统一交给音源。并行问，但要限流 —— 上一版直接
+    // Future.wait 把整队一次全发出去，100 首的队列瞬间打出 100 个请求，
+    // 聆澜整片回 429，等于白问一轮。分批走，每批之间喘一口。
     final needUnblock = <int>[
       for (final id in ids)
         if (result[id]?.url == null || (result[id]?.freeTrial ?? false)) id,
@@ -165,22 +166,7 @@ class NetEasePlaybackService {
       for (final song in songs)
         if (song.neteaseId != null) song.neteaseId!: song,
     };
-    final unblocked = <int, String>{};
-    if (needUnblock.isNotEmpty) {
-      final resolved = await Future.wait([
-        for (final id in needUnblock)
-          UnblockSourceService.instance.resolve(
-            platform: 'wy',
-            songId: '$id',
-            keyword: _searchKeyword(byId[id]),
-            durationMs: byId[id]?.durationMs ?? 0,
-          ),
-      ]);
-      for (var i = 0; i < needUnblock.length; i++) {
-        final url = resolved[i];
-        if (url != null) unblocked[needUnblock[i]] = url;
-      }
-    }
+    final unblocked = await _resolveUnblocked(needUnblock, byId);
 
     final playable = <SongEntity>[];
     var dropped = 0;
@@ -222,6 +208,39 @@ class NetEasePlaybackService {
       '官方 $official 首有地址，可播 ${playable.length} 首，跳过 $dropped 首',
     );
     return playable;
+  }
+
+  /// 一批一批地问音源，别一次全发出去。
+  ///
+  /// [_unblockBatchSize] 是拍的：小到不会触发限流，大到还留着并行的好处。
+  /// 批与批之间停一下，让对面的令牌桶回一点。
+  static const int _unblockBatchSize = 5;
+  static const Duration _unblockBatchGap = Duration(milliseconds: 250);
+
+  Future<Map<int, String>> _resolveUnblocked(
+    List<int> ids,
+    Map<int, SongEntity> byId,
+  ) async {
+    final out = <int, String>{};
+    for (var start = 0; start < ids.length; start += _unblockBatchSize) {
+      final end = (start + _unblockBatchSize).clamp(0, ids.length);
+      final batch = ids.sublist(start, end);
+      final resolved = await Future.wait([
+        for (final id in batch)
+          UnblockSourceService.instance.resolve(
+            platform: 'wy',
+            songId: '$id',
+            keyword: _searchKeyword(byId[id]),
+            durationMs: byId[id]?.durationMs ?? 0,
+          ),
+      ]);
+      for (var i = 0; i < batch.length; i++) {
+        final url = resolved[i];
+        if (url != null) out[batch[i]] = url;
+      }
+      if (end < ids.length) await Future<void>.delayed(_unblockBatchGap);
+    }
+    return out;
   }
 
   /// 「歌名 歌手」，给按关键词搜索的兜底音源用。
