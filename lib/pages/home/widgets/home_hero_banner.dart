@@ -318,9 +318,6 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
     unawaited(CoverDominantColor.resolve(coverId));
   }
 
-  static String _hex(Color c) =>
-      '#${c.toARGB32().toRadixString(16).padLeft(8, '0')}';
-
   /// 把主色收进一个适合当底色的明度区间。
   ///
   /// 取色走 ColorScheme.fromImageProvider，出来的已经是量化过的主色、不是
@@ -380,11 +377,6 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
         // 同步读缓存：取色成功时缓存已经写好，revision 只是「该重画了」的信号。
         final raw = coverId == null ? null : CoverDominantColor.cached(coverId);
         final (top, bottom) = _cardColors(scheme, isDark, raw);
-        debugPrint(
-          '[HeroCard] 上色 cover=$coverId'
-          ' raw=${raw == null ? 'null' : _hex(raw)}'
-          ' top=${_hex(top)}',
-        );
         return _buildCard(
           scheme: scheme,
           isDark: isDark,
@@ -501,8 +493,8 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
         final t = Curves.easeInOut.transform(_sweep.value);
         final x = -1.4 + t * 2.8;
         final peak = widget.isPlaying
-            ? (isDark ? 0.16 : 0.30)
-            : (isDark ? 0.06 : 0.12);
+            ? (isDark ? 0.24 : 0.40)
+            : (isDark ? 0.10 : 0.18);
         return DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(

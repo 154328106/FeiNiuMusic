@@ -368,13 +368,35 @@ class NetEaseApiClient {
   }
 
   Future<NetEaseUser> account() async {
+    var user = await _accountOnce();
+    if (user != null) return user;
+    // 请求本身是成功的（HTTP 200 + 合法 JSON），只是返回里没有 profile ——
+    // 网易云不认这个登录态了。Cookie 还在的话先刷一次 token 再试，这是
+    // 官方客户端的做法（参考 kumone 的 refreshLogin）。刷不回来才算真失败。
+    if (_cookies.containsKey('MUSIC_U')) {
+      debugPrint('[NetEase] account 无 profile，尝试刷新登录态');
+      await refreshLogin();
+      user = await _accountOnce();
+      if (user != null) return user;
+    }
+    throw NetEaseApiException('获取账号信息失败（登录态可能已过期，请重新扫码）');
+  }
+
+  Future<NetEaseUser?> _accountOnce() async {
     final json = await _request('/api/w/nuser/account/get', {}, _Scheme.weapi);
     final profile = json['profile'];
-    final user = profile is Map<String, dynamic>
-        ? NetEaseUser.fromJson(profile)
-        : null;
-    if (user == null) throw NetEaseApiException('获取账号信息失败');
-    return user;
+    if (profile is Map<String, dynamic>) return NetEaseUser.fromJson(profile);
+    debugPrint('[NetEase] account 返回里没有 profile：keys=${json.keys.toList()}');
+    return null;
+  }
+
+  /// 刷新登录 token。Cookie 会通过 Set-Cookie 换新，由 [_request] 吸收。
+  Future<void> refreshLogin() async {
+    try {
+      await _request('/api/login/token/refresh', const {}, _Scheme.weapi);
+    } on NetEaseApiException catch (e) {
+      debugPrint('[NetEase] 刷新登录态失败：${e.message}');
+    }
   }
 
   // ---------------------------------------------------------------------
