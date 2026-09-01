@@ -188,7 +188,10 @@ class _SourceTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final available = source.isAvailable;
-    final loggedIn = source is NetEaseSource ? source.isLoggedIn : true;
+    // 先落到局部变量再判类型：Dart 不对字段做类型提升（字段可能被 getter
+    // 覆盖），直接 `source is NetEaseSource ? source.isLoggedIn : ...` 编译不过。
+    final src = source;
+    final loggedIn = src is NetEaseSource ? src.isLoggedIn : true;
     return AppSettingTile(
       title: source.label,
       // 不可用时把原因和下一步写在副标题上，而不是让用户切过去看到一片空白。
