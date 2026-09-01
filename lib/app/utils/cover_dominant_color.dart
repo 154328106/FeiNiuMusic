@@ -25,6 +25,13 @@ class CoverDominantColor {
   /// 线上表现是「一次都不成功，而且一条日志都不打」。
   static const Duration _timeout = Duration(seconds: 8);
 
+  /// 每算出一张封面的主色就自增。
+  ///
+  /// UI 监听它、再同步读 [cached]，就不用在 widget 里持有 Future。上一版用
+  /// FutureBuilder，线上出现过「同一个 coverId 的取色已经成功、snapshot 却
+  /// 永远停在 waiting」，那条通知链不可靠，索性绕开。
+  static final ValueNotifier<int> revision = ValueNotifier<int>(0);
+
   /// 已经算过就同步给出，省掉一帧空窗。
   static Color? cached(String coverId) => _cache[coverId];
 
@@ -74,6 +81,7 @@ class CoverDominantColor {
         _cache.remove(_cache.keys.first);
       }
       _cache[coverId] = color;
+      revision.value++;
       // Color.toString() 在 release 下只给 "Instance of 'Color'"，
       // 打十六进制才看得出取到的是什么颜色。
       debugPrint(

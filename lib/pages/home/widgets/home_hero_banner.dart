@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
@@ -275,13 +277,13 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
     duration: const Duration(milliseconds: 4200),
   );
 
-  /// 当前封面的取色 Future，交给 [FutureBuilder] 去驱动重建。
+  /// 已经发起过取色的封面，避免重复发起。
   ///
-  /// 之前是 `await` 完再 setState。那条路上取色明明成功了（日志里
-  /// `[CoverColor] 取色成功` 有），await 之后那行却从来不执行 —— 续体没跑，
-  /// 颜色自然也就没写进 State。与其继续查续体为什么不恢复，不如干脆不要
-  /// 续体：Future 交给框架，重建由 FutureBuilder 负责。
-  Future<Color?>? _tintFuture;
+  /// 这里**不持有 Future**。先后试过 `await` + setState 和 FutureBuilder，
+  /// 两条都是同一个症状：`[CoverColor] 取色成功` 打得出来，widget 这边却
+  /// 永远收不到（FutureBuilder 的 snapshot 一直停在 waiting）。那条通知链
+  /// 不可靠，改成「发起是一回事，读值是另一回事」：取色只管把结果写进
+  /// CoverDominantColor 的缓存并自增 revision，这里监听 revision、同步读缓存。
   String? _tintCoverId;
 
   @override
@@ -303,17 +305,17 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
     super.dispose();
   }
 
-  /// 封面变了就换一个取色 Future。同一张封面不重复发起。
+  /// 封面变了就发起一次取色。结果不在这里接，靠 revision 通知。
   void _syncTintFuture() {
     final coverId = widget.song?.coverId;
     if (coverId == null || coverId.isEmpty) {
       _tintCoverId = null;
-      _tintFuture = null;
       return;
     }
-    if (_tintCoverId == coverId && _tintFuture != null) return;
+    if (_tintCoverId == coverId) return;
     _tintCoverId = coverId;
-    _tintFuture = CoverDominantColor.resolve(coverId);
+    if (CoverDominantColor.cached(coverId) != null) return;
+    unawaited(CoverDominantColor.resolve(coverId));
   }
 
   static String _hex(Color c) =>
@@ -346,15 +348,16 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
       );
     }
     final tint = _vivid(raw);
-    // 排查用的极端值：直接铺满不透明度，故意刺眼。
-    //
-    // 现状是「取色成功、颜色也是真的，但屏幕上看不出变化」，剩两种可能：
-    // 这层画出来了只是混色太淡，或者根本没画在屏幕上（画的是别的 widget）。
-    // 满色能一次把两者劈开 —— 确认之后再调回 alphaBlend 的柔和版本。
-    final hsl = HSLColor.fromColor(tint);
+    // 强度取在「一眼看得出、又不至于盖过标题」之间。
     return (
-      tint,
-      hsl.withLightness((hsl.lightness * 0.62).clamp(0.0, 1.0)).toColor(),
+      Color.alphaBlend(
+        tint.withValues(alpha: isDark ? 0.58 : 0.44),
+        scheme.surfaceContainerHighest,
+      ),
+      Color.alphaBlend(
+        tint.withValues(alpha: isDark ? 0.26 : 0.18),
+        scheme.surfaceContainerHigh,
+      ),
     );
   }
 
@@ -371,19 +374,16 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
     final song = widget.song;
     final coverId = song?.coverId;
 
-    return FutureBuilder<Color?>(
-      future: _tintFuture,
-      // 算过的同步给出，换歌时不会先闪一下默认色再变。
-      initialData: coverId == null ? null : CoverDominantColor.cached(coverId),
-      builder: (context, snapshot) {
-        final (top, bottom) = _cardColors(scheme, isDark, snapshot.data);
-        // 探针：FutureBuilder 到底有没有拿到颜色、算出来的底色是什么。
-        // 「取色成功但界面没变」只可能断在这两处之一。
+    return ValueListenableBuilder<int>(
+      valueListenable: CoverDominantColor.revision,
+      builder: (context, _, _) {
+        // 同步读缓存：取色成功时缓存已经写好，revision 只是「该重画了」的信号。
+        final raw = coverId == null ? null : CoverDominantColor.cached(coverId);
+        final (top, bottom) = _cardColors(scheme, isDark, raw);
         debugPrint(
           '[HeroCard] 上色 cover=$coverId'
-          ' future=${_tintFuture == null ? 'null' : 'yes'}'
-          ' state=${snapshot.connectionState.name}'
-          ' data=${snapshot.data == null ? 'null' : _hex(snapshot.data!)}',
+          ' raw=${raw == null ? 'null' : _hex(raw)}'
+          ' top=${_hex(top)}',
         );
         return _buildCard(
           scheme: scheme,
