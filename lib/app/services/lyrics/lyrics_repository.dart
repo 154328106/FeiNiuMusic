@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../state/song_state.dart';
 import '../feiniu/api_client.dart';
+import '../netease/netease_api_client.dart';
 
 class LyricsRepository {
   /// 加载歌词，优先从缓存读取，未命中则从 API 获取
@@ -16,9 +17,13 @@ class LyricsRepository {
       return cached;
     }
 
-    // 2. 从 API 获取
+    // 2. 从 API 获取。按来源分流 —— 之前这里一律问飞牛要歌词，网易云的歌
+    //    拿 `ne:xxx` 这种 id 去问 NAS，必然什么都没有，表现就是「网易云的歌
+    //    全都没歌词」。
     try {
-      final lyricText = await FeiNiuApiClient.instance.getLyricText(song.id);
+      final lyricText = song.isNetease
+          ? await _neteaseLrc(song)
+          : await FeiNiuApiClient.instance.getLyricText(song.id);
       if (lyricText != null && lyricText.trim().isNotEmpty) {
         await _writeToCache(song.id, lyricText);
         return lyricText;
@@ -28,6 +33,45 @@ class LyricsRepository {
     }
 
     return null;
+  }
+
+  /// 网易云歌词。有翻译就按「原文 / 译文」逐行合并成一份 LRC。
+  ///
+  /// 两边时间戳不一定一一对应，所以按时间标签归并：同一个标签下先原文、
+  /// 后译文，解析器会把它们当成同一行的两段。
+  Future<String?> _neteaseLrc(SongEntity song) async {
+    final id = song.neteaseId;
+    if (id == null) return null;
+    final result = await NetEaseApiClient.instance.lyric(id);
+    final lrc = result.lrc;
+    if (lrc == null || lrc.trim().isEmpty) return null;
+    final translated = result.translated;
+    if (translated == null || translated.trim().isEmpty) return lrc;
+    return _mergeTranslation(lrc, translated);
+  }
+
+  /// 把译文按时间标签并进原文。标签对不上的译文行直接丢掉，
+  /// 宁可只有原文，也不要错位的翻译。
+  static String _mergeTranslation(String lrc, String translated) {
+    final tag = RegExp(r'^(\[\d{2}:\d{2}(?:[.:]\d{2,3})?\])(.*)$');
+    final transByTag = <String, String>{};
+    for (final line in translated.split('\n')) {
+      final m = tag.firstMatch(line.trim());
+      if (m == null) continue;
+      final text = m.group(2)!.trim();
+      if (text.isNotEmpty) transByTag[m.group(1)!] = text;
+    }
+    if (transByTag.isEmpty) return lrc;
+
+    final out = <String>[];
+    for (final line in lrc.split('\n')) {
+      out.add(line);
+      final m = tag.firstMatch(line.trim());
+      if (m == null) continue;
+      final t = transByTag[m.group(1)!];
+      if (t != null) out.add('${m.group(1)!}$t');
+    }
+    return out.join('\n');
   }
 
   Future<void> removeCachedLrc(String songId) async {

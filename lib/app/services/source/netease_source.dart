@@ -39,11 +39,18 @@ class NetEaseSource implements MusicSource {
   @override
   Color get accent => const Color(0xFFD33A31);
 
+  // 不登录也能用：推荐新歌、推荐歌单、排行榜、搜索都不需要账号。
+  // 只有收藏 / 最近播放 / 每日推荐是账号维度的，那几条自己会返回空并
+  // 在 lastError 里说明原因。所以这里恒为 true —— 挂在登录态上会让
+  // 「暂不登录」的用户连源都切不过去。
   @override
-  bool get isAvailable => _api.isLoggedIn;
+  bool get isAvailable => true;
 
   @override
   String get unavailableHint => '尚未登录网易云账号';
+
+  /// 是否已登录。决定收藏 / 最近播放这些账号维度的区块有没有内容。
+  bool get isLoggedIn => _api.isLoggedIn;
 
   /// 登出后清掉缓存，换账号不会读到上一个人的收藏。
   void reset() {

@@ -4,7 +4,6 @@ import '../../app/router/app_router.dart';
 import '../../app/state/settings_layout_state.dart';
 import '../../components/account/profile_account_card.dart';
 import '../../app/router/app_router.dart' show AppRoutes;
-import '../../app/services/netease/netease_api_client.dart';
 import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';
 import '../../app/services/source/netease_source.dart';
@@ -138,6 +137,9 @@ class _MusicSourceSection extends StatelessWidget {
                 source: source,
                 selected: identical(source, current),
                 onTap: () => _onTap(context, source, registry),
+                onLogin: source.id == 'netease'
+                    ? () => _onLogin(context, registry)
+                    : null,
               ),
           ],
         );
@@ -145,32 +147,25 @@ class _MusicSourceSection extends StatelessWidget {
     );
   }
 
-  /// 未登录的源点一下直接去登录，不用再翻设置页 —— 之前登录入口藏在
-  /// 「设置 → 网易云音乐」的顶栏里，基本找不到。
+  /// 点整行 = 切换到这个源。登录与否不影响切换：网易云不登录也能听
+  /// 推荐新歌、推荐歌单和排行榜。登录走右侧那个单独的按钮。
   Future<void> _onTap(
     BuildContext context,
     MusicSource source,
     MusicSourceRegistry registry,
   ) async {
-    if (!source.isAvailable && source.id == 'netease') {
-      await Navigator.pushNamed(context, AppRoutes.neteaseLogin);
-      NetEaseSource.instance.reset();
-      // 登录成功就顺手切过去，省一步。
-      //
-      // 切换本身已经会让首页重拉，所以两条通知只能响一条：切过去就不再补
-      // notifyContentChanged，否则 current 和 revision 前后脚各响一次，
-      // 首页整整刷两遍（日志里所有行成对出现、请求量翻倍）。
-      final willSwitch =
-          NetEaseApiClient.instance.isLoggedIn &&
-          !identical(registry.current.value, source);
-      if (willSwitch) {
-        await registry.setCurrent(source);
-      } else {
-        registry.notifyContentChanged();
-      }
-      return;
-    }
     await registry.setCurrent(source);
+  }
+
+  /// 右侧「登录 / 账号」按钮：扫码登录，回来后刷新这一行和首页。
+  Future<void> _onLogin(
+    BuildContext context,
+    MusicSourceRegistry registry,
+  ) async {
+    await Navigator.pushNamed(context, AppRoutes.neteaseLogin);
+    NetEaseSource.instance.reset();
+    // 登录态变了，首页的收藏 / 最近播放要重拉。源没换，所以只发内容变更。
+    registry.notifyContentChanged();
   }
 }
 
@@ -179,22 +174,29 @@ class _SourceTile extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
 
+  /// 需要账号的源给一个单独的登录入口；为 null 表示这个源不谈登录。
+  final VoidCallback? onLogin;
+
   const _SourceTile({
     required this.source,
     required this.selected,
     required this.onTap,
+    this.onLogin,
   });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final available = source.isAvailable;
+    final loggedIn = source is NetEaseSource ? source.isLoggedIn : true;
     return AppSettingTile(
       title: source.label,
       // 不可用时把原因和下一步写在副标题上，而不是让用户切过去看到一片空白。
-      subtitle: available
+      subtitle: !available
+          ? '${source.unavailableHint} · 点击登录'
+          : loggedIn
           ? (selected ? '当前使用中' : '点击切换')
-          : '${source.unavailableHint} · 点击登录',
+          : '未登录，只有推荐和排行榜${selected ? '' : ' · 点击切换'}',
       onTap: onTap,
       leading: ClipRRect(
         borderRadius: BorderRadius.circular(8),
@@ -208,9 +210,22 @@ class _SourceTile extends StatelessWidget {
               Icon(source.icon, size: 26, color: source.accent),
         ),
       ),
-      trailing: selected
-          ? Icon(Icons.check_rounded, size: 20, color: scheme.primary)
-          : null,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (onLogin != null)
+            TextButton(
+              onPressed: onLogin,
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+              ),
+              child: Text(loggedIn ? '账号' : '登录'),
+            ),
+          if (selected)
+            Icon(Icons.check_rounded, size: 20, color: scheme.primary),
+        ],
+      ),
     );
   }
 }

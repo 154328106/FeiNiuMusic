@@ -413,10 +413,17 @@ class PlayerControls extends StatelessWidget {
     final iconColor = scheme.primary.withValues(alpha: 0.86);
     // 整排的比例：主按钮是视觉中心，左右两个只是配角，拉开差距整排才有主次。
     final mainButtonSize = switch (stylePreset) {
-      PlayerStylePreset.poster => isTv ? 86.0 : 68.0,
+      PlayerStylePreset.poster => isTv ? 92.0 : 76.0,
       PlayerStylePreset.classic => isTv ? 78.0 : 62.0,
     };
-    final sideIconSize = isTv ? 50.0 : 34.0;
+    // 海报样式：主按钮更大、侧键去掉底盘只留图标（配大封面的极简感）；
+    // 默认样式：侧键带底盘，和雷达一样有厚度。之前两者只差 6px 主按钮
+    // 尺寸，选完基本看不出区别。
+    final isPoster = stylePreset == PlayerStylePreset.poster;
+    final sideIconSize = isTv
+        ? (isPoster ? 56.0 : 50.0)
+        : (isPoster ? 40.0 : 34.0);
+    final sideGap = isTv ? 28.0 : (isPoster ? 30.0 : 20.0);
     return Watch.builder(
       builder: (context) {
         final playing = player.isPlayingSignal.value;
@@ -426,15 +433,15 @@ class PlayerControls extends StatelessWidget {
           children: [
             // DecoratedBox 只装饰不占位：给上一首/下一首加浅底+发丝描边+
             // 轻投影，让它们也有厚度，同时不改变原有尺寸与间距。
-            DecoratedBox(
-              decoration: _secondaryControlDecoration(scheme),
-              child: IconButton(
-                iconSize: sideIconSize,
-                icon: Icon(Icons.skip_previous_rounded, color: iconColor),
-                onPressed: player.previous,
-              ),
+            _sideControl(
+              scheme: scheme,
+              plated: !isPoster,
+              iconSize: sideIconSize,
+              icon: Icons.skip_previous_rounded,
+              color: iconColor,
+              onPressed: player.previous,
             ),
-            SizedBox(width: isTv ? 28 : 20),
+            SizedBox(width: sideGap),
             // 主按钮换成和首页漫游卡、迷你条同一个雷达。它自带盘面、描边和
             // 投影，所以外面不用再包一层 Container 做立体。
             loading
@@ -461,20 +468,43 @@ class PlayerControls extends StatelessWidget {
                       onPlay: player.togglePlayPause,
                     ),
                   ),
-            const SizedBox(width: 20),
-            DecoratedBox(
-              decoration: _secondaryControlDecoration(scheme),
-              child: IconButton(
-                iconSize: sideIconSize,
-                icon: Icon(Icons.skip_next_rounded, color: iconColor),
-                onPressed: player.next,
-              ),
+            SizedBox(width: sideGap),
+            _sideControl(
+              scheme: scheme,
+              plated: !isPoster,
+              iconSize: sideIconSize,
+              icon: Icons.skip_next_rounded,
+              color: iconColor,
+              onPressed: player.next,
             ),
           ],
         );
       },
     );
   }
+}
+
+/// 上一曲 / 下一曲。[plated] 决定要不要那层底盘（默认样式要，海报样式不要）。
+Widget _sideControl({
+  required ColorScheme scheme,
+  required bool plated,
+  required double iconSize,
+  required IconData icon,
+  required Color color,
+  required VoidCallback onPressed,
+}) {
+  final button = IconButton(
+    iconSize: iconSize,
+    icon: Icon(icon, color: color),
+    onPressed: onPressed,
+  );
+  if (!plated) return button;
+  // DecoratedBox 只装饰不占位：加浅底 + 发丝描边 + 轻投影，让它们也有
+  // 厚度，同时不改变原有尺寸与间距。
+  return DecoratedBox(
+    decoration: _secondaryControlDecoration(scheme),
+    child: button,
+  );
 }
 
 class BottomActions extends StatelessWidget {
