@@ -50,21 +50,23 @@ class QQSource implements MusicSource {
 
   Future<List<QQPlaylist>> _ensurePlaylists() async {
     final cached = _playlistCache;
-    if (cached != null) return cached;
+    if (cached != null && cached.isNotEmpty) return cached;
     final lists = await _api.recommendPlaylists(limit: 12);
-    _playlistCache = lists;
+    // 空结果不进缓存：上一版缓存了空列表，之后每次都直接返回空，
+    // 连一条日志都不打，排查时看不出是「拉过了但没有」还是「压根没拉」。
+    if (lists.isNotEmpty) _playlistCache = lists;
     debugPrint('[QQSource] 推荐歌单 ${lists.length} 张');
     return lists;
   }
 
-  /// 首页大图和「最新歌曲」的共同数据源：第一张推荐歌单里的歌。
+  /// 首页大图和「最新歌曲」的共同数据源。
   ///
-  /// QQ 没有「私人 FM」那种个人电台（那要登录），拿推荐歌单顶上最合适 ——
-  /// 免登录、每天会变、量也够。
+  /// 用热歌 / 新歌 / 飙升三个公开榜拼出来。QQ 的「每日推荐」和推荐歌单那套
+  /// musicu 模块实测返回是空的（多半要登录），榜单这条是纯 GET 的老接口，
+  /// 免登录、字段稳。
   Future<List<SongEntity>> _recommendedSongs() async {
-    final lists = await _ensurePlaylists();
-    if (lists.isEmpty) return const [];
-    final songs = await _api.playlistSongs(lists.first.id);
+    final songs = await _api.recommendSongs(limit: 60);
+    debugPrint('[QQSource] 推荐歌曲 ${songs.length} 首');
     return [for (final s in songs) QQPlaybackService.toSongEntity(s)];
   }
 

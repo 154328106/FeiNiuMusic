@@ -80,10 +80,15 @@ class QQApiClient {
     return decoded;
   }
 
-  Future<Map<String, dynamic>> _getJson(String url) async {
+  Future<Map<String, dynamic>> _getJson(String url, {String? referer}) async {
     final Response<String> response;
     try {
-      response = await _dio.get<String>(url);
+      response = await _dio.get<String>(
+        url,
+        options: referer == null
+            ? null
+            : Options(headers: {'Referer': referer}),
+      );
     } on DioException catch (e) {
       throw QQApiException('网络请求失败：${e.message ?? e.type.name}');
     }
@@ -120,8 +125,42 @@ class QQApiClient {
   // 搜索
   // ---------------------------------------------------------------------
 
+  /// 搜索歌曲。
+  ///
+  /// 主通道是 `search_for_qq_cp` 这条纯 GET 的老接口 —— 和榜单、歌单详情
+  /// 一样，它比 musicu 上对应的模块稳得多。musicu 那条留作兜底：实测它
+  /// 偶尔返回空，表现就是「搜几次才搜得到」。
   Future<List<QQSong>> searchSongs(String keyword, {int limit = 30}) async {
-    if (keyword.trim().isEmpty) return const [];
+    final query = keyword.trim();
+    if (query.isEmpty) return const [];
+    try {
+      final songs = await _searchViaClient(query, limit: limit);
+      if (songs.isNotEmpty) return songs;
+      debugPrint('[QQ] 老接口搜索为空，换 musicu 再试');
+    } on QQApiException catch (e) {
+      debugPrint('[QQ] 老接口搜索失败：${e.message}，换 musicu 再试');
+    }
+    return _searchViaMusicu(query, limit: limit);
+  }
+
+  Future<List<QQSong>> _searchViaClient(
+    String keyword, {
+    required int limit,
+  }) async {
+    final json = await _getJson(
+      'https://c.y.qq.com/soso/fcgi-bin/search_for_qq_cp'
+      '?format=json&w=${Uri.encodeQueryComponent(keyword)}'
+      '&n=$limit&p=1&t=0',
+      referer: 'https://y.qq.com/portal/search.html',
+    );
+    final list = _at(json, ['data', 'song', 'list']) as List?;
+    return _toSongs(list);
+  }
+
+  Future<List<QQSong>> _searchViaMusicu(
+    String keyword, {
+    required int limit,
+  }) async {
     final json = await _musicuCall({
       'comm': {'ct': 19, 'cv': 1859, 'uin': '0', 'format': 'json'},
       'req_1': {
@@ -174,22 +213,61 @@ class QQApiClient {
   }
 
   /// 歌单内的歌。
+  ///
+  /// 走 `fcg_ucc_getcdinfo_byids_cp` 这条老接口：纯 GET、免登录、字段稳定。
+  /// musicu 上那个 GetPlaylistDetail 试过，返回是空的。
   Future<List<QQSong>> playlistSongs(int tid) async {
-    final json = await _musicuCall({
-      'comm': {'ct': 24, 'cv': 0},
-      'req_1': {
-        'module': 'music.playlist.PlayListDetail',
-        'method': 'get_playlist_detail',
-        'param': {
-          'disstid': tid,
-          'onlysonglist': 1,
-          'song_begin': 0,
-          'song_num': 300,
-        },
-      },
-    });
-    final list = _at(json, ['req_1', 'data', 'songlist']) as List?;
-    return _toSongs(list);
+    final json = await _getJson(
+      'https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg'
+      '?type=1&json=1&utf8=1&onlysong=0&new_format=1&disstid=$tid'
+      '&loginUin=0&hostUin=0&format=json&inCharset=utf8&outCharset=utf-8'
+      '&notice=0&platform=yqq.json&needNewCode=0',
+      referer: 'https://y.qq.com/n/yqq/playlist',
+    );
+    final cdlist =
+        (json['cdlist'] as List?)?.whereType<Map<String, dynamic>>().toList() ??
+        const [];
+    if (cdlist.isEmpty) return const [];
+    return _toSongs(cdlist.first['songlist'] as List?);
+  }
+
+  /// 排行榜歌曲。topid：26 热歌榜、27 新歌榜、62 飙升榜。
+  ///
+  /// 也是纯 GET 的老接口，不需要登录，字段比 musicu 那套稳。
+  Future<List<QQSong>> topListSongs(int topid, {int limit = 30}) async {
+    final json = await _getJson(
+      'https://c.y.qq.com/v8/fcg-bin/fcg_v8_toplist_cp.fcg'
+      '?format=json&page=detail&type=top&topid=$topid'
+      '&song_begin=0&song_num=$limit',
+    );
+    final list = json['songlist'] as List?;
+    if (list == null) return const [];
+    // 这个接口把歌塞在 data 里再包一层。
+    return _toSongs([
+      for (final item in list.whereType<Map<String, dynamic>>())
+        (item['data'] as Map<String, dynamic>?) ?? item,
+    ]);
+  }
+
+  /// 首页推荐：热歌 / 新歌 / 飙升三榜混合去重。
+  ///
+  /// QQ 的「每日推荐」要登录，这里用三个公开榜拼一份 —— 内容每天会变，
+  /// 量也够，而且一个账号都不用。
+  Future<List<QQSong>> recommendSongs({int limit = 50}) async {
+    final per = ((limit + 2) ~/ 3).clamp(8, 100);
+    final seen = <String>{};
+    final songs = <QQSong>[];
+    for (final topid in const [26, 27, 62]) {
+      try {
+        for (final song in await topListSongs(topid, limit: per)) {
+          if (seen.add(song.mid)) songs.add(song);
+        }
+      } on QQApiException catch (e) {
+        debugPrint('[QQ] 榜单 $topid 读取失败：${e.message}');
+      }
+    }
+    songs.shuffle();
+    return songs.length <= limit ? songs : songs.sublist(0, limit);
   }
 
   // ---------------------------------------------------------------------
@@ -261,13 +339,18 @@ class QQApiClient {
 
   /// 歌词。`nobase64=1` 直接给明文 LRC，省一次解码。
   Future<String?> lyric(String mid) async {
+    // 这个接口对 Referer 敏感，必须是播放页那个地址，否则返回 retcode 非 0。
     final json = await _getJson(
       'https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg'
       '?songmid=${Uri.encodeQueryComponent(mid)}'
       '&format=json&nobase64=1&g_tk=5381',
+      referer: 'https://y.qq.com/portal/player.html',
     );
     final lyric = json['lyric'] as String?;
-    if (lyric == null || lyric.isEmpty) return null;
+    if (lyric == null || lyric.isEmpty) {
+      debugPrint('[QQ] $mid 没有歌词：retcode=${json['retcode']}');
+      return null;
+    }
     return lyric;
   }
 

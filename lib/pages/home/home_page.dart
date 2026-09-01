@@ -671,6 +671,29 @@ class _HomePageState extends State<HomePage>
   /// 四个快捷入口。飞牛是曲库维度（歌单/歌手/专辑/风格），网易云换成它
   /// 自己有的那几样，没有的一律不放 —— 摆个点进去是空的入口更糟。
   List<HomeShortcutItem> _shortcutItems() {
+    // 飞牛之外的源没有歌手 / 专辑 / 风格那套曲库概念，摆着点进去是空的 ——
+    // 网易云那次已经这么改过，QQ 这次漏了，还落到飞牛那一套上，点「歌单」
+    // 直接报 "No host specified in URI"（访客模式压根没连 NAS）。
+    if (_source.id != 'feiniu' && _source.id != 'netease') {
+      final source = _source;
+      return [
+        HomeShortcutItem(
+          icon: Icons.queue_music_rounded,
+          label: '歌单',
+          accent: const Color(0xFF3B82F6),
+          onTap: () => _openSourcePlaylists(
+            '${source.label}歌单',
+            () => source.playlists(limit: 30),
+          ),
+        ),
+        HomeShortcutItem(
+          icon: Icons.search_rounded,
+          label: '搜索',
+          accent: const Color(0xFF14B8A6),
+          onTap: _openSearch,
+        ),
+      ];
+    }
     if (_source.id != 'netease') {
       return [
         HomeShortcutItem(
