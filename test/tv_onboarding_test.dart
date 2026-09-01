@@ -39,9 +39,11 @@ void main() {
     await pumpToPage3(tester);
 
     expect(find.text('播放器外观'), findsOneWidget);
-    // 样式选择卡（默认/海报歌词）渲染。
-    expect(find.text('默认'), findsOneWidget);
-    expect(find.text('海报歌词'), findsOneWidget);
+    // 封面样式选择卡（CD 碟片 / 黑胶唱片）渲染。
+    // 引导页这一屏原来选的是「默认 / 海报歌词」的布局，现在改成选封面样式，
+    // 布局那两项留在设置里，所以这里的锚点文案跟着换。
+    expect(find.text('CD 碟片'), findsOneWidget);
+    expect(find.text('黑胶唱片'), findsOneWidget);
     // 非 TV 模式不引入焦点环。
     expect(find.byType(TvFocusable), findsNothing);
   });
@@ -52,8 +54,8 @@ void main() {
     await pumpToPage3(tester);
 
     expect(find.text('播放器外观'), findsOneWidget);
-    expect(find.text('默认'), findsOneWidget);
-    expect(find.text('海报歌词'), findsOneWidget);
+    expect(find.text('CD 碟片'), findsOneWidget);
+    expect(find.text('黑胶唱片'), findsOneWidget);
     // TV 模式：两个样式卡各一个焦点环。
     expect(find.byType(TvFocusable), findsWidgets);
   });
