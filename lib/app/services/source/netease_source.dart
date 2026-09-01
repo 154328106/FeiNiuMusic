@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../state/song_source.dart';
 import '../../state/song_state.dart';
@@ -19,7 +22,13 @@ class NetEaseSource implements MusicSource {
   final NetEaseApiClient _api = NetEaseApiClient.instance;
 
   /// 缓存的用户 id。收藏、播放记录都要它，每次现取要多一轮请求。
+  ///
+  /// 同时落盘。只放内存的话每次启动都得问一遍
+  /// `/nuser/account/get`，那个接口一被限流，收藏和最近播放会**同时**清零
+  /// —— 明明 cookie 还好好的。存下来就只有换账号才需要重新取。
   int? _uid;
+
+  static const String _prefsUid = 'netease.source.uid';
 
   /// 「我喜欢的音乐」歌单 id：用户歌单里的第一个。
   int? _likedPlaylistId;
@@ -52,10 +61,21 @@ class NetEaseSource implements MusicSource {
   /// 是否已登录。决定收藏 / 最近播放这些账号维度的区块有没有内容。
   bool get isLoggedIn => _api.isLoggedIn;
 
-  /// 登出后清掉缓存，换账号不会读到上一个人的收藏。
+  /// 登录 / 登出后清掉缓存，换账号不会读到上一个人的收藏。
   void reset() {
     _uid = null;
     _likedPlaylistId = null;
+    // 落盘的那份也要清，否则换账号后还会拿上一个人的 uid 去取收藏。
+    unawaited(_clearPersistedUid());
+  }
+
+  Future<void> _clearPersistedUid() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_prefsUid);
+    } catch (_) {
+      // 清不掉不影响使用：下一次 account 成功会覆盖它。
+    }
   }
 
   /// 最近一次失败原因，供首页在区块为空时给出可读提示。
@@ -64,9 +84,17 @@ class NetEaseSource implements MusicSource {
   Future<int?> _ensureUid() async {
     final cached = _uid;
     if (cached != null) return cached;
+    // 先吃落盘的那份：account 接口被限流时照样能取收藏。
+    final stored = await _readPersistedUid();
+    if (stored != null) {
+      _uid = stored;
+      debugPrint('[NetEaseSource] uid=$stored（来自本地缓存）');
+      return stored;
+    }
     try {
       final user = await _api.account();
       _uid = user.userId;
+      unawaited(_writePersistedUid(user.userId));
       debugPrint('[NetEaseSource] uid=$_uid nickname=${user.nickname}');
       return _uid;
     } on NetEaseApiException catch (e) {
@@ -74,6 +102,25 @@ class NetEaseSource implements MusicSource {
       lastError = '获取账号信息失败：${e.message}';
       debugPrint('[NetEaseSource] account error: ${e.message} code=${e.code}');
       return null;
+    }
+  }
+
+  Future<int?> _readPersistedUid() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final value = prefs.getInt(_prefsUid);
+      return (value == null || value <= 0) ? null : value;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _writePersistedUid(int uid) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_prefsUid, uid);
+    } catch (_) {
+      // 存不下就下次再取，不影响这一次。
     }
   }
 
