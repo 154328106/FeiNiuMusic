@@ -553,34 +553,41 @@ class _PosterPlayerLayout extends StatelessWidget {
                 ),
                 // Transparent so the cover-color + 流光 background shows through,
                 // matching the lyrics page (no solid white panel).
+                // 整块居中：封面是居中的、底部控制排也是居中的，中间这段
+                // 原来左对齐，三段对不齐才是「看着普通」的主要来源。
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Skeletonizer(
                       enabled: song == null,
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
                           Text(
                             title,
                             maxLines: 1,
+                            textAlign: TextAlign.center,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: scheme.onSurface,
-                              fontSize: 23,
+                              fontSize: 27,
                               fontWeight: FontWeight.w800,
+                              letterSpacing: -0.6,
                               height: 1.05,
                             ),
                           ),
-                          const SizedBox(height: 5),
+                          const SizedBox(height: 7),
                           Text(
                             artist,
                             maxLines: 1,
+                            textAlign: TextAlign.center,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: scheme.onSurface.withValues(alpha: 0.86),
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
+                              // 歌手压下去一档，标题才立得起来。
+                              color: scheme.onSurface.withValues(alpha: 0.62),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.2,
                             ),
                           ),
                         ],
@@ -796,9 +803,9 @@ class _PosterLyricsPreview extends StatelessWidget {
           // Don't echo the song title/artist here — they already show in the
           // header above; use neutral placeholders to avoid duplication.
           return const Align(
-            alignment: Alignment.topLeft,
+            alignment: Alignment.topCenter,
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 _PosterLyricLine(text: '暂无歌词', active: true),
                 SizedBox(height: 8),
@@ -825,11 +832,14 @@ class _PosterLyricsPreview extends StatelessWidget {
                 : 118.0;
             return LyricPreview(
               height: h.clamp(0.0, 1000.0),
-              textAlign: TextAlign.start,
-              contentAlignment: CrossAxisAlignment.start,
+              // 居中，与上面的标题、下面的控制排对齐成一条中轴。
+              textAlign: TextAlign.center,
+              contentAlignment: CrossAxisAlignment.center,
               showTranslation: true,
-              fontSize: 15,
-              activeFontSize: 18,
+              // 当前行和其它行拉开一档：原来 15 / 18 差得太小，看着就是
+              // 一堆一样大的字，没有焦点。
+              fontSize: 14,
+              activeFontSize: 22,
               contentPadding: EdgeInsets.zero,
               // 上下边缘渐隐，歌词行滑出边界时淡出而非硬截断
               fadeEdges: true,
