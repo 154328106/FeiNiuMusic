@@ -11,7 +11,8 @@
 enum SongSource {
   feiniu,
   netease,
-  qq;
+  qq,
+  kugou;
 
   /// 网易云 id 前缀。选 `ne:` 而不是 `netease:` 是为了让缓存文件名短一些。
   static const String neteasePrefix = 'ne:';
@@ -19,11 +20,25 @@ enum SongSource {
   /// QQ 音乐 id 前缀。QQ 的主键是字符串 mid，不是数字。
   static const String qqPrefix = 'qq:';
 
+  /// 酷狗 id 前缀。酷狗的主键是歌曲文件的 hash。
+  static const String kugouPrefix = 'kg:';
+
   /// 从 `SongEntity.id` 反推来源。无法识别的一律当飞牛，保证老数据行为不变。
   static SongSource fromSongId(String songId) {
     if (songId.startsWith(neteasePrefix)) return SongSource.netease;
     if (songId.startsWith(qqPrefix)) return SongSource.qq;
+    if (songId.startsWith(kugouPrefix)) return SongSource.kugou;
     return SongSource.feiniu;
+  }
+
+  /// 把酷狗的 hash 编码成 `SongEntity.id`。
+  static String encodeKugou(String hash) => '$kugouPrefix$hash';
+
+  /// 从 `SongEntity.id` 取回酷狗 hash；不是酷狗歌曲则返回 null。
+  static String? decodeKugou(String songId) {
+    if (!songId.startsWith(kugouPrefix)) return null;
+    final hash = songId.substring(kugouPrefix.length);
+    return hash.isEmpty ? null : hash;
   }
 
   /// 把 QQ 的 mid 编码成 `SongEntity.id`。

@@ -344,7 +344,6 @@ class _SourceTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final available = source.isAvailable;
     // 先落到局部变量再判类型：Dart 不对字段做类型提升（字段可能被 getter
     // 覆盖），直接 `source is NetEaseSource ? source.isLoggedIn : ...` 编译不过。
     final src = source;
@@ -356,11 +355,9 @@ class _SourceTile extends StatelessWidget {
     return AppSettingTile(
       title: source.label,
       // 不可用时把原因和下一步写在副标题上，而不是让用户切过去看到一片空白。
-      subtitle: !available
-          ? '${source.unavailableHint} · 点击登录'
-          : loggedIn
-          ? (selected ? '当前使用中' : '点击切换')
-          : '免登录 · 登录获取更多',
+      // 只说「在用 / 能切」。登录与否右边的按钮已经写着了，副标题再解释
+      // 一遍是重复；不可用的原因也没必要占一行 —— 点进去自然会引导。
+      subtitle: selected ? '当前使用中' : '点击切换',
       onTap: onTap,
       leading: ClipRRect(
         borderRadius: BorderRadius.circular(8),

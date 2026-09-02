@@ -103,30 +103,19 @@ class _ProfileAccountCardInner extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // 只留一行「账号管理」。原来下面还挂着用户名和服务器地址
+                    // （形如 `admin · http://192.168.1.123:5666`），一串内网
+                    // 地址摆在首页既没用又刺眼；标题也从 w800 收到 w600、
+                    // 17 收到 16 —— 它是入口，不该比页面标题还重。
                     Text(
                       '账号管理',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.3,
-                        color: scheme.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    // 副标题只给用户名。原来还拼了服务器地址（形如
-                    // `admin · http://192.168.1.123:5666`），首页上挂着一串
-                    // 内网地址既没用又刺眼，真要看进账号页里有。
-                    Text(
-                      account.displayName.isEmpty
-                          ? account.username
-                          : account.displayName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: scheme.onSurfaceVariant.withValues(alpha: 0.85),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.1,
+                        color: scheme.onSurface.withValues(alpha: 0.88),
                       ),
                     ),
                   ],

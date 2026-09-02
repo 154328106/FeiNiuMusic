@@ -71,9 +71,15 @@ class SongEntity {
   /// QQ 歌曲的 mid；非 QQ 歌曲为 null。
   String? get qqMid => SongSource.decodeQQ(id);
 
-  /// 来自公网源（网易云 / QQ）：封面是直链、播放地址是带签名的临时链接，
-  /// 两条链路都不能按飞牛那套处理。
-  bool get isRemoteSource => isNetease || isQQ;
+  /// 是否来自酷狗。
+  bool get isKugou => source == SongSource.kugou;
+
+  /// 酷狗歌曲的 hash；非酷狗歌曲为 null。
+  String? get kugouHash => SongSource.decodeKugou(id);
+
+  /// 来自公网源（网易云 / QQ / 酷狗）：封面是直链、播放地址是带签名的临时
+  /// 链接，两条链路都不能按飞牛那套处理。
+  bool get isRemoteSource => isNetease || isQQ || isKugou;
 
   /// 解析 artist JSON 获取歌手显示名
   String get artistDisplayName {

@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../state/song_state.dart';
 import '../feiniu/api_client.dart';
 import '../netease/netease_api_client.dart';
+import '../kugou/kugou_api_client.dart';
 import '../qq/qq_api_client.dart';
 
 class LyricsRepository {
@@ -26,6 +27,8 @@ class LyricsRepository {
           ? await _neteaseLrc(song)
           : song.isQQ
           ? await _qqLrc(song)
+          : song.isKugou
+          ? await _kugouLrc(song)
           : await FeiNiuApiClient.instance.getLyricText(song.id);
       if (lyricText != null && lyricText.trim().isNotEmpty) {
         await _writeToCache(song.id, lyricText);
@@ -36,6 +39,16 @@ class LyricsRepository {
     }
 
     return null;
+  }
+
+  /// 酷狗歌词。两步：按 hash 搜到 id + accesskey，再下载 base64 的 LRC。
+  Future<String?> _kugouLrc(SongEntity song) async {
+    final hash = song.kugouHash;
+    if (hash == null) return null;
+    return KugouApiClient.instance.lyric(
+      hash,
+      durationMs: song.durationMs ?? 0,
+    );
   }
 
   /// QQ 音乐歌词。接口直接给明文 LRC（nobase64=1），不用再解码。

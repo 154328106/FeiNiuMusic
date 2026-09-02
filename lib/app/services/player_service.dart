@@ -22,6 +22,7 @@ import 'feiniu/cue_service.dart';
 import 'feiniu/track_service.dart';
 import 'feiniu/transcode_service.dart';
 import 'netease/netease_playback_service.dart';
+import 'kugou/kugou_playback_service.dart';
 import 'qq/qq_playback_service.dart';
 import 'player/just_audio_engine.dart';
 import 'player/media_kit_engine.dart';
@@ -999,6 +1000,18 @@ class PlayerService with WidgetsBindingObserver {
         throw StateError('QQ 音乐无可用播放地址：${song.title}');
       }
       return mk.Media(url, httpHeaders: QQPlaybackService.streamHeaders());
+    }
+
+    // 酷狗：同样是带签名的临时直链。
+    if (song.isKugou) {
+      final hash = song.kugouHash;
+      final url = hash == null
+          ? null
+          : await KugouPlaybackService.instance.resolveStreamUrl(hash);
+      if (url == null) {
+        throw StateError('酷狗音乐无可用播放地址：${song.title}');
+      }
+      return mk.Media(url, httpHeaders: KugouPlaybackService.streamHeaders());
     }
 
     // CUE 整轨曲目：跳过本地缓存（命中会拿到整轨文件，缺失会让后台把整轨
@@ -3711,6 +3724,20 @@ class PlayerService with WidgetsBindingObserver {
       return Uri.parse(url);
     }
 
+    if (song.isKugou) {
+      final hash = song.kugouHash;
+      final url = hash == null
+          ? null
+          : await KugouPlaybackService.instance.resolveStreamUrl(
+              hash,
+              force: forceRefresh,
+            );
+      if (url == null) {
+        throw StateError('酷狗音乐无可用播放地址：${song.title}');
+      }
+      return Uri.parse(url);
+    }
+
     final rawUri = (song.uri ?? '').trim();
     if (!rawUri.startsWith('http')) {
       return Uri.file(rawUri);
@@ -3905,6 +3932,24 @@ class PlayerService with WidgetsBindingObserver {
       return AudioSource.uri(
         Uri.parse(url),
         headers: QQPlaybackService.streamHeaders(),
+      );
+    }
+
+    // 酷狗：同样绕开飞牛的缓存/转码链路。
+    if (song.isKugou) {
+      final hash = song.kugouHash;
+      final url = hash == null
+          ? null
+          : await KugouPlaybackService.instance.resolveStreamUrl(
+              hash,
+              force: forceRefresh,
+            );
+      if (url == null) {
+        throw StateError('酷狗音乐无可用播放地址：${song.title}');
+      }
+      return AudioSource.uri(
+        Uri.parse(url),
+        headers: KugouPlaybackService.streamHeaders(),
       );
     }
 
