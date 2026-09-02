@@ -111,7 +111,7 @@ class _NetEaseLoginPageState extends State<NetEaseLoginPage> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return AppPageScaffold(
-      appBar: const AppTopBar(title: '网易云登录'),
+      appBar: const AppTopBar(title: '网易音乐登录'),
       showMiniPlayer: false,
       body: Center(
         child: Padding(
