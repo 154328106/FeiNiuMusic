@@ -609,8 +609,15 @@ class _HomePageState extends State<HomePage>
       }
       // 公网源要先筛掉拿不到地址的。不筛的话，队列里夹着的会员曲会在
       // playQueue 内部构建播放源时抛异常，直接掉进下面的 catch，退化成
-      // 「只播大图这一首」——QQ 那边一半以上的歌都拿不到官方地址，几乎必踩。
-      final prepared = await _source.prepareQueue(songs);
+      // 「只播大图这一首」——会员曲占比高的源几乎必踩。
+      //
+      // 只预取前一段：漫游队列有 60 首，整队预取意味着为其中每首会员曲都
+      // 问一次第三方音源，而一次收听根本听不到那么后面 —— 音源那边的请求量
+      // 主要就是这么堆起来的。后面的等真播到了再单独取。
+      const roamPrepareWindow = 25;
+      final head = songs.take(roamPrepareWindow).toList();
+      final tail = songs.skip(roamPrepareWindow).toList();
+      final prepared = [...await _source.prepareQueue(head), ...tail];
       if (!mounted) return;
       if (prepared.isEmpty) {
         AppToast.showGlobal('这批歌都取不到播放地址', type: ToastType.error);

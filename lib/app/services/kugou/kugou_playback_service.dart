@@ -41,7 +41,15 @@ class KugouPlaybackService {
 
   static final KugouPlaybackService instance = KugouPlaybackService._();
 
-  static const Duration urlTtl = Duration(minutes: 20);
+  /// 地址缓存时长。
+  ///
+  /// 原来 20 分钟，一小时的连续收听要重探三轮 —— 每轮都要为会员曲各问一次
+  /// 音源，请求量就是这么堆起来的。拉到 45 分钟。
+  ///
+  /// 敢拉长是因为过期有兜底：地址失效会让播放打不开，播放器的错误恢复会
+  /// 带 force 重取一次（见 player_service 里的 `force: forceRefresh`），
+  /// 最坏就是那一首多花一次请求。
+  static const Duration urlTtl = Duration(minutes: 45);
 
   final Map<String, _ResolvedUrl> _cache = {};
 
