@@ -41,7 +41,7 @@ android {
         // 兼容包）覆盖为传入值；本地构建恒为正式包名 com.feiniu.music。
         applicationId = appIdOverride ?: DEFAULT_APP_ID
         // 应用名：正式包与汽水音乐兼容包统一为「飞牛音乐」，不区分命名。
-        manifestPlaceholders["appLabel"] = "飞牛音乐"
+        manifestPlaceholders["appLabel"] = "Melodic"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 27

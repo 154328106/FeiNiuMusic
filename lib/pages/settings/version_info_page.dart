@@ -24,7 +24,7 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
   /// 想恢复把这里改回 true 即可。
   static final bool _showAppInfo = false;
 
-  static const String _appName = '飞牛音乐';
+  static const String _appName = 'Melodic';
   static const String _iconAsset = 'assets/icon/app_icon.png';
   static const String _projectUrl = 'https://github.com/kuilei0926/FeiNiuMusic';
 

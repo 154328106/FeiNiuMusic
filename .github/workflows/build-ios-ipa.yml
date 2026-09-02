@@ -71,12 +71,12 @@ jobs:
           codesign -dv "$APP_PATH" 2>&1 || echo "（未签名，符合预期）"
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
-          ditto -c -k --sequesterRsrc --keepParent Payload "FeiNiuMusic-v${VERSION}-unsigned.ipa"
-          ls -lh "FeiNiuMusic-v${VERSION}-unsigned.ipa"
+          ditto -c -k --sequesterRsrc --keepParent Payload "Melodic-v${VERSION}-unsigned.ipa"
+          ls -lh "Melodic-v${VERSION}-unsigned.ipa"
 
       - name: 上传 IPA
         uses: actions/upload-artifact@v4
         with:
-          name: FeiNiuMusic-unsigned-ipa
-          path: FeiNiuMusic-v*-unsigned.ipa
+          name: Melodic-unsigned-ipa
+          path: Melodic-v*-unsigned.ipa
           if-no-files-found: error

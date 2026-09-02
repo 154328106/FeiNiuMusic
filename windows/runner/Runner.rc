@@ -1,4 +1,4 @@
-// Microsoft Visual C++ generated resource script.
+﻿// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 #include "resource.h"
@@ -95,7 +95,7 @@ BEGIN
             VALUE "InternalName", "feiniumusic" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.lanke. All rights reserved." "\0"
             VALUE "OriginalFilename", "feiniumusic.exe" "\0"
-            VALUE "ProductName", "飞牛音乐" "\0"
+            VALUE "ProductName", "Melodic" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

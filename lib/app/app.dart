@@ -183,7 +183,7 @@ class FeiNiuMusicApp extends StatelessWidget {
                         return _TvOrientationSync(
                           tv: isTv,
                           child: MaterialApp(
-                          title: '飞牛音乐',
+                          title: 'Melodic',
                           navigatorKey: appNavigatorKey,
                           theme: lightTheme,
                           darkTheme: darkTheme,

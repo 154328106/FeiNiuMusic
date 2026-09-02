@@ -235,7 +235,7 @@ class SideMenu extends StatelessWidget {
                             ]
                           : [
                               Text(
-                                '飞牛音乐',
+                                'Melodic',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
