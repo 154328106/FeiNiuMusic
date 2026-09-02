@@ -6,9 +6,12 @@ import '../../components/account/profile_account_card.dart';
 import '../../app/router/app_router.dart' show AppRoutes;
 import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';
+import '../../app/services/kugou/kugou_auth.dart';
+import '../../app/services/kugou/kugou_playback_service.dart';
 import '../../app/services/qq/qq_auth.dart';
 import '../../app/services/qq/qq_playback_service.dart';
 import '../../app/services/source/netease_source.dart';
+import '../../app/services/source/kugou_source.dart';
 import '../../app/services/source/qq_source.dart';
 import '../../components/index.dart';
 
@@ -249,6 +252,7 @@ class _MusicSourceSection extends StatelessWidget {
                 onLogin: switch (source.id) {
                   'netease' => () => _onLogin(context, registry),
                   'qq' => () => _onLoginQQ(context, registry),
+                  'kugou' => () => _onLoginKugou(context, registry),
                   _ => null,
                 },
               ),
@@ -314,6 +318,47 @@ class _MusicSourceSection extends StatelessWidget {
     registry.notifyContentChanged();
   }
 
+  /// 酷狗扫码登录。登录后能听会员曲，还能同步云端歌单和「我喜欢」。
+  Future<void> _onLoginKugou(
+    BuildContext context,
+    MusicSourceRegistry registry,
+  ) async {
+    final auth = KugouAuth.instance;
+    if (auth.isLoggedIn.value) {
+      final logout = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('酷狗音乐账号'),
+          content: Text(
+            '已登录${auth.nickname.isEmpty ? '' : '：${auth.nickname}'}。'
+            '退出后仍可用推荐、榜单和搜索，但会员曲和云端歌单拿不到。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('退出登录'),
+            ),
+          ],
+        ),
+      );
+      if (logout != true) return;
+      await auth.logout();
+      // 换了登录态，之前判定「拿不到地址」的那批歌值得重试一次。
+      KugouPlaybackService.instance.clear();
+      KugouSource.instance.reset();
+      registry.notifyContentChanged();
+      return;
+    }
+    await Navigator.pushNamed(context, AppRoutes.kugouLogin);
+    KugouPlaybackService.instance.clear();
+    KugouSource.instance.reset();
+    registry.notifyContentChanged();
+  }
+
   /// 右侧「登录 / 账号」按钮：扫码登录，回来后刷新这一行和首页。
   Future<void> _onLogin(
     BuildContext context,
@@ -350,6 +395,7 @@ class _SourceTile extends StatelessWidget {
     final loggedIn = switch (src) {
       NetEaseSource() => src.isLoggedIn,
       QQSource() => QQAuth.instance.isLoggedIn.value,
+      KugouSource() => KugouAuth.instance.isLoggedIn.value,
       _ => true,
     };
     return AppSettingTile(
@@ -383,8 +429,14 @@ class _SourceTile extends StatelessWidget {
               ),
               child: Text(loggedIn ? '账号' : '登录'),
             ),
-          if (selected)
-            Icon(Icons.check_rounded, size: 20, color: scheme.primary),
+          // 勾位固定占宽：不占的话，选中那行的按钮会被勾挤走 20 像素，
+          // 上下几行的「账号 / 登录」就对不齐了。
+          SizedBox(
+            width: 20,
+            child: selected
+                ? Icon(Icons.check_rounded, size: 20, color: scheme.primary)
+                : null,
+          ),
         ],
       ),
     );

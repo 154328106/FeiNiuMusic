@@ -121,3 +121,13 @@ class KugouPlaylist {
   final String? coverUrl;
   final int trackCount;
 }
+
+/// 扫码登录的状态。
+enum KugouScanState { waiting, scanned, expired, success }
+
+class KugouScanResult {
+  const KugouScanResult(this.state, {this.nickname});
+
+  final KugouScanState state;
+  final String? nickname;
+}

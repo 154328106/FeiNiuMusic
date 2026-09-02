@@ -77,6 +77,7 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
     if (_preparing) return; // 准备中再点没有意义，反而各发一轮请求
     var queue = _songs;
     var start = index;
+    int? extendFrom;
     if (_source.id != 'feiniu') {
       final tapped = _songs[index];
       // 从点中的位置往后取一段，别把整张歌单都问一遍。
@@ -87,21 +88,26 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
       } finally {
         if (mounted) setState(() => _preparing = false);
       }
-      // 队尾续接：播到这一段末尾时再准备下一段，而不是一次性把整张歌单
-      // 塞进队列 —— 那样播放器会为整队构建播放源，窗口就白设了。
-      var offset = index + _prepareWindow;
+      if (!mounted || queue.isEmpty) return;
+      // 筛完索引会变，按歌曲 id 重新定位；点中的那首若被筛掉就从头播。
+      final moved = queue.indexWhere((s) => s.id == tapped.id);
+      start = moved >= 0 ? moved : 0;
+      extendFrom = index + _prepareWindow;
+    }
+    await _player.playQueue(queue, start);
+    // 队尾续接：播到这一段末尾时再准备下一段，而不是一次性把整张歌单塞进
+    // 队列 —— 那样播放器会为整队构建播放源，窗口就白设了。必须挂在
+    // playQueue **之后**：playQueue 内部会先把 queueExtender 清空。
+    final from = extendFrom;
+    if (from != null) {
+      var offset = from;
       _player.queueExtender = () async {
         if (offset >= _songs.length) return const <SongEntity>[];
         final next = _songs.skip(offset).take(_prepareWindow).toList();
         offset += _prepareWindow;
         return _source.prepareQueue(next);
       };
-      if (!mounted || queue.isEmpty) return;
-      // 筛完索引会变，按歌曲 id 重新定位；点中的那首若被筛掉就从头播。
-      final moved = queue.indexWhere((s) => s.id == tapped.id);
-      start = moved >= 0 ? moved : 0;
     }
-    await _player.playQueue(queue, start);
   }
 
   @override

@@ -98,6 +98,13 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage>
     with SignalsMixin, PrimaryTabRefreshMixin {
+  /// 一次交给播放器的队列长度。
+  ///
+  /// 队列多长，第三方音源就要被问多少次 —— 播放器会为整个队列构建
+  /// 播放源，不是只解析当前这首。所以队列本身要短，播到尾部再靠
+  /// queueExtender 续下一段。
+  static const int _prepareWindow = 25;
+
   final FeiNiuApiClient _api = FeiNiuApiClient.instance;
   final PlayerService _player = PlayerService.instance;
   final GlobalKey<AppPageScaffoldState> _scaffoldKey =
@@ -619,8 +626,7 @@ class _HomePageState extends State<HomePage>
       // 一批 status=2）。真正的杠杆是队列本身要短。
       //
       // 队尾由播放器的漫游续接负责（_roamQueueExtender），听得到底自然会续。
-      const roamQueueWindow = 25;
-      final head = songs.take(roamQueueWindow).toList();
+      final head = songs.take(_prepareWindow).toList();
       final prepared = await _source.prepareQueue(head);
       if (!mounted) return;
       if (prepared.isEmpty) {
@@ -974,15 +980,30 @@ class _HomePageState extends State<HomePage>
     if (!mounted) return;
     // 公网源的队列里可能夹着取不到地址的歌，会让整队卡住不动，起播前先
     // 批量筛一遍。飞牛的 prepareQueue 是原样返回，不用分支判断。
-    queue = await _source.prepareQueue(queue);
+    //
+    // 只筛点中那首往后的一段，剩下的等播到队尾再续：整队筛意味着为里面
+    // 每首会员曲都问一次第三方音源，而且队列给到播放器之后，播放器还要
+    // 为整队构建播放源 —— 两头都在放大请求量。
+    final full = queue;
+    final start = song != null
+        ? full.indexWhere((s) => s.id == song.id)
+        : playIndex.clamp(0, full.length - 1);
+    final from = start < 0 ? 0 : start;
+    queue = await _source.prepareQueue(
+      full.skip(from).take(_prepareWindow).toList(),
+    );
     if (!mounted || queue.isEmpty) return;
-    if (song != null) {
-      final idx = queue.indexWhere((s) => s.id == song.id);
-      _player.playQueue(queue, idx >= 0 ? idx : 0);
-    } else {
-      final idx = playIndex.clamp(0, queue.length - 1);
-      _player.playQueue(queue, idx);
-    }
+    final idx = song != null ? queue.indexWhere((s) => s.id == song.id) : 0;
+    await _player.playQueue(queue, idx >= 0 ? idx : 0);
+    // 续接器必须在 playQueue **之后**挂：playQueue 内部会先把 queueExtender
+    // 清空，先挂就等于没挂。
+    var offset = from + _prepareWindow;
+    _player.queueExtender = () async {
+      if (offset >= full.length) return const <SongEntity>[];
+      final next = full.skip(offset).take(_prepareWindow).toList();
+      offset += _prepareWindow;
+      return _source.prepareQueue(next);
+    };
   }
 
   /// 请求某一数据源的完整列表（按队列上限）。

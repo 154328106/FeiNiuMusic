@@ -493,6 +493,8 @@ class _SongsPageState extends State<SongsPage>
     //
     // 把整个列表塞进队列是没用的：播放器会为整个队列构建播放源，窗口外的
     // 歌照样被逐个解析，音源请求一点没省。
+    await _player.playQueue(queue, _startIndexFor(head, 0, tapped, queue));
+    // 续接器要在 playQueue 之后挂 —— playQueue 内部会先清空它。
     var offset = index + _prepareWindow;
     _player.queueExtender = () async {
       if (offset >= songs.length) return const <SongEntity>[];
@@ -500,8 +502,6 @@ class _SongsPageState extends State<SongsPage>
       offset += _prepareWindow;
       return _source.prepareQueue(next);
     };
-
-    _player.playQueue(queue, _startIndexFor(head, 0, tapped, queue));
   }
 
   /// 筛完之后点中的那首落在哪。
