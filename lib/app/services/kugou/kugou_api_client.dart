@@ -180,7 +180,7 @@ class KugouApiClient {
     String? albumAudioId,
   }) async {
     final h = hash.toUpperCase();
-    final key = _md5Hex('$h$_playSalt${_appid}${_mid}0');
+    final key = _md5Hex('$h$_playSalt$_appid${_mid}0');
     final params = <String, String>{
       'cmd': '26',
       'hash': h,
