@@ -878,17 +878,38 @@ class _HomePageState extends State<HomePage>
   /// 「当前歌就是 hero」时也算在播：有些歌服务端给了地址但实际打不开，
   /// 播放器会停在那首上，此时再点就该换一首，而不是把同一首再放一遍
   /// ——之前就是这么卡住的，连点几次全是同一首。
+  /// 上一次从大图起播的是哪首、什么时候。
+  ///
+  /// 播放失败时播放器会自动往后跳，于是「当前歌」已经不是大图那首了 ——
+  /// 再点就又从头播同一首打不开的歌，表现成「怎么点都是这首、也换不掉」。
+  /// 记一笔就能认出「刚放过、没响」这种情况。
+  String? _lastRoamAttemptId;
+  DateTime? _lastRoamAttemptAt;
+
   void _togglePlayRoam() {
     final hero = _heroSong;
-    if (hero != null && _player.currentSongSignal.value?.id == hero.id) {
-      if (_player.isPlayingSignal.value) {
-        unawaited(_player.togglePlayPause());
-      } else {
-        // 已经是这首但没在响 —— 多半是取到的地址打不开，换一首。
-        unawaited(_refreshRoam());
-      }
+    if (hero == null) {
+      _playRoam();
       return;
     }
+    final playingThis = _player.currentSongSignal.value?.id == hero.id;
+    if (playingThis && _player.isPlayingSignal.value) {
+      unawaited(_player.togglePlayPause());
+      return;
+    }
+    // 刚放过这首、到现在还没响 —— 地址多半是坏的，换一首而不是再放一遍。
+    final justTried =
+        _lastRoamAttemptId == hero.id &&
+        _lastRoamAttemptAt != null &&
+        DateTime.now().difference(_lastRoamAttemptAt!) < const Duration(
+          seconds: 20,
+        );
+    if (justTried && !_player.isPlayingSignal.value) {
+      unawaited(_refreshRoam());
+      return;
+    }
+    _lastRoamAttemptId = hero.id;
+    _lastRoamAttemptAt = DateTime.now();
     _playRoam();
   }
 

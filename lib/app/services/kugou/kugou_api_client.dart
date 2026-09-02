@@ -136,11 +136,20 @@ class KugouApiClient {
 
   /// 榜单内的歌。
   Future<List<KugouSong>> rankSongs(int rankId, {int limit = 60}) async {
-    final json = await _getJson(
-      'https://m.kugou.com/rank/info?rankid=$rankId&page=1&json=true',
-    );
-    final rows = _at(json, ['songs', 'list']) as List?;
-    final songs = _toSongs(rows);
+    // 一页只有 30 首，翻到够为止（榜单本身也就几页）。
+    final seen = <String>{};
+    final songs = <KugouSong>[];
+    for (var page = 1; page <= 4 && songs.length < limit; page++) {
+      final json = await _getJson(
+        'https://m.kugou.com/rank/info?rankid=$rankId&page=$page&json=true',
+      );
+      final rows = _at(json, ['songs', 'list']) as List?;
+      final batch = _toSongs(rows);
+      if (batch.isEmpty) break;
+      for (final song in batch) {
+        if (seen.add(song.hash)) songs.add(song);
+      }
+    }
     return songs.length <= limit ? songs : songs.sublist(0, limit);
   }
 
@@ -205,13 +214,13 @@ class KugouApiClient {
     final status = (json['status'] as num?)?.toInt() ?? 0;
     final code =
         (json['error_code'] ?? json['errcode'] ?? json['code']) as num?;
-    final url =
-        (json['play_url'] ??
-                json['play_backup_url'] ??
-                json['url'] ??
-                json['backup_url'])
-            ?.toString();
-    if (url == null || url.isEmpty) {
+    final url = _firstUrl([
+      json['play_url'],
+      json['url'],
+      json['play_backup_url'],
+      json['backup_url'],
+    ]);
+    if (url == null) {
       debugPrint('[Kugou] $h 无地址：status=$status code=${code?.toInt()}');
       return null;
     }
@@ -245,6 +254,24 @@ class KugouApiClient {
   }
 
   // ---------------------------------------------------------------------
+
+  /// 从若干候选字段里挑出第一个能用的地址。
+  ///
+  /// 酷狗的 `url` 字段**是个数组**（主备两个 CDN），直接 `.toString()` 会得到
+  /// `[http://a.mp3, http://b.mp3]` 这么一串 —— 播放器把它当成文件路径，报
+  /// 「Cannot open file .../tmp/[http://…, http://…]: No such file」。这就是
+  /// 「显示可播 60/60 却一首都开不了」的真正原因，跟权限无关。
+  static String? _firstUrl(List<Object?> candidates) {
+    for (final value in candidates) {
+      if (value is String && value.isNotEmpty) return value;
+      if (value is List) {
+        for (final item in value) {
+          if (item is String && item.isNotEmpty) return item;
+        }
+      }
+    }
+    return null;
+  }
 
   static Object? _at(Map<String, dynamic> root, List<String> path) {
     Object? node = root;
