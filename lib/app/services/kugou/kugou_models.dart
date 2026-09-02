@@ -53,8 +53,11 @@ class KugouSong {
             ?.toString() ??
         '';
     final rawTitle =
-        (json['songname'] ?? json['SongName'] ?? json['filename'] ??
-                json['fileName'] ?? json['audio_name'])
+        (json['songname'] ??
+                json['SongName'] ??
+                json['filename'] ??
+                json['fileName'] ??
+                json['audio_name'])
             ?.toString() ??
         '';
     final (name, artists) = _splitTitle(rawTitle, singer);
@@ -87,7 +90,9 @@ class KugouSong {
       albumAudioId: (json['album_audio_id'] ?? json['mixsongid'])?.toString(),
       coverUrl: cover,
       durationMs: durationMs,
-      isVip: privilege != null ? (privilege != 0 && privilege != 8) : payType > 0,
+      isVip: privilege != null
+          ? (privilege != 0 && privilege != 8)
+          : payType > 0,
     );
   }
 }

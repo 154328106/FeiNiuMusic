@@ -104,7 +104,9 @@ class KugouPlaybackService {
       }
       playable.add(song);
     }
-    debugPrint('[Kugou] 队列 ${songs.length} 首：可播 ${playable.length}，跳过 $dropped');
+    debugPrint(
+      '[Kugou] 队列 ${songs.length} 首：可播 ${playable.length}，跳过 $dropped',
+    );
     return playable;
   }
 
