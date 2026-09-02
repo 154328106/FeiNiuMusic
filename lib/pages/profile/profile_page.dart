@@ -283,7 +283,7 @@ class _MusicSourceSection extends StatelessWidget {
       final logout = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('QQ 音乐账号'),
+          title: const Text('扣扣音乐账号'),
           content: Text(
             '已登录${QQAuth.instance.nickname.isEmpty ? '' : '：${QQAuth.instance.nickname}'}。'
             '退出后仍可用推荐、榜单和搜索，但会员曲和高音质拿不到。',
@@ -360,7 +360,7 @@ class _SourceTile extends StatelessWidget {
           ? '${source.unavailableHint} · 点击登录'
           : loggedIn
           ? (selected ? '当前使用中' : '点击切换')
-          : '未登录，只有推荐和排行榜${selected ? '' : ' · 点击切换'}',
+          : '免登录 · 登录获取更多',
       onTap: onTap,
       leading: ClipRRect(
         borderRadius: BorderRadius.circular(8),

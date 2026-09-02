@@ -37,7 +37,7 @@ class NetEaseSource implements MusicSource {
   String get id => 'netease';
 
   @override
-  String get label => '网易云音乐';
+  String get label => '网易音乐';
 
   @override
   IconData get icon => Icons.cloud_rounded;

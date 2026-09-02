@@ -165,7 +165,7 @@ class _NetEaseSearchPageState extends State<NetEaseSearchPage> {
 
     if (!widget.embedded) {
       return Scaffold(
-        appBar: AppBar(title: const Text('网易云音乐'), actions: [loginAction]),
+        appBar: AppBar(title: const Text('网易音乐'), actions: [loginAction]),
         body: body,
       );
     }
@@ -173,7 +173,7 @@ class _NetEaseSearchPageState extends State<NetEaseSearchPage> {
     return AppNavigationModeBuilder(
       builder: (context, useBottomNavigation) => AppPageScaffold(
         appBar: AppTopBar(
-          title: '搜索 · 网易云',
+          title: '搜索 · 网易音乐',
           showBackButton: !useBottomNavigation,
           actions: [loginAction],
         ),

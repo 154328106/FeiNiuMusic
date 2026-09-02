@@ -874,10 +874,19 @@ class _HomePageState extends State<HomePage>
   /// [source] 指定首页数据源：列表只是 10 首预览，播放时按队列上限
   /// 请求完整列表填充队列，而不是只播预览的 10 首。
   /// hero 大图按钮：正在放这首 hero 歌就切换播放/暂停，否则起播漫游。
+  ///
+  /// 「当前歌就是 hero」时也算在播：有些歌服务端给了地址但实际打不开，
+  /// 播放器会停在那首上，此时再点就该换一首，而不是把同一首再放一遍
+  /// ——之前就是这么卡住的，连点几次全是同一首。
   void _togglePlayRoam() {
     final hero = _heroSong;
     if (hero != null && _player.currentSongSignal.value?.id == hero.id) {
-      unawaited(_player.togglePlayPause());
+      if (_player.isPlayingSignal.value) {
+        unawaited(_player.togglePlayPause());
+      } else {
+        // 已经是这首但没在响 —— 多半是取到的地址打不开，换一首。
+        unawaited(_refreshRoam());
+      }
       return;
     }
     _playRoam();

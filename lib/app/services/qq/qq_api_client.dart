@@ -293,16 +293,17 @@ class QQApiClient {
   /// 提交多个候选，服务端挑得到哪个给哪个 —— 所以这里把几种历史格式都塞
   /// 进去，别为「拼错一种就没地址」再跑一轮。
   Future<String?> songUrl(String mid, {String? mediaMid}) async {
-    // 登录了先试 320k，不行再退 128k；没登录直接 128k —— 高音质要会员，
-    // 没登录连试都是白跑一轮。
-    final auth = QQAuth.instance;
-    final prefixes = auth.isLoggedIn.value
-        ? const ['M800', 'M500']
-        : const ['M500'];
-    for (final prefix in prefixes) {
-      final url = await _songUrlWith(prefix, mid, mediaMid);
-      if (url != null) return url;
-    }
+    // 只要 128k。
+    //
+    // 试过登录后先要 320k：服务端**照给 purl**，但那个地址实际打不开
+    // （mpv 报 Failed to open，URL 里还带着 `src=` 指向另一个文件名——
+    // 明显是服务端做了降级替换）。结果是 prepareQueue 以为拿到了地址、
+    // 队列显示「可播 51/51」，播起来却全是哑的，漫游更是卡在那一首反复重播。
+    //
+    // 320k 要绿钻。与其拿一个「看着有、其实放不出」的地址，不如老老实实
+    // 要 128k —— 登录态本身已经把会员曲解锁了（22/51 → 42/51）。
+    final url = await _songUrlWith('M500', mid, mediaMid);
+    if (url != null) return url;
     debugPrint('[QQ] $mid 无可播地址（多半是会员曲）');
     return null;
   }
@@ -359,10 +360,16 @@ class QQApiClient {
     String? purl;
     for (final info in infos.whereType<Map>()) {
       final value = info['purl'] as String?;
-      if (value != null && value.isNotEmpty) {
-        purl = value;
-        break;
+      if (value == null || value.isEmpty) continue;
+      // result 非 0 表示服务端其实没给到这首（常见于会员曲降级），
+      // 这时 purl 里往往还带一个指向别的文件的 `src=`，拿去播必然打不开。
+      final result = info['result'];
+      if (result is int && result != 0) {
+        debugPrint('[QQ] $mid 地址被降级：result=$result');
+        continue;
       }
+      purl = value;
+      break;
     }
     if (purl == null) return null;
     if (purl.startsWith('http')) return purl;

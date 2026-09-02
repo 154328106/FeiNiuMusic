@@ -80,7 +80,7 @@ class _ProfileAccountCardInner extends StatelessWidget {
                 // 这张卡就是「飞牛音乐」这个源本身，直接挂品牌图标；
                 // 图标缺失时退回原来的首字母头像。
                 child: Image.asset(
-                  'assets/source/feiniu.png',
+                  'assets/icon/account.png',
                   width: 56,
                   height: 56,
                   fit: BoxFit.cover,
@@ -104,7 +104,7 @@ class _ProfileAccountCardInner extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      account.displayName,
+                      '账号管理',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -115,8 +115,13 @@ class _ProfileAccountCardInner extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 3),
+                    // 副标题只给用户名。原来还拼了服务器地址（形如
+                    // `admin · http://192.168.1.123:5666`），首页上挂着一串
+                    // 内网地址既没用又刺眼，真要看进账号页里有。
                     Text(
-                      '${account.username} · ${account.serverLabel}',
+                      account.displayName.isEmpty
+                          ? account.username
+                          : account.displayName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(

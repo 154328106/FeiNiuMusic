@@ -109,7 +109,7 @@ class _QQLoginPageState extends State<QQLoginPage> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return AppPageScaffold(
-      appBar: const AppTopBar(title: 'QQ 音乐登录', showBackButton: true),
+      appBar: const AppTopBar(title: '扣扣音乐登录', showBackButton: true),
       showMiniPlayer: false,
       body: Center(
         child: Padding(

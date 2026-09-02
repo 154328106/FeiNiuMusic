@@ -32,7 +32,7 @@ class QQSource implements MusicSource {
   String get id => 'qq';
 
   @override
-  String get label => 'QQ 音乐';
+  String get label => '扣扣音乐';
 
   @override
   IconData get icon => Icons.music_note_rounded;
