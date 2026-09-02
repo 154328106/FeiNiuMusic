@@ -647,9 +647,9 @@ class KugouApiClient {
           'token': auth.token,
         },
         headers: const {
-        'x-router': 'cloudlist.service.kugou.com',
-        'Content-Type': 'application/json',
-      },
+          'x-router': 'cloudlist.service.kugou.com',
+          'Content-Type': 'application/json',
+        },
       );
       final rows = _deepList(json, const [
         'songs',
