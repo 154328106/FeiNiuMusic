@@ -55,12 +55,31 @@ class KugouPlaybackService {
   /// 「kg/`<hash>` 全部未命中」就是这么来的。
   final Map<String, _SongMeta> _meta = {};
 
+  /// 同一首歌的并发请求合并成一次。
+  ///
+  /// 日志里同一个 hash 会被连着问两遍（起播路径偶尔并发触发两次
+  /// prepareQueue），请求量凭空翻倍 —— 之前把聆澜打成 429 就是这么来的。
+  /// 网易云那边早就有这道合并，酷狗漏了。
+  final Map<String, Future<String?>> _inflight = {};
+
   Future<String?> resolveStreamUrl(String hash, {bool force = false}) async {
     if (!force) {
       final cached = _cache[hash];
       if (cached != null && !cached.isExpired) return cached.url;
       if (_unresolvable.contains(hash)) return null;
+      final pending = _inflight[hash];
+      if (pending != null) return pending;
     }
+    final future = _resolveOnce(hash);
+    _inflight[hash] = future;
+    try {
+      return await future;
+    } finally {
+      _inflight.remove(hash);
+    }
+  }
+
+  Future<String?> _resolveOnce(String hash) async {
     final meta = _meta[hash];
     try {
       var url = await KugouApiClient.instance.songUrl(
@@ -155,6 +174,7 @@ class KugouPlaybackService {
   void clear() {
     _cache.clear();
     _unresolvable.clear();
+    _inflight.clear();
   }
 
   /// 播放时要带的请求头。
