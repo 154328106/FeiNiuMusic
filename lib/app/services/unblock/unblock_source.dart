@@ -103,6 +103,15 @@ class UnblockSourceService {
   DateTime? _rateLimitedUntil;
   static const Duration _rateLimitCooldown = Duration(seconds: 20);
 
+  /// 当前是否处在限流冷却里。
+  ///
+  /// 调用方要用它区分「这首真没有」和「刚才问太快了」：后者不能把歌记成
+  /// 永久不可播，否则一次 429 就能让半个队列在这次启动里彻底消失。
+  bool get isRateLimited {
+    final until = _rateLimitedUntil;
+    return until != null && DateTime.now().isBefore(until);
+  }
+
   bool _loaded = false;
 
   final Dio _dio = Dio(

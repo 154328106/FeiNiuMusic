@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -70,6 +71,33 @@ class KugouPlaybackService {
   /// 网易云那边早就有这道合并，酷狗漏了。
   final Map<String, Future<String?>> _inflight = {};
 
+  /// 全局并发闸。
+  ///
+  /// prepareQueue 里的分批只管得住**一次调用**。冷启动时恢复播放队列、
+  /// 首页收藏、歌曲页会同时各来一轮，三个 8 并发叠在一起就是 24 个请求
+  /// 挤在同一毫秒 —— 聆澜直接 429。这里按整个 App 算总数。
+  static const int _maxConcurrent = 5;
+  int _active = 0;
+  final List<Completer<void>> _waiting = [];
+
+  Future<void> _acquire() {
+    if (_active < _maxConcurrent) {
+      _active++;
+      return Future.value();
+    }
+    final completer = Completer<void>();
+    _waiting.add(completer);
+    return completer.future;
+  }
+
+  void _release() {
+    if (_waiting.isNotEmpty) {
+      _waiting.removeAt(0).complete();
+      return;
+    }
+    _active--;
+  }
+
   Future<String?> resolveStreamUrl(String hash, {bool force = false}) async {
     if (!force) {
       final cached = _cache[hash];
@@ -78,12 +106,21 @@ class KugouPlaybackService {
       final pending = _inflight[hash];
       if (pending != null) return pending;
     }
-    final future = _resolveOnce(hash);
+    final future = _guarded(hash);
     _inflight[hash] = future;
     try {
       return await future;
     } finally {
       _inflight.remove(hash);
+    }
+  }
+
+  Future<String?> _guarded(String hash) async {
+    await _acquire();
+    try {
+      return await _resolveOnce(hash);
+    } finally {
+      _release();
     }
   }
 
@@ -103,7 +140,12 @@ class KugouPlaybackService {
         durationMs: meta?.durationMs ?? 0,
       );
       if (url == null) {
-        _unresolvable.add(hash);
+        // 被限流时的失败不算数：那是「问太快了」，不是「这首没有」。
+        // 记进 _unresolvable 的话，一次 429 就能让半个队列在这次启动里
+        // 彻底消失（日志里的「可播 7，跳过 18」就是这么来的）。
+        if (!UnblockSourceService.instance.isRateLimited) {
+          _unresolvable.add(hash);
+        }
         return null;
       }
       final secure = url.startsWith('http://')
@@ -132,13 +174,11 @@ class KugouPlaybackService {
       pending.add(hash);
     }
 
-    // 限并发：网易云那边一次并发一百个把第三方音源打成 429，教训在前。
-    const batch = 8;
-    for (var i = 0; i < pending.length; i += batch) {
-      await Future.wait([
-        for (final hash in pending.skip(i).take(batch)) resolveStreamUrl(hash),
-      ]);
-    }
+    // 并发由上面那道全局闸控制，这里全丢进去就行。
+    //
+    // 原来是在这里按 8 个一批 —— 只管得住单次调用，挡不住多个调用方同时
+    // 各来一轮。
+    await Future.wait([for (final hash in pending) resolveStreamUrl(hash)]);
 
     final playable = <SongEntity>[];
     var dropped = 0;

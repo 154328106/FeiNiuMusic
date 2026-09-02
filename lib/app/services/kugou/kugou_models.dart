@@ -44,17 +44,28 @@ class KugouSong {
   }
 
   static KugouSong? fromJson(Map<String, dynamic> json) {
-    final hash = (json['hash'] ?? json['FileHash'] ?? json['audio_id'])
-        ?.toString();
+    final hash =
+        (json['hash'] ??
+                json['FileHash'] ??
+                json['file_hash'] ??
+                json['audio_id'])
+            ?.toString();
     if (hash == null || hash.isEmpty) return null;
 
     final singer =
-        (json['singername'] ?? json['SingerName'] ?? json['author_name'])
+        (json['singername'] ??
+                json['SingerName'] ??
+                json['author_name'] ??
+                json['singer'])
             ?.toString() ??
         '';
+    // `name` 必须在候选里：云端歌单（get_list_all_file）只给这一个字段，
+    // 形如「歌手 - 歌名」。漏了它，收藏和歌单里的歌就是「有封面、能播、
+    // 但没歌名没歌手」—— 搜索和榜单那几个接口给的是 songname，才没露馅。
     final rawTitle =
         (json['songname'] ??
                 json['SongName'] ??
+                json['name'] ??
                 json['filename'] ??
                 json['fileName'] ??
                 json['audio_name'])
@@ -75,6 +86,9 @@ class KugouSong {
     final trans = json['trans_param'];
     var cover =
         (json['album_sizable_cover'] ??
+                json['sizable_cover'] ??
+                json['cover'] ??
+                json['pic'] ??
                 json['img'] ??
                 json['imgurl'] ??
                 json['Image'] ??
