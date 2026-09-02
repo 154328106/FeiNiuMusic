@@ -6,7 +6,10 @@ import '../../components/account/profile_account_card.dart';
 import '../../app/router/app_router.dart' show AppRoutes;
 import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';
+import '../../app/services/qq/qq_auth.dart';
+import '../../app/services/qq/qq_playback_service.dart';
 import '../../app/services/source/netease_source.dart';
+import '../../app/services/source/qq_source.dart';
 import '../../components/index.dart';
 
 /// 底部导航第 4 项「我的」入口页。
@@ -243,9 +246,11 @@ class _MusicSourceSection extends StatelessWidget {
                 source: source,
                 selected: identical(source, current),
                 onTap: () => _onTap(context, source, registry),
-                onLogin: source.id == 'netease'
-                    ? () => _onLogin(context, registry)
-                    : null,
+                onLogin: switch (source.id) {
+                  'netease' => () => _onLogin(context, registry),
+                  'qq' => () => _onLoginQQ(context, registry),
+                  _ => null,
+                },
               ),
           ],
         );
@@ -267,6 +272,46 @@ class _MusicSourceSection extends StatelessWidget {
       return;
     }
     await registry.setCurrent(source);
+  }
+
+  /// QQ 扫码登录。登录后能听会员曲、拿更高音质。
+  Future<void> _onLoginQQ(
+    BuildContext context,
+    MusicSourceRegistry registry,
+  ) async {
+    if (QQAuth.instance.isLoggedIn.value) {
+      final logout = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('QQ 音乐账号'),
+          content: Text(
+            '已登录${QQAuth.instance.nickname.isEmpty ? '' : '：${QQAuth.instance.nickname}'}。'
+            '退出后仍可用推荐、榜单和搜索，但会员曲和高音质拿不到。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('退出登录'),
+            ),
+          ],
+        ),
+      );
+      if (logout != true) return;
+      await QQAuth.instance.logout();
+      // 换了登录态，之前判定「拿不到地址」的那批歌值得重试一次。
+      QQPlaybackService.instance.clear();
+      QQSource.instance.reset();
+      registry.notifyContentChanged();
+      return;
+    }
+    await Navigator.pushNamed(context, AppRoutes.qqLogin);
+    QQPlaybackService.instance.clear();
+    QQSource.instance.reset();
+    registry.notifyContentChanged();
   }
 
   /// 右侧「登录 / 账号」按钮：扫码登录，回来后刷新这一行和首页。
@@ -303,7 +348,11 @@ class _SourceTile extends StatelessWidget {
     // 先落到局部变量再判类型：Dart 不对字段做类型提升（字段可能被 getter
     // 覆盖），直接 `source is NetEaseSource ? source.isLoggedIn : ...` 编译不过。
     final src = source;
-    final loggedIn = src is NetEaseSource ? src.isLoggedIn : true;
+    final loggedIn = switch (src) {
+      NetEaseSource() => src.isLoggedIn,
+      QQSource() => QQAuth.instance.isLoggedIn.value,
+      _ => true,
+    };
     return AppSettingTile(
       title: source.label,
       // 不可用时把原因和下一步写在副标题上，而不是让用户切过去看到一片空白。

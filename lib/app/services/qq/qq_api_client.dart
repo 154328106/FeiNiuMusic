@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
+import 'qq_auth.dart';
 import 'qq_models.dart';
 
 class QQApiException implements Exception {
@@ -48,7 +49,6 @@ class QQApiClient {
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) '
             'Gecko/20100101 Firefox/80.0',
         'Referer': 'https://y.qq.com/',
-        'Cookie': 'uin=0; qqmusic_fromtag=66',
       },
     ),
   );
@@ -63,6 +63,8 @@ class QQApiClient {
       response = await _dio.get<String>(
         _musicu,
         queryParameters: {'format': 'json', 'data': jsonEncode(payload)},
+        // 带上登录态：没登录时 QQAuth 给的是一份游客 Cookie。
+        options: Options(headers: {'Cookie': QQAuth.instance.cookieHeader}),
       );
     } on DioException catch (e) {
       throw QQApiException('网络请求失败：${e.message ?? e.type.name}');
@@ -85,9 +87,12 @@ class QQApiClient {
     try {
       response = await _dio.get<String>(
         url,
-        options: referer == null
-            ? null
-            : Options(headers: {'Referer': referer}),
+        options: Options(
+          headers: {
+            'Cookie': QQAuth.instance.cookieHeader,
+            if (referer != null) 'Referer': referer,
+          },
+        ),
       );
     } on DioException catch (e) {
       throw QQApiException('网络请求失败：${e.message ?? e.type.name}');
@@ -287,8 +292,26 @@ class QQApiClient {
   /// 提交多个候选，服务端挑得到哪个给哪个 —— 所以这里把几种历史格式都塞
   /// 进去，别为「拼错一种就没地址」再跑一轮。
   Future<String?> songUrl(String mid, {String? mediaMid}) async {
-    // M500 是 128k mp3：免费账号最稳的一档。更高音质要会员，拿不到就白跑。
-    const prefix = 'M500';
+    // 登录了先试 320k，不行再退 128k；没登录直接 128k —— 高音质要会员，
+    // 没登录连试都是白跑一轮。
+    final auth = QQAuth.instance;
+    final prefixes = auth.isLoggedIn.value
+        ? const ['M800', 'M500']
+        : const ['M500'];
+    for (final prefix in prefixes) {
+      final url = await _songUrlWith(prefix, mid, mediaMid);
+      if (url != null) return url;
+    }
+    debugPrint('[QQ] $mid 无可播地址（多半是会员曲）');
+    return null;
+  }
+
+  Future<String?> _songUrlWith(
+    String prefix,
+    String mid,
+    String? mediaMid,
+  ) async {
+    final auth = QQAuth.instance;
     final preferred = (mediaMid != null && mediaMid.isNotEmpty)
         ? mediaMid
         : mid;
@@ -299,8 +322,16 @@ class QQApiClient {
       '$prefix$mid.mp3',
     }.toList();
 
+    final loginKey = auth.authst;
     final json = await _musicuCall({
-      'comm': {'uin': 0, 'format': 'json', 'ct': 24, 'cv': 0},
+      'comm': {
+        'uin': int.tryParse(auth.uin) ?? 0,
+        'format': 'json',
+        // 登录态下 ct 要用 19，否则服务端按游客处理，会员曲照样不给。
+        'ct': loginKey.isEmpty ? 24 : 19,
+        'cv': 0,
+        if (loginKey.isNotEmpty) 'authst': loginKey,
+      },
       'req': {
         'module': 'CDN.SrfCdnDispatchServer',
         'method': 'GetCdnDispatch',
@@ -314,7 +345,7 @@ class QQApiClient {
           'guid': _guid,
           'songmid': List.filled(filenames.length, mid),
           'songtype': List.filled(filenames.length, 0),
-          'uin': '0',
+          'uin': auth.uin,
           'loginflag': 1,
           'platform': '20',
         },
@@ -332,10 +363,7 @@ class QQApiClient {
         break;
       }
     }
-    if (purl == null) {
-      debugPrint('[QQ] $mid 无可播地址（多半是会员曲）');
-      return null;
-    }
+    if (purl == null) return null;
     if (purl.startsWith('http')) return purl;
     final sips = (data['sip'] as List?)?.whereType<String>().toList();
     final base = (sips == null || sips.isEmpty)
