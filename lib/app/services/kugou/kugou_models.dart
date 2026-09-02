@@ -69,8 +69,18 @@ class KugouSong {
     // timelen 是毫秒，duration 是秒 —— 超过一小时的多半是毫秒。
     final durationMs = duration > 36000 ? duration : duration * 1000;
 
-    var cover = (json['album_sizable_cover'] ?? json['img'] ?? json['imgurl'])
-        ?.toString();
+    // 封面字段各接口不一样：榜单给 album_sizable_cover，移动搜索那个精简
+    // 接口不给顶层封面，但通常把模板塞在 trans_param.union_cover 里
+    // （形如 http://imge.kugou.com/stdmusic/{size}/….jpg）。
+    final trans = json['trans_param'];
+    var cover =
+        (json['album_sizable_cover'] ??
+                json['img'] ??
+                json['imgurl'] ??
+                json['Image'] ??
+                json['AlbumImg'] ??
+                (trans is Map ? trans['union_cover'] : null))
+            ?.toString();
     if (cover != null && cover.isNotEmpty) {
       cover = cover.replaceAll('{size}', '400');
     } else {
