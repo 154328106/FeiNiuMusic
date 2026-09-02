@@ -31,6 +31,8 @@ class KugouSource implements MusicSource {
 
   List<SongEntity>? _favoriteCache;
 
+  Future<List<SongEntity>>? _songInflight;
+
   bool get isLoggedIn => KugouAuth.instance.isLoggedIn.value;
 
   /// 首页推荐缓存。必须缓存：点歌播放时会再拉一次完整列表当队列，两次拉到
@@ -65,6 +67,7 @@ class KugouSource implements MusicSource {
     _songCache = null;
     _cloudCache = null;
     _favoriteCache = null;
+    _songInflight = null;
   }
 
   /// 云端歌单。没登录返回空，调用方据此不渲染。
@@ -97,9 +100,18 @@ class KugouSource implements MusicSource {
     return entities;
   }
 
-  Future<List<SongEntity>> _recommendedSongs() async {
+  Future<List<SongEntity>> _recommendedSongs() {
     final cached = _songCache;
-    if (cached != null && cached.isNotEmpty) return cached;
+    if (cached != null && cached.isNotEmpty) return Future.value(cached);
+    // 首页一次加载里，hero、最新歌曲、歌曲页会同时问推荐 —— 缓存要等第一次
+    // 回来才有，中间那几发就都真的打出去了（日志里表现为「推荐歌曲 60 首」
+    // 一次加载打印三遍）。共用同一个 in-flight future。
+    return _songInflight ??= _loadRecommended().whenComplete(() {
+      _songInflight = null;
+    });
+  }
+
+  Future<List<SongEntity>> _loadRecommended() async {
     final songs = await _api.recommendSongs(limit: 60);
     final entities = [
       for (final s in songs) KugouPlaybackService.toSongEntity(s),

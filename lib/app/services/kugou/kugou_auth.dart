@@ -63,6 +63,9 @@ class KugouAuth {
 
   String get mid => _data['mid'] ?? '';
 
+  /// 设备注册的画像里当 imei / uuid 用。
+  String get guid => _data['guid'] ?? '';
+
   int get vipType => int.tryParse(_data['vipType'] ?? '0') ?? 0;
 
   bool get isVip => vipType > 0;

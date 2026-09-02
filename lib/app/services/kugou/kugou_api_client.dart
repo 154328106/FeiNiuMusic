@@ -497,12 +497,24 @@ class KugouApiClient {
         6,
         (_) => pool[rand.nextInt(pool.length)],
       ).join();
+      // 这份设备画像是官方端的原样，字段少一个都可能被判成异常设备。
+      final guid = auth.guid;
       final payload = utf8.encode(
         jsonEncode({
-          'appid': int.parse(_gwAppid),
-          'clientver': int.parse(_gwClientver),
-          'mid': auth.mid,
-          'platform': 'android',
+          'availableRamSize': 4983533568,
+          'availableRomSize': 48114719,
+          'availableSDSize': 48114717,
+          'basebandVer': '',
+          'batteryLevel': 100,
+          'batteryStatus': 3,
+          'brand': 'Redmi',
+          'buildSerial': 'unknown',
+          'device': 'marble',
+          'imei': guid,
+          'imsi': '',
+          'manufacturer': 'Xiaomi',
+          'uuid': guid,
+          'accelerometer': false,
           'gyroscope': false,
         }),
       );
@@ -527,6 +539,9 @@ class KugouApiClient {
         },
       );
       final dfid = _deepString(json, const ['dfid']);
+      if (dfid.isEmpty) {
+        debugPrint('[Kugou] 设备注册返回：$json');
+      }
       await auth.saveDfid(dfid);
       debugPrint('[Kugou] 设备注册：dfid=${dfid.isEmpty ? '未返回' : '已获取'}');
     } catch (e) {
@@ -558,9 +573,19 @@ class KugouApiClient {
         'userid': int.tryParse(auth.userId) ?? 0,
         'token': auth.token,
       },
-      headers: {'x-router': 'cloudlist.service.kugou.com'},
+      headers: const {
+        'x-router': 'cloudlist.service.kugou.com',
+        'Content-Type': 'application/json',
+      },
     );
-    final raw = _deepList(json, const ['info', 'list', 'lists']);
+    final raw = _deepList(json, const [
+      'lists',
+      'list',
+      'info',
+      'listinfo',
+      'collection_list',
+      'playlist',
+    ]);
     final result = <KugouPlaylist>[];
     final seen = <int>{};
     for (final item in raw.whereType<Map>()) {
@@ -583,7 +608,10 @@ class KugouApiClient {
       );
       if (result.length >= limit) break;
     }
-    debugPrint('[Kugou] 云端歌单 ${result.length} 个');
+    debugPrint(
+      '[Kugou] 云端歌单 ${result.length} 个：'
+      '${result.map((p) => '${p.id}/${p.name}').join(', ')}',
+    );
     return result;
   }
 
@@ -618,9 +646,18 @@ class KugouApiClient {
           'userid': int.tryParse(auth.userId) ?? 0,
           'token': auth.token,
         },
-        headers: {'x-router': 'cloudlist.service.kugou.com'},
+        headers: const {
+        'x-router': 'cloudlist.service.kugou.com',
+        'Content-Type': 'application/json',
+      },
       );
-      final rows = _deepList(json, const ['songs', 'info', 'list', 'files']);
+      final rows = _deepList(json, const [
+        'songs',
+        'songlist',
+        'list',
+        'info',
+        'files',
+      ]);
       all.addAll(rows.whereType<Map<String, dynamic>>());
       if (rows.length < 200 || all.length >= limit) break;
     }
@@ -631,13 +668,11 @@ class KugouApiClient {
   // ------------------------- 网关用到的小工具 -------------------------
 
   static Uint8List _aesCbcEncrypt(Uint8List input, String password) {
-    // 口令补齐到 32 字节，IV 全零 —— 照抄官方端。
-    final key = Uint8List(32);
-    final iv = Uint8List(16);
-    final pwd = utf8.encode(password);
-    for (var i = 0; i < pwd.length && i < 32; i++) {
-      key[i] = pwd[i];
-    }
+    // key / iv 取 md5(口令) 那个**十六进制字符串**的前 16 和后 16 个字符的
+    // ASCII 字节 —— 不是它代表的 16 字节摘要，也不是零填充。
+    final digest = _md5Hex(password);
+    final key = Uint8List.fromList(utf8.encode(digest.substring(0, 16)));
+    final iv = Uint8List.fromList(utf8.encode(digest.substring(16)));
     final cipher = pc.PaddedBlockCipherImpl(
       pc.PKCS7Padding(),
       pc.CBCBlockCipher(pc.AESEngine()),
@@ -689,9 +724,27 @@ class KugouApiClient {
     return int.tryParse('$found') ?? 0;
   }
 
+  /// 找出第一个**非空**的同名数组。
+  ///
+  /// 不能用 [_deepFind]：酷狗的返回里常常同时有 `"songs": []` 和真正装着
+  /// 数据的 `data.info`，撞上前者就直接空手而归了。
   static List<Object?> _deepList(Object? node, List<String> names) {
-    final found = _deepFind(node, names, 0);
-    return found is List ? found : const [];
+    if (node is Map) {
+      for (final name in names) {
+        final value = node[name];
+        if (value is List && value.isNotEmpty) return value;
+      }
+      for (final value in node.values) {
+        final found = _deepList(value, names);
+        if (found.isNotEmpty) return found;
+      }
+    } else if (node is List) {
+      for (final value in node) {
+        final found = _deepList(value, names);
+        if (found.isNotEmpty) return found;
+      }
+    }
+    return const [];
   }
 
   static Object? _deepFind(Object? node, List<String> names, int depth) {
