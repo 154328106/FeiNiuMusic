@@ -38,6 +38,11 @@ class QQPlaybackService {
   /// 5 首就能把起播拖到四五秒。
   final Set<String> _unresolvable = {};
 
+  /// 给第三方音源做匹配用的「歌名 歌手」和时长。
+  ///
+  /// 音源是按歌名搜、再比时长挑版本的，只给一个 mid 它对不上。
+  final Map<String, (String, int)> _matchHints = {};
+
   Future<String?> resolveStreamUrl(String mid, {String? mediaMid}) async {
     final cached = _cache[mid];
     if (cached != null && !cached.isExpired) return cached.url;
@@ -45,9 +50,12 @@ class QQPlaybackService {
     try {
       var url = await QQApiClient.instance.songUrl(mid, mediaMid: mediaMid);
       // 官方给不出（会员曲）就问第三方音源。没配密钥时一个请求都不会发。
+      final hint = _matchHints[mid];
       url ??= await UnblockSourceService.instance.resolve(
         platform: 'tx',
         songId: mid,
+        keyword: hint?.$1,
+        durationMs: hint?.$2 ?? 0,
       );
       if (url == null) {
         _unresolvable.add(mid);
@@ -74,6 +82,11 @@ class QQPlaybackService {
     for (final song in songs) {
       final mid = SongSource.decodeQQ(song.id);
       if (mid == null) continue;
+      // 先记下匹配线索，后面走音源兜底时要用。
+      _matchHints[mid] ??= (
+        '${song.title} ${song.artistDisplayName}'.trim(),
+        song.durationMs ?? 0,
+      );
       if (_cache[mid]?.isExpired == false) continue;
       if (_unresolvable.contains(mid)) continue;
       pending.add(song);

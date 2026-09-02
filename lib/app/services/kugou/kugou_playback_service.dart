@@ -8,6 +8,23 @@ import '../unblock/unblock_source.dart';
 import 'kugou_api_client.dart';
 import 'kugou_models.dart';
 
+/// 一首歌取址与兜底要用到的信息。
+class _SongMeta {
+  const _SongMeta({
+    required this.albumId,
+    required this.albumAudioId,
+    required this.keyword,
+    required this.durationMs,
+  });
+
+  final String? albumId;
+  final String? albumAudioId;
+
+  /// 「歌名 歌手」，给第三方音源做匹配用。
+  final String keyword;
+  final int durationMs;
+}
+
 class _ResolvedUrl {
   _ResolvedUrl(this.url, this.resolvedAt);
 
@@ -31,8 +48,12 @@ class KugouPlaybackService {
   /// 确认拿不到地址的歌。没有这份记录，每次起播都会为它们重跑一整套请求。
   final Set<String> _unresolvable = {};
 
-  /// 取址所需的 albumId / albumAudioId：从 SongEntity 里带过来。
-  final Map<String, (String?, String?)> _albumRefs = {};
+  /// 取址与兜底要用到的信息，从 SongEntity 里带过来。
+  ///
+  /// keyword（歌名+歌手）和时长是给第三方音源用的：音源按「搜歌名再比
+  /// 时长」匹配，拿酷狗的文件 hash 去查它一条都对不上 —— 之前日志里
+  /// 「kg/<hash> 全部未命中」就是这么来的。
+  final Map<String, _SongMeta> _meta = {};
 
   Future<String?> resolveStreamUrl(String hash, {bool force = false}) async {
     if (!force) {
@@ -40,17 +61,19 @@ class KugouPlaybackService {
       if (cached != null && !cached.isExpired) return cached.url;
       if (_unresolvable.contains(hash)) return null;
     }
-    final refs = _albumRefs[hash];
+    final meta = _meta[hash];
     try {
       var url = await KugouApiClient.instance.songUrl(
         hash,
-        albumId: refs?.$1,
-        albumAudioId: refs?.$2,
+        albumId: meta?.albumId,
+        albumAudioId: meta?.albumAudioId,
       );
-      // 官方给不出就问第三方音源。没配密钥时 resolve 直接返回 null。
+      // 官方给不出（会员曲）就问第三方音源，按歌名+歌手+时长匹配。
       url ??= await UnblockSourceService.instance.resolve(
         platform: 'kg',
         songId: hash,
+        keyword: meta?.keyword,
+        durationMs: meta?.durationMs ?? 0,
       );
       if (url == null) {
         _unresolvable.add(hash);
@@ -110,11 +133,18 @@ class KugouPlaybackService {
     return playable;
   }
 
-  /// 取址要用的 album 引用存在 audioSpec / codec 两个既有字段里
-  /// （见 SongSource 里关于不改数据库 schema 的说明）。
+  /// 记下取址与兜底要用的信息。
+  ///
+  /// album 引用借 codec / audioSpec 两个既有字段存（见 SongSource 里关于
+  /// 不改数据库 schema 的说明）。
   void _rememberRefs(SongEntity song, String hash) {
-    if (_albumRefs.containsKey(hash)) return;
-    _albumRefs[hash] = (song.codec, song.audioSpec);
+    if (_meta.containsKey(hash)) return;
+    _meta[hash] = _SongMeta(
+      albumId: song.codec,
+      albumAudioId: song.audioSpec,
+      keyword: '${song.title} ${song.artistDisplayName}'.trim(),
+      durationMs: song.durationMs ?? 0,
+    );
   }
 
   void invalidate(String hash) {
