@@ -65,6 +65,8 @@ class NetEaseSource implements MusicSource {
   void reset() {
     _uid = null;
     _likedPlaylistId = null;
+    // 在途的那几发是按旧账号发的，别让它们的结果被后来者领走。
+    _inflight.clear();
     // 落盘的那份也要清，否则换账号后还会拿上一个人的 uid 去取收藏。
     unawaited(_clearPersistedUid());
   }
@@ -81,7 +83,25 @@ class NetEaseSource implements MusicSource {
   /// 最近一次失败原因，供首页在区块为空时给出可读提示。
   String? lastError;
 
-  Future<int?> _ensureUid() async {
+  /// 同一份数据的并发请求合并成一次。
+  ///
+  /// 首页的收藏、最近播放、歌曲页会在同一次加载里各问一遍，缓存要等第一
+  /// 个回来才建好，中间那几发就都真打出去了 —— 日志里 `uid=… nickname=`
+  /// 每轮打两遍就是这么来的。网易云的账号接口有速率限制，被限流的表现很
+  /// 隐蔽：收藏和播放记录忽然变空，界面上却还写着「已登录」。
+  final Map<String, Future<Object?>> _inflight = {};
+
+  Future<T> _dedupe<T>(String key, Future<T> Function() run) {
+    final pending = _inflight[key];
+    if (pending != null) return pending.then((v) => v as T);
+    final future = run();
+    _inflight[key] = future;
+    return future.whenComplete(() => _inflight.remove(key));
+  }
+
+  Future<int?> _ensureUid() => _dedupe('uid', _loadUid);
+
+  Future<int?> _loadUid() async {
     final cached = _uid;
     if (cached != null) return cached;
     // 先吃落盘的那份：account 接口被限流时照样能取收藏。
@@ -125,7 +145,10 @@ class NetEaseSource implements MusicSource {
   }
 
   /// 「我喜欢的音乐」是用户歌单列表里的第一个，网易云没有专门的接口。
-  Future<int?> _ensureLikedPlaylist() async {
+  Future<int?> _ensureLikedPlaylist() =>
+      _dedupe('likedPlaylist', _loadLikedPlaylist);
+
+  Future<int?> _loadLikedPlaylist() async {
     final cached = _likedPlaylistId;
     if (cached != null) return cached;
     final uid = await _ensureUid();
@@ -186,7 +209,10 @@ class NetEaseSource implements MusicSource {
   }
 
   @override
-  Future<List<SongEntity>> fullFeed(HomeFeed kind, {required int limit}) async {
+  Future<List<SongEntity>> fullFeed(HomeFeed kind, {required int limit}) =>
+      _dedupe('feed:${kind.name}:$limit', () => _loadFeed(kind, limit));
+
+  Future<List<SongEntity>> _loadFeed(HomeFeed kind, int limit) async {
     try {
       switch (kind) {
         case HomeFeed.favorites:

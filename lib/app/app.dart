@@ -8,7 +8,6 @@ import '../components/dialog/app_update_dialog.dart';
 import '../components/focus/tv_focus_scope.dart';
 import '../components/layout/tablet_layout_host.dart';
 import '../pages/login/login_page.dart';
-import '../pages/onboarding/onboarding_page.dart';
 import 'navigator_key.dart';
 import 'router/app_page_route.dart';
 import 'router/app_router.dart';
@@ -357,14 +356,11 @@ class _AppStartupGateState extends State<_AppStartupGate> {
 
   @override
   Widget build(BuildContext context) {
-    // 首次启动引导门控：未完成引导一律全屏显示，与登录态无关；
-    // 完成后（completed=true）才进入下方登录/外壳逻辑。
-    return ValueListenableBuilder<bool>(
-      valueListenable: AppOnboardingSettings.completed,
-      builder: (context, onboardingCompleted, _) {
-        if (!onboardingCompleted) {
-          return const OnboardingPage();
-        }
+    // 首次启动引导已停用：自用版本，装上就是要直接用，没必要每次装新包都
+    // 先点一遍引导。OnboardingPage 和 AppOnboardingSettings 保留着，想恢复
+    // 把下面这层 ValueListenableBuilder 加回来即可。
+    return Builder(
+      builder: (context) {
         // 访客模式：没连飞牛也放行 —— 网易云那条线不登录就能听（推荐新歌、
         // 推荐歌单、排行榜、搜索都不要账号），没道理把人挡在登录页外面。
         return ValueListenableBuilder<bool>(

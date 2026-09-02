@@ -165,13 +165,6 @@ class _SettingsPageState extends State<SettingsPage> {
                     onTap: () =>
                         Navigator.pushNamed(context, AppRoutes.unblockSource),
                   ),
-                  AppSettingTile(
-                    title: '网易云音乐',
-                    subtitle: '搜索并播放网易云曲库',
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () =>
-                        Navigator.pushNamed(context, AppRoutes.neteaseSearch),
-                  ),
                 ],
               ),
               const SizedBox(height: 16),

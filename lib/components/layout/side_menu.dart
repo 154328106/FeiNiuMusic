@@ -123,6 +123,15 @@ class SideMenu extends StatelessWidget {
                       color: cardColor,
                       accent: scheme.primary,
                       children: [
+                        // 侧边导航模式下「我的」原本没有任何入口：它在底部
+                        // 标签栏里是一个 tab，换成侧边栏就整个消失了 ——
+                        // 而主题外观、音乐来源、账号都在那一页，等于调不回来。
+                        _MenuItem(
+                          icon: Icons.person_rounded,
+                          label: '我的',
+                          onTap: () =>
+                              _pushAndClose(context, AppRoutes.profile),
+                        ),
                         _MenuItem(
                           icon: Icons.bar_chart_rounded,
                           label: '统计',
