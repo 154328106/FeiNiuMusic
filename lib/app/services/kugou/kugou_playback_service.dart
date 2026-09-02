@@ -52,7 +52,7 @@ class KugouPlaybackService {
   ///
   /// keyword（歌名+歌手）和时长是给第三方音源用的：音源按「搜歌名再比
   /// 时长」匹配，拿酷狗的文件 hash 去查它一条都对不上 —— 之前日志里
-  /// 「kg/<hash> 全部未命中」就是这么来的。
+  /// 「kg/`<hash>` 全部未命中」就是这么来的。
   final Map<String, _SongMeta> _meta = {};
 
   Future<String?> resolveStreamUrl(String hash, {bool force = false}) async {
