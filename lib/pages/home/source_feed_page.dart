@@ -87,6 +87,15 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
       } finally {
         if (mounted) setState(() => _preparing = false);
       }
+      // 队尾续接：播到这一段末尾时再准备下一段，而不是一次性把整张歌单
+      // 塞进队列 —— 那样播放器会为整队构建播放源，窗口就白设了。
+      var offset = index + _prepareWindow;
+      _player.queueExtender = () async {
+        if (offset >= _songs.length) return const <SongEntity>[];
+        final next = _songs.skip(offset).take(_prepareWindow).toList();
+        offset += _prepareWindow;
+        return _source.prepareQueue(next);
+      };
       if (!mounted || queue.isEmpty) return;
       // 筛完索引会变，按歌曲 id 重新定位；点中的那首若被筛掉就从头播。
       final moved = queue.indexWhere((s) => s.id == tapped.id);

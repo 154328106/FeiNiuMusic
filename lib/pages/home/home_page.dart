@@ -611,13 +611,17 @@ class _HomePageState extends State<HomePage>
       // playQueue 内部构建播放源时抛异常，直接掉进下面的 catch，退化成
       // 「只播大图这一首」——会员曲占比高的源几乎必踩。
       //
-      // 只预取前一段：漫游队列有 60 首，整队预取意味着为其中每首会员曲都
-      // 问一次第三方音源，而一次收听根本听不到那么后面 —— 音源那边的请求量
-      // 主要就是这么堆起来的。后面的等真播到了再单独取。
-      const roamPrepareWindow = 25;
-      final head = songs.take(roamPrepareWindow).toList();
-      final tail = songs.skip(roamPrepareWindow).toList();
-      final prepared = [...await _source.prepareQueue(head), ...tail];
+      // 队列只给前一段。
+      //
+      // 上一版只收窄了「预取」的范围，队列照样是整整 60 首 —— 没用：
+      // playQueue 之后播放器要为**整个队列**构建播放源，剩下那 35 首照样被
+      // 逐个解析，总请求数一点没少（日志里表现为「队列 25 首」之后又冒出
+      // 一批 status=2）。真正的杠杆是队列本身要短。
+      //
+      // 队尾由播放器的漫游续接负责（_roamQueueExtender），听得到底自然会续。
+      const roamQueueWindow = 25;
+      final head = songs.take(roamQueueWindow).toList();
+      final prepared = await _source.prepareQueue(head);
       if (!mounted) return;
       if (prepared.isEmpty) {
         AppToast.showGlobal('这批歌都取不到播放地址', type: ToastType.error);

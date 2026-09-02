@@ -486,10 +486,21 @@ class _SongsPageState extends State<SongsPage>
   Future<void> _playFromSource(List<SongEntity> songs, int index) async {
     final tapped = songs[index];
     final head = songs.skip(index).take(_prepareWindow).toList();
-    final prepared = await _source.prepareQueue(head);
-    if (!mounted || prepared.isEmpty) return;
-    // 预取窗口之外的原样接在后面，播到了再单独取。
-    final queue = [...prepared, ...songs.skip(index + _prepareWindow)];
+    final queue = await _source.prepareQueue(head);
+    if (!mounted || queue.isEmpty) return;
+
+    // 队列只给这一段，剩下的等播到队尾再续。
+    //
+    // 把整个列表塞进队列是没用的：播放器会为整个队列构建播放源，窗口外的
+    // 歌照样被逐个解析，音源请求一点没省。
+    var offset = index + _prepareWindow;
+    _player.queueExtender = () async {
+      if (offset >= songs.length) return const <SongEntity>[];
+      final next = songs.skip(offset).take(_prepareWindow).toList();
+      offset += _prepareWindow;
+      return _source.prepareQueue(next);
+    };
+
     _player.playQueue(queue, _startIndexFor(head, 0, tapped, queue));
   }
 
