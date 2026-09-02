@@ -388,9 +388,21 @@ class KugouApiClient {
     if (method == 'GET') return _getJson(url, headers: merged);
     final Response<String> response;
     try {
+      // 二进制 body 走 Stream。
+      //
+      // 直接把 Uint8List 交给 dio 是不保险的：非 JSON 的 Content-Type 下，
+      // 它的默认 transformer 会走到 `data.toString()`，于是发出去的是
+      // 「[123, 34, 97...]」这么一串字面量 —— 服务端当然解不开，表现就是
+      // 设备注册永远拿不到 dfid。Stream 这条路 dio 是原样透传的。
+      final payload = rawBody == null
+          ? body
+          : Stream<List<int>>.fromIterable([rawBody]);
+      if (rawBody != null) {
+        merged['Content-Length'] = '${rawBody.length}';
+      }
       response = await _dio.post<String>(
         url,
-        data: body,
+        data: payload,
         options: Options(headers: merged),
       );
     } on DioException catch (e) {
@@ -548,6 +560,17 @@ class KugouApiClient {
       // 拿不到 dfid 只影响会员曲成功率，不该让登录整个失败。
       debugPrint('[Kugou] 设备注册失败：$e');
     }
+  }
+
+  /// 登录着但没有 dfid 时补注册一次。
+  ///
+  /// dfid 只在扫码成功那一刻注册，那次失败了就一直空着，除非用户想起来
+  /// 退出重登 —— 没道理要用户猜。
+  Future<void> ensureDeviceRegistered() async {
+    final auth = KugouAuth.instance;
+    await auth.ensureLoaded();
+    if (!auth.isLoggedIn.value || auth.hasDfid) return;
+    await registerDevice();
   }
 
   /// 登录用户的云端歌单（含「我喜欢」）。

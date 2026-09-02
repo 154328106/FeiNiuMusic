@@ -6,6 +6,7 @@ import '../../components/account/profile_account_card.dart';
 import '../../app/router/app_router.dart' show AppRoutes;
 import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';
+import '../../app/services/kugou/kugou_api_client.dart';
 import '../../app/services/kugou/kugou_auth.dart';
 import '../../app/services/kugou/kugou_playback_service.dart';
 import '../../app/services/qq/qq_auth.dart';
@@ -325,27 +326,54 @@ class _MusicSourceSection extends StatelessWidget {
   ) async {
     final auth = KugouAuth.instance;
     if (auth.isLoggedIn.value) {
-      final logout = await showDialog<bool>(
+      // 设备注册状态直接写在这儿。它决定会员曲能不能拿到官方地址，出问题
+      // 时不该让人翻日志去猜 —— 没注册就给一个当场重试的按钮。
+      final action = await showDialog<String>(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('酷狗音乐账号'),
           content: Text(
-            '已登录${auth.nickname.isEmpty ? '' : '：${auth.nickname}'}。'
+            '已登录${auth.nickname.isEmpty ? '' : '：${auth.nickname}'}
+'
+            '会员：${auth.isVip ? 'VIP${auth.vipType}' : '无'}
+'
+            '设备标识：${auth.hasDfid ? '已注册' : '未注册'}
+
+'
+            '${auth.hasDfid ? '' : '设备没注册时，会员曲的官方地址一律拿不到，'
+                  '只能靠第三方音源兜。可以点「重注册设备」再试一次。
+
+'}'
             '退出后仍可用推荐、榜单和搜索，但会员曲和云端歌单拿不到。',
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: () => Navigator.pop(context, 'cancel'),
               child: const Text('取消'),
             ),
+            if (!auth.hasDfid)
+              TextButton(
+                onPressed: () => Navigator.pop(context, 'device'),
+                child: const Text('重注册设备'),
+              ),
             TextButton(
-              onPressed: () => Navigator.pop(context, true),
+              onPressed: () => Navigator.pop(context, 'logout'),
               child: const Text('退出登录'),
             ),
           ],
         ),
       );
-      if (logout != true) return;
+      if (action == 'device') {
+        await KugouApiClient.instance.registerDevice();
+        AppToast.showGlobal(
+          KugouAuth.instance.hasDfid ? '设备注册成功' : '设备注册失败，看日志',
+          type: KugouAuth.instance.hasDfid ? ToastType.success : ToastType.error,
+        );
+        KugouPlaybackService.instance.clear();
+        registry.notifyContentChanged();
+        return;
+      }
+      if (action != 'logout') return;
       await auth.logout();
       // 换了登录态，之前判定「拿不到地址」的那批歌值得重试一次。
       KugouPlaybackService.instance.clear();

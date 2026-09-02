@@ -26,6 +26,7 @@ import 'app/services/feiniu/api_client.dart';
 import 'app/services/feiniu/auth_service.dart';
 import 'app/services/feiniu/fn_connection_probe_service.dart';
 import 'app/services/song_match/match_source_state.dart';
+import 'app/services/kugou/kugou_api_client.dart';
 import 'app/services/kugou/kugou_auth.dart';
 import 'app/services/qq/qq_auth.dart';
 import 'app/state/settings_guest_state.dart';
@@ -130,6 +131,8 @@ Future<void> main() async {
   await QQAuth.instance.ensureLoaded();
   // 酷狗的设备标识（mid/dfid）免登录也要用，签名和取址都带着它。
   await KugouAuth.instance.ensureLoaded();
+  // dfid 只在扫码成功那一刻注册；那次失败就一直空着。补一发，不等它。
+  unawaited(KugouApiClient.instance.ensureDeviceRegistered());
   await MusicSourceRegistry.instance.ensureLoaded();
   await UnblockSourceService.instance.load();
   // 网易云的 MUSIC_U 会过期，过期后表现很隐蔽：收藏、播放记录忽然变空，

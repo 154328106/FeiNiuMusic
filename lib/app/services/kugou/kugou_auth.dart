@@ -61,6 +61,9 @@ class KugouAuth {
 
   String get dfid => _data['dfid']?.isNotEmpty == true ? _data['dfid']! : '-';
 
+  /// 设备是否注册过。没注册的话会员曲的取址接口一律不认账。
+  bool get hasDfid => dfid != '-';
+
   String get mid => _data['mid'] ?? '';
 
   /// 设备注册的画像里当 imei / uuid 用。
