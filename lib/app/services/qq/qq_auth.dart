@@ -344,8 +344,11 @@ class QQAuth {
     }
     _absorbCookies(loginResponse);
     try {
-      final json = jsonDecode(loginResponse.data ?? '{}');
-      final data = json is Map ? (json['req'] as Map?)?['data'] : null;
+      // 分步取，别写成一行三元 —— `?[` 跟三元的 `?` 撞在一起，Dart 会
+      // 解析歧义（analyze 报 "Conditions must have a static type of bool"）。
+      final root = jsonDecode(loginResponse.data ?? '{}');
+      final req = root is Map ? root['req'] : null;
+      final data = req is Map ? req['data'] : null;
       if (data is Map) {
         final musicKey = data['musickey'] as String?;
         if (musicKey != null && musicKey.isNotEmpty) {
