@@ -607,6 +607,18 @@ class _HomePageState extends State<HomePage>
       if (songs.isEmpty) {
         songs = [first];
       }
+      // 公网源要先筛掉拿不到地址的。不筛的话，队列里夹着的会员曲会在
+      // playQueue 内部构建播放源时抛异常，直接掉进下面的 catch，退化成
+      // 「只播大图这一首」——QQ 那边一半以上的歌都拿不到官方地址，几乎必踩。
+      final prepared = await _source.prepareQueue(songs);
+      if (!mounted) return;
+      if (prepared.isEmpty) {
+        AppToast.showGlobal('这批歌都取不到播放地址', type: ToastType.error);
+        return;
+      }
+      // 大图那首若被筛掉了就从头播，别把索引落在别人身上。
+      final startAt = prepared.indexWhere((s) => s.id == first.id);
+      songs = prepared;
       final roamId = _roamId.value;
       if (mounted) {
         // mode: shuffle + roamId 直接传入 playQueue：playQueue 内部会清空
@@ -618,7 +630,7 @@ class _HomePageState extends State<HomePage>
         );
         await _player.playQueue(
           songs,
-          0,
+          startAt >= 0 ? startAt : 0,
           mode: PlaybackMode.shuffle,
           roamChainId: roamId,
         );
