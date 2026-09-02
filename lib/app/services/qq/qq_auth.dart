@@ -212,10 +212,7 @@ class QQAuth {
       case '0':
         final url = parts.length > 2 ? parts[2] : '';
         if (url.isEmpty) {
-          return const QQScanResult(
-            QQScanState.error,
-            message: '登录成功但没拿到凭证',
-          );
+          return const QQScanResult(QQScanState.error, message: '登录成功但没拿到凭证');
         }
         final nick = parts.length > 5 ? parts[5] : '';
         try {
@@ -301,10 +298,7 @@ class QQAuth {
         },
         options: Options(
           contentType: Headers.formUrlEncodedContentType,
-          headers: {
-            'Referer': 'https://graph.qq.com/',
-            'Cookie': cookieHeader,
-          },
+          headers: {'Referer': 'https://graph.qq.com/', 'Cookie': cookieHeader},
         ),
       );
     } on DioException catch (e) {
@@ -333,10 +327,7 @@ class QQAuth {
         }),
         options: Options(
           contentType: Headers.jsonContentType,
-          headers: {
-            'Referer': 'https://y.qq.com/',
-            'Cookie': cookieHeader,
-          },
+          headers: {'Referer': 'https://y.qq.com/', 'Cookie': cookieHeader},
         ),
       );
     } on DioException catch (e) {
@@ -369,9 +360,7 @@ class QQAuth {
   }
 
   String _cookieHeaderWithQrsig() {
-    final base = _cookies.entries
-        .map((e) => '${e.key}=${e.value}')
-        .join('; ');
+    final base = _cookies.entries.map((e) => '${e.key}=${e.value}').join('; ');
     if (_qrsig.isEmpty) return base;
     return base.isEmpty ? 'qrsig=$_qrsig' : 'qrsig=$_qrsig; $base';
   }

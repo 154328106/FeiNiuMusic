@@ -178,11 +178,7 @@ class _QQLoginPageState extends State<QQLoginPage> {
             height: 200,
             color: Colors.white.withValues(alpha: 0.82),
             alignment: Alignment.center,
-            child: Icon(
-              Icons.refresh_rounded,
-              size: 44,
-              color: scheme.primary,
-            ),
+            child: Icon(Icons.refresh_rounded, size: 44, color: scheme.primary),
           ),
       ],
     );
