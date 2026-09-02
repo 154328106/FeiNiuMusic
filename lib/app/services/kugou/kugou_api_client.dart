@@ -319,7 +319,6 @@ class KugouApiClient {
     return node;
   }
 
-
   // ---------------------------------------------------------------------
   // 网关：签名请求 / 扫码登录 / 云端歌单
   //
@@ -568,10 +567,12 @@ class KugouApiClient {
       final id = _numOf(item, const ['listid', 'id', 'specialid']);
       if (id <= 0 || !seen.add(id)) continue;
       final name = _strOf(item, const ['name', 'listname', 'specialname']);
-      final cover = _strOf(
-        item,
-        const ['pic', 'img', 'list_pic', 'cover'],
-      ).replaceAll('{size}', '400');
+      final cover = _strOf(item, const [
+        'pic',
+        'img',
+        'list_pic',
+        'cover',
+      ]).replaceAll('{size}', '400');
       result.add(
         KugouPlaylist(
           id: id,
