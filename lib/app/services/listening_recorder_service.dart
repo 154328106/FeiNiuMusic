@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../state/player_state.dart';
 import '../state/song_state.dart';
 import 'db/db_constants.dart';
 import 'db/db_helper.dart';
+import 'played_song_cache.dart';
 
 /// 听歌报告埋点：把每次「单曲播放 session」落成一条 [DbConstants.tableReportEvents]
 /// 记录，存于主库 `feiniu_music.db`（与聚合统计同库，便于统一备份）。
@@ -57,6 +60,10 @@ class ListeningRecorderService {
       }
       _currentSongId = song?.id;
       _currentSong = song;
+      // 顺手把歌本身留档。统计表只存 songId，而把 id 换回歌曲信息靠的是
+      // 飞牛曲库 —— 公网源的歌从来不在里面，统计页和「最近播放」就一直是
+      // 空的。留档补上这一环。
+      if (song != null) PlayedSongCache.instance.record(song);
       _sessionStartMs = now.millisecondsSinceEpoch;
       _sessionEndMs = _sessionStartMs;
       _playMs = 0;
@@ -97,6 +104,7 @@ class ListeningRecorderService {
   /// 生命周期兜底：App 切后台/被杀时调用。
   void onLifecyclePause() {
     flush();
+    unawaited(PlayedSongCache.instance.flush());
   }
 
   void _finalizeCurrent({bool completed = false}) {

@@ -570,6 +570,7 @@ class KugouApiClient {
     final auth = KugouAuth.instance;
     await auth.ensureLoaded();
     if (!auth.isLoggedIn.value || auth.hasDfid) return;
+    if (auth.dfidRecentlyFailed) return;
     await registerDevice();
   }
 

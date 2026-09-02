@@ -106,9 +106,24 @@ class KugouAuth {
   }
 
   Future<void> saveDfid(String value) async {
-    if (value.isEmpty) return;
+    if (value.isEmpty) {
+      // 记一笔失败时间：注册被服务端拒（error_code 20006）时，没必要每次
+      // 开 App 都再撞一遍，留给用户在账号弹窗里手动重试。
+      _data['dfidFailedAt'] = '${DateTime.now().millisecondsSinceEpoch}';
+      await _persist();
+      return;
+    }
+    _data.remove('dfidFailedAt');
     _data['dfid'] = value;
     await _persist();
+  }
+
+  /// 最近一次注册失败是不是还在冷却里（24 小时）。
+  bool get dfidRecentlyFailed {
+    final raw = int.tryParse(_data['dfidFailedAt'] ?? '');
+    if (raw == null) return false;
+    final at = DateTime.fromMillisecondsSinceEpoch(raw);
+    return DateTime.now().difference(at) < const Duration(hours: 24);
   }
 
   Future<void> logout() async {

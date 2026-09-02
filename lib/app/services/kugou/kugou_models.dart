@@ -32,6 +32,17 @@ class KugouSong {
   final int durationMs;
   final bool isVip;
 
+  /// 去掉文件扩展名。云端歌单的标题字段是文件名，带着 .mp3 / .flac。
+  static String _stripExtension(String raw) {
+    final value = raw.trim();
+    for (final ext in const ['.mp3', '.flac', '.ape', '.wav', '.m4a', '.ogg']) {
+      if (value.toLowerCase().endsWith(ext)) {
+        return value.substring(0, value.length - ext.length).trim();
+      }
+    }
+    return value;
+  }
+
   /// 酷狗返回的歌名常是「歌手 - 歌名」，拆开只留歌名。
   static (String name, String artist) _splitTitle(String raw, String singer) {
     final idx = raw.indexOf(' - ');
@@ -59,18 +70,27 @@ class KugouSong {
                 json['singer'])
             ?.toString() ??
         '';
-    // `name` 必须在候选里：云端歌单（get_list_all_file）只给这一个字段，
-    // 形如「歌手 - 歌名」。漏了它，收藏和歌单里的歌就是「有封面、能播、
-    // 但没歌名没歌手」—— 搜索和榜单那几个接口给的是 songname，才没露馅。
-    final rawTitle =
-        (json['songname'] ??
-                json['SongName'] ??
-                json['name'] ??
-                json['filename'] ??
-                json['fileName'] ??
-                json['audio_name'])
-            ?.toString() ??
-        '';
+    // 标题字段各接口给的东西不一样，而且**同一个接口里也不一致**：云端歌单
+    // 有时给「周杰伦 - 晴天.mp3」，有时只给「晴天.mp3」。所以不能按固定顺序
+    // 取第一个非空的（上一版就是这么写的，结果收藏里全是「歌名.mp3」），
+    // 要在所有候选里挑信息最全的那个 —— 带「歌手 - 」的优先。
+    final titleCandidates = [
+      for (final key in const [
+        'songname',
+        'SongName',
+        'name',
+        'filename',
+        'fileName',
+        'audio_name',
+      ])
+        json[key]?.toString() ?? '',
+    ].where((v) => v.trim().isNotEmpty).map(_stripExtension).toList();
+    final rawTitle = titleCandidates.isEmpty
+        ? ''
+        : titleCandidates.firstWhere(
+            (v) => v.contains(' - '),
+            orElse: () => titleCandidates.first,
+          );
     final (name, artists) = _splitTitle(rawTitle, singer);
 
     // 时长：移动端接口给秒，网页端有的给毫秒。

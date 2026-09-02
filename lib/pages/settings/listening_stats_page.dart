@@ -16,6 +16,7 @@ import '../../components/layout/base/app_top_bar.dart';
 import '../../components/list/media_list_tile.dart';
 import '../library/library_detail_pages.dart';
 import '../songs/song_detail_sheet.dart';
+import '../../app/services/played_song_cache.dart';
 
 enum _TrendMode { week, month }
 
@@ -80,7 +81,14 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
     final songs = await _songDao.fetchByIds(
       topStats.map((e) => e.songId).toList(),
     );
-    final songMap = {for (final s in songs) s.id: s};
+    // SongDao 查的是**飞牛曲库**。网易云 / 酷狗的 id 不在里面，查不到就被
+    // 下面的 `continue` 跳过 —— 换源之后整页空白就是这么来的。用本机的播放
+    // 留档把这些补上。
+    await PlayedSongCache.instance.ensureLoaded();
+    final songMap = {
+      ...PlayedSongCache.instance.byIds(topStats.map((e) => e.songId)),
+      for (final s in songs) s.id: s,
+    };
     final topSongs = <_SongStatRow>[];
     final artistAcc = <String, _AggAccum>{};
     final albumAcc = <String, _AggAccum>{};

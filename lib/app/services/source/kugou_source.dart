@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../state/song_source.dart';
 import '../../state/song_state.dart';
+import '../played_song_cache.dart';
 import '../kugou/kugou_api_client.dart';
 import '../kugou/kugou_auth.dart';
 import '../kugou/kugou_models.dart';
@@ -152,9 +154,13 @@ class KugouSource implements MusicSource {
         case HomeFeed.favorites:
           return await _favorites();
         case HomeFeed.recentPlayed:
-          // 最近播放在酷狗那边没有免登录也稳定的接口，先留空。首页对空
-          // 区块本来就不渲染。
-          return const [];
+          // 酷狗没有稳定可用的播放历史接口。与其猜一个，不如用本机播过的
+          // 记录 —— 用户想在这块看到的本来就是「我刚才听的」。
+          await PlayedSongCache.instance.ensureLoaded();
+          return PlayedSongCache.instance.recent(
+            limit: limit,
+            idPrefix: SongSource.kugouPrefix,
+          );
         case HomeFeed.latestSongs:
           return await _recommendedSongs();
       }
