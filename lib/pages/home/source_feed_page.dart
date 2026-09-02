@@ -48,7 +48,7 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
   ///
   /// 整张歌单几百首全问一遍要好几秒，而且后面那些等真播到了早过期了。
   /// 从点中的位置往后取一段就够，播完这段会自然续。
-  static const int _prepareWindow = 60;
+  static const int _prepareWindow = 25;
 
   MusicSource get _source => MusicSourceRegistry.instance.current.value;
 

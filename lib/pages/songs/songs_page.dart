@@ -477,11 +477,20 @@ class _SongsPageState extends State<SongsPage>
     );
   }
 
+  /// 一次最多为多少首歌预取地址。
+  ///
+  /// 整个列表全预取意味着为其中每首会员曲都问一次第三方音源 —— 一次收听
+  /// 根本听不到那么后面，纯属白花请求。从点中的位置往后取一段就够。
+  static const int _prepareWindow = 25;
+
   Future<void> _playFromSource(List<SongEntity> songs, int index) async {
     final tapped = songs[index];
-    final queue = await _source.prepareQueue(songs);
-    if (!mounted || queue.isEmpty) return;
-    _player.playQueue(queue, _startIndexFor(songs, index, tapped, queue));
+    final head = songs.skip(index).take(_prepareWindow).toList();
+    final prepared = await _source.prepareQueue(head);
+    if (!mounted || prepared.isEmpty) return;
+    // 预取窗口之外的原样接在后面，播到了再单独取。
+    final queue = [...prepared, ...songs.skip(index + _prepareWindow)];
+    _player.playQueue(queue, _startIndexFor(head, 0, tapped, queue));
   }
 
   /// 筛完之后点中的那首落在哪。
