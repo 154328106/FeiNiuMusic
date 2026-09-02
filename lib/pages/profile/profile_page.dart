@@ -319,6 +319,26 @@ class _MusicSourceSection extends StatelessWidget {
     registry.notifyContentChanged();
   }
 
+  /// 酷狗账号弹窗里那段说明。
+  ///
+  /// 「会员」和「设备标识」两行是有用的诊断：会员决定官方给不给地址，设备
+  /// 没注册则一律不给 —— 这两样都不该靠翻日志才知道。
+  static String _kugouAccountDetail(KugouAuth auth) {
+    final lines = <String>[
+      '已登录${auth.nickname.isEmpty ? '' : '：${auth.nickname}'}',
+      '会员：${auth.isVip ? 'VIP${auth.vipType}' : '无'}',
+      '设备标识：${auth.hasDfid ? '已注册' : '未注册'}',
+      '',
+      if (!auth.hasDfid) ...[
+        '设备没注册时，会员曲的官方地址一律拿不到，只能靠第三方音源兜。'
+            '可以点「重注册设备」再试一次。',
+        '',
+      ],
+      '退出后仍可用推荐、榜单和搜索，但会员曲和云端歌单拿不到。',
+    ];
+    return lines.join('\n');
+  }
+
   /// 酷狗扫码登录。登录后能听会员曲，还能同步云端歌单和「我喜欢」。
   Future<void> _onLoginKugou(
     BuildContext context,
@@ -332,20 +352,7 @@ class _MusicSourceSection extends StatelessWidget {
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('酷狗音乐账号'),
-          content: Text(
-            '已登录${auth.nickname.isEmpty ? '' : '：${auth.nickname}'}
-'
-            '会员：${auth.isVip ? 'VIP${auth.vipType}' : '无'}
-'
-            '设备标识：${auth.hasDfid ? '已注册' : '未注册'}
-
-'
-            '${auth.hasDfid ? '' : '设备没注册时，会员曲的官方地址一律拿不到，'
-                  '只能靠第三方音源兜。可以点「重注册设备」再试一次。
-
-'}'
-            '退出后仍可用推荐、榜单和搜索，但会员曲和云端歌单拿不到。',
-          ),
+          content: Text(_kugouAccountDetail(auth)),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, 'cancel'),
