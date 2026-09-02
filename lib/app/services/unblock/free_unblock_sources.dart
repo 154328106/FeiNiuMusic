@@ -34,26 +34,33 @@ class FreeUnblockSources {
   ///
   /// [keyword] 是「歌名 歌手」，[durationMs] 用来在搜索结果里挑对版本 ——
   /// 少了它很容易匹配到现场版、翻唱或者串烧。
+  /// [neteaseId] 只有网易云的歌才有 —— GD Studio 按它查；酷狗和酷我这两家
+  /// 本来就是「搜歌名再比时长」，跟来源是哪家无关。所以它是可选的：QQ 和
+  /// 酷狗的歌照样能走后两家，之前把整条链按 platform=='wy' 拦掉是我堵死了
+  /// 自己的退路。
   static Future<String?> resolve({
-    required int neteaseId,
+    int? neteaseId,
     required String keyword,
     required int durationMs,
   }) async {
-    final gd = await _gdStudio(neteaseId);
-    if (gd != null) {
-      debugPrint('[Unblock] GD Studio 命中 $neteaseId');
-      return gd;
+    final label = neteaseId?.toString() ?? keyword;
+    if (neteaseId != null) {
+      final gd = await _gdStudio(neteaseId);
+      if (gd != null) {
+        debugPrint('[Unblock] GD Studio 命中 $label');
+        return gd;
+      }
     }
     if (keyword.trim().isEmpty) return null;
 
     final kugou = await _kugou(keyword, durationMs);
     if (kugou != null) {
-      debugPrint('[Unblock] 酷狗命中 $neteaseId');
+      debugPrint('[Unblock] 酷狗命中 $label');
       return kugou;
     }
     final kuwo = await _kuwo(keyword, durationMs);
     if (kuwo != null) {
-      debugPrint('[Unblock] 酷我命中 $neteaseId');
+      debugPrint('[Unblock] 酷我命中 $label');
       return kuwo;
     }
     return null;

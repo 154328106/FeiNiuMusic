@@ -203,6 +203,9 @@ class UnblockSourceService {
         );
         if (url != null) {
           await _rememberKey(index);
+          // 成功也留一行。之前只在失败时打日志，结果「明明救回来了」
+          // 在日志里完全看不出来，排查时误以为音源没生效。
+          debugPrint('[Unblock] 聆澜命中 $platform/$songId');
           return url;
         }
       }
@@ -210,13 +213,18 @@ class UnblockSourceService {
     }
 
     // 聆澜没配、或者这首它也没有 —— 再试一遍免费的那几家。
-    // 目前只做了网易云：另外两家的原始 id 对不上 GD Studio 的入参。
-    if (!freeFallbackEnabled.value || platform != 'wy') return null;
-    final numericId = int.tryParse(songId);
-    if (numericId == null) return null;
+    //
+    // 原来这里按 `platform != 'wy'` 直接返回，理由是「另外两家的 id 对不上
+    // GD Studio 的入参」。那只对 GD Studio 成立：链里的酷狗和酷我都是按
+    // 歌名搜的，跟来源无关。拦掉整条等于把 QQ / 酷狗的退路堵死了。
+    if (!freeFallbackEnabled.value) return null;
+    final numericId = platform == 'wy' ? int.tryParse(songId) : null;
+    final query = keyword ?? '';
+    // 既没有网易云 id、也没有歌名，那就真没得查了。
+    if (numericId == null && query.trim().isEmpty) return null;
     return FreeUnblockSources.resolve(
       neteaseId: numericId,
-      keyword: keyword ?? '',
+      keyword: query,
       durationMs: durationMs,
     );
   }

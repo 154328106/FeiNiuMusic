@@ -6,7 +6,6 @@ import 'feiniu_source.dart';
 import 'music_source.dart';
 import 'netease_source.dart';
 import 'kugou_source.dart';
-import 'qq_source.dart';
 
 /// 当前音乐数据源。
 ///
@@ -24,7 +23,11 @@ class MusicSourceRegistry {
   static final List<MusicSource> all = [
     FeiniuSource.instance,
     NetEaseSource.instance,
-    QQSource.instance,
+    // QQ 音乐摘掉了：它的取址接口会返回一个**打不开的** purl（日志里
+    // 大片 `Failed to open …aqqmusic…`），而接口本身不给状态码，起播前
+    // 没法分辨真假地址，预筛形同虚设 —— 表现成「显示可播 23 首，一首都
+    // 放不出声」。酷狗那边给 status，拿不到就是真拿不到，可信得多。
+    // 代码留在仓库里，哪天 QQ 那边有解了把这行加回来即可。
     KugouSource.instance,
   ];
 
