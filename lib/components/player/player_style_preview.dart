@@ -33,6 +33,15 @@ class PlayerStylePreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final accent = selected ? scheme.primary : scheme.secondary;
+    // 样式选择卡用真机截图。
+    //
+    // 代码画的那套小样（_classicPreview / _posterPreview）保留着 —— 流光设置
+    // 页的 `fill: true` 预览还要用它们，那里必须是活的、跟着真实动态背景走。
+    // 只有这里的选择卡换成静态图：光看假界面看不出两种布局的真实差别。
+    if (!fill && !lyricsOnly) {
+      return _screenshotCard(context, accent);
+    }
+
     final content = lyricsOnly
         ? _lyricsPage(context)
         : switch (preset) {
@@ -100,6 +109,57 @@ class PlayerStylePreview extends StatelessWidget {
           const SizedBox(height: 10),
           _lyricLine(context, '为什么舍不得熄灭', size: 8),
         ],
+      ),
+    );
+  }
+
+  /// 样式选择卡：直接铺真机截图。
+  static const String _shotClassic = 'assets/preview/player_style_classic.jpg';
+  static const String _shotPoster = 'assets/preview/player_style_poster.jpg';
+
+  Widget _screenshotCard(BuildContext context, Color accent) {
+    final scheme = Theme.of(context).colorScheme;
+    final asset = switch (preset) {
+      PlayerStylePreset.classic => _shotClassic,
+      PlayerStylePreset.poster => _shotPoster,
+    };
+    final size = MediaQuery.sizeOf(context);
+    final isLarge = AppLayoutSettings.effectiveTabletMode;
+    final aspectRatio = isLarge ? 0.56 : size.shortestSide / size.longestSide;
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: isLarge ? 412 : double.infinity,
+        ),
+        child: AspectRatio(
+          aspectRatio: aspectRatio,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Image.asset(
+                  asset,
+                  fit: BoxFit.cover,
+                  alignment: Alignment.topCenter,
+                  // 图丢了也别让整页报红，退回代码画的那套小样。
+                  errorBuilder: (context, _, _) => switch (preset) {
+                    PlayerStylePreset.classic => _classicPreview(
+                      context,
+                      accent,
+                    ),
+                    PlayerStylePreset.poster => _posterPreview(context, accent),
+                  },
+                ),
+                // 没选中的压暗一点，和选中的拉开差别。
+                if (!selected)
+                  ColoredBox(
+                    color: scheme.surface.withValues(alpha: 0.28),
+                  ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -684,7 +684,9 @@ class _LoginPageState extends State<LoginPage> {
                   ClipRRect(
                     borderRadius: BorderRadius.circular(20),
                     child: Image.asset(
-                      'assets/icon/app_icon.png',
+                      // 这一页是**连飞牛 NAS** 的登录页，标题也写着「飞牛音乐」，
+                      // 所以用飞牛自己的图标，不是 App 的桌面图标。
+                      'assets/source/feiniu.png',
                       width: 80,
                       height: 80,
                       fit: BoxFit.cover,

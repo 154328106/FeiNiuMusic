@@ -69,7 +69,7 @@ class PlayerBackgroundSettings {
   static final ValueNotifier<double> saturation = ValueNotifier(1.2);
   static final ValueNotifier<double> hueShift = ValueNotifier(120.0);
   static final ValueNotifier<PlayerCoverStyle> coverStyle = ValueNotifier(
-    PlayerCoverStyle.circle,
+    PlayerCoverStyle.cd,
   );
 
   /// 「非方形」的派生值。保留它是为了让预览组件、引导页等既有消费方
@@ -115,9 +115,10 @@ class PlayerBackgroundSettings {
     final rawStyle = prefs.getString(_prefsCoverStyle);
     coverStyle.value = rawStyle != null
         ? PlayerCoverStyle.fromName(rawStyle)
-        // 老版本没有样式键，按旧的「圆形封面」开关迁移一次。
+        // 老版本没有样式键，按旧的「圆形封面」开关迁移一次。圆形那一档
+        // 现在落到 CD 碟片 —— 它是新的默认样式。
         : ((prefs.getBool(_prefsRoundCover) ?? true)
-              ? PlayerCoverStyle.circle
+              ? PlayerCoverStyle.cd
               : PlayerCoverStyle.square);
     roundCover.value = coverStyle.value.spinnable;
     rotateCover.value =

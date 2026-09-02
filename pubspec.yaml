@@ -120,6 +120,8 @@ flutter:
     - assets/icon/account.png
     - assets/icon/onboard_appearance.png
     - assets/icon/onboard_player.png
+    - assets/preview/player_style_classic.jpg
+    - assets/preview/player_style_poster.jpg
     - assets/preview/player_style_cd.jpg
     - assets/preview/player_style_vinyl.jpg
     - assets/preview/cover_style_cd.jpg
