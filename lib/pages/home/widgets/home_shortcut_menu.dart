@@ -97,7 +97,11 @@ class _ShortcutItem extends StatelessWidget {
     // 缩放/描边，避免聚焦范围只剩图标一小块、右侧空白。
     // 底色带一点各自的强调色，别是一片白 —— 下面「最近播放 / 收藏」两张卡
     // 就是这个路子，四宫格跟上才是一套。
-    return Container(
+    //
+    // 外面那层 AppUnitFrameBuilder 是为了让描边跟着「内容框」的颜色 /
+    // 透明度设置一起重画：外层的 AppContentFrame 只在「非不加框」分支里
+    // 监听这两项，卡片自己得再听一次。
+    return AppUnitFrameBuilder(builder: (context) => Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
@@ -114,7 +118,9 @@ class _ShortcutItem extends StatelessWidget {
           ],
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: accent.withValues(alpha: 0.16)),
+        // 描边交给统一的框设置，别再自己写死一个 —— 否则用户调低透明度
+        // 后只有列表的线变淡，这几张卡的线还在。
+        border: appUnitBorder(context, accent: accent),
       ),
       clipBehavior: Clip.antiAlias,
       child: Material(
@@ -152,6 +158,6 @@ class _ShortcutItem extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }

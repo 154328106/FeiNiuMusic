@@ -53,6 +53,49 @@ Widget _watchFrameSettings(BuildContext context, WidgetBuilder builder) {
   );
 }
 
+/// 首页那些**独立单元**（四宫格、快捷入口卡、漫游卡）共用的描边。
+///
+/// 这些卡原本各自写死 `Border.all(accent…)`，和列表那套可调的框各走各的 ——
+/// 用户把框的透明度调低之后，列表的线淡了、这些卡的线还在，看着就不像一套
+/// 东西。统一走这里：画不画、什么颜色、多透明，全听「内容框」那组设置。
+///
+/// [accent] 是这张卡自己的色相，没自定义颜色时用它，保持原来的观感。
+/// 返回 null 表示当前是「不加框」——调用方别画。
+BoxBorder? appUnitBorder(
+  BuildContext context, {
+  Color? accent,
+  double scale = 1.0,
+}) {
+  final style = AppBackgroundSettings.contentFrameStyle.value;
+  if (style == AppContentFrameStyle.none) return null;
+  final custom = AppBackgroundSettings.contentFrameColor.value;
+  final base = custom ?? accent ?? Theme.of(context).colorScheme.outlineVariant;
+  final opacity = (AppBackgroundSettings.contentFrameOpacity.value * scale)
+      .clamp(0.0, 1.0);
+  return Border.all(color: base.withValues(alpha: opacity));
+}
+
+/// 让用了 [appUnitBorder] 的单元跟着框设置一起重建。
+///
+/// 不套它的话，改完样式要重进页面才生效。
+class AppUnitFrameBuilder extends StatelessWidget {
+  const AppUnitFrameBuilder({super.key, required this.builder});
+
+  final WidgetBuilder builder;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        AppBackgroundSettings.contentFrameStyle,
+        AppBackgroundSettings.contentFrameColor,
+        AppBackgroundSettings.contentFrameOpacity,
+      ]),
+      builder: (context, _) => builder(context),
+    );
+  }
+}
+
 /// 列表区块的外框。仅在「整块描边」样式下生效。
 ///
 /// 其余样式**原样透传**子组件，不额外包一层 widget —— 没开这个效果的用户

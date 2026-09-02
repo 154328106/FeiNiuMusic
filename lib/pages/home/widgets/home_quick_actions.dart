@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/state/settings_state.dart';
+import '../../../components/common/content_frame.dart';
 
 /// 首页功能入口卡片数据
 class HomeQuickAction {
@@ -45,14 +46,17 @@ class HomeQuickActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (var i = 0; i < actions.length; i++) ...[
-          if (i > 0) const SizedBox(width: 12),
-          Expanded(child: _QuickActionCard(action: actions[i])),
+    // 套一层：改「内容框」的样式 / 颜色 / 透明度时这两张卡要跟着重画。
+    return AppUnitFrameBuilder(
+      builder: (context) => Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var i = 0; i < actions.length; i++) ...[
+            if (i > 0) const SizedBox(width: 12),
+            Expanded(child: _QuickActionCard(action: actions[i])),
+          ],
         ],
-      ],
+      ),
     );
   }
 }
@@ -82,7 +86,8 @@ class _QuickActionCard extends StatelessWidget {
           ],
         ),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: accent.withValues(alpha: 0.18)),
+        // 同四宫格：描边统一听「内容框」那组设置。
+        border: appUnitBorder(context, accent: accent),
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
