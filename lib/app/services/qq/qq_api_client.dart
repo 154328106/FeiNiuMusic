@@ -90,7 +90,8 @@ class QQApiClient {
         options: Options(
           headers: {
             'Cookie': QQAuth.instance.cookieHeader,
-            if (referer != null) 'Referer': referer,
+            // `?:` 是空安全的 map 元素：referer 为 null 时这一项直接不出现。
+            'Referer': ?referer,
           },
         ),
       );
