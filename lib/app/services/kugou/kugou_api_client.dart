@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
@@ -54,7 +53,7 @@ class KugouApiClient {
   static const String _androidUa =
       'Android15-1070-11440-46-0-DiscoveryDRADProtocol-wifi';
 
-  static const String _gateway = 'https://gateway.kugou.com';
+  static const String _gatewayBase = 'https://gateway.kugou.com';
   static const String _loginBase = 'https://login-user.kugou.com';
   static const String _userService = 'https://userservice.kugou.com';
 
@@ -80,10 +79,7 @@ class KugouApiClient {
     Map<String, String>? headers,
   }) async {
     final Response<String> response;
-    final merged = <String, String>{
-      if (ua != null) 'User-Agent': ua,
-      ...?headers,
-    };
+    final merged = <String, String>{'User-Agent': ?ua, ...?headers};
     try {
       response = await _dio.get<String>(
         url,
@@ -389,7 +385,7 @@ class KugouApiClient {
       if (auth.cookieHeader.isNotEmpty) 'Cookie': auth.cookieHeader,
       ...headers,
     };
-    final url = '${baseUrl ?? _gateway}$path?$query';
+    final url = '${baseUrl ?? _gatewayBase}$path?$query';
     if (method == 'GET') return _getJson(url, headers: merged);
     final Response<String> response;
     try {
