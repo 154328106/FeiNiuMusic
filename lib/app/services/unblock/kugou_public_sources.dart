@@ -82,7 +82,7 @@ class KugouPublicSources {
     if (skip != null && DateTime.now().isBefore(skip)) return null;
 
     // 排在前面的每一个都要花掉至少一个间隔，据此估算轮到自己的时间。
-    if (_queued * _minInterval > _maxQueueWait) return null;
+    if (_minInterval * _queued > _maxQueueWait) return null;
 
     final completer = Completer<String?>();
     _queued++;
