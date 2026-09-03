@@ -26,12 +26,12 @@ class KugouPublicSources {
   /// 准备 25 首，对它们来说就是批量 —— 所以这里**串行 + 限速**，不复用
   /// 聆澜那条链的并发闸（那个是 8 并发）。慢一点无所谓：解析是在后台跑的，
   /// 而且命中一次就进缓存，一首歌 45 分钟内不会再问第二遍。
-  static const Duration _minInterval = Duration(milliseconds: 350);
+  static const Duration _minInterval = Duration(milliseconds: 200);
 
   /// 整条链的超时。两家都试完还没结果就交给聆澜，别让起播一直卡着。
-  static const Duration _timeout = Duration(seconds: 8);
+  static const Duration _timeout = Duration(seconds: 5);
 
-  /// 排队等待的上限。轮到自己要等超过这么久，就不等了，直接交给聆澜。
+  /// 排队等待的上限。**按真实等待时间算**，不是估算。
   ///
   /// 没有这道闸的话，串行限速会跟起播打架：一次准备 25 首、其中 20 首是
   /// 会员曲，光排队就 7 秒起步，起播肉眼可见地变慢。
@@ -40,7 +40,11 @@ class KugouPublicSources {
   /// 起播那种突发批量则只有前几首走，剩下的立刻回落到聆澜 —— 既没有拖慢
   /// 起播，又实实在在削掉了一部分聆澜的请求。而且命中的会进缓存，越用
   /// 越多的歌不需要再问任何人。
-  static const Duration _maxQueueWait = Duration(seconds: 3);
+  ///
+  /// 第一版是拿「排队人数 × 间隔」估算等待时间的，估错了四倍：实际每首
+  /// 要 1.5 秒（因为上面那个 201 的 bug，每首都白等一家），闸门形同虚设，
+  /// 起播要卡十几秒。现在改成进队时打时间戳、轮到自己再看真的过了多久。
+  static const Duration _maxQueueWait = Duration(milliseconds: 1200);
 
   static final Dio _dio = Dio(
     BaseOptions(
@@ -62,12 +66,9 @@ class KugouPublicSources {
   static Future<void> _gate = Future.value();
   static DateTime _lastAt = DateTime.fromMillisecondsSinceEpoch(0);
 
-  /// 当前排在队里的数量，用来估算「轮到我要等多久」。
-  static int _queued = 0;
-
   /// 连续失败到这个时刻之前，整条链直接跳过。
   ///
-  /// 服务挂掉时不该每首歌都去撞一次超时 —— 那会让起播平白多等 8 秒 × N。
+  /// 服务挂掉时不该每首歌都去撞一次超时 —— 那会让起播平白多等 5 秒 × N。
   static DateTime? _skipUntil;
   static int _consecutiveFailures = 0;
   static const int _failureThreshold = 5;
@@ -81,14 +82,17 @@ class KugouPublicSources {
     final skip = _skipUntil;
     if (skip != null && DateTime.now().isBefore(skip)) return null;
 
-    // 排在前面的每一个都要花掉至少一个间隔，据此估算轮到自己的时间。
-    if (_minInterval * _queued > _maxQueueWait) return null;
-
+    final enqueuedAt = DateTime.now();
     final completer = Completer<String?>();
-    _queued++;
     // 排进串行队列。前一个的成败不影响后一个，所以用 then 而不是 await 链。
     _gate = _gate.then((_) async {
       try {
+        // 轮到自己了，先看已经等了多久。等太久说明前面排了一长串（起播那种
+        // 突发），这时候再去问只会继续拖着播放器 —— 直接让给聆澜。
+        if (DateTime.now().difference(enqueuedAt) > _maxQueueWait) {
+          completer.complete(null);
+          return;
+        }
         final wait = _minInterval - DateTime.now().difference(_lastAt);
         if (wait > Duration.zero) await Future<void>.delayed(wait);
         final url = await _resolveOnce(hash);
@@ -107,23 +111,28 @@ class KugouPublicSources {
       } catch (e) {
         _lastAt = DateTime.now();
         completer.complete(null);
-      } finally {
-        _queued--;
       }
     });
     return completer.future;
   }
 
+  /// 上一次真正给出地址的那家，下次从它开始问。
+  ///
+  /// 一家挂了的时候，固定顺序意味着每首歌都要先白等它一次。记住赢家能把
+  /// 这份浪费省掉 —— 这正是 201 那个 bug 被放大的原因。
+  static String _lastGood = 'haitangw';
+
   static Future<String?> _resolveOnce(String hash) async {
-    final haitang = await _haitangw(hash);
-    if (haitang != null) {
-      debugPrint('[公益音源] haitangw 命中 kg/$hash');
-      return haitang;
-    }
-    final zddyr = await _zddyr(hash);
-    if (zddyr != null) {
-      debugPrint('[公益音源] zddyr 命中 kg/$hash');
-      return zddyr;
+    final order = _lastGood == 'zddyr'
+        ? const ['zddyr', 'haitangw']
+        : const ['haitangw', 'zddyr'];
+    for (final name in order) {
+      final url = name == 'haitangw' ? await _haitangw(hash) : await _zddyr(hash);
+      if (url != null) {
+        _lastGood = name;
+        debugPrint('[公益音源] $name 命中 kg/$hash');
+        return url;
+      }
     }
     return null;
   }
@@ -161,7 +170,11 @@ class KugouPublicSources {
     required String codeField,
     required List<int> okCodes,
   }) {
-    if (res.statusCode != 200) return null;
+    // 2xx 都算成功：haitangw 返回的是 201，写死判 200 会把它的每一次成功
+    // 响应都扔掉 —— 实测日志里它 110 次零命中就是这么来的，每首歌都白等
+    // 它一次再去问下一家。
+    final status = res.statusCode ?? 0;
+    if (status < 200 || status >= 300) return null;
     final body = res.data;
     if (body == null || body.isEmpty) return null;
     Object? json;
