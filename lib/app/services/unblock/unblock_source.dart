@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'free_unblock_sources.dart';
+import 'kugou_public_sources.dart';
 
 /// 第三方音源（解锁灰色 / 会员歌曲的播放地址）。
 ///
@@ -194,6 +195,16 @@ class UnblockSourceService {
   }) async {
     await load();
     final cfg = config.value;
+
+    // 第一层：酷狗的公益取址后端。
+    //
+    // 它们按 hash 取址，正好是我们手里已有的东西，而且实测覆盖了聆澜
+    // 「密钥全部未命中」的那几首。放在最前面能把大部分酷狗会员曲挡下来，
+    // 聆澜的额度留给它真正救得了的（网易云那边没有替代品）。
+    if (platform == 'kg') {
+      final url = await KugouPublicSources.resolve(songId);
+      if (url != null) return url;
+    }
 
     final limitedUntil = _rateLimitedUntil;
     final rateLimited =
