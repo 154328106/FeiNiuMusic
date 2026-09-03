@@ -194,8 +194,12 @@ class SideMenu extends StatelessWidget {
                         ),
                       ],
                     ),
+                    // 这块代表的是「当前连的飞牛服务器」，不是这个 App 本身
+                    // —— 所以用飞牛的图标，不是 Melodic 的。
                     child: Image.asset(
-                      'assets/icon/app_icon.png',
+                      hasAccount
+                          ? 'assets/source/feiniu.png'
+                          : 'assets/icon/app_icon.png',
                       fit: BoxFit.cover,
                     ),
                   ),
@@ -206,29 +210,20 @@ class SideMenu extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: hasAccount
                           ? [
-                              Text(
-                                account.displayName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: -0.2,
-                                  color: scheme.onSurface,
-                                ),
-                              ),
-                              const SizedBox(height: 1),
+                              // 服务器地址不再明文显示 —— 截图、投屏、录屏
+                              // 时内网地址跟着一起出去没什么好处。长按这里
+                              // 仍能看到，账号页里也照常写着。
                               Tooltip(
                                 message: account.serverUrl,
                                 child: Text(
-                                  account.serverLabel,
+                                  account.displayName,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    fontSize: 11,
-                                    color: scheme.onSurfaceVariant.withValues(
-                                      alpha: 0.8,
-                                    ),
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.2,
+                                    color: scheme.onSurface,
                                   ),
                                 ),
                               ),
