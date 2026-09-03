@@ -147,11 +147,7 @@ class KugouPublicSources {
     try {
       final res = await _dio.get<String>(
         'https://yy.zddyr.top/lx/api/',
-        queryParameters: {
-          'source': 'kg',
-          'quality': 'flac',
-          'mainHash': hash,
-        },
+        queryParameters: {'source': 'kg', 'quality': 'flac', 'mainHash': hash},
       );
       return _pickUrl(res, codeField: 'code', okCodes: const [0, 200]);
     } catch (_) {
