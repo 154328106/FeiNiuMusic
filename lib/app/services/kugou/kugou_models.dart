@@ -63,13 +63,29 @@ class KugouSong {
             ?.toString();
     if (hash == null || hash.isEmpty) return null;
 
-    final singer =
+    // 歌手：顶层字段之外还要认 `authors` 数组。
+    //
+    // 榜单接口（m.kugou.com/rank/info，漫游和首页推荐都走它）**根本没有
+    // singername**，歌手在 `authors: [{author_name}]` 里 —— 只找顶层字段
+    // 的话整个榜单都是「未知歌手」。合唱会有多个，用 / 连起来。
+    var singer =
         (json['singername'] ??
                 json['SingerName'] ??
                 json['author_name'] ??
                 json['singer'])
             ?.toString() ??
         '';
+    if (singer.isEmpty) {
+      final authors = json['authors'];
+      if (authors is List) {
+        final names = [
+          for (final a in authors)
+            if (a is Map && a['author_name'] != null)
+              a['author_name'].toString().trim(),
+        ].where((n) => n.isNotEmpty).toList();
+        if (names.isNotEmpty) singer = names.join(' / ');
+      }
+    }
     // 标题字段各接口给的东西不一样，而且**同一个接口里也不一致**：云端歌单
     // 有时给「周杰伦 - 晴天.mp3」，有时只给「晴天.mp3」。所以不能按固定顺序
     // 取第一个非空的（上一版就是这么写的，结果收藏里全是「歌名.mp3」），
@@ -91,6 +107,12 @@ class KugouSong {
             (v) => v.contains(' - '),
             orElse: () => titleCandidates.first,
           );
+    // 还是没歌手，就从「歌手 - 歌名」里取左半边。云端歌单那些只给文件名的
+    // 记录全靠这一条 —— 否则它们同样是「未知歌手」。
+    if (singer.isEmpty) {
+      final dash = rawTitle.indexOf(' - ');
+      if (dash > 0) singer = rawTitle.substring(0, dash).trim();
+    }
     final (name, artists) = _splitTitle(rawTitle, singer);
 
     // 时长：移动端接口给秒，网页端有的给毫秒。
