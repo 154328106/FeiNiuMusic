@@ -211,6 +211,47 @@ class FreeUnblockSources {
     if (text == null) return null;
     final found = RegExp(r'http[^\s"]+').firstMatch(text);
     final url = found?.group(0);
-    return (url == null || url.isEmpty) ? null : _https(url);
+    if (url == null || url.isEmpty) return null;
+    final secure = _https(url);
+    return await _looksLikeRealAudio(secure, durationMs) ? secure : null;
+  }
+
+  /// 拦下酷我的「请到酷我音乐APP收听」提示音。
+  ///
+  /// 那段提示音是一个**正常可下载的 mp3**，地址、状态码都挑不出毛病 ——
+  /// 只有时长不对：十几秒对上一首四分钟的歌。之前没有这道检查，它就被当成
+  /// 有效地址塞进队列，播放器打开后放几秒提示音就跳下一首，表现是「歌全都
+  /// 自动跳过」，很难看出是音源的问题。
+  ///
+  /// 用体积反推时长：按 128kbps 算，每秒约 16000 字节。比应有时长的一半还
+  /// 短就判定是提示音。时长未知时退一步用绝对下限（300KB ≈ 19 秒）。
+  static Future<bool> _looksLikeRealAudio(String url, int durationMs) async {
+    try {
+      final res = await _dio.head<void>(url);
+      final raw = res.headers.value('content-length');
+      final bytes = int.tryParse(raw ?? '');
+      // 拿不到长度就别拦：宁可放过，也好过把能播的歌误杀。
+      if (bytes == null || bytes <= 0) return true;
+      const bytesPerSecond = 16000;
+      if (durationMs > 0) {
+        final expected = durationMs ~/ 1000 * bytesPerSecond;
+        if (bytes < expected ~/ 2) {
+          debugPrint(
+            '[Unblock] 酷我返回的疑似提示音（${(bytes / 1024).round()}KB，'
+            '应有 ${(expected / 1024).round()}KB），丢弃',
+          );
+          return false;
+        }
+        return true;
+      }
+      if (bytes < 300 * 1024) {
+        debugPrint('[Unblock] 酷我返回的音频只有 ${(bytes / 1024).round()}KB，丢弃');
+        return false;
+      }
+      return true;
+    } catch (_) {
+      // 探测本身失败不算证据，放行。
+      return true;
+    }
   }
 }

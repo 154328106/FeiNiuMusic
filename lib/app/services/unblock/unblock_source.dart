@@ -196,19 +196,27 @@ class UnblockSourceService {
     await load();
     final cfg = config.value;
 
+    final limitedUntil = _rateLimitedUntil;
+    final rateLimited =
+        limitedUntil != null && DateTime.now().isBefore(limitedUntil);
+    final paidAvailable = cfg.isUsable && !rateLimited;
+
     // 第一层：酷狗的公益取址后端。
     //
     // 它们按 hash 取址，正好是我们手里已有的东西，而且实测覆盖了聆澜
     // 「密钥全部未命中」的那几首。放在最前面能把大部分酷狗会员曲挡下来，
     // 聆澜的额度留给它真正救得了的（网易云那边没有替代品）。
+    //
+    // 只有聆澜确实可用时才允许它「排队太久就让路」。否则让出去等于跌进
+    // 按歌名搜的免费链，酷我那家现在多半给一段「请到酷我APP收听」的提示音
+    // —— 播不了还会触发自动跳曲，比多等一会儿糟得多。
     if (platform == 'kg') {
-      final url = await KugouPublicSources.resolve(songId);
+      final url = await KugouPublicSources.resolve(
+        songId,
+        allowBail: paidAvailable,
+      );
       if (url != null) return url;
     }
-
-    final limitedUntil = _rateLimitedUntil;
-    final rateLimited =
-        limitedUntil != null && DateTime.now().isBefore(limitedUntil);
 
     if (cfg.isUsable && !rateLimited) {
       final keys = cfg.apiKeys;

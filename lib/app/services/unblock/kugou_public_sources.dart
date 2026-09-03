@@ -77,7 +77,12 @@ class KugouPublicSources {
   /// 取酷狗某个 hash 的播放地址，拿不到返回 null。
   ///
   /// [hash] 是酷狗的文件 hash（大写十六进制）。
-  static Future<String?> resolve(String hash) async {
+  ///
+  /// [allowBail] 表示「排队太久时可以放弃、交给下一层」。**只有下一层确实
+  /// 存在时才该传 true。** 聆澜没配（或正被限流）的时候让出去，下一层就是
+  /// 按歌名搜的免费链 —— 酷我那家现在多半返回「请到酷我APP收听」的提示音，
+  /// 播不了、还会让播放器自动跳到下一首。宁可多等一会儿也比这个强。
+  static Future<String?> resolve(String hash, {bool allowBail = true}) async {
     if (hash.isEmpty) return null;
     final skip = _skipUntil;
     if (skip != null && DateTime.now().isBefore(skip)) return null;
@@ -89,7 +94,8 @@ class KugouPublicSources {
       try {
         // 轮到自己了，先看已经等了多久。等太久说明前面排了一长串（起播那种
         // 突发），这时候再去问只会继续拖着播放器 —— 直接让给聆澜。
-        if (DateTime.now().difference(enqueuedAt) > _maxQueueWait) {
+        if (allowBail &&
+            DateTime.now().difference(enqueuedAt) > _maxQueueWait) {
           completer.complete(null);
           return;
         }
