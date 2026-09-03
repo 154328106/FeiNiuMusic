@@ -99,6 +99,12 @@ class _KugouLoginPageState extends State<KugouLoginPage> {
     } finally {
       _polling = false;
     }
+    // 扫码不自动返回这件事查了两轮还没定位，光靠推测不行了 —— 把每一步
+    // 都打出来：轮询拿到什么状态、到没到 success、pop 有没有真的执行。
+    debugPrint(
+      '[KugouLogin] 轮询状态=${result.state.name} '
+      'mounted=$mounted session=$session/$_session',
+    );
     if (!mounted || session != _session) return;
     switch (result.state) {
       case KugouScanState.waiting:
@@ -118,7 +124,10 @@ class _KugouLoginPageState extends State<KugouLoginPage> {
         AppToast.showGlobal(
           (nick == null || nick.isEmpty) ? '登录成功' : '登录成功：$nick',
         );
-        Navigator.of(context).pop(true);
+        final navigator = Navigator.of(context);
+        debugPrint('[KugouLogin] 准备返回，canPop=${navigator.canPop()}');
+        navigator.pop(true);
+        debugPrint('[KugouLogin] pop 已执行');
     }
   }
 

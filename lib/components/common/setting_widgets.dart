@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/state/settings_state.dart';
 import '../../app/theme/app_visual_theme.dart';
+import 'content_frame.dart';
 import 'glass_panel.dart';
 import 'labeled_slider.dart';
 
@@ -77,20 +78,27 @@ class AppSettingSection extends StatelessWidget {
               ],
             ),
           ),
-        GlassPanel(
+        // 描边跟着「主题外观 → 应用外观」里那组统一的框设置走 —— 首页的
+        // 四宫格、快捷卡早就归它管了，设置分组（「我的」页那几块也是它）
+        // 一直各画各的，调了透明度只有首页在变，看着不像一套东西。
+        AppUnitFrameBuilder(
+          builder: (context) => GlassPanel(
           // 设置分组在滚动列表内：背景逐帧变化，BackdropFilter 每帧重采样
           // 是滚动掉帧主因。显式关闭，改用纯色半透明面板（appPanelColorSolid）。
           backdropBlur: false,
           borderRadius: BorderRadius.circular(miuix ? 24 : 16),
           blurSigma: miuix ? 0.2 : 0.8,
           boxShadow: miuix ? const [] : null,
-          borderColor: miuix ? Colors.transparent : null,
+          borderColor: miuix
+              ? Colors.transparent
+              : appUnitBorderColor(context, accent: accent),
           child: Padding(
             padding: margin ?? EdgeInsets.zero,
             child: Padding(
               padding: padding ?? EdgeInsets.zero,
               child: Column(children: content),
             ),
+          ),
           ),
         ),
       ],

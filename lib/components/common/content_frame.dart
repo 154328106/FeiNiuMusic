@@ -75,6 +75,25 @@ BoxBorder? appUnitBorder(
   return Border.all(color: base.withValues(alpha: opacity));
 }
 
+/// 同 [appUnitBorder]，但只给颜色 —— 有些组件（如 GlassPanel）只收
+/// `borderColor`，自己去 `Border.all`。
+///
+/// 「不加框」时返回透明色而不是 null：null 在那些组件里会退回它们各自的
+/// 默认描边，等于这个设置对它们无效。
+Color appUnitBorderColor(
+  BuildContext context, {
+  Color? accent,
+  double scale = 1.0,
+}) {
+  final style = AppBackgroundSettings.contentFrameStyle.value;
+  if (style == AppContentFrameStyle.none) return Colors.transparent;
+  final custom = AppBackgroundSettings.contentFrameColor.value;
+  final base = custom ?? accent ?? Theme.of(context).colorScheme.outlineVariant;
+  final opacity = (AppBackgroundSettings.contentFrameOpacity.value * scale)
+      .clamp(0.0, 1.0);
+  return base.withValues(alpha: opacity);
+}
+
 /// 让用了 [appUnitBorder] 的单元跟着框设置一起重建。
 ///
 /// 不套它的话，改完样式要重进页面才生效。
