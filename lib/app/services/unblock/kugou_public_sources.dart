@@ -127,7 +127,9 @@ class KugouPublicSources {
         ? const ['zddyr', 'haitangw']
         : const ['haitangw', 'zddyr'];
     for (final name in order) {
-      final url = name == 'haitangw' ? await _haitangw(hash) : await _zddyr(hash);
+      final url = name == 'haitangw'
+          ? await _haitangw(hash)
+          : await _zddyr(hash);
       if (url != null) {
         _lastGood = name;
         debugPrint('[公益音源] $name 命中 kg/$hash');
