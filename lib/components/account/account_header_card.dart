@@ -53,17 +53,27 @@ class _AccountHeaderCardInner extends StatelessWidget {
           ),
           child: Row(
             children: [
+              // 用「我的」页那张账号卡同一个图标，两处对得上；图标缺失时
+              // 退回原来的首字母头像。
               CircleAvatar(
                 radius: 18,
                 backgroundColor: scheme.primary.withValues(alpha: 0.16),
-                child: Text(
-                  account.username.isNotEmpty
-                      ? account.username.characters.first
-                      : '?',
-                  style: TextStyle(
-                    color: scheme.primary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16,
+                child: ClipOval(
+                  child: Image.asset(
+                    'assets/icon/account.png',
+                    width: 36,
+                    height: 36,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => Text(
+                      account.username.isNotEmpty
+                          ? account.username.characters.first
+                          : '?',
+                      style: TextStyle(
+                        color: scheme.primary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
                   ),
                 ),
               ),
