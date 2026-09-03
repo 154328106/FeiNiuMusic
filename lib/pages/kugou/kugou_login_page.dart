@@ -80,8 +80,15 @@ class _KugouLoginPageState extends State<KugouLoginPage> {
     );
   }
 
+  /// 上一发轮询还没回来时，定时器的下一发直接跳过。
+  ///
+  /// 不拦的话，一次慢响应会让好几发查询叠在一起 —— 扫码成功那一刻尤其明显，
+  /// 每一发都会各自走一遍「保存登录 + 注册设备」。
+  bool _polling = false;
+
   Future<void> _poll(int session, String key) async {
-    if (!mounted || session != _session) return;
+    if (!mounted || session != _session || _polling) return;
+    _polling = true;
     final KugouScanResult result;
     try {
       result = await _api.pollQr(key);
@@ -89,6 +96,8 @@ class _KugouLoginPageState extends State<KugouLoginPage> {
       // 网络抖动就等下一轮，不要因为一次失败把码作废。
       debugPrint('[KugouLogin] 轮询失败：$e');
       return;
+    } finally {
+      _polling = false;
     }
     if (!mounted || session != _session) return;
     switch (result.state) {

@@ -7,6 +7,14 @@ import 'labeled_slider.dart';
 
 class AppSettingSection extends StatelessWidget {
   final String? title;
+
+  /// 分组标题的强调色。给了就在标题前画一根色条、标题也跟着上色。
+  ///
+  /// 不给保持原来的灰标题。侧边栏的分组卡（`│ 浏览`）早就是这个样子，
+  /// 设置页这边一直是清一色的灰字 + 深色面板，几个分组堆在一起就是几坨
+  /// 一样的深色块，分不出层次。
+  final Color? accent;
+
   final List<Widget> children;
   final EdgeInsetsGeometry? margin;
   final EdgeInsetsGeometry? padding;
@@ -15,6 +23,7 @@ class AppSettingSection extends StatelessWidget {
   const AppSettingSection({
     super.key,
     this.title,
+    this.accent,
     required this.children,
     this.margin,
     this.padding,
@@ -38,14 +47,34 @@ class AppSettingSection extends StatelessWidget {
         if (title != null)
           Padding(
             padding: EdgeInsets.fromLTRB(miuix ? 6 : 0, 0, 0, 8),
-            child: Text(
-              title!,
-              style: miuix
-                  ? Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
-                    )
-                  : Theme.of(context).textTheme.titleMedium,
+            child: Row(
+              children: [
+                if (accent != null) ...[
+                  Container(
+                    width: 4,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: accent,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                ],
+                Text(
+                  title!,
+                  style: miuix
+                      ? Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color:
+                              accent?.withValues(alpha: 0.95) ??
+                              Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        )
+                      : Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: accent?.withValues(alpha: 0.95),
+                          fontWeight: accent == null ? null : FontWeight.w700,
+                        ),
+                ),
+              ],
             ),
           ),
         GlassPanel(

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -487,7 +488,13 @@ class KugouApiClient {
       avatar: avatar,
       vipType: vip,
     );
-    await registerDevice();
+    // 注册设备**不能**挡在登录结果前面。
+    //
+    // 它稳定失败（风控返 20006），await 在这里意味着扫完码要先干等它把
+    // 超时耗完，登录页才收得到成功、才会自己返回。而轮询是 2 秒一次的定时
+    // 器，前一发卡着的时候后一发照样进来，于是注册被重复触发好几次。
+    // dfid 拿不到只影响会员曲的官方地址，本来就不该拖着登录。
+    unawaited(registerDevice());
     return KugouScanResult(
       KugouScanState.success,
       nickname: nick.isEmpty ? '酷狗用户 $userId' : nick,

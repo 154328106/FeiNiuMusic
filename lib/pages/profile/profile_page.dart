@@ -58,19 +58,10 @@ class ProfilePage extends StatelessWidget {
               // 首页的快捷入口和功能卡片里都有，放两份只是重复。
               // 「账号管理」也去掉了：上面那张 ProfileAccountCard 点进去就是
               // 同一个 AppRoutes.accounts，两个入口紧挨着更像是漏删。
-              AppSettingSection(
-                title: '更多',
-                children: [
-                  _navTile(
-                    context,
-                    icon: Icons.bar_chart_rounded,
-                    assetIcon: 'assets/icon/stats.png',
-                    title: '听歌统计',
-                    subtitle: '本地播放数据概览',
-                    route: AppRoutes.listeningStats,
-                  ),
-                ],
-              ),
+              // 「听歌统计」原来独占一个「更多」分组 —— 一个大面板只装一行，
+              // 空得明显，和上面两个深色分组叠在一起就是三坨一样的块。改成
+              // 首页那种渐变卡：有颜色、有分量，也不用再为一项开一个分组。
+              const _StatsCard(),
             ],
           ),
           bottomNavIndex: useBottomNavigation ? 3 : null,
@@ -145,6 +136,7 @@ class _ThemeAppearanceSectionState extends State<_ThemeAppearanceSection> {
     final scheme = Theme.of(context).colorScheme;
     return AppSettingSection(
       title: '主题外观',
+      accent: Theme.of(context).colorScheme.secondary,
       children: [
         AppSettingTile(
           title: '主题外观',
@@ -244,6 +236,7 @@ class _MusicSourceSection extends StatelessWidget {
         final current = registry.current.value;
         return AppSettingSection(
           title: '音乐来源',
+          accent: Theme.of(context).colorScheme.primary,
           children: [
             for (final source in MusicSourceRegistry.all)
               _SourceTile(
@@ -473,6 +466,97 @@ class _SourceTile extends StatelessWidget {
                 : null,
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 听歌统计入口卡。
+///
+/// 视觉语言对齐首页的功能卡（渐变底 + 圆形图标底座），让「我的」这一页
+/// 不至于从上到下全是同一种深色面板。
+class _StatsCard extends StatelessWidget {
+  const _StatsCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final accent = scheme.tertiary;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () => Navigator.pushNamed(context, AppRoutes.listeningStats),
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                accent.withValues(alpha: 0.16),
+                accent.withValues(alpha: 0.05),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(20),
+            border: appUnitBorder(context, accent: accent),
+          ),
+          padding: const EdgeInsets.fromLTRB(16, 16, 12, 16),
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: accent.withValues(alpha: 0.18),
+                ),
+                alignment: Alignment.center,
+                clipBehavior: Clip.antiAlias,
+                child: Image.asset(
+                  'assets/icon/stats.png',
+                  width: 30,
+                  height: 30,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, _, _) => Icon(
+                    Icons.bar_chart_rounded,
+                    color: accent,
+                    size: 26,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '听歌统计',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.2,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '本地播放数据概览',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: scheme.onSurfaceVariant.withValues(alpha: 0.85),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
