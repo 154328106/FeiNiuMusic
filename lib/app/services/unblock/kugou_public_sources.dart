@@ -62,9 +62,19 @@ class KugouPublicSources {
     ),
   );
 
-  /// 串行闸：保证任意时刻只有一个请求在飞，且两次之间隔够 [_minInterval]。
-  static Future<void> _gate = Future.value();
+  /// 并发通道数。
+  ///
+  /// 一开始是纯串行（一条），但一次请求要 ~600ms，而起播准备 25~30 首时
+  /// 它就卡在关键路径上：实测 30 首要 11 秒。两条通道把这个减半，同时因为
+  /// 排队上限是按时间算的，同样的 1.2 秒里能放行的歌反而变多了 —— 快和省
+  /// 两头都好。两条 × ~600ms 约等于 3 次/秒的瞬时峰值，而且被排队上限
+  /// 掐着，只在起播那一下出现，不构成作者说的「短时间批量下载」。
+  static const int _lanes = 2;
+
+  /// 每条通道一个串行链，进来的排到最空的那条。
+  static final List<Future<void>> _gates = List.filled(_lanes, Future.value());
   static DateTime _lastAt = DateTime.fromMillisecondsSinceEpoch(0);
+  static int _nextLane = 0;
 
   /// 连续失败到这个时刻之前，整条链直接跳过。
   ///
@@ -89,8 +99,10 @@ class KugouPublicSources {
 
     final enqueuedAt = DateTime.now();
     final completer = Completer<String?>();
-    // 排进串行队列。前一个的成败不影响后一个，所以用 then 而不是 await 链。
-    _gate = _gate.then((_) async {
+    // 排进某条通道。前一个的成败不影响后一个，所以用 then 而不是 await 链。
+    final lane = _nextLane;
+    _nextLane = (_nextLane + 1) % _lanes;
+    _gates[lane] = _gates[lane].then((_) async {
       try {
         // 轮到自己了，先看已经等了多久。等太久说明前面排了一长串（起播那种
         // 突发），这时候再去问只会继续拖着播放器 —— 直接让给聆澜。

@@ -49,9 +49,29 @@ class KugouSong {
     if (idx <= 0) return (raw.trim(), singer.trim());
     final left = raw.substring(0, idx).trim();
     final right = raw.substring(idx + 3).trim();
-    // 前半段等于歌手时才拆，否则「A - B」可能本来就是歌名的一部分。
-    if (singer.isEmpty || left == singer) return (right, singer.trim());
+    // 前半段是歌手时才拆，否则「A - B」可能本来就是歌名的一部分。
+    //
+    // 不能用字符串相等去比：歌手字段来自 `authors` 数组、用 / 连接
+    //（「灯叔 / 方大树」），而文件名里是顿号（「灯叔、方大树」）—— 直接
+    // 比就永远不等，于是整串「灯叔、方大树 - 说文解字」被当成歌名。
+    // 归一化分隔符再按集合比，任一歌手对得上就认。
+    if (singer.isEmpty || _sameArtists(left, singer)) {
+      return (right, singer.trim());
+    }
     return (raw.trim(), singer.trim());
+  }
+
+  /// 两串歌手名是不是同一批人。分隔符各接口不一样，归一后按集合比。
+  static bool _sameArtists(String a, String b) {
+    Set<String> parts(String v) => v
+        .split(RegExp(r'[、,，/／&]|\sfeat\.?\s', caseSensitive: false))
+        .map((e) => e.trim().toLowerCase())
+        .where((e) => e.isNotEmpty)
+        .toSet();
+    final left = parts(a);
+    final right = parts(b);
+    if (left.isEmpty || right.isEmpty) return false;
+    return left.intersection(right).isNotEmpty;
   }
 
   static KugouSong? fromJson(Map<String, dynamic> json) {
