@@ -46,7 +46,18 @@ class AppToast {
   }) {
     final context = appNavigatorKey.currentContext;
     if (context == null) return;
-    show(context, message, type: type, duration: duration);
+    // 提示弹不出来是小事，绝不能把调用方掐断。
+    //
+    // `show` 里的 `Overlay.of(context, rootOverlay: true)` 找不到 overlay 时
+    // 会抛 —— 而这里拿的是根 Navigator 自己的 context，overlay 在它**下面**
+    // 不在上面。酷狗扫码登录成功后不自动返回，查到最后就是这个：toast 抛异常，
+    // 后面那句 Navigator.pop 根本没机会执行，而调用方是 Timer 里没人 await 的
+    // async 函数，异常被静默吞掉，表现成「什么都没发生」。
+    try {
+      show(context, message, type: type, duration: duration);
+    } catch (e) {
+      debugPrint('[AppToast] 弹提示失败（不影响主流程）：$e');
+    }
   }
 
   static void _removeCurrent() {

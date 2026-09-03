@@ -99,12 +99,6 @@ class _KugouLoginPageState extends State<KugouLoginPage> {
     } finally {
       _polling = false;
     }
-    // 扫码不自动返回这件事查了两轮还没定位，光靠推测不行了 —— 把每一步
-    // 都打出来：轮询拿到什么状态、到没到 success、pop 有没有真的执行。
-    debugPrint(
-      '[KugouLogin] 轮询状态=${result.state.name} '
-      'mounted=$mounted session=$session/$_session',
-    );
     if (!mounted || session != _session) return;
     switch (result.state) {
       case KugouScanState.waiting:
@@ -121,13 +115,12 @@ class _KugouLoginPageState extends State<KugouLoginPage> {
         _pollTimer?.cancel();
         if (!mounted) return;
         final nick = result.nickname?.trim();
+        // 先返回，再提示。反过来的话，提示万一出问题就把返回带走了 ——
+        // 这正是之前「扫完码不跳回去」的原因。
+        Navigator.of(context).pop(true);
         AppToast.showGlobal(
           (nick == null || nick.isEmpty) ? '登录成功' : '登录成功：$nick',
         );
-        final navigator = Navigator.of(context);
-        debugPrint('[KugouLogin] 准备返回，canPop=${navigator.canPop()}');
-        navigator.pop(true);
-        debugPrint('[KugouLogin] pop 已执行');
     }
   }
 

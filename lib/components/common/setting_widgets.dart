@@ -89,9 +89,10 @@ class AppSettingSection extends StatelessWidget {
           borderRadius: BorderRadius.circular(miuix ? 24 : 16),
           blurSigma: miuix ? 0.2 : 0.8,
           boxShadow: miuix ? const [] : null,
-          borderColor: miuix
-              ? Colors.transparent
-              : appUnitBorderColor(context, accent: accent),
+          // 两种视觉风格都听统一设置。原来 miuix 下写死透明，等于这个开关
+          // 对它无效 —— 「统一管理」就不该留这种例外。不想要线时把样式调成
+          // 「不加框」，那时返回的也是透明。
+          borderColor: appUnitBorderColor(context, accent: accent),
           child: Padding(
             padding: margin ?? EdgeInsets.zero,
             child: Padding(
