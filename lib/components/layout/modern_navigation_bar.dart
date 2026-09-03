@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
+import '../../app/utils/route_visibility.dart';
 import '../../app/router/app_router.dart';
 import '../../app/state/settings_state.dart';
 import '../../app/theme/app_glass_theme.dart';
@@ -61,7 +62,21 @@ void navigateToPrimaryDestination(BuildContext context, int index) {
   // 导致从首页点进来后无法按返回回到首页。
   final routeName = _primaryNavigationRoutes[index];
   if (ModalRoute.of(context)?.settings.name == routeName) return;
-  Navigator.of(context).pushNamed(routeName);
+
+  // 已经在栈里就回到那一页，别再压一份。
+  //
+  // 原来只比对了当前路由，不看整个栈：首页 →「我的」→ 再点首页，栈就成了
+  // `/`(首页) + `/profile` + `/home`(第二个首页)。下面那层**不会被卸载**，
+  // State 还挂着、定时刷新照跑 —— 首页、歌曲页的每一次加载都变成两遍，
+  // 网络请求整体翻倍。
+  if (index == 0) {
+    // 首页是这个模式下的根页面，弹回栈底即可。
+    Navigator.of(context).popUntil(
+      (route) => route.settings.name == routeName || route.isFirst,
+    );
+    return;
+  }
+  pushOrReturnTo(Navigator.of(context), routeName);
 }
 
 class PrimaryNavigationScope extends InheritedWidget {

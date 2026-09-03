@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../app/router/app_router.dart';
+import '../../app/utils/route_visibility.dart';
 import '../../app/state/settings_state.dart';
 import '../feedback/app_toast.dart';
 import '../focus/tv_focusable.dart';
@@ -226,7 +227,11 @@ class _TabletLayoutHostState extends State<TabletLayoutHost>
   }
 
   void _handlePush(String route) {
-    widget.navigatorKey.currentState?.pushNamed(route);
+    final navigator = widget.navigatorKey.currentState;
+    if (navigator == null) return;
+    // 已经在栈里就回到它 —— 「歌曲 → 我的 → 歌曲」原本会压出第二个歌曲页，
+    // 下面那个不卸载、照样定时刷新。
+    pushOrReturnTo(navigator, route);
   }
 
   /// 底部迷你播放器。TV 模式下：

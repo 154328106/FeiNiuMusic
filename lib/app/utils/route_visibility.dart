@@ -72,3 +72,63 @@ mixin AppRouteVisibilityMixin<T extends StatefulWidget>
     super.dispose();
   }
 }
+
+/// 记录当前还活着的路由，用来判断某个页面是不是已经在栈里了。
+///
+/// 侧边导航模式下，主导航目标是**压栈**打开的（这样返回键能回到来源页）。
+/// 原来的防重复只看当前路由，不看整个栈：首页 →「我的」→ 再点首页，就会
+/// 变成 `/`(首页) + `/profile` + `/home`(第二个首页)。栈里下面那层**不会被
+/// 卸载**，State 还挂着、定时刷新照跑 —— 每次刷新、每次取数据都是两遍。
+///
+/// 按 Route 对象记而不是按名字：didRemove / didReplace 在有同名路由时靠
+/// 名字对不准。
+class LiveRouteTracker extends NavigatorObserver {
+  final List<Route<dynamic>> _routes = [];
+
+  /// 栈里是否已经有这个名字的页面。
+  bool contains(String name) =>
+      _routes.any((r) => r.settings.name == name);
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _routes.add(route);
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _routes.remove(route);
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _routes.remove(route);
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    final index = oldRoute == null ? -1 : _routes.indexOf(oldRoute);
+    if (index >= 0) {
+      if (newRoute == null) {
+        _routes.removeAt(index);
+      } else {
+        _routes[index] = newRoute;
+      }
+    } else if (newRoute != null) {
+      _routes.add(newRoute);
+    }
+  }
+}
+
+final LiveRouteTracker liveRoutes = LiveRouteTracker();
+
+/// 压栈打开一个页面；它要是已经在栈里了，就回到它，不再压一份。
+///
+/// 侧边导航模式下所有主导航目标都是压栈打开的，而同名页面压两次不会让下面
+/// 那份卸载 —— 两个 State 一起活着、各自的定时刷新都在跑，请求量直接翻倍。
+void pushOrReturnTo(NavigatorState navigator, String routeName) {
+  if (liveRoutes.contains(routeName)) {
+    navigator.popUntil((route) => route.settings.name == routeName);
+    return;
+  }
+  navigator.pushNamed(routeName);
+}

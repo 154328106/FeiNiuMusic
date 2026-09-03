@@ -408,7 +408,7 @@ class _AppStartupGateState extends State<_AppStartupGate> {
                       // 挂载 appRouteObserver：应用内所有路由都在此嵌套 Navigator
                       // 上，注册后 AppRouteVisibilityMixin（didPushNext/didPopNext）
                       // 才能按文档生效，播放页/流光预览的路由可见性暂停才有意义。
-                      observers: [appRouteObserver],
+                      observers: [appRouteObserver, liveRoutes],
                       // TV 方向键跨块：路由 scope 默认 directionalEdgeBehavior
                       // 是 stop，横向/纵向到边缘就停住，进不了左侧侧边栏、也下不到
                       // 迷你播放器。TV 时放开为 parentScope，让最外层 WidgetsApp
