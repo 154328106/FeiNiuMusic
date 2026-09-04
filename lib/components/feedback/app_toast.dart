@@ -16,9 +16,38 @@ class AppToast {
     ToastType type = ToastType.info,
     Duration duration = const Duration(seconds: 2),
   }) {
-    _removeCurrent();
+    _insert(
+      _resolveOverlay(context),
+      message,
+      type: type,
+      duration: duration,
+    );
+  }
 
-    final overlay = Overlay.of(context, rootOverlay: true);
+  /// 找一个能用的 overlay。
+  ///
+  /// 不能只靠 `Overlay.of(context)`：全局提示传的是根 Navigator **自己的**
+  /// context，而 Navigator 的 Overlay 是它的**子节点** —— 往上找找不到，
+  /// 而 `Overlay.of` 内部是 `maybeOf(...)!`，于是抛「Null check operator used
+  /// on a null value」。13 处全局提示因此一直是哑的。
+  ///
+  /// `NavigatorState.overlay` 直接给出 Navigator 自己那个 overlay，正是要的。
+  static OverlayState? _resolveOverlay(BuildContext? context) {
+    if (context != null) {
+      final fromContext = Overlay.maybeOf(context, rootOverlay: true);
+      if (fromContext != null) return fromContext;
+    }
+    return appNavigatorKey.currentState?.overlay;
+  }
+
+  static void _insert(
+    OverlayState? overlay,
+    String message, {
+    required ToastType type,
+    required Duration duration,
+  }) {
+    if (overlay == null || !overlay.mounted) return;
+    _removeCurrent();
 
     final entry = OverlayEntry(
       builder: (context) => _ToastWidget(
@@ -44,17 +73,15 @@ class AppToast {
     ToastType type = ToastType.info,
     Duration duration = const Duration(seconds: 2),
   }) {
-    final context = appNavigatorKey.currentContext;
-    if (context == null) return;
-    // 提示弹不出来是小事，绝不能把调用方掐断。
-    //
-    // `show` 里的 `Overlay.of(context, rootOverlay: true)` 找不到 overlay 时
-    // 会抛 —— 而这里拿的是根 Navigator 自己的 context，overlay 在它**下面**
-    // 不在上面。酷狗扫码登录成功后不自动返回，查到最后就是这个：toast 抛异常，
-    // 后面那句 Navigator.pop 根本没机会执行，而调用方是 Timer 里没人 await 的
-    // async 函数，异常被静默吞掉，表现成「什么都没发生」。
+    // 提示弹不出来是小事，绝不能把调用方掐断（酷狗扫码登录成功后不返回，
+    // 查到最后就是这句抛异常把后面的 Navigator.pop 带走了）。
     try {
-      show(context, message, type: type, duration: duration);
+      _insert(
+        _resolveOverlay(null),
+        message,
+        type: type,
+        duration: duration,
+      );
     } catch (e) {
       debugPrint('[AppToast] 弹提示失败（不影响主流程）：$e');
     }
