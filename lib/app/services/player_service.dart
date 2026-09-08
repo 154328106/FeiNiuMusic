@@ -3058,6 +3058,23 @@ class PlayerService with WidgetsBindingObserver {
     _PlaybackRestoreState session,
   ) async {
     try {
+      // 恢复路径的地址缓存是冷的。直接算引擎路由的话，_computeEngineKinds
+      // 会对队列里每首歌单独解一次地址 —— 日志里一次冷启动刷出 25 条
+      // `[NetEase] songUrls: 1/1 有地址`，而正常 playQueue 路径在调用前
+      // 已经由 prepareQueue 批量解过，只有一条 `songUrls: 25/25`。
+      //
+      // 这里补上那一次批量预热：25 个请求压成 1 个，顺带让灰歌走
+      // prepareQueue 里带限流的 _resolveUnblocked，而不是 _computeEngineKinds
+      // 那种不受控的 Future.wait 齐发（公益音源明说了别短时间批量打）。
+      //
+      // **只取副作用，丢掉返回值**：prepareQueue 会把取不到地址的歌过滤掉，
+      // 而恢复要的是忠实还原上次的队列，不能在这里悄悄改变它的长度。
+      // 预热失败也不该拖垮恢复，所以单独 catch。
+      try {
+        await NetEasePlaybackService.instance.prepareQueue(session.queue);
+      } catch (e) {
+        _debugLog('restore 预热地址失败（不影响恢复）：$e');
+      }
       // 双引擎架构：按 run 加载恢复的当前曲所在引擎。
       _applyEngineKinds(await _computeEngineKinds(session.queue));
       // 构建源期间用户可能已开始新的播放：放弃 apply，避免 setAudioSources
