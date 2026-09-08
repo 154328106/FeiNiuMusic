@@ -133,10 +133,10 @@ class FreeUnblockSources {
   /// 这条链里唯一不靠关键词搜索的一家，所以不会串到同名翻唱上；实测连会员曲
   /// 都能解，[quality] 给到 `flac` / `flac24bit` 时会返回无损。
   static Future<String?> gdStudio(int neteaseId, {String? quality}) async {
-    final br = gdBitrate(quality);
+    final requested = gdBitrate(quality);
     final body = await _get(
       'https://music-api.gdstudio.xyz/api.php'
-      '?types=url&source=netease&id=$neteaseId&br=$br',
+      '?types=url&source=netease&id=$neteaseId&br=$requested',
     );
     final json = _json(body);
     if (json == null) return null;
