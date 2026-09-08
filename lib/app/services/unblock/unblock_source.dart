@@ -272,10 +272,7 @@ class UnblockSourceService {
     final query = keyword ?? '';
     // 没有歌名就真没得查了（GD 那条按 id 的路在上面已经走完）。
     if (query.trim().isEmpty) return null;
-    return FreeUnblockSources.resolve(
-      keyword: query,
-      durationMs: durationMs,
-    );
+    return FreeUnblockSources.resolve(keyword: query, durationMs: durationMs);
   }
 
   Future<String?> _requestOnce({
