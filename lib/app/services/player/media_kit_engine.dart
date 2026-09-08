@@ -400,7 +400,10 @@ class MediaKitEngine implements PlayerEngine {
     Duration target,
     int generation,
   ) async {
+    final startedAt = DateTime.now();
+    var waited = false;
     if (player.state.duration <= Duration.zero) {
+      waited = true;
       try {
         await player.stream.duration
             .firstWhere((d) => d > Duration.zero)
@@ -410,8 +413,19 @@ class MediaKitEngine implements PlayerEngine {
       }
     }
     // 等待期间用户可能已经切了队列，别把旧位置按到新歌上。
-    if (generation != _loadGeneration) return;
+    if (generation != _loadGeneration) {
+      debugPrint('[MediaKitEngine] seek 放弃：等待期间队列已切换');
+      return;
+    }
     await player.seek(target);
+    // 这条日志是给「恢复播放位置到底生效没有」用的：mpv 拒绝 seek 时不抛
+    // 异常，只能靠对比目标位置与 seek 之后的实际位置来判断。
+    final waitedMs = DateTime.now().difference(startedAt).inMilliseconds;
+    debugPrint(
+      '[MediaKitEngine] seek 目标 ${target.inMilliseconds}ms，'
+      '${waited ? "等加载 ${waitedMs}ms" : "无需等待"}，'
+      'seek 后实际 ${player.state.position.inMilliseconds}ms',
+    );
   }
 
   @override

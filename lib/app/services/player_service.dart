@@ -3266,6 +3266,7 @@ class PlayerService with WidgetsBindingObserver {
   ///   一次恢复出现**两条相同的** `_command(seek, X, absolute)` 失败，就是
   ///   loadQueue 和这里各发了一次。
   void _publishRestoredPosition(Duration restored) {
+    _debugLog('restore position -> ${restored.inMilliseconds}ms');
     position.value = restored;
     _emitSnapshot(force: true);
   }
