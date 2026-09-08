@@ -218,6 +218,29 @@ class UnblockSourceService {
       if (url != null) return url;
     }
 
+    // 第二层：GD 音乐台（只有网易云走得到）。
+    //
+    // 放在聆澜**前面**，理由是它几乎没有下行风险：按网易云原始 id 取址，
+    // 不像酷狗/酷我那两家是搜歌名，串不到同名翻唱上；免费；实测连会员曲都
+    // 给，还能按设置里的音质给到无损。命中就省一次聆澜额度，没命中也只是
+    // 多一个请求 —— 它本来就在链里，只是从聆澜后面挪到了前面。
+    //
+    // 注意它只认网易云 id：QQ / 酷狗的歌 [FreeUnblockSources.gdStudio] 用不上，
+    // 那两家仍然走后面的关键词兜底。
+    final gdNeteaseId = platform == 'wy' && freeFallbackEnabled.value
+        ? int.tryParse(songId)
+        : null;
+    if (gdNeteaseId != null) {
+      final url = await FreeUnblockSources.gdStudio(
+        gdNeteaseId,
+        quality: cfg.quality,
+      );
+      if (url != null) {
+        debugPrint('[Unblock] GD Studio 命中 $platform/$songId');
+        return url;
+      }
+    }
+
     if (cfg.isUsable && !rateLimited) {
       final keys = cfg.apiKeys;
       // 从上次命中的那个开始轮，命中率最高的先试。
@@ -240,18 +263,16 @@ class UnblockSourceService {
       debugPrint('[Unblock] ${keys.length} 个密钥全部未命中：$platform/$songId');
     }
 
-    // 聆澜没配、或者这首它也没有 —— 再试一遍免费的那几家。
+    // 最后一层：按歌名搜的免费兜底（酷狗 → 酷我）。GD 上面已经试过了。
     //
-    // 原来这里按 `platform != 'wy'` 直接返回，理由是「另外两家的 id 对不上
-    // GD Studio 的入参」。那只对 GD Studio 成立：链里的酷狗和酷我都是按
-    // 歌名搜的，跟来源无关。拦掉整条等于把 QQ / 酷狗的退路堵死了。
+    // 这里不按平台拦：那两家都是「搜歌名再比时长」，跟歌来自哪个平台无关。
+    // 原来按 `platform != 'wy'` 直接返回，理由是「id 对不上 GD 的入参」——
+    // 那只对 GD 成立，拦掉整条等于把 QQ / 酷狗的退路也堵死了。
     if (!freeFallbackEnabled.value) return null;
-    final numericId = platform == 'wy' ? int.tryParse(songId) : null;
     final query = keyword ?? '';
-    // 既没有网易云 id、也没有歌名，那就真没得查了。
-    if (numericId == null && query.trim().isEmpty) return null;
+    // 没有歌名就真没得查了（GD 那条按 id 的路在上面已经走完）。
+    if (query.trim().isEmpty) return null;
     return FreeUnblockSources.resolve(
-      neteaseId: numericId,
       keyword: query,
       durationMs: durationMs,
     );

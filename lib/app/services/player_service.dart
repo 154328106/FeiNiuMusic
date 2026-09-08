@@ -3071,7 +3071,7 @@ class PlayerService with WidgetsBindingObserver {
         initialPosition: session.position,
       );
       if (session.position > Duration.zero) {
-        await _seekRestoredPosition(session.position);
+        _publishRestoredPosition(session.position);
       }
       // 加载源期间用户可能已点漫游开始播放（_queueGeneration 已递增）：
       // 放弃把旧会话的循环模式应用到播放器，避免覆盖漫游设好的模式。
@@ -3250,30 +3250,24 @@ class PlayerService with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _seekRestoredPosition(Duration restored) async {
-    _isSeeking = true;
+  /// 把恢复出来的播放位置同步到 UI。
+  ///
+  /// **这里不发 seek。** 位置已经由 `loadQueue(initialPosition:)` 交给引擎了：
+  /// just_audio 存进 `_PluginLoadRequest`，play 激活时应用；media_kit 等文件
+  /// 加载完再落（见 `MediaKitEngine._seekAfterLoad`）。再补一次 seek 在两个
+  /// 引擎上都有害：
+  ///
+  /// - just_audio：seek 会调 `resetInitialSeekValues` 清掉那份待应用的初始
+  ///   索引+位置，play 激活时就从第 1 首（种子 currentIndex=0）播起。原来那道
+  ///   `processingState != idle` 守卫正是为了绕开它。
+  /// - media_kit：它的 `processingState` 只要 playlist 非空就报 ready（见
+  ///   [MediaKitEngine.processingState]），`open()` 一返回就满足，守卫形同虚设；
+  ///   seek 打在 mpv 还没加载完文件时会被直接拒绝，而且**不抛异常**。日志里
+  ///   一次恢复出现**两条相同的** `_command(seek, X, absolute)` 失败，就是
+  ///   loadQueue 和这里各发了一次。
+  void _publishRestoredPosition(Duration restored) {
     position.value = restored;
     _emitSnapshot(force: true);
-    try {
-      // 引擎未加载（idle，preload=false 的恢复场景）时跳过真实 seek：
-      // just_audio 的 seek 会调 resetInitialSeekValues 清掉 setAudioSources
-      // 保留的 _PluginLoadRequest.initialIndex/initialPosition——而 play 激活
-      // 时正是靠它恢复正确索引+位置。idle 下 seek 只写 _IdleAudioPlayer 内部
-      // 状态、不落真机，位置由 _activateLogicalIndex(initialPosition:) 已传入
-      // _PluginLoadRequest，play 激活时由 load 的 initialPosition 应用。跳过
-      // 它才能保证 play 不从第 1 首（种子 currentIndex=0）开始播。
-      if (_activeEngine.processingState != EngineProcessingState.idle) {
-        await _activeEngine.seek(restored);
-      }
-    } finally {
-      _isSeeking = false;
-      if (_activeEngine.position > Duration.zero) {
-        position.value = _activeEngine.position;
-      } else {
-        position.value = restored;
-      }
-      _emitSnapshot(force: true);
-    }
   }
 
   void _completeRestoreSessionIfReady() {

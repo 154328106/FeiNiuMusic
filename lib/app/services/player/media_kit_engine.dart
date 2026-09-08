@@ -111,19 +111,20 @@ class MediaKitEngine implements PlayerEngine {
       ),
     );
     _player = player;
-    // media_kit 默认启用 mpv cache-on-disk。macOS 沙盒与部分 Windows 环境
-    // （无法访问 mpv 默认缓存目录）下 mpv 创建其文件缓存失败，日志为
+    // media_kit 默认启用 mpv cache-on-disk。拿不到 mpv 默认缓存目录时（macOS
+    // 沙盒、部分 Windows 环境、移动端）mpv 创建文件缓存失败，日志为
     // "Failed to create file cache"，随后 FLAC 流可能在曲末报 invalid frame
     // header。关闭磁盘层，仅保留既有 32MB 内存 demux 缓存；应用自己的
     // StreamCacheService 仍负责完整歌曲落盘。
-    if (defaultTargetPlatform == TargetPlatform.macOS ||
-        defaultTargetPlatform == TargetPlatform.windows) {
-      try {
-        final dynamic nativePlayer = player.platform;
-        await nativePlayer.setProperty('cache-on-disk', 'no');
-      } catch (e) {
-        debugPrint('[MediaKitEngine] disable disk cache failed: $e');
-      }
+    //
+    // 原来这里只在 macOS / Windows 上关。但实测日志在别的平台同样刷
+    // "Failed to create file cache" —— 判断漏了，等于没关。这个属性在哪个
+    // 平台都不需要磁盘缓存层，索性不再挑平台；设置失败本来就被 catch 兜着。
+    try {
+      final dynamic nativePlayer = player.platform;
+      await nativePlayer.setProperty('cache-on-disk', 'no');
+    } catch (e) {
+      debugPrint('[MediaKitEngine] disable disk cache failed: $e');
     }
     // 订阅 mpv 原生日志：仅保留错误级别（PlayerConfiguration.logLevel=error），
     // 诊断加载/解码失败的具体原因。不依赖 kDebugMode：release 版经 DebugLogService
@@ -350,6 +351,9 @@ class MediaKitEngine implements PlayerEngine {
   /// 不让播放器卡死。
   static const Duration openTimeout = Duration(seconds: 10);
 
+  /// 等 mpv 真正加载完文件的上限。超过就直接试 seek，不再干等。
+  static const Duration seekReadyTimeout = Duration(seconds: 5);
+
   @override
   Future<void> loadQueue({
     required List<EngineItem> items,
@@ -374,10 +378,40 @@ class MediaKitEngine implements PlayerEngine {
     if (initialPosition != null && initialPosition > Duration.zero) {
       // 恢复播放位置对 CUE 曲目是相对时间：加回该曲起始偏移换算成整轨
       // 绝对位置再让 mpv 定位（否则会 seek 到整轨文件前面的部分）。
-      await player.seek(
+      await _seekAfterLoad(
+        player,
         absoluteCroppedSeekTarget(initialPosition, medias[safeIndex].start),
+        _loadGeneration,
       );
     }
+  }
+
+  /// `open()` 返回 ≠ mpv 已经加载好文件。
+  ///
+  /// `open(play: false)` 只是把播放列表交给 mpv，解复用要晚一拍才完成。在
+  /// 那之前发 seek，mpv 直接拒绝 —— 日志里的
+  /// `error running command _command(seek, ..., absolute)` 就是它 —— 而且
+  /// media_kit **不把这个失败抛回来**，`player.seek()` 正常返回。表现就是
+  /// 「恢复播放位置静默失效」：UI 显示上次的进度，实际从头播。
+  ///
+  /// 等 duration 有值再 seek 才落得下去：mpv 报得出时长就说明文件已就位。
+  Future<void> _seekAfterLoad(
+    mk.Player player,
+    Duration target,
+    int generation,
+  ) async {
+    if (player.state.duration <= Duration.zero) {
+      try {
+        await player.stream.duration
+            .firstWhere((d) => d > Duration.zero)
+            .timeout(seekReadyTimeout);
+      } catch (_) {
+        // 超时、或流式源压根不报时长：仍然试一次，落不下去也只是回到原状。
+      }
+    }
+    // 等待期间用户可能已经切了队列，别把旧位置按到新歌上。
+    if (generation != _loadGeneration) return;
+    await player.seek(target);
   }
 
   @override

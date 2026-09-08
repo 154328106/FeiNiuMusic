@@ -8,15 +8,16 @@ import 'package:flutter/foundation.dart';
 ///
 /// 和聆澜那种要密钥的音源是互补关系，不是替代：
 /// - 聆澜命中率高、音质档位可选，但要花钱；
-/// - 这三家不要密钥、不要账号，命中率和音质看运气。
+/// - 这两家不要密钥、不要账号，命中率和音质看运气。
 ///
-/// 所以顺序是「先聆澜，没配或没命中再走这里」，见 [UnblockSourceService]。
+/// 链里的位置见 [UnblockSourceService]：GD 音乐台（[gdStudio]）按网易云原始
+/// id 取址，准确率高又免费，已经被提到聆澜**前面**单独调用；剩下这两家是
+/// 「搜歌名再比时长」的模糊匹配，仍然排在聆澜后面兜底。
 ///
-/// 顺序有讲究：
-/// 1. GD Studio —— 直接按**网易云原始 id** 取，对得最准，不会串成同名别的版本；
-/// 2. 酷狗 —— 关键词搜索 + 时长匹配；
-/// 3. 酷我 —— 同样是搜索匹配，但它的 convert_url 越来越常返回
-///    「请在酷我音乐APP播放」的提示音，所以压到最后当兜底。
+/// 兜底两家的顺序有讲究：
+/// 1. 酷狗 —— 关键词搜索 + 时长匹配；
+/// 2. 酷我 —— 同样是搜索匹配，但它的 convert_url 越来越常返回
+///    「请在酷我音乐APP播放」的提示音，所以压到最后。
 class FreeUnblockSources {
   FreeUnblockSources._();
 
@@ -30,37 +31,27 @@ class FreeUnblockSources {
     ),
   );
 
-  /// 逐个音源试，先拿到地址的赢。
+  /// 按关键词逐个音源试，先拿到地址的赢。
   ///
   /// [keyword] 是「歌名 歌手」，[durationMs] 用来在搜索结果里挑对版本 ——
   /// 少了它很容易匹配到现场版、翻唱或者串烧。
-  /// [neteaseId] 只有网易云的歌才有 —— GD Studio 按它查；酷狗和酷我这两家
-  /// 本来就是「搜歌名再比时长」，跟来源是哪家无关。所以它是可选的：QQ 和
-  /// 酷狗的歌照样能走后两家，之前把整条链按 platform=='wy' 拦掉是我堵死了
-  /// 自己的退路。
+  ///
+  /// 这两家都是「搜歌名再比时长」，跟歌来自哪个平台无关，所以 QQ / 酷狗的
+  /// 歌照样走得通 —— 之前把整条链按 platform=='wy' 拦掉是堵死了自己的退路。
   static Future<String?> resolve({
-    int? neteaseId,
     required String keyword,
     required int durationMs,
   }) async {
-    final label = neteaseId?.toString() ?? keyword;
-    if (neteaseId != null) {
-      final gd = await _gdStudio(neteaseId);
-      if (gd != null) {
-        debugPrint('[Unblock] GD Studio 命中 $label');
-        return gd;
-      }
-    }
     if (keyword.trim().isEmpty) return null;
 
     final kugou = await _kugou(keyword, durationMs);
     if (kugou != null) {
-      debugPrint('[Unblock] 酷狗命中 $label');
+      debugPrint('[Unblock] 酷狗命中 $keyword');
       return kugou;
     }
     final kuwo = await _kuwo(keyword, durationMs);
     if (kuwo != null) {
-      debugPrint('[Unblock] 酷我命中 $label');
+      debugPrint('[Unblock] 酷我命中 $keyword');
       return kuwo;
     }
     return null;
@@ -111,10 +102,41 @@ class FreeUnblockSources {
 
   // ---- GD Studio（按网易云原始 id 取，最准）----
 
-  static Future<String?> _gdStudio(int neteaseId) async {
+  /// 把音质设置换成 GD 音乐台的 `br` 取值。
+  ///
+  /// 设置里那一项是个自由文本框（设置 → 音源 → 音质），所以既要认洛雪那套
+  /// 档位名，也要容忍用户直接填数字。认不出来退回 320：宁可给一档能播的，
+  /// 也好过传个非法值让这一跳空手而归。
+  static int gdBitrate(String? quality) {
+    switch ((quality ?? '').trim().toLowerCase()) {
+      case '128k':
+      case '128':
+        return 128;
+      case '320k':
+      case '320':
+        return 320;
+      case 'flac':
+      case 'lossless':
+      case '740':
+        return 740;
+      case 'flac24bit':
+      case 'hires':
+      case '999':
+        return 999;
+    }
+    final n = int.tryParse((quality ?? '').trim());
+    return (n != null && n > 0) ? n : 320;
+  }
+
+  /// GD 音乐台：按**网易云原始 id** 取址。
+  ///
+  /// 这条链里唯一不靠关键词搜索的一家，所以不会串到同名翻唱上；实测连会员曲
+  /// 都能解，[quality] 给到 `flac` / `flac24bit` 时会返回无损。
+  static Future<String?> gdStudio(int neteaseId, {String? quality}) async {
+    final br = gdBitrate(quality);
     final body = await _get(
       'https://music-api.gdstudio.xyz/api.php'
-      '?types=url&source=netease&id=$neteaseId&br=320',
+      '?types=url&source=netease&id=$neteaseId&br=$br',
     );
     final json = _json(body);
     if (json == null) return null;
