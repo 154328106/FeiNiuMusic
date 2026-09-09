@@ -157,6 +157,7 @@ class _HomePageState extends State<HomePage>
       _latestShuffleInterval,
       (_) => _shuffleLatestTick(),
     );
+    _player.isPlaying.addListener(_onPlayingChanged);
     MusicSourceRegistry.instance.current.addListener(_onSourceChanged);
     // 登录 / 登出后源没换但内容变了，也要重拉。
     MusicSourceRegistry.instance.revision.addListener(_onSourceChanged);
@@ -185,6 +186,8 @@ class _HomePageState extends State<HomePage>
     }
     _roamAutoTimer?.cancel();
     _latestShuffleTimer?.cancel();
+    _heroLingerTimer?.cancel();
+    _player.isPlaying.removeListener(_onPlayingChanged);
     MusicSourceRegistry.instance.current.removeListener(_onSourceChanged);
     MusicSourceRegistry.instance.revision.removeListener(_onSourceChanged);
     super.dispose();
@@ -687,9 +690,55 @@ class _HomePageState extends State<HomePage>
   ///
   /// 首页关掉了迷你播放条（见 AppPageScaffold.showMiniPlayer），不借这张图的话
   /// 整个首页看不到当前在放什么。
-  bool get _heroShowsNowPlaying =>
-      _player.isPlayingSignal.value &&
-      _player.currentSongSignal.value != null;
+  /// 暂停后大图还停留在「正在播放」上的时长。
+  ///
+  /// 没有这个窗口的话，一按暂停 isPlaying 立刻变 false，大图当帧就切回漫游
+  /// 那首，而按钮回调 [_togglePlayRoam] 拿到的 hero 已经是漫游歌、playingThis
+  /// 为 false，于是直接开始播漫游 —— 表现就是「暂停按不动，一按反而换歌」。
+  static const Duration _heroLingerAfterPause = Duration(seconds: 3);
+
+  /// 暂停后大图停留到这个时刻；null = 没在挽留。
+  DateTime? _heroLingerUntil;
+  Timer? _heroLingerTimer;
+
+  bool get _heroShowsNowPlaying {
+    if (_player.currentSongSignal.value == null) return false;
+    if (_player.isPlayingSignal.value) return true;
+    final until = _heroLingerUntil;
+    return until != null && DateTime.now().isBefore(until);
+  }
+
+  /// 播放状态一变就更新挽留窗口。放监听里而不是 build 里算，避免在构建
+  /// 过程中改状态。
+  void _onPlayingChanged() {
+    _heroLingerTimer?.cancel();
+    _heroLingerTimer = null;
+    if (_player.isPlaying.value) {
+      _heroLingerUntil = null;
+      return;
+    }
+    if (_player.currentSongSignal.value == null) return;
+    _heroLingerUntil = DateTime.now().add(_heroLingerAfterPause);
+    _heroLingerTimer = Timer(_heroLingerAfterPause, () {
+      _heroLingerTimer = null;
+      _heroLingerUntil = null;
+      if (mounted) setState(() {});
+    });
+  }
+
+  /// 大图借去显示「正在播放」时整卡可点，进播放/歌词页。
+  ///
+  /// 展示漫游推荐时不挂这个：那首歌还没开始放，点整卡没有合理去处，
+  /// 让用户只能点按钮反而更清楚。卡片内的播放/换一首按钮在上层，会先
+  /// 吃掉点击，不会误触发。
+  Widget _wrapHeroTap(Widget banner) {
+    if (!_heroShowsNowPlaying) return banner;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => Navigator.of(context).pushNamed(AppRoutes.player),
+      child: banner,
+    );
+  }
 
   /// 大图上的小标签：借去显示当前播放时改成「正在播放」，否则还是漫游的标签。
   String get _heroDisplayLabel =>
@@ -925,8 +974,11 @@ class _HomePageState extends State<HomePage>
       _playRoam();
       return;
     }
+    // hero 就是当前这首（正在播、或刚暂停还在挽留窗口里）→ 这个按钮的语义
+    // 就是播放/暂停。原来只判 isPlaying，于是暂停之后再点会掉进下面的
+    // _playRoam()，表现是「暂停完再按不是继续，而是重开漫游」。
     final playingThis = _player.currentSongSignal.value?.id == hero.id;
-    if (playingThis && _player.isPlayingSignal.value) {
+    if (playingThis && (_player.isPlayingSignal.value || _heroShowsNowPlaying)) {
       unawaited(_player.togglePlayPause());
       return;
     }
@@ -953,6 +1005,15 @@ class _HomePageState extends State<HomePage>
     if (!_player.isPlayingSignal.value) return false;
     return _player.currentSongSignal.value?.id == hero.id;
   }
+
+  /// 首页内容不足一屏时不让它滚动。
+  ///
+  /// 默认的 AlwaysScrollableScrollPhysics（RefreshIndicator 需要它才能下拉刷新）
+  /// 会让内容明明没占满也能往上推，推上去漫游大图被裁掉一半、底下空一大块。
+  /// ClampingScrollPhysics 只在真的超出一屏时才滚，同时保留下拉刷新。
+  static const ScrollPhysics _homeScrollPhysics = ClampingScrollPhysics(
+    parent: RangeMaintainingScrollPhysics(),
+  );
 
   void _playFromList(List<SongEntity> songs, _HomePlaySource source) {
     if (songs.isEmpty) {
@@ -1078,7 +1139,11 @@ class _HomePageState extends State<HomePage>
         body: ValueListenableBuilder<bool>(
           valueListenable: AppLayoutSettings.effectiveTabletModeNotifier,
           builder: (context, effectiveTabletMode, _) {
-            return _buildHomeBody(context, effectiveTabletMode);
+            return _buildHomeBody(
+              context,
+              effectiveTabletMode,
+              useBottomNavigation,
+            );
           },
         ),
       ),
@@ -1086,7 +1151,11 @@ class _HomePageState extends State<HomePage>
   }
 
   /// 首页主体：平板/TV/Windows 用大屏五模块布局，手机端保持原滚动布局。
-  Widget _buildHomeBody(BuildContext context, bool effectiveTabletMode) {
+  Widget _buildHomeBody(
+    BuildContext context,
+    bool effectiveTabletMode,
+    bool useBottomNavigation,
+  ) {
     return Watch.builder(
       builder: (context) {
         if (_loading.value) {
@@ -1169,9 +1238,21 @@ class _HomePageState extends State<HomePage>
         return RefreshIndicator(
           onRefresh: () => _loadAll(forceRefresh: true),
           child: ListView(
+            // 底部留白按实际情况算，别再写死 160。首页已经关掉迷你播放条，
+            // 写死的 160 会凭空多出一截可滚动的空白 —— 现象就是内容明明没
+            // 占满一屏却能往上推，推上去漫游大图被裁掉一半、下面空一大块。
             padding: AppLayoutSettings.tvMode.value
                 ? TvLayout.pagePadding()
-                : const EdgeInsets.fromLTRB(20, 8, 20, 160),
+                : EdgeInsets.fromLTRB(
+                    20,
+                    8,
+                    20,
+                    AppPageScaffold.scrollableBottomPadding(
+                      context,
+                      hasBottomNav: useBottomNavigation,
+                      showMiniPlayer: false,
+                    ),
+                  ),
             children: [
               // 1. Hero Banner — 漫游/今日推荐，封面是绝对主角
               if (heroSong != null)
@@ -1179,13 +1260,17 @@ class _HomePageState extends State<HomePage>
                 AppContentFrame(
                   child: AnimatedSwitcher(
                   duration: const Duration(milliseconds: 420),
-                  child: HomeHeroBanner(
+                  child: KeyedSubtree(
                     key: ValueKey(heroSong.id),
-                    song: heroSong,
-                    label: _heroDisplayLabel,
-                    onPlay: _togglePlayRoam,
-                    isPlaying: _heroIsPlaying,
-                    onRefresh: _refreshRoam,
+                    child: _wrapHeroTap(
+                      HomeHeroBanner(
+                        song: heroSong,
+                        label: _heroDisplayLabel,
+                        onPlay: _togglePlayRoam,
+                        isPlaying: _heroIsPlaying,
+                        onRefresh: _refreshRoam,
+                      ),
+                    ),
                   ),
                 ),
                 ),
