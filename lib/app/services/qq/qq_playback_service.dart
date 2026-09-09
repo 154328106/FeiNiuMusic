@@ -34,6 +34,14 @@ class QQPlaybackService {
 
   final Map<String, _ResolvedUrl> _cache = {};
 
+  /// 正在解析中的 mid → 同一个 Future。
+  ///
+  /// 缓存只在**拿到结果之后**才挡得住重复请求。真机日志里首页缓存命中后又
+  /// 起了一次后台刷新，两个 prepareQueue 并发跑同一批歌，同一首被解析两遍
+  /// （`队列 25 首` 打了两次）—— 等于对着公益服务打双份，而作者明说了
+  /// 「切勿短时间批量」。让后来者搭前一个的车。
+  final Map<String, Future<String?>> _inFlight = {};
+
   /// 确认取不到地址的歌（会员曲，且音源也没有）。
   ///
   /// 没有这份记录，每次起播都会为这些歌重跑一整套请求 —— 网易云那边实测
@@ -85,10 +93,18 @@ class QQPlaybackService {
     }
   }
 
-  Future<String?> resolveStreamUrl(String mid, {String? mediaMid}) async {
+  Future<String?> resolveStreamUrl(String mid, {String? mediaMid}) {
     final cached = _cache[mid];
-    if (cached != null && !cached.isExpired) return cached.url;
-    if (_unresolvable.contains(mid)) return null;
+    if (cached != null && !cached.isExpired) return Future.value(cached.url);
+    if (_unresolvable.contains(mid)) return Future.value(null);
+    final running = _inFlight[mid];
+    if (running != null) return running;
+    final future = _resolveStreamUrl(mid, mediaMid: mediaMid);
+    _inFlight[mid] = future;
+    return future.whenComplete(() => _inFlight.remove(mid));
+  }
+
+  Future<String?> _resolveStreamUrl(String mid, {String? mediaMid}) async {
     try {
       // 顺序是「公益源 → 官方 → 其余音源」，和网易云/酷狗反着来，两个理由：
       //

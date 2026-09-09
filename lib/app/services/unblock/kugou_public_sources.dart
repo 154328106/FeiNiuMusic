@@ -89,12 +89,14 @@ class KugouPublicSources {
 
   /// 已确认不支持的「接口 × 源」组合，本次运行不再尝试。
   ///
-  /// 判据不能只看「没给地址」—— 那和「这首歌它没货」分不清。所以是连续
-  /// [_unsupportedThreshold] 次一个都没中才判死，且只对非酷狗的源生效
-  /// （酷狗是实测过的，它没货是常态，不该被判成不支持）。
+  /// **只认接口自己说的话**（HTTP 语义的 400/401/403），不再用「连撞 N 次
+  /// 没结果」去猜。第一版用的就是猜：真机日志里 haitangw 前面连中 50 次，
+  /// 只因为碰上连着几首它真没货的歌（几首韩语歌）就被判成「不支持 tx」停掉，
+  /// 还连锁触发了全局 10 分钟熄火。「不支持」和「这几首没货」这两件事，
+  /// 从「没给地址」上根本分不出来，只有接口明说才算数：
+  /// - zddyr 对 QQ 回 `code 403 / QQ 音乐仅对认证用户开放`
+  /// - zddyr 对 tx 回 `code 400 / source 无效，支持 kg/kw/qq/...`
   static final Set<String> _unsupported = {};
-  static final Map<String, int> _sourceMisses = {};
-  static const int _unsupportedThreshold = 3;
 
   /// 每个「接口 × 源」组合只留一次原始返回，用来判断到底是不支持还是没货。
   /// 没法在本地联网验证这两家认不认 `tx`，只能让真机来回答。
@@ -112,7 +114,6 @@ class KugouPublicSources {
     probes.clear();
     _probeLogged.clear();
     _unsupported.clear();
-    _sourceMisses.clear();
   }
 
   /// 取酷狗某个 hash 的播放地址，拿不到返回 null。
@@ -133,6 +134,7 @@ class KugouPublicSources {
     bool allowBail = true,
   }) async {
     if (rid.isEmpty) return null;
+    if (_allRefused(source)) return null;
     final skip = _skipUntil[source];
     if (skip != null && DateTime.now().isBefore(skip)) return null;
 
@@ -195,25 +197,35 @@ class KugouPublicSources {
           : await _zddyr(rid, source);
       if (url != null) {
         _lastGood = name;
-        _sourceMisses.remove(combo);
         debugPrint('[公益音源] $name 命中 $source/$rid');
         return url;
       }
-      _noteMiss(combo, source);
     }
     return null;
   }
 
-  /// 非酷狗的源连续多次一个都没中，就当这家不认这个源，本次运行不再问它。
-  static void _noteMiss(String combo, String source) {
-    if (source == 'kg') return;
-    final n = (_sourceMisses[combo] ?? 0) + 1;
-    _sourceMisses[combo] = n;
-    if (n >= _unsupportedThreshold) {
-      _unsupported.add(combo);
-      debugPrint('[公益音源] $combo 连续 $n 次没结果，本次运行不再尝试');
+  /// 接口明说了不支持这个源就记下来，本次运行不再问它。
+  ///
+  /// 400/401/403 是「这个请求本身不该发」，和「这首歌我没有」（那是 code 0
+  /// 但没 url，或者 404/5xx）是两回事，不会被没货的歌误触发。
+  static void _noteRefusal(String endpoint, String source, Object? code) {
+    if (code is! num) return;
+    final n = code.toInt();
+    if (n != 400 && n != 401 && n != 403) return;
+    final combo = '$endpoint/$source';
+    if (_unsupported.add(combo)) {
+      debugPrint('[公益音源] $combo 被接口拒绝（code $n），本次运行不再尝试');
     }
   }
+
+  /// 两家都拒了这个源 —— 直接不走这条链，也别去动服务健康度的计数。
+  ///
+  /// 不加这道判断的话，被拒之后每首歌都会「空转一次、记一笔失败」，攒够 5 次
+  /// 就把整个源熄火 10 分钟 —— 真机日志里那两行 `tx 连续 5 次没结果` 就是
+  /// 这么来的，跟服务好不好一点关系都没有。
+  static bool _allRefused(String source) =>
+      _unsupported.contains('haitangw/$source') &&
+      _unsupported.contains('zddyr/$source');
 
   /// 两家的源代号不一样，得分别翻译。
   ///
@@ -240,7 +252,13 @@ class KugouPublicSources {
         options: Options(headers: {'Content-Type': 'application/json'}),
       );
       _probe('haitangw', source, res);
-      return _pickUrl(res, codeField: 'code', okCodes: const [0, 200]);
+      return _pickUrl(
+        res,
+        endpoint: 'haitangw',
+        source: source,
+        codeField: 'code',
+        okCodes: const [0, 200],
+      );
     } catch (_) {
       return null;
     }
@@ -262,7 +280,13 @@ class KugouPublicSources {
         },
       );
       _probe('zddyr', source, res);
-      return _pickUrl(res, codeField: 'code', okCodes: const [0, 200]);
+      return _pickUrl(
+        res,
+        endpoint: 'zddyr',
+        source: source,
+        codeField: 'code',
+        okCodes: const [0, 200],
+      );
     } catch (_) {
       return null;
     }
@@ -304,6 +328,8 @@ class KugouPublicSources {
   /// 从返回里挑出播放地址。两家的结构不一样，路径都试一遍。
   static String? _pickUrl(
     Response<String> res, {
+    required String endpoint,
+    required String source,
     required String codeField,
     required List<int> okCodes,
   }) {
@@ -322,6 +348,8 @@ class KugouPublicSources {
     }
     if (json is! Map) return null;
     final code = json[codeField];
+    // 接口明说不支持这个源的话，记下来别再问了。
+    _noteRefusal(endpoint, source, code);
     if (code is num && !okCodes.contains(code.toInt())) return null;
 
     final data = json['data'];
