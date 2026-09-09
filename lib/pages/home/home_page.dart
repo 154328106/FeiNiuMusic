@@ -1468,10 +1468,44 @@ class _CompactSongList extends StatelessWidget {
                         ],
                       ),
                     ),
-                    Icon(
-                      Icons.play_circle_outline_rounded,
-                      size: 28,
-                      color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
+                    // 播放/暂停按钮：正在放这首时显示暂停图标，点它就暂停；
+                    // 放的是别的歌（或没在放）就还是播放图标，点它播这首。
+                    // 整行仍然可点 —— 点行是「播这首」，只有这个按钮带暂停语义。
+                    Watch.builder(
+                      builder: (context) {
+                        final player = PlayerService.instance;
+                        final isThis =
+                            player.currentSongSignal.value?.id == song.id;
+                        final playing =
+                            isThis && player.isPlayingSignal.value;
+                        return GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () {
+                            if (isThis) {
+                              unawaited(player.togglePlayPause());
+                            } else {
+                              onTap(song);
+                            }
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 8,
+                            ),
+                            child: Icon(
+                              playing
+                                  ? Icons.pause_circle_outline_rounded
+                                  : Icons.play_circle_outline_rounded,
+                              size: 28,
+                              color: playing
+                                  ? scheme.primary
+                                  : scheme.onSurfaceVariant.withValues(
+                                      alpha: 0.6,
+                                    ),
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ),
