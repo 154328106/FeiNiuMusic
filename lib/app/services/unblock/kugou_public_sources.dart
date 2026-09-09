@@ -268,6 +268,25 @@ class KugouPublicSources {
     debugPrint('[公益音源] 探针 $combo HTTP ${res.statusCode}：$brief');
   }
 
+  /// 诊断用：两家**都**问一遍（不像 [_resolveOnce] 那样先命中先返回），
+  /// 好知道每一家分别认不认这个源。返回 `接口名 -> 地址(或 null)`。
+  static Future<Map<String, String?>> probeBoth(String rid, String source) async {
+    return {
+      'haitangw': await _haitangw(rid, source),
+      'zddyr': await _zddyr(rid, source),
+    };
+  }
+
+  /// 诊断用：取文件大小，用来反推时长、判断拿到的是不是同一首歌。
+  static Future<int?> contentLength(String url) async {
+    try {
+      final res = await _dio.head<void>(url);
+      return int.tryParse(res.headers.value('content-length') ?? '');
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 从返回里挑出播放地址。两家的结构不一样，路径都试一遍。
   static String? _pickUrl(
     Response<String> res, {

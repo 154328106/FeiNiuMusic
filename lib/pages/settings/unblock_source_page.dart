@@ -197,14 +197,29 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
     setState(() => _qualityController.text = result);
   }
 
-  /// 临时诊断：这两家公益源认不认 QQ（洛雪源代号 `tx`）。
+  /// 探测用的曲目。故意挑时长差别大的几首 —— 时长是这里唯一拿得到的
+  /// 身份证据，几首都对得上才说明它是按 id 映射，而不是按歌名瞎猜。
+  static const List<String> _probeKeywords = [
+    '少年 梦然',
+    '晴天 周杰伦',
+    '起风了 买辣椒也用券',
+    '孤勇者 陈奕迅',
+    '突然的自我 伍佰',
+  ];
+
+  /// 临时诊断：这两家公益源认不认 QQ（洛雪源代号 `tx`），以及**给的是不是
+  /// 同一首歌**。
   ///
-  /// **不写死 songmid**：让 App 现搜一首拿真 mid，否则 mid 写错会被误判成
-  /// 「接口不支持 tx」—— 这两种情况从返回上分不出来。
+  /// 第一版只探一首，结果 haitangw 用 QQ 的 songmid 回了个**酷我**的 flac
+  /// —— 说明它做的是跨平台匹配，不是按 QQ 的 id 取 QQ 的资源。那就有串到
+  /// 同名翻唱的风险，光看「拿到地址了」根本不算数。
+  ///
+  /// 所以改成多首一起跑，每首比对 QQ 报的时长和文件大小反推的时长：
+  /// 按 id 映射的话首首都该吻合，按歌名猜的话会散。
   ///
   /// 扣扣音乐眼下不在源列表里（取址接口会给打不开的 purl 且不带状态码，
-  /// 见 music_source_registry 的注释），所以平时根本触发不到这条链，
-  /// 只能靠这个按钮把结论问出来。有定论后这段就该删掉。
+  /// 见 music_source_registry 的注释），平时触发不到这条链，只能靠这个按钮
+  /// 把结论问出来。有定论后这段就该删掉。
   Future<void> _probeQQPublicSources() async {
     setState(() {
       _probing = true;
@@ -212,37 +227,40 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
     });
     final buf = StringBuffer();
     try {
-      final songs = await QQApiClient.instance.searchSongs('少年 梦然', limit: 10);
-      if (songs.isEmpty) {
-        buf.writeln('搜不到歌，QQ 那边的接口就没通，先别管公益源。');
-      } else {
-        // 优先挑会员曲：官方肯给的歌本来就不需要公益源救。
+      KugouPublicSources.resetProbes();
+      for (final keyword in _probeKeywords) {
+        final songs = await QQApiClient.instance.searchSongs(keyword, limit: 5);
+        if (songs.isEmpty) {
+          buf.writeln('$keyword → QQ 搜不到');
+          buf.writeln('');
+          continue;
+        }
         final target = songs.firstWhere(
           (s) => s.payPlay,
           orElse: () => songs.first,
         );
-        buf.writeln('探测曲：${target.name} - ${target.artists}');
-        buf.writeln('songmid：${target.mid}');
-        buf.writeln('会员曲：${target.payPlay ? '是' : '否'}');
-        buf.writeln('');
-        KugouPublicSources.resetProbes();
-        final url = await KugouPublicSources.resolve(
-          target.mid,
-          source: 'tx',
-          allowBail: false,
-        );
-        buf.writeln(url == null ? '结果：两家都没给地址' : '结果：拿到地址了');
-        if (url != null) {
-          buf.writeln(url.length > 120 ? '${url.substring(0, 120)}…' : url);
+        final qqSec = target.durationMs ~/ 1000;
+        buf.writeln('${target.name} - ${target.artists}');
+        buf.writeln('  mid ${target.mid} · QQ ${_mmss(qqSec)}'
+            '${target.payPlay ? ' · 会员曲' : ''}');
+        final results = await KugouPublicSources.probeBoth(target.mid, 'tx');
+        for (final entry in results.entries) {
+          final url = entry.value;
+          if (url == null) {
+            buf.writeln('  ${entry.key}：没给地址');
+            continue;
+          }
+          final host = Uri.tryParse(url)?.host ?? '?';
+          final bytes = await KugouPublicSources.contentLength(url);
+          buf.writeln('  ${entry.key}：$host ${_sizeDesc(bytes)}'
+              ' → ${_durationVerdict(bytes, url, qqSec)}');
         }
         buf.writeln('');
-        if (KugouPublicSources.probes.isEmpty) {
-          buf.writeln('两家都没返回（超时或域名不通）。');
-        } else {
-          for (final e in KugouPublicSources.probes.entries) {
-            buf.writeln('${e.key} → ${e.value}');
-            buf.writeln('');
-          }
+      }
+      if (KugouPublicSources.probes.isNotEmpty) {
+        buf.writeln('原始返回：');
+        for (final e in KugouPublicSources.probes.entries) {
+          buf.writeln('${e.key} → ${e.value}');
         }
       }
     } catch (e) {
@@ -253,6 +271,30 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
       _probing = false;
       _probeReport = buf.toString().trim();
     });
+  }
+
+  static String _mmss(int seconds) {
+    if (seconds <= 0) return '未知';
+    return '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
+  }
+
+  static String _sizeDesc(int? bytes) {
+    if (bytes == null || bytes <= 0) return '大小未知';
+    return '${(bytes / 1024 / 1024).toStringAsFixed(1)}MB';
+  }
+
+  /// 用文件大小反推时长，和 QQ 报的比。
+  ///
+  /// 码率按扩展名估：flac 约 900kbps（112KB/s），mp3 按 320k（40KB/s）。
+  /// 估得糙，但翻唱/现场版跟原版的时长差通常在几十秒量级，够看出来。
+  static String _durationVerdict(int? bytes, String url, int qqSec) {
+    if (bytes == null || bytes <= 0 || qqSec <= 0) return '无法比对';
+    final isFlac = url.toLowerCase().contains('.flac');
+    final bytesPerSecond = isFlac ? 112000 : 40000;
+    final estSec = bytes ~/ bytesPerSecond;
+    final diff = (estSec - qqSec).abs();
+    final tag = diff <= qqSec * 0.15 ? '吻合' : '对不上';
+    return '估算 ${_mmss(estSec)}，差 ${diff}s（$tag）';
   }
 
   Future<void> _save() async {
@@ -427,8 +469,8 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
               AppSettingTile(
                 title: '探测扣扣音乐公益源',
                 subtitle: _probing
-                    ? '正在探测…'
-                    : '问一次 haitangw / zddyr 认不认 QQ，结果直接显示在下面',
+                    ? '正在探测…（5 首，约十几秒）'
+                    : '拿 5 首歌问 haitangw / zddyr，比对时长看是不是同一首',
                 trailing: _probing
                     ? const SizedBox(
                         width: 18,
