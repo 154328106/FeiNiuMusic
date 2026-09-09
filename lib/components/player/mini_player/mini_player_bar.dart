@@ -12,6 +12,7 @@ import '../../../app/state/song_state.dart';
 import '../radar_play_button.dart';
 import '../../../app/theme/app_glass_theme.dart';
 import '../../common/artwork_widget.dart';
+import '../../common/content_frame.dart';
 import '../../common/glass_gate.dart';
 import '../../player/lyric_preview.dart';
 import '../../../pages/player/player_page.dart';
@@ -91,10 +92,14 @@ class MiniPlayerBar extends StatelessWidget {
                   : Colors.white.withValues(alpha: 0.08))
             : scheme.surface.withValues(alpha: 0.85);
 
+        // 描边跟全局「内容框」设置走，不再写死。
+        //
+        // 原来浅色下固定用 outlineVariant@0.42，比列表卡片的描边重得多，
+        // 看着就是一圈突兀的黑边，而且改全局描边设置对它完全无效。
+        // appUnitBorderColor 在「不加框」时返回透明色（不是 null），
+        // 所以关掉框之后这条也会跟着干净。
         final border = Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.08)
-              : scheme.outlineVariant.withValues(alpha: 0.42),
+          color: appUnitBorderColor(context),
           width: 0.8,
         );
 

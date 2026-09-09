@@ -43,6 +43,12 @@ class HomeHeroBanner extends StatelessWidget {
   /// 换一首按钮回调。为 null 时不显示刷新按钮。
   final VoidCallback? onRefresh;
 
+  /// 点封面的回调：播放中是「下一曲」，漫游态是「换一首推荐」。
+  ///
+  /// 判断放在调用方（首页），这张卡只管把点击转出去 —— 它不知道
+  /// hero 现在展示的是当前播放还是漫游推荐。
+  final VoidCallback? onArtworkTap;
+
   /// 自定义宽高比（宽/高）。默认按设备自适应：
   /// TV/平板 12:5、手机 16:9。调用方（如大屏首页布局）可传更扁的值
   /// 让 Banner 变矮变长方形，避免占满整屏。
@@ -59,6 +65,7 @@ class HomeHeroBanner extends StatelessWidget {
     this.isPlaying = false,
     this.label = '漫游 · 随心听',
     this.onRefresh,
+    this.onArtworkTap,
     this.aspectRatio,
     this.height,
   });
@@ -244,6 +251,7 @@ class HomeHeroBanner extends StatelessWidget {
       song: song,
       onPlay: onPlay,
       onRefresh: onRefresh,
+      onArtworkTap: onArtworkTap,
       isPlaying: isPlaying,
     );
   }
@@ -259,11 +267,13 @@ class _CompactHeroCard extends StatefulWidget {
     required this.onPlay,
     required this.onRefresh,
     required this.isPlaying,
+    this.onArtworkTap,
   });
 
   final SongEntity? song;
   final VoidCallback onPlay;
   final VoidCallback? onRefresh;
+  final VoidCallback? onArtworkTap;
   final bool isPlaying;
 
   @override
@@ -421,21 +431,28 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(14),
-                    child: SizedBox(
-                      width: 68,
-                      height: 68,
-                      child: (coverId != null && coverId.isNotEmpty)
-                          ? CachedNetworkImage(
-                              imageUrl: _heroCoverUrl(coverId, song),
-                              httpHeaders: _heroCoverHeaders(coverId),
-                              fit: BoxFit.cover,
-                              placeholder: (_, _) => _HeroFallback(song: song),
-                              errorWidget: (_, _, _) =>
-                                  _HeroFallback(song: song),
-                            )
-                          : _HeroFallback(song: song),
+                  // 点封面切歌。外层还有个「点卡片进歌词页」的手势，
+                  // 手势竞技场里内层先赢，不会打架。
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: widget.onArtworkTap,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: SizedBox(
+                        width: 68,
+                        height: 68,
+                        child: (coverId != null && coverId.isNotEmpty)
+                            ? CachedNetworkImage(
+                                imageUrl: _heroCoverUrl(coverId, song),
+                                httpHeaders: _heroCoverHeaders(coverId),
+                                fit: BoxFit.cover,
+                                placeholder: (_, _) =>
+                                    _HeroFallback(song: song),
+                                errorWidget: (_, _, _) =>
+                                    _HeroFallback(song: song),
+                              )
+                            : _HeroFallback(song: song),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 14),
@@ -470,6 +487,7 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
                   ),
                   const SizedBox(width: 8),
                   // 点击 = 播放/暂停，长按 = 换一首。
+                  //
                   //
                   // 原来传的是 onRefresh，而 RadarPlayButton 在「正在播 + 有
                   // onRefresh」时点击走的是换一首 —— 所以播放中怎么点都暂停

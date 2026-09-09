@@ -23,6 +23,8 @@ class AppBackgroundSettings {
   static const String _prefsNavBarOpacity = 'setting_nav_bar_opacity';
   static const String _prefsMiniPlayerOnlyWhilePlaying =
       'setting_mini_player_only_while_playing';
+  static const String _prefsNavBarFrameEnabled =
+      'setting_nav_bar_frame_enabled';
 
   static final ValueNotifier<String?> backgroundImagePath = ValueNotifier(null);
   static final ValueNotifier<double> backgroundMaskOpacity = ValueNotifier(
@@ -35,7 +37,11 @@ class AppBackgroundSettings {
   /// 面板高斯模糊强度（0 = 无模糊，32 = 最大模糊）
   static final ValueNotifier<double> panelBlurStrength = ValueNotifier(20);
   /// 高斯模糊总开关。关闭后 [panelBlurStrength] 视为 0，各处不渲染模糊。
-  static final ValueNotifier<bool> panelBlurEnabled = ValueNotifier(true);
+  /// 高斯模糊总开关。关闭后 [panelBlurStrength] 视为 0，各处不渲染模糊。
+  ///
+  /// 默认关：模糊在低端机上掉帧，而且开了之后底栏底色被压到很淡（见
+  /// modern_navigation_bar 里的 isBlurred 分支），观感反而糊。
+  static final ValueNotifier<bool> panelBlurEnabled = ValueNotifier(false);
 
   /// 列表加框样式。见 [AppContentFrameStyle]（不加框 / 整块描边 / 逐行卡片）。
   /// 用字符串存，避免枚举顺序变化影响已保存的值。
@@ -55,7 +61,12 @@ class AppBackgroundSettings {
   static final ValueNotifier<Color?> navBarColor = ValueNotifier(null);
 
   /// 底部导航栏底色深浅度（不透明度）0~1。
-  static final ValueNotifier<double> navBarOpacity = ValueNotifier(0.85);
+  static final ValueNotifier<double> navBarOpacity = ValueNotifier(1.0);
+
+  /// 底部导航栏是否描边。
+  ///
+  /// 液体玻璃分支自己有一圈底板描边，这个开关只作用于普通（非玻璃）分支。
+  static final ValueNotifier<bool> navBarFrameEnabled = ValueNotifier(true);
 
   /// 迷你播放条仅在播放时显示，暂停/停止时隐藏。
   ///
@@ -82,7 +93,7 @@ class AppBackgroundSettings {
         (prefs.getDouble(_prefsBackgroundBlurSigma) ?? 16).clamp(0.0, 32.0);
     pageGlowEnabled.value = prefs.getBool(_prefsPageGlowEnabled) ?? false;
     panelBlurStrength.value = (prefs.getDouble(_prefsPanelBlur) ?? 20).clamp(0.0, 32.0);
-    panelBlurEnabled.value = prefs.getBool(_prefsPanelBlurEnabled) ?? true;
+    panelBlurEnabled.value = prefs.getBool(_prefsPanelBlurEnabled) ?? false;
     final rawFrame = prefs.getString(_prefsContentFrameStyle);
     contentFrameStyle.value = rawFrame != null
         ? AppContentFrameStyle.fromName(rawFrame)
@@ -100,7 +111,9 @@ class AppBackgroundSettings {
     final navColor = prefs.getInt(_prefsNavBarColor);
     navBarColor.value = navColor == null ? null : Color(navColor);
     navBarOpacity.value =
-        (prefs.getDouble(_prefsNavBarOpacity) ?? 0.85).clamp(0.0, 1.0);
+        (prefs.getDouble(_prefsNavBarOpacity) ?? 1.0).clamp(0.0, 1.0);
+    navBarFrameEnabled.value =
+        prefs.getBool(_prefsNavBarFrameEnabled) ?? true;
     miniPlayerOnlyWhilePlaying.value =
         prefs.getBool(_prefsMiniPlayerOnlyWhilePlaying) ?? false;
   }
@@ -182,6 +195,12 @@ class AppBackgroundSettings {
     final v = value.clamp(0.0, 1.0);
     await prefs.setDouble(_prefsNavBarOpacity, v);
     navBarOpacity.value = v;
+  }
+
+  static Future<void> setNavBarFrameEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsNavBarFrameEnabled, enabled);
+    navBarFrameEnabled.value = enabled;
   }
 
   static Future<void> setContentFrameStyle(AppContentFrameStyle style) async {

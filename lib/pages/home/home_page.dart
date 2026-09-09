@@ -716,6 +716,19 @@ class _HomePageState extends State<HomePage>
   /// 由信号驱动重建的 —— 暂停时 isPlayingSignal 先变、重建先跑，那一帧
   /// _heroLingerUntil 还是 null，hero 已经切回漫游；等这个监听回调再改字段时
   /// 已经没人重建了。表现就是「暂停按不动」。
+  /// 点大图封面。
+  ///
+  /// 大图展示的是「当前播放」时切下一曲；展示漫游推荐时（没在播）换一首 ——
+  /// 那种状态下队列可能是空的，next() 点了没反应，等于一个死区。
+  /// 两种状态下语义一致：都是「换一个」。
+  void _heroArtworkTapped() {
+    if (_heroShowsNowPlaying) {
+      unawaited(_player.next());
+    } else {
+      _refreshRoam();
+    }
+  }
+
   void _startHeroLinger() {
     _heroLingerTimer?.cancel();
     _heroLingerUntil = DateTime.now().add(_heroLingerAfterPause);
@@ -1292,6 +1305,7 @@ class _HomePageState extends State<HomePage>
                         onPlay: _togglePlayRoam,
                         isPlaying: _heroIsPlaying,
                         onRefresh: _refreshRoam,
+                        onArtworkTap: _heroArtworkTapped,
                       ),
                     ),
                   ),

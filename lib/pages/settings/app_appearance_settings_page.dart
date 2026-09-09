@@ -757,6 +757,19 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                 },
               ),
               ValueListenableBuilder<bool>(
+                valueListenable: AppBackgroundSettings.navBarFrameEnabled,
+                builder: (context, framed, _) {
+                  return AppSettingSwitchTile(
+                    title: '导航栏描边',
+                    subtitle: framed
+                        ? '底栏画一圈发丝描边，和背景分得开'
+                        : '不画描边，底栏只靠底色和投影',
+                    value: framed,
+                    onChanged: AppBackgroundSettings.setNavBarFrameEnabled,
+                  );
+                },
+              ),
+              ValueListenableBuilder<bool>(
                 valueListenable: AppBackgroundSettings.panelBlurEnabled,
                 builder: (context, blurEnabled, _) {
                   return AppSettingSwitchTile(

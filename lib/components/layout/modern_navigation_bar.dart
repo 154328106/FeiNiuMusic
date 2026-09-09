@@ -188,6 +188,7 @@ class ModernNavigationBar extends StatelessWidget {
       listenable: Listenable.merge([
         AppBackgroundSettings.navBarColor,
         AppBackgroundSettings.navBarOpacity,
+        AppBackgroundSettings.navBarFrameEnabled,
       ]),
       builder: (context, _) => ValueListenableBuilder<bool>(
       valueListenable: AppBackgroundSettings.panelBlurEnabled,
@@ -202,11 +203,15 @@ class ModernNavigationBar extends StatelessWidget {
         // 底色与深浅度可在「应用外观 → 底部导航栏」自定义；
         // 未自定义时跟随主题表面色。开了模糊时底色本就接近透明（靠
         // BackdropFilter 出效果），此时深浅度只按比例微调，不然一调就糊死。
-        // 未自定义时用 surfaceContainerHigh 而不是 surface：页面背景本身就是
-        // surface，两者同色的话胶囊整个糊进背景里，实机反馈「有点糊、不明显」。
+        // 未自定义时跟「逐行卡片」同色（见 content_frame.dart 的 isCards
+        // 分支），让底栏和列表看着是一套，而不是浮在上面的另一块。
+        // 不能用 surface：页面背景本身就是 surface，同色会整个糊进背景。
+        final isDarkTint = Theme.of(context).brightness == Brightness.dark;
         final navTint =
             AppBackgroundSettings.navBarColor.value ??
-            scheme.surfaceContainerHigh;
+            (isDarkTint
+                ? scheme.surfaceContainerHighest
+                : Colors.white);
         final navOpacity = AppBackgroundSettings.navBarOpacity.value;
         // 开模糊时底色本该很淡（靠 BackdropFilter 出效果），但页面背景是纯色
         // 时模糊等于没模糊，0.08 的底色会让胶囊彻底消失。给它一个下限。
@@ -256,6 +261,8 @@ class ModernNavigationBar extends StatelessWidget {
         // 悬浮圆角外壳：和玻璃分支一样留出左右边距、加发丝描边与轻投影，
         // 免得浅色背景下这条整个糊进去看不出边界。
         final isDark = Theme.of(context).brightness == Brightness.dark;
+        // 描边跟「应用外观 → 底栏描边」走；关掉就整条不画边。
+        final framed = AppBackgroundSettings.navBarFrameEnabled.value;
         final pillBorder = isDark
             ? Colors.white.withValues(alpha: 0.24)
             : Colors.black.withValues(alpha: 0.18);
@@ -269,7 +276,9 @@ class ModernNavigationBar extends StatelessWidget {
             child: DecoratedBox(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(kNavPillRadius),
-                border: Border.all(color: pillBorder, width: 1),
+                border: framed
+                    ? Border.all(color: pillBorder, width: 1)
+                    : null,
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(
