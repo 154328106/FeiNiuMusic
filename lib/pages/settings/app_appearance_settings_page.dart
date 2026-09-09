@@ -762,7 +762,7 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                   return AppSettingSwitchTile(
                     title: '导航栏描边',
                     subtitle: framed
-                        ? '底栏画一圈描边，和背景分得开'
+                        ? '底栏画一圈描边，和背景分得开（液体玻璃下同样生效）'
                         : '不画描边，底栏只靠底色和投影',
                     value: framed,
                     onChanged: AppBackgroundSettings.setNavBarFrameEnabled,
@@ -776,10 +776,12 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                   return ValueListenableBuilder<Color?>(
                     valueListenable: AppBackgroundSettings.navBarFrameColor,
                     builder: (context, frameColor, _) {
+                      // 与 modern_navigation_bar 里实色分支的默认描边一致，
+                      // 否则这块色板显示的和底栏实际画出来的对不上。
                       final fallback = Theme.of(context).brightness ==
                               Brightness.dark
-                          ? Colors.white.withValues(alpha: 0.24)
-                          : Colors.black.withValues(alpha: 0.18);
+                          ? Colors.white.withValues(alpha: 0.32)
+                          : Colors.black.withValues(alpha: 0.28);
                       return _ColorSettingTile(
                         title: '导航栏描边颜色',
                         subtitle: frameColor == null

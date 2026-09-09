@@ -49,7 +49,11 @@ class MiniPlayerBar extends StatelessWidget {
     // Follow the same panel blur slider as cards/settings panels so the
     // bottom music bar (which the setting description explicitly names) reacts
     // to the "高斯模糊强度" slider instead of a hardcoded blur.
-    return ValueListenableBuilder<bool>(
+    // 同时挂玻璃滑块（模糊/厚度）：玻璃分支的 settings 是运行时读的，
+    // 不挂监听拖完滑块这条播放栏纹丝不动。
+    return ListenableBuilder(
+      listenable: appGlassTunables,
+      builder: (context, _) => ValueListenableBuilder<bool>(
       valueListenable: AppBackgroundSettings.panelBlurEnabled,
       builder: (context, blurEnabled, _) {
         final baseStrength =
@@ -58,6 +62,7 @@ class MiniPlayerBar extends StatelessWidget {
                 : 0.0;
         return _buildBar(context, baseStrength);
       },
+      ),
     );
   }
 
@@ -102,6 +107,9 @@ class MiniPlayerBar extends StatelessWidget {
           color: appUnitBorderColor(context),
           width: 0.8,
         );
+
+        // 玻璃底板：与底栏同一组值，两块才像一套东西。
+        final glassPlate = appGlassPlateColor(isDark);
 
         final defaultShadow = [
           BoxShadow(
@@ -211,12 +219,14 @@ class MiniPlayerBar extends StatelessWidget {
         final glassSurface = GlassContainer(
           shape: LiquidRoundedRectangle(borderRadius: borderRadius),
           clipBehavior: Clip.antiAlias,
-          // 与底栏同款深折射参数，但玻璃罩更透（白 24% → 白 10%）：迷你播放器
-          // 是大面积全宽面板，同样不透明度会罩成一片白雾（「像高斯模糊」），
-          // 降低罩子后背后内容透出更多、折射可见，才有玻璃的通透感。
-          settings: kAppGlassSurfaceSettings.copyWith(
-            glassColor: const Color(0x1AFFFFFF),
-          ),
+          // 与底栏**完全同款**：同一套 appGlassSurfaceSettings（含用户调的
+          // 模糊/厚度），玻璃着色也不再单独压到白 10%。
+          //
+          // 压到 10% 是上一版在「没有底板」的前提下做的妥协 —— 全宽面板罩
+          // 24% 会成一片白雾。现在底下垫了和底栏同款的底板，白雾问题由底板
+          // 兜住，着色就该跟底栏对齐；否则底栏是块亮底板、播放栏是块近乎全透
+          // 的玻璃，摆一起就是两样东西（用户原话：感觉不搭配、播放的也是黑的）。
+          settings: appGlassSurfaceSettings(),
           // 独立渲染层 + 与全局主题一致的 standard 质量（0.30.2 Skia 路径下
           // premium 需要 blend group 多通道，且滚动时整条全宽面板逐帧重采样，
           // 是滚动黑屏闪烁/掉帧的主要来源；Windows 端本就静态封顶 standard，
@@ -268,8 +278,23 @@ class MiniPlayerBar extends StatelessWidget {
                 // RepaintBoundary —— 动画重绘不触发玻璃重新采样。
                 glass: Stack(
                   children: [
+                    // 底板：与底栏共用 appGlassPlateColor。玻璃面会把它一起
+                    // 采样进去，效果等同底栏「底板在玻璃之后」的层次。
+                    Positioned.fill(child: ColoredBox(color: glassPlate)),
                     Positioned.fill(child: glassSurface),
                     inner,
+                    // 描边画前景，且玻璃分支以前压根没有描边 —— 底栏有边、
+                    // 播放栏没边，是「不搭配」的另一半原因。
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(borderRadius),
+                            border: border,
+                          ),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),

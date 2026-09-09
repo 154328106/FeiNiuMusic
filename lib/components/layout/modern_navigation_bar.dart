@@ -334,6 +334,21 @@ class ModernNavigationBar extends StatelessWidget {
   /// [AppPageScaffold.modernNavHeight]，槽位/迷你播放器抬升/滚动留白数学零改动。
   /// 胶囊无内部 SafeArea，外层补 `SafeArea(top: false)` 悬浮在 Home 指示条上方。
   Widget _buildGlass(BuildContext context, int index) {
+    // 玻璃分支原来一个监听都没挂：底色/深浅度/边框/玻璃滑块改完全不重建，
+    // 要切一次页才看得到 —— 用户反馈的「调了跟没调一样」有一半是这个。
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        AppBackgroundSettings.navBarColor,
+        AppBackgroundSettings.navBarOpacity,
+        AppBackgroundSettings.navBarFrameEnabled,
+        AppBackgroundSettings.navBarFrameColor,
+        appGlassTunables,
+      ]),
+      builder: (context, _) => _glassPill(context, index),
+    );
+  }
+
+  Widget _glassPill(BuildContext context, int index) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     // 选中胶囊色：与包内置 demo（CupertinoApp）一致 —— label 色 10% 半透明。
     // MaterialApp 下没有显式 CupertinoTheme，包默认的动态色 .withValues 可能
@@ -346,13 +361,22 @@ class ModernNavigationBar extends StatelessWidget {
     // 玻璃胶囊在浅色壁纸上几乎没有边界，整条底栏"看不见"。垫一层很薄的
     // 底板（半透明表面色 + 发丝描边 + 轻投影）给它一个轮廓 —— 玻璃效果
     // 照旧从上面透过来，只是不再糊进背景里。
-    // 上一版这层太克制，浅色壁纸下还是几乎看不见，再加一档。
-    final plate = isDark
-        ? Colors.black.withValues(alpha: 0.42)
-        : Colors.white.withValues(alpha: 0.74);
-    final plateBorder = isDark
-        ? Colors.white.withValues(alpha: 0.22)
-        : Colors.black.withValues(alpha: 0.14);
+    //
+    // 底板色与迷你播放器共用（见 appGlassPlateColor），两者才是一套东西。
+    // 底板透明度跟「导航栏深浅度」联动：以前玻璃分支下这个滑块只在自定义了
+    // 底色时才影响 glassColor，默认状态下拖它毫无反应。
+    final plateBase = appGlassPlateColor(isDark);
+    final plate = plateBase.withValues(
+      alpha: (plateBase.a * navOpacity).clamp(0.0, 1.0),
+    );
+    final framed = AppBackgroundSettings.navBarFrameEnabled.value;
+    // 描边跟实色分支共用同一组设置（应用外观 → 导航栏边框 / 边框颜色），
+    // 不再是玻璃分支自己写死的一条发丝线。
+    final plateBorder =
+        AppBackgroundSettings.navBarFrameColor.value ??
+        appGlassPlateBorderColor(isDark);
+    final borderWidth =
+        AppBackgroundSettings.navBarFrameColor.value == null ? 1.2 : 1.6;
     return SafeArea(
       top: false,
       child: Padding(
@@ -364,49 +388,59 @@ class ModernNavigationBar extends StatelessWidget {
           decoration: BoxDecoration(
             color: plate,
             borderRadius: BorderRadius.circular(kNavPillRadius),
-            border: Border.all(color: plateBorder, width: 1),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.40 : 0.18),
+                // 投影跟深浅度一起淡，否则底板调透之后透出来的全是这团黑影。
+                color: Colors.black.withValues(
+                  alpha: ((isDark ? 0.40 : 0.18) * navOpacity).clamp(0.0, 1.0),
+                ),
                 blurRadius: 18,
                 offset: const Offset(0, 6),
               ),
             ],
           ),
-          // 垫一层透明 Material：GlassTabBar 的文字标签挂在 SafeArea 下，
-          // 脱离了 Scaffold 的 Material 树。Flutter 对「找不到 Material 祖先」
-          // 的 Text 会用调试样式渲染 —— 黄色双下划线，就是开液态玻璃后
-          // 「搜索」「我的」底下那两道黄线。透明 Material 不影响玻璃观感。
-          child: Material(
-            type: MaterialType.transparency,
-            child: GlassTabBar.bottom(
-        tabs: [
-          for (var i = 0; i < _labels.length; i++)
-            GlassTab(
-              icon: Icon(_glassIcons[i]),
-              label: _labels[i],
+          child: DecoratedBox(
+            // 描边画前景：画背景会被上面的底板 + 玻璃整个盖住。
+            position: DecorationPosition.foreground,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(kNavPillRadius),
+              border: framed
+                  ? Border.all(color: plateBorder, width: borderWidth)
+                  : null,
             ),
-        ],
-        selectedIndex: index,
-        onTabSelected: onTap,
-        // 显式传入共享表面参数（见 kAppGlassSurfaceSettings）：与全局其它玻璃
-        // 统一观感，并防止包升级改动内部默认值导致底栏漂移。
-        // 自定义底色时覆盖玻璃着色（glassColor），未自定义则用全局共享参数。
-        settings: navTint == null
-            ? kAppGlassSurfaceSettings
-            : kAppGlassSurfaceSettings.copyWith(
-                glassColor: navTint.withValues(alpha: navOpacity * 0.5),
+            // 垫一层透明 Material：GlassTabBar 的文字标签挂在 SafeArea 下，
+            // 脱离了 Scaffold 的 Material 树。Flutter 对「找不到 Material 祖先」
+            // 的 Text 会用调试样式渲染 —— 黄色双下划线，就是开液态玻璃后
+            // 「搜索」「我的」底下那两道黄线。透明 Material 不影响玻璃观感。
+            child: Material(
+              type: MaterialType.transparency,
+              child: GlassTabBar.bottom(
+                tabs: [
+                  for (var i = 0; i < _labels.length; i++)
+                    GlassTab(
+                      icon: Icon(_glassIcons[i]),
+                      label: _labels[i],
+                    ),
+                ],
+                selectedIndex: index,
+                onTabSelected: onTap,
+                // 走 appGlassSurfaceSettings()（带用户的模糊/厚度），不再是
+                // const kAppGlassSurfaceSettings —— 后者会把滑块值盖回默认。
+                // 自定义底色时覆盖玻璃着色（glassColor）。
+                settings: appGlassSurfaceSettings(
+                  glassColor: navTint?.withValues(alpha: navOpacity * 0.5),
+                ),
+                // 悬浮：胶囊上下各留 kGlassNavPillTopGap 空隙（槽位 56 + 14×2 = 84），
+                // 内容从胶囊四周透出，视觉上像 demo（GlassScaffold 底栏）一样飘浮。
+                barHeight: kGlassNavBarHeight,
+                // 圆角矩形而非胶囊：包的默认 barBorderRadius 是
+                // GlassDefaults.capsuleRadius（9999），两端会被拉成半圆。
+                barBorderRadius: kNavPillRadius,
+                // 外边距已经由上面的底板接管，胶囊自己不再重复留白。
+                verticalPadding: 0,
+                horizontalPadding: 0,
+                indicatorColor: pillColor,
               ),
-        // 悬浮：胶囊上下各留 kGlassNavPillTopGap 空隙（槽位 56 + 14×2 = 84），
-        // 内容从胶囊四周透出，视觉上像 demo（GlassScaffold 底栏）一样飘浮。
-        barHeight: kGlassNavBarHeight,
-        // 圆角矩形而非胶囊：包的默认 barBorderRadius 是
-        // GlassDefaults.capsuleRadius（9999），两端会被拉成半圆。
-        barBorderRadius: kNavPillRadius,
-            // 外边距已经由上面的底板接管，胶囊自己不再重复留白。
-            verticalPadding: 0,
-            horizontalPadding: 0,
-            indicatorColor: pillColor,
             ),
           ),
         ),

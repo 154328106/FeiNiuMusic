@@ -75,3 +75,39 @@ GlassThemeData appGlassTheme(Color seed) {
     ),
   );
 }
+
+/// 用户可调的玻璃参数（应用外观 → 液体玻璃：模糊强度 / 厚度）。
+///
+/// [kAppGlassSurfaceSettings] 是 const，显式把它传进 `settings:` 的地方
+/// （底栏、迷你播放器）会**盖掉** [appGlassTheme] 里已经接好的滑块值 ——
+/// 表现就是「模糊和厚度调了跟没调一样」，因为用户盯着看的恰好就是这两块。
+/// 需要显式传参的地方一律改用这个函数，并记得挂 [appGlassTunables] 重建。
+LiquidGlassSettings appGlassSurfaceSettings({Color? glassColor}) {
+  final base = kAppGlassSurfaceSettings.copyWith(
+    blur: AppGlassSettings.glassBlurStrength.value,
+    thickness: AppGlassSettings.glassThickness.value,
+  );
+  // 不把 null 传进 copyWith：包的 copyWith 对 null 是「保留」还是「清空」
+  // 无从验证（本机没有 pub 缓存），传空等于赌它的实现。有值才覆盖。
+  return glassColor == null ? base : base.copyWith(glassColor: glassColor);
+}
+
+/// 玻璃滑块的可监听体：用 [appGlassSurfaceSettings] 的地方套一层
+/// `ListenableBuilder`，否则拖完滑块要切页才看得到变化。
+Listenable get appGlassTunables => Listenable.merge([
+  AppGlassSettings.glassBlurStrength,
+  AppGlassSettings.glassThickness,
+]);
+
+/// 玻璃底板色：玻璃本身在浅色壁纸上几乎没有边界，垫一层半透明底板给它轮廓。
+///
+/// 底栏和迷你播放器**共用**这一组值 —— 之前底栏有底板、迷你播放器没有，
+/// 一个是亮底板一个是近乎全透的玻璃，摆在一起就是「两块不是一套的东西」。
+Color appGlassPlateColor(bool isDark) => isDark
+    ? Colors.black.withValues(alpha: 0.42)
+    : Colors.white.withValues(alpha: 0.74);
+
+/// 玻璃底板的发丝描边（未自定义边框颜色时的默认值）。
+Color appGlassPlateBorderColor(bool isDark) => isDark
+    ? Colors.white.withValues(alpha: 0.30)
+    : Colors.black.withValues(alpha: 0.20);
