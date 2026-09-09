@@ -185,6 +185,13 @@ class PlayerService with WidgetsBindingObserver {
   Timer? _backgroundAudioKeepAliveTimer;
   _PlaybackRestoreState? _restoreSession;
   Future<void>? _restorePrepareFuture;
+
+  /// 恢复的「灌队列」阶段是否仍在进行。
+  ///
+  /// 用来让 [_startPlayback] 知道该不该等：光判断 _restorePrepareFuture 非空
+  /// 不够，它在恢复走完后还会留着（由 _completeRestoreSessionIfReady 清），
+  /// 那时候再等就是白等一轮日志。
+  bool _restorePreparing = false;
   DateTime? _sleepEndAt;
   final Map<String, int> _durationPersistedMs = {};
   final Map<String, _ResolvedRemoteSource> _resolvedRemoteSources = {};
@@ -1965,23 +1972,6 @@ class PlayerService with WidgetsBindingObserver {
       await DlnaCastService.instance.play();
       return;
     }
-    // 冷启动恢复还没走完时按播放：先等它。
-    //
-    // 恢复要先批量解地址、再把队列灌进引擎，而 loadQueue 内部是
-    // `open(playlist, play: false)` —— 它会把**已经在播的东西停掉**。不等的
-    // 话两边互相踩：用户按下的播放被 open 掐掉，恢复的位置又因为「检测到已
-    // 在播」被放弃，结果就是按两次才响、而且从头开始。
-    //
-    // playQueue 早就有 `await _initFuture` 做同样的事，播放这条一直漏着。
-    final restoring = _restorePrepareFuture;
-    if (restoring != null) {
-      _debugLog('play：恢复尚未完成，先等它走完');
-      try {
-        await restoring;
-      } catch (_) {
-        // 恢复失败不该挡住播放，继续。
-      }
-    }
     await _startPlayback();
   }
 
@@ -2943,7 +2933,10 @@ class PlayerService with WidgetsBindingObserver {
     final shouldAutoPlayOnLaunch =
         AppLaunchPlaybackSettings.shouldAutoPlayOnAppLaunch();
     _restorePlaybackUiState(session);
-    _restorePrepareFuture = _prepareRestoredAudioSource(session);
+    _restorePreparing = true;
+    _restorePrepareFuture = _prepareRestoredAudioSource(
+      session,
+    ).whenComplete(() => _restorePreparing = false);
     await _restorePrepareFuture;
 
     if (shouldAutoPlayOnLaunch) {
@@ -3157,6 +3150,26 @@ class PlayerService with WidgetsBindingObserver {
   /// 不依赖 play() 的 Future，也不会挂起。对 play() 本身只做短超时等待，
   /// 超时不视为失败（音频由状态流确认在播）。
   Future<void> _startPlayback() async {
+    // 冷启动恢复的「灌队列」阶段还没走完时按播放：先等它。
+    //
+    // 恢复要先批量解地址、再把队列灌进引擎，而 loadQueue 内部是
+    // `open(playlist, play: false)` —— 它会把**刚起播的东西直接停掉**。不等
+    // 的话两边互相踩：按下的播放被 open 掐掉，表现是「按一次没反应，按第二
+    // 次才响」。playQueue 早就有 `await _initFuture` 做同样的事。
+    //
+    // 等待放在这里而不是 play()：UI 的播放按钮走的是 togglePlayPause，
+    // 会绕过 play()。所有入口都汇到 _startPlayback，只有这里堵得住。
+    //
+    // 不会自己等自己：恢复自身的 autoplay 在 `await _restorePrepareFuture`
+    // 之后才调这里，那时 _restorePreparing 已经是 false。
+    if (_restorePreparing) {
+      _debugLog('startPlayback：恢复尚未走完，先等它');
+      try {
+        await _restorePrepareFuture;
+      } catch (_) {
+        // 恢复失败不该挡住播放。
+      }
+    }
     _debugLog('startPlayback song=${currentSong.value?.title ?? 'none'}');
     final active = await _setAudioSessionActive(true);
     if (!active) {
