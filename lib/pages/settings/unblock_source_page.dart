@@ -22,6 +22,9 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
 
   bool _enabled = true;
   bool _testing = false;
+  /// 密钥/接口地址默认遮住。它们平时没有再看一眼的必要，露着只是徒增
+  /// 截图和旁人瞄一眼的风险。
+  bool _revealSecrets = false;
   String? _result;
   bool _resultOk = false;
 
@@ -50,6 +53,43 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
     super.dispose();
   }
 
+  /// 音质预设。值必须是 [FreeUnblockSources.gdBitrate] 认得的写法，同时也会
+  /// 原样替换进自配音源接口模板里的 {quality}。
+  static const List<(String, String, String)> _qualityPresets = [
+    ('128k', '流畅', '128 kbps，省流量'),
+    ('320k', '标准', '320 kbps，默认'),
+    ('flac', '无损', 'FLAC，取不到会自动退回 320k'),
+    ('flac24bit', 'Hi-Res', '24bit 母带，货最少'),
+  ];
+
+  /// 密钥遮罩：只留末 4 位，够用来分辨是哪一个，又认不出全貌。
+  String _maskKey(String key) {
+    if (key.length <= 4) return '•' * key.length;
+    return '••••••${key.substring(key.length - 4)}';
+  }
+
+  String _keysSummary() {
+    final keys = _keysController.text
+        .split('
+')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    if (keys.isEmpty) return '未填写';
+    return '${keys.length} 个 · ${keys.map(_maskKey).join('，')}';
+  }
+
+  /// 接口地址遮罩：露主机名的头两位和后缀，剩下打点。
+  String _templateSummary() {
+    final text = _templateController.text.trim();
+    if (text.isEmpty) return '未填写';
+    final host = Uri.tryParse(text)?.host ?? '';
+    if (host.isEmpty) return '已配置';
+    final dot = host.lastIndexOf('.');
+    if (dot <= 2) return '已配置';
+    return '已配置 · ${host.substring(0, 2)}••••${host.substring(dot)}';
+  }
+
   UnblockSourceConfig _currentConfig() => UnblockSourceConfig(
     template: _templateController.text.trim(),
     apiKeys: _keysController.text
@@ -62,6 +102,97 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
         : _qualityController.text.trim(),
     enabled: _enabled,
   );
+
+  String _qualityLabel() {
+    final current = _qualityController.text.trim();
+    for (final (value, name, _) in _qualityPresets) {
+      if (value == current) return '$name（$value）';
+    }
+    return current.isEmpty ? '标准（320k）' : '自定义（$current）';
+  }
+
+  Future<void> _pickQuality() async {
+    final current = _qualityController.text.trim();
+    final isPreset = _qualityPresets.any((e) => e.$1 == current);
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                '音质',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+              ),
+            ),
+            for (final (value, name, desc) in _qualityPresets)
+              ListTile(
+                title: Text(name),
+                subtitle: Text(desc),
+                trailing: current == value
+                    ? const Icon(Icons.check_rounded)
+                    : null,
+                onTap: () => Navigator.pop(context, value),
+              ),
+            // 自配音源的接口模板里 {quality} 是原样替换的，别的源可能要别的
+            // 写法。写死成列表会把那些源打死，留个口子。
+            ListTile(
+              title: const Text('自定义'),
+              subtitle: Text(
+                isPreset || current.isEmpty ? '自己填写音质参数' : '当前：$current',
+              ),
+              trailing: !isPreset && current.isNotEmpty
+                  ? const Icon(Icons.check_rounded)
+                  : null,
+              onTap: () => Navigator.pop(context, '__custom__'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    if (picked == '__custom__') {
+      await _editCustomQuality();
+      return;
+    }
+    setState(() => _qualityController.text = picked);
+  }
+
+  Future<void> _editCustomQuality() async {
+    final controller = TextEditingController(text: _qualityController.text);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('自定义音质'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          autocorrect: false,
+          decoration: const InputDecoration(
+            hintText: '例如 320k / flac / 999',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (result == null || result.isEmpty || !mounted) return;
+    setState(() => _qualityController.text = result);
+  }
 
   Future<void> _save() async {
     await _service.save(_currentConfig());
@@ -128,46 +259,57 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
           AppSettingSection(
             title: '配置',
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                child: TextField(
-                  controller: _keysController,
-                  minLines: 2,
-                  maxLines: 5,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: 'API 密钥',
-                    hintText: '一行一个，可填多个',
-                    border: OutlineInputBorder(),
+              AppSettingTile(
+                title: '音质',
+                subtitle: _qualityLabel(),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: _pickQuality,
+              ),
+              AppSettingSwitchTile(
+                title: '显示密钥与接口地址',
+                subtitle: _revealSecrets
+                    ? '当前明文显示，注意别截图'
+                    : '默认遮住，避免截图或旁人看到',
+                value: _revealSecrets,
+                onChanged: (v) => setState(() => _revealSecrets = v),
+              ),
+              if (!_revealSecrets) ...[
+                AppSettingTile(title: 'API 密钥', subtitle: _keysSummary()),
+                AppSettingTile(
+                  title: '接口地址',
+                  subtitle: _templateSummary(),
+                ),
+              ] else ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  child: TextField(
+                    controller: _keysController,
+                    minLines: 2,
+                    maxLines: 5,
+                    autocorrect: false,
+                    decoration: const InputDecoration(
+                      labelText: 'API 密钥',
+                      hintText: '一行一个，可填多个',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                child: TextField(
-                  controller: _qualityController,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: '音质',
-                    hintText: '320k',
-                    border: OutlineInputBorder(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                  child: TextField(
+                    controller: _templateController,
+                    minLines: 2,
+                    maxLines: 4,
+                    autocorrect: false,
+                    decoration: const InputDecoration(
+                      labelText: '接口地址',
+                      helperText:
+                          '占位符：{source} 平台代号、{id} 歌曲 id、{quality} 音质',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                child: TextField(
-                  controller: _templateController,
-                  minLines: 2,
-                  maxLines: 4,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: '接口地址',
-                    helperText: '占位符：{source} 平台代号、{id} 歌曲 id、{quality} 音质',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-              ),
+              ],
             ],
           ),
           const SizedBox(height: 16),
@@ -219,7 +361,8 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
           ],
           const SizedBox(height: 20),
           Text(
-            '密钥只保存在本机，不会上传。多个密钥会依次尝试，并记住最近可用的那个。',
+            '密钥只保存在本机，不会上传，也不会写进日志。多个密钥会依次尝试，'
+            '并记住最近可用的那个。',
             style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
           ),
         ],
