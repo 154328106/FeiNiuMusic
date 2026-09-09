@@ -234,22 +234,50 @@ class _MusicSourceSection extends StatelessWidget {
       listenable: Listenable.merge([registry.current, registry.revision]),
       builder: (context, _) {
         final current = registry.current.value;
-        return AppSettingSection(
-          title: '音乐来源',
-          accent: Theme.of(context).colorScheme.primary,
+        final accent = Theme.of(context).colorScheme.primary;
+        // 不再套 AppSettingSection：那个组件会把 children 包进一层描边面板，
+        // 而这里三张卡自己就有底色和描边，套进去就是双层框。只借它的标题行样式。
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (final source in MusicSourceRegistry.all)
-              _SourceTile(
-                source: source,
-                selected: identical(source, current),
-                onTap: () => _onTap(context, source, registry),
-                onLogin: switch (source.id) {
+            Padding(
+              padding: const EdgeInsets.fromLTRB(0, 0, 0, 8),
+              child: Row(
+                children: [
+                  Container(
+                    width: 4,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: accent,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  Text(
+                    '音乐来源',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: accent.withValues(alpha: 0.95),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            for (var i = 0; i < MusicSourceRegistry.all.length; i++) ...[
+              if (i > 0) const SizedBox(height: 10),
+              _SourceBar(
+                source: MusicSourceRegistry.all[i],
+                selected: identical(MusicSourceRegistry.all[i], current),
+                onTap: () =>
+                    _onTap(context, MusicSourceRegistry.all[i], registry),
+                onLogin: switch (MusicSourceRegistry.all[i].id) {
                   'netease' => () => _onLogin(context, registry),
                   'qq' => () => _onLoginQQ(context, registry),
                   'kugou' => () => _onLoginKugou(context, registry),
                   _ => null,
                 },
               ),
+            ],
           ],
         );
       },
@@ -399,7 +427,12 @@ class _MusicSourceSection extends StatelessWidget {
   }
 }
 
-class _SourceTile extends StatelessWidget {
+/// 音乐来源的横条卡。
+///
+/// 原来是设置项列表里的三行 AppSettingTile，和「切换数据来源」这件事的分量
+/// 不太相称 —— 它其实是这个 App 最常动的开关之一。改成三张带强调色的横条，
+/// 视觉语言和同页的 [_StatsCard]、首页的快捷卡片一致。
+class _SourceBar extends StatelessWidget {
   final MusicSource source;
   final bool selected;
   final VoidCallback onTap;
@@ -407,7 +440,7 @@ class _SourceTile extends StatelessWidget {
   /// 需要账号的源给一个单独的登录入口；为 null 表示这个源不谈登录。
   final VoidCallback? onLogin;
 
-  const _SourceTile({
+  const _SourceBar({
     required this.source,
     required this.selected,
     required this.onTap,
@@ -426,46 +459,101 @@ class _SourceTile extends StatelessWidget {
       KugouSource() => KugouAuth.instance.isLoggedIn.value,
       _ => true,
     };
-    return AppSettingTile(
-      title: source.label,
-      // 不可用时把原因和下一步写在副标题上，而不是让用户切过去看到一片空白。
-      // 只说「在用 / 能切」。登录与否右边的按钮已经写着了，副标题再解释
-      // 一遍是重复；不可用的原因也没必要占一行 —— 点进去自然会引导。
-      subtitle: selected ? '当前使用中' : '点击切换',
-      onTap: onTap,
-      leading: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.asset(
-          source.assetIcon,
-          width: 32,
-          height: 32,
-          fit: BoxFit.cover,
-          // 资源缺失时退回图标，不至于整行报红。
-          errorBuilder: (_, _, _) =>
-              Icon(source.icon, size: 26, color: source.accent),
+    final accent = source.accent;
+    return Container(
+      height: 72,
+      decoration: BoxDecoration(
+        // 选中的那张底色和描边都加重一档，一眼能看出在用哪个源。
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: selected
+              ? [accent.withValues(alpha: 0.30), accent.withValues(alpha: 0.11)]
+              : [accent.withValues(alpha: 0.14), accent.withValues(alpha: 0.05)],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: accent.withValues(alpha: selected ? 0.60 : 0.20),
+          width: selected ? 1.6 : 1,
         ),
       ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (onLogin != null)
-            TextButton(
-              onPressed: onLogin,
-              style: TextButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 8, 0),
+              child: Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Image.asset(
+                      source.assetIcon,
+                      width: 40,
+                      height: 40,
+                      fit: BoxFit.cover,
+                      // 资源缺失时退回图标，不至于整张卡报红。
+                      errorBuilder: (_, _, _) =>
+                          Icon(source.icon, size: 30, color: accent),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          source.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        // 只说「在用 / 能切」。登录与否右边的按钮已经写着了。
+                        Text(
+                          selected ? '当前使用中' : '点击切换',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (onLogin != null)
+                    TextButton(
+                      onPressed: onLogin,
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                      child: Text(loggedIn ? '账号' : '登录'),
+                    ),
+                  // 勾位固定占宽：不占的话选中那张的按钮会被勾挤走，
+                  // 三张卡的「账号 / 登录」就对不齐了。
+                  SizedBox(
+                    width: 26,
+                    child: selected
+                        ? Icon(
+                            Icons.check_circle_rounded,
+                            size: 20,
+                            color: accent,
+                          )
+                        : null,
+                  ),
+                ],
               ),
-              child: Text(loggedIn ? '账号' : '登录'),
             ),
-          // 勾位固定占宽：不占的话，选中那行的按钮会被勾挤走 20 像素，
-          // 上下几行的「账号 / 登录」就对不齐了。
-          SizedBox(
-            width: 20,
-            child: selected
-                ? Icon(Icons.check_rounded, size: 20, color: scheme.primary)
-                : null,
           ),
-        ],
+        ),
       ),
     );
   }
