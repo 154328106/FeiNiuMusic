@@ -118,8 +118,9 @@ class AppBackgroundSettings {
         (prefs.getDouble(_prefsNavBarOpacity) ?? 1.0).clamp(0.0, 1.0);
     navBarFrameEnabled.value =
         prefs.getBool(_prefsNavBarFrameEnabled) ?? true;
-    final frameColor = prefs.getInt(_prefsNavBarFrameColor);
-    navBarFrameColor.value = frameColor == null ? null : Color(frameColor);
+    final navFrameColor = prefs.getInt(_prefsNavBarFrameColor);
+    navBarFrameColor.value =
+        navFrameColor == null ? null : Color(navFrameColor);
     miniPlayerOnlyWhilePlaying.value =
         prefs.getBool(_prefsMiniPlayerOnlyWhilePlaying) ?? false;
   }
