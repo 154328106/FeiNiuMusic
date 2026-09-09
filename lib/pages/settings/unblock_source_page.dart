@@ -70,8 +70,7 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
 
   String _keysSummary() {
     final keys = _keysController.text
-        .split('
-')
+        .split('\n')
         .map((e) => e.trim())
         .where((e) => e.isNotEmpty)
         .toList();
