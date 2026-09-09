@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../app/router/app_page_route.dart';
@@ -13,6 +12,7 @@ import '../../app/services/player_service.dart';
 import '../../app/state/settings_state.dart';
 import '../../app/state/song_state.dart';
 import '../../components/common/app_list_tile.dart';
+import '../../components/common/artwork_widget.dart';
 import '../../components/feedback/app_toast.dart';
 import '../library/library_detail_pages.dart';
 import '../library/playlists_page.dart';
@@ -197,10 +197,12 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
               child: Row(
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: _buildCover(theme, song),
-                  ),
+                  // 用统一的 ArtworkWidget，不要自己拼封面地址：网易云/酷狗
+                  // 这类公网源的封面是直链（coverId 里存的就是完整 URL），
+                  // 原来这里无条件走 FeiNiuApiClient.coverUrl() 拼 NAS 地址、
+                  // 还带上 NAS 鉴权头，结果必然 404 退占位图 —— 表现就是
+                  // 「播放页点⋯，当前这首没有封面」。
+                  ArtworkWidget(song: song, size: 52, borderRadius: 8),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -397,44 +399,6 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
     );
   }
 
-  Widget _buildCover(ThemeData theme, SongEntity song) {
-    if (song.coverId != null && song.coverId!.isNotEmpty) {
-      final coverUrl =
-          FeiNiuApiClient.instance.coverUrl(song.coverId!, size: FeiNiuApiClient.coverRequestSize, updatedAt: song.updatedAt);
-      return CachedNetworkImage(
-        imageUrl: coverUrl,
-        httpHeaders: FeiNiuApiClient.imageAuthHeaders(),
-        width: 52,
-        height: 52,
-        memCacheWidth: 52,
-        memCacheHeight: 52,
-        fit: BoxFit.cover,
-        placeholder: (_, _) => _coverPlaceholder(theme, song.title),
-        errorWidget: (_, _, _) => _coverPlaceholder(theme, song.title),
-      );
-    }
-    return _coverPlaceholder(theme, song.title);
-  }
-
-  Widget _coverPlaceholder(ThemeData theme, String title) {
-    final letter = title.trim().isEmpty ? '?' : title.trim().substring(0, 1);
-    return Container(
-      width: 52,
-      height: 52,
-      decoration: BoxDecoration(
-        color: theme.cardColor,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        letter.toUpperCase(),
-        style: TextStyle(
-          color: theme.colorScheme.primary,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
 }
 
 class _AppVolumeControl extends StatelessWidget {

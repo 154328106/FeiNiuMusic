@@ -64,7 +64,7 @@ class AppBackgroundSettings {
   static final ValueNotifier<Color?> navBarColor = ValueNotifier(null);
 
   /// 底部导航栏底色深浅度（不透明度）0~1。
-  static final ValueNotifier<double> navBarOpacity = ValueNotifier(1.0);
+  static final ValueNotifier<double> navBarOpacity = ValueNotifier(0.85);
 
   /// 底部导航栏是否描边。普通分支与液体玻璃分支共用。
   static final ValueNotifier<bool> navBarFrameEnabled = ValueNotifier(true);
@@ -76,7 +76,7 @@ class AppBackgroundSettings {
   ///
   /// 默认发丝色本身就是半透明的（浅色 28% / 深色 32%），所以这里是「在默认
   /// 基础上再淡多少」，1.0 = 默认那档，不是纯色。
-  static final ValueNotifier<double> navBarFrameOpacity = ValueNotifier(1.0);
+  static final ValueNotifier<double> navBarFrameOpacity = ValueNotifier(0.5);
 
   /// 迷你播放条仅在播放时显示，暂停/停止时隐藏。
   ///
@@ -121,11 +121,11 @@ class AppBackgroundSettings {
     final navColor = prefs.getInt(_prefsNavBarColor);
     navBarColor.value = navColor == null ? null : Color(navColor);
     navBarOpacity.value =
-        (prefs.getDouble(_prefsNavBarOpacity) ?? 1.0).clamp(0.0, 1.0);
+        (prefs.getDouble(_prefsNavBarOpacity) ?? 0.85).clamp(0.0, 1.0);
     navBarFrameEnabled.value =
         prefs.getBool(_prefsNavBarFrameEnabled) ?? true;
     navBarFrameOpacity.value =
-        (prefs.getDouble(_prefsNavBarFrameOpacity) ?? 1.0).clamp(0.0, 1.0);
+        (prefs.getDouble(_prefsNavBarFrameOpacity) ?? 0.5).clamp(0.0, 1.0);
     final navFrameColor = prefs.getInt(_prefsNavBarFrameColor);
     navBarFrameColor.value =
         navFrameColor == null ? null : Color(navFrameColor);
