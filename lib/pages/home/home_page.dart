@@ -710,20 +710,32 @@ class _HomePageState extends State<HomePage>
 
   /// 播放状态一变就更新挽留窗口。放监听里而不是 build 里算，避免在构建
   /// 过程中改状态。
-  void _onPlayingChanged() {
+  /// 开一个挽留窗口，让大图暂停后先停在当前这首上。
+  ///
+  /// **必须 setState**：上一版只改了字段就返回，而大图那棵树是 Watch.builder
+  /// 由信号驱动重建的 —— 暂停时 isPlayingSignal 先变、重建先跑，那一帧
+  /// _heroLingerUntil 还是 null，hero 已经切回漫游；等这个监听回调再改字段时
+  /// 已经没人重建了。表现就是「暂停按不动」。
+  void _startHeroLinger() {
     _heroLingerTimer?.cancel();
-    _heroLingerTimer = null;
-    if (_player.isPlaying.value) {
-      _heroLingerUntil = null;
-      return;
-    }
-    if (_player.currentSongSignal.value == null) return;
     _heroLingerUntil = DateTime.now().add(_heroLingerAfterPause);
     _heroLingerTimer = Timer(_heroLingerAfterPause, () {
       _heroLingerTimer = null;
       _heroLingerUntil = null;
       if (mounted) setState(() {});
     });
+    if (mounted) setState(() {});
+  }
+
+  void _onPlayingChanged() {
+    if (_player.isPlaying.value) {
+      _heroLingerTimer?.cancel();
+      _heroLingerTimer = null;
+      _heroLingerUntil = null;
+      return;
+    }
+    if (_player.currentSongSignal.value == null) return;
+    _startHeroLinger();
   }
 
   /// 大图借去显示「正在播放」时整卡可点，进播放/歌词页。
@@ -979,6 +991,9 @@ class _HomePageState extends State<HomePage>
     // _playRoam()，表现是「暂停完再按不是继续，而是重开漫游」。
     final playingThis = _player.currentSongSignal.value?.id == hero.id;
     if (playingThis && (_player.isPlayingSignal.value || _heroShowsNowPlaying)) {
+      // 这一下如果是「暂停」，当场就开挽留窗口，不去赌 isPlaying 的监听
+      // 和 Watch.builder 谁先跑。
+      if (_player.isPlayingSignal.value) _startHeroLinger();
       unawaited(_player.togglePlayPause());
       return;
     }
@@ -1011,9 +1026,13 @@ class _HomePageState extends State<HomePage>
   /// 默认的 AlwaysScrollableScrollPhysics（RefreshIndicator 需要它才能下拉刷新）
   /// 会让内容明明没占满也能往上推，推上去漫游大图被裁掉一半、底下空一大块。
   /// ClampingScrollPhysics 只在真的超出一屏时才滚，同时保留下拉刷新。
-  static const ScrollPhysics _homeScrollPhysics = ClampingScrollPhysics(
-    parent: RangeMaintainingScrollPhysics(),
-  );
+  /// 首页的滚动手感。
+  ///
+  /// AlwaysScrollable 是 RefreshIndicator 的前提（内容不满一屏也要能下拉），
+  /// 但它在 iOS 上默认带 Bouncing —— 内容明明没占满也能拽起来晃，就是
+  /// 「首页还是可以滑动」。父级换成 Clamping：下拉刷新照常，多余的弹性没了。
+  static const ScrollPhysics _homeScrollPhysics =
+      AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics());
 
   void _playFromList(List<SongEntity> songs, _HomePlaySource source) {
     if (songs.isEmpty) {
@@ -1238,6 +1257,7 @@ class _HomePageState extends State<HomePage>
         return RefreshIndicator(
           onRefresh: () => _loadAll(forceRefresh: true),
           child: ListView(
+            physics: _homeScrollPhysics,
             // 底部留白按实际情况算，别再写死 160。首页已经关掉迷你播放条，
             // 写死的 160 会凭空多出一截可滚动的空白 —— 现象就是内容明明没
             // 占满一屏却能往上推，推上去漫游大图被裁掉一半、下面空一大块。

@@ -1434,6 +1434,13 @@ class _SpectrumRingState extends State<_SpectrumRing>
   double _phase = 0;
   Duration _last = Duration.zero;
 
+  /// 模拟的鼓点速度。真要跟歌变的话得先做节拍检测，这里取一个大多数流行乐
+  /// 都不违和的中间值。
+  static const double _bpm = 124;
+  double _beatPhase = 0;
+  int _beatIndex = 0;
+  final math.Random _rand = math.Random(20260909);
+
   @override
   void initState() {
     super.initState();
@@ -1460,21 +1467,61 @@ class _SpectrumRingState extends State<_SpectrumRing>
         (1 - math.exp(-dt * (playing ? 3.5 : 1.8)));
     _phase += dt;
 
+    // 走节拍时钟。上一版只有正弦叠加、没有任何节拍结构，所以整环只会匀速
+    // 起伏 —— 那就是「太柔」的由来。冲击由 _fireBeat 直接打进 _levels，
+    // 这里只负责往下衰减，攻击瞬间因此是硬的。
+    if (_gain > 0.02) {
+      _beatPhase += dt * (_bpm / 60.0);
+      while (_beatPhase >= 1.0) {
+        _beatPhase -= 1.0;
+        _beatIndex = (_beatIndex + 1) % 8;
+        _fireBeat();
+      }
+    }
+
     for (var i = 0; i < _barCount; i++) {
       final band = i / (_barCount - 1);
-      // 低频段慢而重，高频段快而碎。
-      final speed = 1.3 + band * 6.5;
-      final weight = 1.0 - band * 0.5;
+      // 底噪纹理：没被鼓点打到的条也留一点细微起伏，不然拍与拍之间整环死平。
+      final speed = 2.0 + band * 9.0;
       final seed = _seed[i];
-      final drive =
-          0.5 * math.sin(_phase * speed + seed) +
-          0.3 * math.sin(_phase * speed * 1.73 + seed * 2.1) +
-          0.2 * math.sin(_phase * speed * 0.41 + seed * 0.7);
-      var target = ((drive + 1) / 2) * weight * _gain;
-      // 平方一下压低小值：真频谱的静默段是贴底的，线性映射会显得整环在「呼吸」。
-      target *= target;
-      final k = target > _levels[i] ? 24.0 : 6.0;
-      _levels[i] += (target - _levels[i]) * (1 - math.exp(-dt * k));
+      final texture =
+          (0.5 + 0.5 * math.sin(_phase * speed + seed)) *
+          (0.08 + 0.13 * (1 - band)) *
+          _gain;
+      // 衰减：低频拖一点（余音），高频干脆（碎音）。这个差别是「有节奏感」
+      // 的关键 —— 一刀切的衰减率听觉上就是一团糊。
+      final k = _levels[i] > texture ? (5.0 + band * 10.0) : 26.0;
+      _levels[i] += (texture - _levels[i]) * (1 - math.exp(-dt * k));
+    }
+  }
+
+  /// 一个拍点：按频段分别注入冲击。
+  ///
+  /// 底鼓打低频、军鼓落在 2/4 拍的中频、高频每拍碎响，每 4 拍的重拍更狠。
+  /// 直接加到 _levels 上（而不是设目标值再逼近），攻击才是瞬间的。
+  void _fireBeat() {
+    final downbeat = _beatIndex % 4 == 0;
+    final backbeat = _beatIndex % 4 == 2;
+    for (var i = 0; i < _barCount; i++) {
+      final band = i / (_barCount - 1);
+      var hit = 0.0;
+      // 底鼓：越靠低频越重，重拍加倍。
+      if (band < 0.30) {
+        final w = 1 - band / 0.30;
+        hit += (downbeat ? 1.0 : 0.60) * w * w;
+      }
+      // 军鼓：中频一段，只在 2/4 拍。
+      if (backbeat && band > 0.22 && band < 0.62) {
+        hit += 0.55 * math.sin((band - 0.22) / 0.40 * math.pi);
+      }
+      // 高频碎音：每拍都有，量小且带随机，做出 hi-hat 的毛糙感。
+      if (band > 0.55) {
+        hit += 0.34 * ((band - 0.55) / 0.45) * (0.4 + 0.6 * _rand.nextDouble());
+      }
+      // 每根条各自抖一点，别整排削平成一条弧。
+      hit *= 0.72 + 0.56 * _rand.nextDouble();
+      if (hit <= 0) continue;
+      _levels[i] = math.min(1.0, _levels[i] + hit * _gain);
     }
   }
 
@@ -1519,7 +1566,7 @@ class _SpectrumPainter extends CustomPainter {
     final r = size.shortestSide / 2;
     // 封面缩到 0.76，条带从它外沿再往外长一点点。
     final inner = r * 0.79;
-    final maxLen = r * 0.19;
+    final maxLen = r * 0.21;
     final paint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
@@ -1532,7 +1579,7 @@ class _SpectrumPainter extends CustomPainter {
       if (len < 1.0) continue;
       final a = (i / n) * 2 * math.pi - math.pi / 2;
       final dir = Offset(math.cos(a), math.sin(a));
-      paint.color = color.withValues(alpha: 0.22 + 0.68 * v);
+      paint.color = color.withValues(alpha: 0.18 + 0.78 * v);
       canvas.drawLine(c + dir * inner, c + dir * (inner + len), paint);
     }
   }
