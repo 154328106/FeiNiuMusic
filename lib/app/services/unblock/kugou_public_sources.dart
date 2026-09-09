@@ -96,9 +96,24 @@ class KugouPublicSources {
   static final Map<String, int> _sourceMisses = {};
   static const int _unsupportedThreshold = 3;
 
-  /// 每个「接口 × 源」组合只打一次原始返回，用来判断到底是不支持还是没货。
-  /// 没法在本地联网验证这两家认不认 `tx`，只能让真机日志来回答。
+  /// 每个「接口 × 源」组合只留一次原始返回，用来判断到底是不支持还是没货。
+  /// 没法在本地联网验证这两家认不认 `tx`，只能让真机来回答。
+  ///
+  /// 除了打日志也存一份：设置页的「探测」按钮直接把它显示出来，省得用户
+  /// 还要去导日志。key 是 `接口/源`。
+  static final Map<String, String> probes = {};
   static final Set<String> _probeLogged = {};
+
+  /// 清掉一次探测的痕迹，让「探测」按钮可以反复按。
+  ///
+  /// 不碰 [_skipUntil] / [_consecutiveFailures]：那两个是真实的服务健康度，
+  /// 不该被一次手动探测重置掉。
+  static void resetProbes() {
+    probes.clear();
+    _probeLogged.clear();
+    _unsupported.clear();
+    _sourceMisses.clear();
+  }
 
   /// 取酷狗某个 hash 的播放地址，拿不到返回 null。
   ///
@@ -249,6 +264,7 @@ class KugouPublicSources {
     if (!_probeLogged.add(combo)) return;
     final body = (res.data ?? '').replaceAll(RegExp(r'\s+'), ' ');
     final brief = body.length > 200 ? '${body.substring(0, 200)}…' : body;
+    probes[combo] = 'HTTP ${res.statusCode}：$brief';
     debugPrint('[公益音源] 探针 $combo HTTP ${res.statusCode}：$brief');
   }
 

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../app/services/qq/qq_api_client.dart';
+import '../../app/services/unblock/kugou_public_sources.dart';
 import '../../app/services/unblock/unblock_source.dart';
 import '../../components/index.dart';
 
@@ -25,6 +27,8 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
   /// 密钥/接口地址默认遮住。它们平时没有再看一眼的必要，露着只是徒增
   /// 截图和旁人瞄一眼的风险。
   bool _revealSecrets = false;
+  bool _probing = false;
+  String? _probeReport;
   String? _result;
   bool _resultOk = false;
 
@@ -193,6 +197,64 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
     setState(() => _qualityController.text = result);
   }
 
+  /// 临时诊断：这两家公益源认不认 QQ（洛雪源代号 `tx`）。
+  ///
+  /// **不写死 songmid**：让 App 现搜一首拿真 mid，否则 mid 写错会被误判成
+  /// 「接口不支持 tx」—— 这两种情况从返回上分不出来。
+  ///
+  /// 扣扣音乐眼下不在源列表里（取址接口会给打不开的 purl 且不带状态码，
+  /// 见 music_source_registry 的注释），所以平时根本触发不到这条链，
+  /// 只能靠这个按钮把结论问出来。有定论后这段就该删掉。
+  Future<void> _probeQQPublicSources() async {
+    setState(() {
+      _probing = true;
+      _probeReport = null;
+    });
+    final buf = StringBuffer();
+    try {
+      final songs = await QQApiClient.instance.searchSongs('少年 梦然', limit: 10);
+      if (songs.isEmpty) {
+        buf.writeln('搜不到歌，QQ 那边的接口就没通，先别管公益源。');
+      } else {
+        // 优先挑会员曲：官方肯给的歌本来就不需要公益源救。
+        final target = songs.firstWhere(
+          (s) => s.payPlay,
+          orElse: () => songs.first,
+        );
+        buf.writeln('探测曲：${target.name} - ${target.artists}');
+        buf.writeln('songmid：${target.mid}');
+        buf.writeln('会员曲：${target.payPlay ? '是' : '否'}');
+        buf.writeln('');
+        KugouPublicSources.resetProbes();
+        final url = await KugouPublicSources.resolve(
+          target.mid,
+          source: 'tx',
+          allowBail: false,
+        );
+        buf.writeln(url == null ? '结果：两家都没给地址' : '结果：拿到地址了');
+        if (url != null) {
+          buf.writeln(url.length > 120 ? '${url.substring(0, 120)}…' : url);
+        }
+        buf.writeln('');
+        if (KugouPublicSources.probes.isEmpty) {
+          buf.writeln('两家都没返回（超时或域名不通）。');
+        } else {
+          for (final e in KugouPublicSources.probes.entries) {
+            buf.writeln('${e.key} → ${e.value}');
+            buf.writeln('');
+          }
+        }
+      }
+    } catch (e) {
+      buf.writeln('探测出错：$e');
+    }
+    if (!mounted) return;
+    setState(() {
+      _probing = false;
+      _probeReport = buf.toString().trim();
+    });
+  }
+
   Future<void> _save() async {
     await _service.save(_currentConfig());
     if (!mounted) return;
@@ -356,6 +418,42 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                   ),
                 ),
               ],
+            ),
+          ],
+          const SizedBox(height: 16),
+          AppSettingSection(
+            title: '诊断',
+            children: [
+              AppSettingTile(
+                title: '探测扣扣音乐公益源',
+                subtitle: _probing
+                    ? '正在探测…'
+                    : '问一次 haitangw / zddyr 认不认 QQ，结果直接显示在下面',
+                trailing: _probing
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.chevron_right_rounded),
+                onTap: _probing ? null : _probeQQPublicSources,
+              ),
+            ],
+          ),
+          if (_probeReport != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              // 可选中：这段是要发给我看的，不能只让用户干瞪眼。
+              child: SelectableText(
+                _probeReport!,
+                style: const TextStyle(fontSize: 12, height: 1.5),
+              ),
             ),
           ],
           const SizedBox(height: 20),
