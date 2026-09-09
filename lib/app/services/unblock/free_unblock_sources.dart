@@ -41,6 +41,7 @@ class FreeUnblockSources {
   static Future<String?> resolve({
     required String keyword,
     required int durationMs,
+    String? quality,
   }) async {
     if (keyword.trim().isEmpty) return null;
 
@@ -49,7 +50,7 @@ class FreeUnblockSources {
       debugPrint('[Unblock] 酷狗命中 $keyword');
       return kugou;
     }
-    final kuwo = await _kuwo(keyword, durationMs);
+    final kuwo = await _kuwo(keyword, durationMs, quality);
     if (kuwo != null) {
       debugPrint('[Unblock] 酷我命中 $keyword');
       return kuwo;
@@ -147,6 +148,39 @@ class FreeUnblockSources {
     return (url is String && url.isNotEmpty) ? _https(url) : null;
   }
 
+  /// 星海（zddyr）的网易云取址 —— [gdStudio] 的备份。
+  ///
+  /// 同样按**网易云原始 id** 取。实测给正确的 id 配一个完全错误的歌名，
+  /// 返回的还是同一个文件，说明歌名字段不参与匹配，没有串到同名翻唱的风险。
+  ///
+  /// 返回里带「第三方调用将受到总体QPS限制」的提示，所以只当备份用：
+  /// 排在 GD 后面，GD 命中就根本不会走到这儿。
+  static Future<String?> zddyrNetease(int neteaseId, {String? quality}) async {
+    final body = await _get(
+      'https://yy.zddyr.top/lx/api/'
+      '?source=netease&songmid=$neteaseId&quality=${_zddyrLevel(quality)}',
+    );
+    final json = _json(body);
+    if (json == null || json['code'] != 200) return null;
+    final url = json['url'];
+    return (url is String && url.isNotEmpty) ? _https(url) : null;
+  }
+
+  static String _zddyrLevel(String? quality) {
+    switch ((quality ?? '').trim().toLowerCase()) {
+      case '128k':
+        return '128k';
+      case 'flac':
+      case 'lossless':
+        return 'flac';
+      case 'flac24bit':
+      case 'hires':
+        return 'hires';
+      default:
+        return '320k';
+    }
+  }
+
   // ---- 酷狗 ----
 
   static Future<String?> _kugou(String keyword, int durationMs) async {
@@ -193,7 +227,11 @@ class FreeUnblockSources {
 
   // ---- 酷我 ----
 
-  static Future<String?> _kuwo(String keyword, int durationMs) async {
+  static Future<String?> _kuwo(
+    String keyword,
+    int durationMs,
+    String? quality,
+  ) async {
     final query = Uri.encodeQueryComponent(keyword);
     final body = await _get(
       'https://search.kuwo.cn/r.s?&correct=1&vipver=1&stype=comprehensive'
@@ -224,6 +262,16 @@ class FreeUnblockSources {
     final match = _selectMatch(songs, durationMs, (s) => s.durationMs);
     if (match == null) return null;
 
+    // 先走海棠：酷我自家的 antiserver 现在大概率只给「请到酷我音乐APP收听」
+    // 的提示音（实测 8 首里 6 首，都被下面那道 _looksLikeRealAudio 丢掉，
+    // 等于这一层在空转）。海棠按同一个 rid 取，level=lossless 时给完整 FLAC。
+    final viaHaitangw = await _kuwoViaHaitangw(match.rid, quality);
+    if (viaHaitangw != null &&
+        await _looksLikeRealAudio(viaHaitangw, durationMs)) {
+      return viaHaitangw;
+    }
+
+    // 海棠没货再回落酷我自家接口。
     // 这个接口返回的是**纯文本**地址，不是 JSON；换成浏览器 UA 会拿到空串。
     final text = await _get(
       'https://antiserver.kuwo.cn/anti.s'
@@ -236,6 +284,48 @@ class FreeUnblockSources {
     if (url == null || url.isEmpty) return null;
     final secure = _https(url);
     return await _looksLikeRealAudio(secure, durationMs) ? secure : null;
+  }
+
+  /// 海棠的酷我取址：按 rid 换地址，`level=lossless` 时给完整 FLAC。
+  ///
+  /// 它返回 **302**，播放地址在 Location 头里。这里必须关掉重定向跟随 ——
+  /// 否则 dio 会顺着把整首歌（几十 MB）下载进内存。
+  static Future<String?> _kuwoViaHaitangw(String rid, String? quality) async {
+    try {
+      final res = await _dio.get<void>(
+        'https://musicapi.haitangw.net/music/kw.php',
+        queryParameters: {
+          'type': 'mp3',
+          'id': rid,
+          'level': _haitangwKuwoLevel(quality),
+        },
+        options: Options(
+          followRedirects: false,
+          validateStatus: (code) => code != null && code < 400,
+        ),
+      );
+      final location = res.headers.value('location');
+      if (location == null || location.isEmpty) return null;
+      return _https(location);
+    } on DioException {
+      return null;
+    }
+  }
+
+  /// 海棠酷我的档位名。
+  ///
+  /// 实测只有 `lossless` 会真给 FLAC，填 `flac` / `hires` 都退回 320k mp3，
+  /// 所以别照搬洛雪那套档位名直接透传。
+  static String _haitangwKuwoLevel(String? quality) {
+    switch ((quality ?? '').trim().toLowerCase()) {
+      case 'flac':
+      case 'flac24bit':
+      case 'hires':
+      case 'lossless':
+        return 'lossless';
+      default:
+        return '320k';
+    }
   }
 
   /// 拦下酷我的「请到酷我音乐APP收听」提示音。

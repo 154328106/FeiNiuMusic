@@ -1400,7 +1400,7 @@ const double _kCdHubRatio = 0.27;
 const double _kCdStackRingRatio = 0.30;
 
 const double _kVinylHoleRatio = 0.024;
-const double _kVinylLabelRatio = 0.40;
+const double _kVinylLabelRatio = 0.46;
 
 /// 「外圆减中心孔」的圆环路径。碟片的裁剪与投影都用它，孔是真镂空。
 Path _discRingPath(Size size, double holeRatio) {
@@ -1599,6 +1599,27 @@ class _VinylSurfacePainter extends CustomPainter {
     final c = Offset(size.width / 2, size.height / 2);
 
     _paintDiscGloss(canvas, size);
+
+    // 斜向高光：只有自上而下的渐变时盘面偏"平"，加一条从左上扫向右下的
+    // 窄亮带，才有实物在灯下反光的感觉。范围裁在圆内，免得方角漏白。
+    canvas.save();
+    canvas.clipPath(Path()..addOval(Rect.fromCircle(center: c, radius: r)));
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.transparent,
+            Colors.white.withValues(alpha: 0.13),
+            Colors.white.withValues(alpha: 0.03),
+            Colors.transparent,
+          ],
+          stops: const [0.16, 0.33, 0.47, 0.66],
+        ).createShader(Offset.zero & size),
+    );
+    canvas.restore();
 
     final stroke = Paint()..style = PaintingStyle.stroke;
 

@@ -39,6 +39,19 @@ const double kGlassNavBarHeight = 62;
 /// 的迷你播放器停靠与滚动留白按当前分支取对应高度，切换玻璃开关后布局自动对齐。
 const double kSolidNavHeight = 64;
 
+/// 非玻璃栏也做成悬浮圆角胶囊后，它同样只占槽位中间的一段。
+///
+/// 和玻璃分支一个道理：胶囊上下各留这么多空隙，AppPageScaffold 计算迷你
+/// 播放器停靠位时要减掉它，否则胶囊上方的空隙会被当成「播放条和底栏的间隙」，
+/// 观感上离得老远。
+const double kSolidNavPillTopGap = 12;
+
+/// 非玻璃分支的完整槽位高度（胶囊本体 + 上下空隙）。
+const double kSolidNavSlotHeight = kSolidNavHeight + kSolidNavPillTopGap * 2;
+
+/// 两种分支胶囊共用的圆角。
+const double kNavPillRadius = 20;
+
 final ValueNotifier<int> primaryNavigationIndex = ValueNotifier<int>(0);
 bool primaryNavigationShellActive = false;
 
@@ -195,45 +208,80 @@ class ModernNavigationBar extends StatelessWidget {
         final barColor = isBlurred
             ? navTint.withValues(alpha: 0.08 * navOpacity)
             : navTint.withValues(alpha: navOpacity);
-        Widget navBar = Material(
+        // 胶囊本体：一条定高的 Row，圆角/悬浮由外层负责。
+        Widget pill = Material(
           color: barColor,
           elevation: 0,
-          child: SafeArea(
-            top: false,
-            child: SizedBox(
-              // 非玻璃分支高度独立于玻璃胶囊（kSolidNavHeight，比玻璃槽位
-              // modernNavHeight=84 矮）。底部安全区由 SafeArea 计入，不含在此值。
-              height: kSolidNavHeight,
-              child: Row(
-                children: List.generate(_labels.length, (index) {
-                  final selected = currentIndex == index;
-                  return Expanded(
-                    child: _NavItem(
-                      icon: _icons[index],
-                      label: _labels[index],
-                      selected: selected,
-                      onTap: () => onTap(index),
-                    ),
-                  );
-                }),
-              ),
+          child: SizedBox(
+            // 非玻璃分支高度独立于玻璃胶囊（kSolidNavHeight，比玻璃槽位
+            // modernNavHeight=84 矮）。
+            height: kSolidNavHeight,
+            child: Row(
+              children: List.generate(_labels.length, (index) {
+                final selected = currentIndex == index;
+                return Expanded(
+                  child: _NavItem(
+                    icon: _icons[index],
+                    label: _labels[index],
+                    selected: selected,
+                    onTap: () => onTap(index),
+                  ),
+                );
+              }),
             ),
           ),
         );
         // 启用高斯模糊时包裹 BackdropFilter。
         // RepaintBoundary 隔离模糊合成图层：页面切换转场期间底层内容变化时，
         // 模糊结果被图层缓存复用，避免逐帧全屏重采样造成掉帧。
+        //
+        // 注意模糊要包在圆角裁剪**里面**：包在外面的话采样区域是方的，
+        // 胶囊四角会漏出没被裁掉的模糊块。
         if (blurStrength > 0) {
-          navBar = ClipRect(
-            child: RepaintBoundary(
-              child: BackdropFilter(
-                filter: ui.ImageFilter.blur(sigmaX: blurStrength, sigmaY: blurStrength),
-                child: navBar,
+          pill = RepaintBoundary(
+            child: BackdropFilter(
+              filter: ui.ImageFilter.blur(
+                sigmaX: blurStrength,
+                sigmaY: blurStrength,
               ),
+              child: pill,
             ),
           );
         }
-        return navBar;
+        // 悬浮圆角外壳：和玻璃分支一样留出左右边距、加发丝描边与轻投影，
+        // 免得浅色背景下这条整个糊进去看不出边界。
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final pillBorder = isDark
+            ? Colors.white.withValues(alpha: 0.18)
+            : Colors.black.withValues(alpha: 0.10);
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: kSolidNavPillTopGap,
+            ),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(kNavPillRadius),
+                border: Border.all(color: pillBorder, width: 1),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(
+                      alpha: isDark ? 0.34 : 0.14,
+                    ),
+                    blurRadius: 16,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(kNavPillRadius),
+                child: pill,
+              ),
+            ),
+          ),
+        );
           },
         );
       },
@@ -282,7 +330,7 @@ class ModernNavigationBar extends StatelessWidget {
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: plate,
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(kNavPillRadius),
             border: Border.all(color: plateBorder, width: 1),
             boxShadow: [
               BoxShadow(
@@ -292,7 +340,13 @@ class ModernNavigationBar extends StatelessWidget {
               ),
             ],
           ),
-          child: GlassTabBar.bottom(
+          // 垫一层透明 Material：GlassTabBar 的文字标签挂在 SafeArea 下，
+          // 脱离了 Scaffold 的 Material 树。Flutter 对「找不到 Material 祖先」
+          // 的 Text 会用调试样式渲染 —— 黄色双下划线，就是开液态玻璃后
+          // 「搜索」「我的」底下那两道黄线。透明 Material 不影响玻璃观感。
+          child: Material(
+            type: MaterialType.transparency,
+            child: GlassTabBar.bottom(
         tabs: [
           for (var i = 0; i < _labels.length; i++)
             GlassTab(
@@ -315,11 +369,12 @@ class ModernNavigationBar extends StatelessWidget {
         barHeight: kGlassNavBarHeight,
         // 圆角矩形而非胶囊：包的默认 barBorderRadius 是
         // GlassDefaults.capsuleRadius（9999），两端会被拉成半圆。
-        barBorderRadius: 20,
+        barBorderRadius: kNavPillRadius,
             // 外边距已经由上面的底板接管，胶囊自己不再重复留白。
             verticalPadding: 0,
             horizontalPadding: 0,
             indicatorColor: pillColor,
+            ),
           ),
         ),
       ),

@@ -30,7 +30,7 @@ class AppPageScaffold extends StatefulWidget {
     final bottomNavPadding = hasBottomNav
         ? (AppGlassSettings.effectiveEnabled
             ? modernNavHeight
-            : kSolidNavHeight)
+            : kSolidNavSlotHeight)
         : 0.0;
     return bottomInset + miniPlayerPadding + bottomNavPadding + minPadding;
   }
@@ -217,7 +217,7 @@ class AppPageScaffoldState extends State<AppPageScaffold>
     // 由下方 ListenableBuilder 触发重算。
     final navDockHeight = AppGlassSettings.effectiveEnabled
         ? (AppPageScaffold.modernNavHeight - kGlassNavPillTopGap)
-        : kSolidNavHeight;
+        : kSolidNavSlotHeight - kSolidNavPillTopGap;
     final miniPlayerBottom = hasBottomNav
         ? (navDockHeight + bottomInset)
         : bottomInset;

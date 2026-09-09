@@ -40,13 +40,16 @@ class AppBackgroundSettings {
   /// 列表加框样式。见 [AppContentFrameStyle]（不加框 / 整块描边 / 逐行卡片）。
   /// 用字符串存，避免枚举顺序变化影响已保存的值。
   static final ValueNotifier<AppContentFrameStyle> contentFrameStyle =
-      ValueNotifier(AppContentFrameStyle.none);
+      ValueNotifier(AppContentFrameStyle.cards);
 
   /// 描边自定义颜色。null = 跟随主题（scheme.outlineVariant）。
   static final ValueNotifier<Color?> contentFrameColor = ValueNotifier(null);
 
   /// 描边不透明度 0~1。
-  static final ValueNotifier<double> contentFrameOpacity = ValueNotifier(0.8);
+  ///
+  /// 默认 0.15：配合「逐行卡片」时描边只是给每行一个若有若无的轮廓，
+  /// 太重会让整页变成一堆方框。
+  static final ValueNotifier<double> contentFrameOpacity = ValueNotifier(0.15);
 
   /// 底部导航栏自定义底色。null = 跟随主题。
   static final ValueNotifier<Color?> navBarColor = ValueNotifier(null);

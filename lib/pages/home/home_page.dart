@@ -133,7 +133,7 @@ class _HomePageState extends State<HomePage>
   /// 每 [_latestShuffleInterval] 从池子里重新抽一批 —— 只拉 4 首的话
   /// 首页永远是同样那几首。换得太勤反而晃眼，两分钟一次。
   List<SongEntity> _latestPool = const [];
-  static const int _latestVisible = 4;
+  static const int _latestVisible = 5;
   static const int _latestPoolSize = 40;
   static const Duration _latestShuffleInterval = Duration(minutes: 2);
   Timer? _latestShuffleTimer;
@@ -1025,6 +1025,10 @@ class _HomePageState extends State<HomePage>
       builder: (context, useBottomNavigation) => AppPageScaffold(
         key: _scaffoldKey,
         extendBodyBehindAppBar: true,
+        // 首页顶部本来就有漫游大图在显示当前播放，底下再压一条迷你播放条
+        // 就重复了，还把「最新歌曲」的最后一行挡住。这里单独关掉，其它
+        // 页面照旧。
+        showMiniPlayer: false,
         appBar: AppTopBar(
           title: '首页',
           showBackButton: false,
@@ -1288,8 +1292,9 @@ class _CompactSongList extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final isTv = AppLayoutSettings.tvMode.value;
     final artworkSize = isTv ? 56.0 : 44.0;
-    // 固定 4 首：5 首时最后一行会被底部迷你播放条 + 导航栏盖住。
-    final displaySongs = songs.take(4).toList();
+    // 5 首：首页已经关掉迷你播放条（AppPageScaffold.showMiniPlayer: false），
+    // 空出来的位置正好再放一行，不会被导航栏盖住。
+    final displaySongs = songs.take(5).toList();
     return Column(
       children: List.generate(displaySongs.length, (i) {
         final song = displaySongs[i];

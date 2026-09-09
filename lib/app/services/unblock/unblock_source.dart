@@ -241,6 +241,22 @@ class UnblockSourceService {
       }
     }
 
+    // 第三层：星海（zddyr）的网易云，给 GD 当备份。
+    //
+    // 网易云这条链原本单点挂在 GD 上，它一挂就直接掉进付费的聆澜。zddyr
+    // 同样按原始 id 取址（已验证不串歌），域名也是酷狗兜底那家、可靠性有底。
+    // 放在 GD 后面是因为它明说了有 QPS 限制，GD 命中就不会走到这儿。
+    if (gdNeteaseId != null) {
+      final url = await FreeUnblockSources.zddyrNetease(
+        gdNeteaseId,
+        quality: cfg.quality,
+      );
+      if (url != null) {
+        debugPrint('[Unblock] zddyr 命中 $platform/$songId');
+        return url;
+      }
+    }
+
     if (cfg.isUsable && !rateLimited) {
       final keys = cfg.apiKeys;
       // 从上次命中的那个开始轮，命中率最高的先试。
@@ -272,7 +288,11 @@ class UnblockSourceService {
     final query = keyword ?? '';
     // 没有歌名就真没得查了（GD 那条按 id 的路在上面已经走完）。
     if (query.trim().isEmpty) return null;
-    return FreeUnblockSources.resolve(keyword: query, durationMs: durationMs);
+    return FreeUnblockSources.resolve(
+      keyword: query,
+      durationMs: durationMs,
+      quality: cfg.quality,
+    );
   }
 
   Future<String?> _requestOnce({
