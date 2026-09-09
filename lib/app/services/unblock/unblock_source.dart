@@ -210,9 +210,19 @@ class UnblockSourceService {
     // 只有聆澜确实可用时才允许它「排队太久就让路」。否则让出去等于跌进
     // 按歌名搜的免费链，酷我那家现在多半给一段「请到酷我APP收听」的提示音
     // —— 播不了还会触发自动跳曲，比多等一会儿糟得多。
-    if (platform == 'kg') {
+    //
+    // QQ（`tx`）也走这一层：songId 传的就是 songmid，格式和洛雪那套约定
+    // 对得上。以前 QQ 的歌**按 id 取址的只有聆澜一家**（GD 只认网易云、
+    // 这两家写死了酷狗），剩下的只能掉进按歌名搜的兜底 —— 那条会串到同名
+    // 翻唱，酷我还常给「请到酷我APP收听」的提示音。
+    //
+    // 这两家认不认 `tx` 我没能在本地验证（沙箱连不上它们），所以
+    // KugouPublicSources 里带了自熄火：非酷狗的源连撞 3 次没结果就判定
+    // 这家不支持，本次运行不再问它，不会每首 QQ 歌都白等两个请求。
+    if (platform == 'kg' || platform == 'tx') {
       final url = await KugouPublicSources.resolve(
         songId,
+        source: platform,
         allowBail: paidAvailable,
       );
       if (url != null) return url;

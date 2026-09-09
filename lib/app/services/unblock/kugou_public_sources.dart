@@ -79,10 +79,26 @@ class KugouPublicSources {
   /// 连续失败到这个时刻之前，整条链直接跳过。
   ///
   /// 服务挂掉时不该每首歌都去撞一次超时 —— 那会让起播平白多等 5 秒 × N。
-  static DateTime? _skipUntil;
-  static int _consecutiveFailures = 0;
+  /// **按源分开记。** 一开始这两个是全局的，等到 QQ 也走这条链时就成了
+  /// 定时炸弹：万一这两家不认 `tx`，连撞 5 次会把酷狗那条本来好好的链
+  /// 一起熄火 10 分钟。
+  static final Map<String, DateTime> _skipUntil = {};
+  static final Map<String, int> _consecutiveFailures = {};
   static const int _failureThreshold = 5;
   static const Duration _skipCooldown = Duration(minutes: 10);
+
+  /// 已确认不支持的「接口 × 源」组合，本次运行不再尝试。
+  ///
+  /// 判据不能只看「没给地址」—— 那和「这首歌它没货」分不清。所以是连续
+  /// [_unsupportedThreshold] 次一个都没中才判死，且只对非酷狗的源生效
+  /// （酷狗是实测过的，它没货是常态，不该被判成不支持）。
+  static final Set<String> _unsupported = {};
+  static final Map<String, int> _sourceMisses = {};
+  static const int _unsupportedThreshold = 3;
+
+  /// 每个「接口 × 源」组合只打一次原始返回，用来判断到底是不支持还是没货。
+  /// 没法在本地联网验证这两家认不认 `tx`，只能让真机日志来回答。
+  static final Set<String> _probeLogged = {};
 
   /// 取酷狗某个 hash 的播放地址，拿不到返回 null。
   ///
@@ -92,9 +108,17 @@ class KugouPublicSources {
   /// 存在时才该传 true。** 聆澜没配（或正被限流）的时候让出去，下一层就是
   /// 按歌名搜的免费链 —— 酷我那家现在多半返回「请到酷我APP收听」的提示音，
   /// 播不了、还会让播放器自动跳到下一首。宁可多等一会儿也比这个强。
-  static Future<String?> resolve(String hash, {bool allowBail = true}) async {
-    if (hash.isEmpty) return null;
-    final skip = _skipUntil;
+  /// [source] 是洛雪系的源代号：酷狗 `kg`（[rid] 传文件 hash）、QQ `tx`
+  /// （[rid] 传 songmid）。QQ 这条是推测 —— 这两家本来就是洛雪音源脚本里
+  /// 扒出来的，`tx` 是那套约定里的标准代号，而我们手上正好有 songmid。
+  /// 不支持也只是白问一次就自动停，不会比现在更差。
+  static Future<String?> resolve(
+    String rid, {
+    String source = 'kg',
+    bool allowBail = true,
+  }) async {
+    if (rid.isEmpty) return null;
+    final skip = _skipUntil[source];
     if (skip != null && DateTime.now().isBefore(skip)) return null;
 
     final enqueuedAt = DateTime.now();
@@ -113,17 +137,21 @@ class KugouPublicSources {
         }
         final wait = _minInterval - DateTime.now().difference(_lastAt);
         if (wait > Duration.zero) await Future<void>.delayed(wait);
-        final url = await _resolveOnce(hash);
+        final url = await _resolveOnce(rid, source);
         _lastAt = DateTime.now();
         if (url != null) {
-          _consecutiveFailures = 0;
-        } else if (++_consecutiveFailures >= _failureThreshold) {
-          _skipUntil = DateTime.now().add(_skipCooldown);
-          _consecutiveFailures = 0;
-          debugPrint(
-            '[公益音源] 连续 $_failureThreshold 次没结果，'
-            '${_skipCooldown.inMinutes} 分钟内不再尝试',
-          );
+          _consecutiveFailures[source] = 0;
+        } else {
+          final n = (_consecutiveFailures[source] ?? 0) + 1;
+          _consecutiveFailures[source] = n;
+          if (n >= _failureThreshold) {
+            _skipUntil[source] = DateTime.now().add(_skipCooldown);
+            _consecutiveFailures[source] = 0;
+            debugPrint(
+              '[公益音源] $source 连续 $_failureThreshold 次没结果，'
+              '${_skipCooldown.inMinutes} 分钟内不再尝试',
+            );
+          }
         }
         completer.complete(url);
       } catch (e) {
@@ -140,31 +168,49 @@ class KugouPublicSources {
   /// 这份浪费省掉 —— 这正是 201 那个 bug 被放大的原因。
   static String _lastGood = 'haitangw';
 
-  static Future<String?> _resolveOnce(String hash) async {
+  static Future<String?> _resolveOnce(String rid, String source) async {
     final order = _lastGood == 'zddyr'
         ? const ['zddyr', 'haitangw']
         : const ['haitangw', 'zddyr'];
     for (final name in order) {
+      final combo = '$name/$source';
+      if (_unsupported.contains(combo)) continue;
       final url = name == 'haitangw'
-          ? await _haitangw(hash)
-          : await _zddyr(hash);
+          ? await _haitangw(rid, source)
+          : await _zddyr(rid, source);
       if (url != null) {
         _lastGood = name;
-        debugPrint('[公益音源] $name 命中 kg/$hash');
+        _sourceMisses.remove(combo);
+        debugPrint('[公益音源] $name 命中 $source/$rid');
         return url;
       }
+      _noteMiss(combo, source);
     }
     return null;
   }
 
+  /// 非酷狗的源连续多次一个都没中，就当这家不认这个源，本次运行不再问它。
+  static void _noteMiss(String combo, String source) {
+    if (source == 'kg') return;
+    final n = (_sourceMisses[combo] ?? 0) + 1;
+    _sourceMisses[combo] = n;
+    if (n >= _unsupportedThreshold) {
+      _unsupported.add(combo);
+      debugPrint('[公益音源] $combo 连续 $n 次没结果，本次运行不再尝试');
+    }
+  }
+
   /// `{"code":0,"data":{"url":"..."}}`
-  static Future<String?> _haitangw(String hash) async {
+  ///
+  /// 它的 `rid` 本来就是通用的「这个源的曲目 id」，换源只要改 source。
+  static Future<String?> _haitangw(String rid, String source) async {
     try {
       final res = await _dio.post<String>(
         'https://musicserver.haitangw.cc/v1/music/resolve-url',
-        data: {'source': 'kg', 'rid': hash, 'level': 'lossless'},
+        data: {'source': source, 'rid': rid, 'level': 'lossless'},
         options: Options(headers: {'Content-Type': 'application/json'}),
       );
+      _probe('haitangw', source, res);
       return _pickUrl(res, codeField: 'code', okCodes: const [0, 200]);
     } catch (_) {
       return null;
@@ -172,16 +218,38 @@ class KugouPublicSources {
   }
 
   /// `{"code":200,"url":"..."}`
-  static Future<String?> _zddyr(String hash) async {
+  static Future<String?> _zddyr(String rid, String source) async {
     try {
       final res = await _dio.get<String>(
         'https://yy.zddyr.top/lx/api/',
-        queryParameters: {'source': 'kg', 'quality': 'flac', 'mainHash': hash},
+        queryParameters: {
+          'source': source,
+          'quality': 'flac',
+          // `mainHash` 是酷狗的叫法。非酷狗的源它到底收哪个参数名我没法在
+          // 本地验证（沙箱连不上这两家），所以三个常见写法一起发 —— 用不上
+          // 的参数被忽略就是了，总比猜错一个白跑一趟强。
+          'mainHash': rid,
+          if (source != 'kg') ...{'songmid': rid, 'id': rid},
+        },
       );
+      _probe('zddyr', source, res);
       return _pickUrl(res, codeField: 'code', okCodes: const [0, 200]);
     } catch (_) {
       return null;
     }
+  }
+
+  /// 每个「接口 × 源」组合打一次原始返回。
+  ///
+  /// 这两家认不认 `tx` 只能靠真机日志回答：如果返回里写着「不支持的源」
+  /// 之类的话，一眼就能定论；如果是正常的「没有这首」，那就还有戏。
+  static void _probe(String name, String source, Response<String> res) {
+    if (source == 'kg') return;
+    final combo = '$name/$source';
+    if (!_probeLogged.add(combo)) return;
+    final body = (res.data ?? '').replaceAll(RegExp(r'\s+'), ' ');
+    final brief = body.length > 200 ? '${body.substring(0, 200)}…' : body;
+    debugPrint('[公益音源] 探针 $combo HTTP ${res.statusCode}：$brief');
   }
 
   /// 从返回里挑出播放地址。两家的结构不一样，路径都试一遍。
