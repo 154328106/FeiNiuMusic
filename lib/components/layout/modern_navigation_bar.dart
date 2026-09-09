@@ -190,6 +190,7 @@ class ModernNavigationBar extends StatelessWidget {
         AppBackgroundSettings.navBarOpacity,
         AppBackgroundSettings.navBarFrameEnabled,
         AppBackgroundSettings.navBarFrameColor,
+        AppBackgroundSettings.navBarFrameOpacity,
       ]),
       builder: (context, _) => ValueListenableBuilder<bool>(
       valueListenable: AppBackgroundSettings.panelBlurEnabled,
@@ -266,11 +267,11 @@ class ModernNavigationBar extends StatelessWidget {
         final framed = AppBackgroundSettings.navBarFrameEnabled.value;
         // 自定义色按原样用（用户要什么色就什么色，不再乘透明度，
         // 否则调了颜色还是看不出来）；没自定义就用默认发丝色。
-        final pillBorder =
-            AppBackgroundSettings.navBarFrameColor.value ??
-            (isDark
-                ? Colors.white.withValues(alpha: 0.32)
-                : Colors.black.withValues(alpha: 0.28));
+        final pillBorder = _navFrameColor(
+          isDark
+              ? Colors.white.withValues(alpha: 0.32)
+              : Colors.black.withValues(alpha: 0.28),
+        );
         // 描边不跟着深浅度淡。胶囊调透之后，全靠这圈边把形状勾出来。
         final borderWidth =
             AppBackgroundSettings.navBarFrameColor.value == null ? 1.2 : 1.6;
@@ -342,6 +343,7 @@ class ModernNavigationBar extends StatelessWidget {
         AppBackgroundSettings.navBarOpacity,
         AppBackgroundSettings.navBarFrameEnabled,
         AppBackgroundSettings.navBarFrameColor,
+        AppBackgroundSettings.navBarFrameOpacity,
         appGlassTunables,
       ]),
       builder: (context, _) => _glassPill(context, index),
@@ -372,9 +374,7 @@ class ModernNavigationBar extends StatelessWidget {
     final framed = AppBackgroundSettings.navBarFrameEnabled.value;
     // 描边跟实色分支共用同一组设置（应用外观 → 导航栏边框 / 边框颜色），
     // 不再是玻璃分支自己写死的一条发丝线。
-    final plateBorder =
-        AppBackgroundSettings.navBarFrameColor.value ??
-        appGlassPlateBorderColor(isDark);
+    final plateBorder = _navFrameColor(appGlassPlateBorderColor(isDark));
     final borderWidth =
         AppBackgroundSettings.navBarFrameColor.value == null ? 1.2 : 1.6;
     return SafeArea(
@@ -447,6 +447,15 @@ class ModernNavigationBar extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 底栏描边最终颜色：自定义色（没设就是默认发丝色）再乘上「描边深浅度」。
+///
+/// 默认发丝色自带 alpha，所以这里是乘不是覆盖 —— 滑块 100% 就是原来那档。
+Color _navFrameColor(Color fallback) {
+  final base = AppBackgroundSettings.navBarFrameColor.value ?? fallback;
+  final k = AppBackgroundSettings.navBarFrameOpacity.value;
+  return base.withValues(alpha: (base.a * k).clamp(0.0, 1.0));
 }
 
 class _NavItem extends StatelessWidget {

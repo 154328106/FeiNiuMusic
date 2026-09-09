@@ -26,6 +26,8 @@ class AppBackgroundSettings {
   static const String _prefsNavBarFrameEnabled =
       'setting_nav_bar_frame_enabled';
   static const String _prefsNavBarFrameColor = 'setting_nav_bar_frame_color';
+  static const String _prefsNavBarFrameOpacity =
+      'setting_nav_bar_frame_opacity';
 
   static final ValueNotifier<String?> backgroundImagePath = ValueNotifier(null);
   static final ValueNotifier<double> backgroundMaskOpacity = ValueNotifier(
@@ -64,13 +66,17 @@ class AppBackgroundSettings {
   /// 底部导航栏底色深浅度（不透明度）0~1。
   static final ValueNotifier<double> navBarOpacity = ValueNotifier(1.0);
 
-  /// 底部导航栏是否描边。
-  ///
-  /// 液体玻璃分支自己有一圈底板描边，这个开关只作用于普通（非玻璃）分支。
+  /// 底部导航栏是否描边。普通分支与液体玻璃分支共用。
   static final ValueNotifier<bool> navBarFrameEnabled = ValueNotifier(true);
 
   /// 底栏描边颜色。null = 用默认的发丝色（亮/暗各一档）。
   static final ValueNotifier<Color?> navBarFrameColor = ValueNotifier(null);
+
+  /// 底栏描边深浅度（不透明度）0~1，乘在描边颜色自带的 alpha 上。
+  ///
+  /// 默认发丝色本身就是半透明的（浅色 28% / 深色 32%），所以这里是「在默认
+  /// 基础上再淡多少」，1.0 = 默认那档，不是纯色。
+  static final ValueNotifier<double> navBarFrameOpacity = ValueNotifier(1.0);
 
   /// 迷你播放条仅在播放时显示，暂停/停止时隐藏。
   ///
@@ -118,6 +124,8 @@ class AppBackgroundSettings {
         (prefs.getDouble(_prefsNavBarOpacity) ?? 1.0).clamp(0.0, 1.0);
     navBarFrameEnabled.value =
         prefs.getBool(_prefsNavBarFrameEnabled) ?? true;
+    navBarFrameOpacity.value =
+        (prefs.getDouble(_prefsNavBarFrameOpacity) ?? 1.0).clamp(0.0, 1.0);
     final navFrameColor = prefs.getInt(_prefsNavBarFrameColor);
     navBarFrameColor.value =
         navFrameColor == null ? null : Color(navFrameColor);
@@ -212,6 +220,13 @@ class AppBackgroundSettings {
       await prefs.setInt(_prefsNavBarFrameColor, color.toARGB32());
     }
     navBarFrameColor.value = color;
+  }
+
+  static Future<void> setNavBarFrameOpacity(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = value.clamp(0.0, 1.0);
+    await prefs.setDouble(_prefsNavBarFrameOpacity, v);
+    navBarFrameOpacity.value = v;
   }
 
   static Future<void> setNavBarFrameEnabled(bool enabled) async {

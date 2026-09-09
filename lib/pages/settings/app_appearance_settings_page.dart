@@ -802,6 +802,28 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                   );
                 },
               ),
+              // 描边深浅度：和描边颜色一样，只在开了描边时才显示。
+              ValueListenableBuilder<bool>(
+                valueListenable: AppBackgroundSettings.navBarFrameEnabled,
+                builder: (context, framed, _) {
+                  if (!framed) return const SizedBox.shrink();
+                  return ValueListenableBuilder<double>(
+                    valueListenable: AppBackgroundSettings.navBarFrameOpacity,
+                    builder: (context, frameOpacity, _) {
+                      return AppSettingSlider(
+                        title: '导航栏描边深浅度',
+                        description: '描边的浓淡，越高越明显',
+                        value: frameOpacity,
+                        min: 0.05,
+                        max: 1.0,
+                        valueText: '${(frameOpacity * 100).round()}%',
+                        onChanged:
+                            AppBackgroundSettings.setNavBarFrameOpacity,
+                      );
+                    },
+                  );
+                },
+              ),
               ValueListenableBuilder<bool>(
                 valueListenable: AppBackgroundSettings.panelBlurEnabled,
                 builder: (context, blurEnabled, _) {
