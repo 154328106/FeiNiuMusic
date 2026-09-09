@@ -145,7 +145,17 @@ class FreeUnblockSources {
     final br = json['br'];
     if (br is! int || br <= 0) return null;
     final url = json['url'];
-    return (url is String && url.isNotEmpty) ? _https(url) : null;
+    if (url is! String || url.isEmpty) return null;
+    // 把「要的」和「实得的」一起打出来：要 flac 却只回 320k 是常事（那首本来
+    // 就没有无损版），只看「命中」这一行是分不出音质设置到底生效没有的。
+    final size = json['size'];
+    final sizeText = size is int && size > 0
+        ? '${(size / 1048576).toStringAsFixed(1)}MB'
+        : '大小未知';
+    debugPrint(
+      '[Unblock] GD wy/$neteaseId 要 ${requested}k → 实得 ${br}k，$sizeText',
+    );
+    return _https(url);
   }
 
   /// 星海（zddyr）的网易云取址 —— [gdStudio] 的备份。
@@ -163,7 +173,22 @@ class FreeUnblockSources {
     final json = _json(body);
     if (json == null || json['code'] != 200) return null;
     final url = json['url'];
-    return (url is String && url.isNotEmpty) ? _https(url) : null;
+    if (url is! String || url.isEmpty) return null;
+    // 它的响应里没有码率字段，只能拿地址后缀当判据（.flac / .mp3）。
+    debugPrint(
+      '[Unblock] zddyr wy/$neteaseId 要 ${_zddyrLevel(quality)}'
+      '，得 ${_urlExtension(url)}',
+    );
+    return _https(url);
+  }
+
+  /// 取地址里的文件后缀，认不出就返回「未知」。带查询串的先切掉。
+  static String _urlExtension(String url) {
+    final path = url.split('?').first;
+    final dot = path.lastIndexOf('.');
+    if (dot < 0 || dot < path.lastIndexOf('/')) return '未知';
+    final ext = path.substring(dot + 1).toLowerCase();
+    return ext.length <= 5 ? ext : '未知';
   }
 
   static String _zddyrLevel(String? quality) {
