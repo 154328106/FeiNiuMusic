@@ -269,10 +269,11 @@ class ModernNavigationBar extends StatelessWidget {
         final pillBorder =
             AppBackgroundSettings.navBarFrameColor.value ??
             (isDark
-                ? Colors.white.withValues(alpha: 0.24)
-                : Colors.black.withValues(alpha: 0.18));
+                ? Colors.white.withValues(alpha: 0.32)
+                : Colors.black.withValues(alpha: 0.28));
+        // 描边不跟着深浅度淡。胶囊调透之后，全靠这圈边把形状勾出来。
         final borderWidth =
-            AppBackgroundSettings.navBarFrameColor.value == null ? 1.0 : 1.6;
+            AppBackgroundSettings.navBarFrameColor.value == null ? 1.2 : 1.6;
         return SafeArea(
           top: false,
           child: Padding(
@@ -281,24 +282,35 @@ class ModernNavigationBar extends StatelessWidget {
               vertical: kSolidNavPillTopGap,
             ),
             child: DecoratedBox(
+              // 只画投影。透明度跟着深浅度一起降 —— 上一版是定值，胶囊调透之后
+              // 透出来的全是它底下这团黑影，实机反馈「黑压压的像影子」。
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(kNavPillRadius),
-                border: framed
-                    ? Border.all(color: pillBorder, width: borderWidth)
-                    : null,
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(
-                      alpha: isDark ? 0.40 : 0.20,
+                      alpha: ((isDark ? 0.40 : 0.20) * navOpacity)
+                          .clamp(0.0, 1.0),
                     ),
                     blurRadius: 20,
                     offset: const Offset(0, 6),
                   ),
                 ],
               ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(kNavPillRadius),
-                child: pill,
+              child: DecoratedBox(
+                // 描边画在**前景**。画在背景会被上面那层胶囊盖住 —— 深浅度
+                // 调高、胶囊变不透明之后，那圈边就整个看不见了。
+                position: DecorationPosition.foreground,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(kNavPillRadius),
+                  border: framed
+                      ? Border.all(color: pillBorder, width: borderWidth)
+                      : null,
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(kNavPillRadius),
+                  child: pill,
+                ),
               ),
             ),
           ),
