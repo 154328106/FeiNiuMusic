@@ -1965,6 +1965,23 @@ class PlayerService with WidgetsBindingObserver {
       await DlnaCastService.instance.play();
       return;
     }
+    // 冷启动恢复还没走完时按播放：先等它。
+    //
+    // 恢复要先批量解地址、再把队列灌进引擎，而 loadQueue 内部是
+    // `open(playlist, play: false)` —— 它会把**已经在播的东西停掉**。不等的
+    // 话两边互相踩：用户按下的播放被 open 掐掉，恢复的位置又因为「检测到已
+    // 在播」被放弃，结果就是按两次才响、而且从头开始。
+    //
+    // playQueue 早就有 `await _initFuture` 做同样的事，播放这条一直漏着。
+    final restoring = _restorePrepareFuture;
+    if (restoring != null) {
+      _debugLog('play：恢复尚未完成，先等它走完');
+      try {
+        await restoring;
+      } catch (_) {
+        // 恢复失败不该挡住播放，继续。
+      }
+    }
     await _startPlayback();
   }
 
@@ -3092,17 +3109,11 @@ class PlayerService with WidgetsBindingObserver {
         session.prepareFailed = true;
         return;
       }
-      // 预热 + 解锁要好几秒，这期间用户完全可能已经手动按了播放。这时候
-      // 不能再把上次的位置按下去 —— 那会把正在听的歌一把拽到几十秒外。
-      final alreadyPlaying = _activeEngine.playing || isPlaying.value;
-      if (alreadyPlaying) {
-        _debugLog('restore：用户已开始播放，放弃回填位置');
-      }
       await _activateLogicalIndex(
         session.index,
-        initialPosition: alreadyPlaying ? null : session.position,
+        initialPosition: session.position,
       );
-      if (!alreadyPlaying && session.position > Duration.zero) {
+      if (session.position > Duration.zero) {
         _publishRestoredPosition(session.position);
       }
       // 加载源期间用户可能已点漫游开始播放（_queueGeneration 已递增）：
