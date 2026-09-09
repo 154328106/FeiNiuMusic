@@ -187,11 +187,15 @@ class UnblockSourceService {
   /// [keyword]（「歌名 歌手」）和 [durationMs] 只有免费兜底音源用得上 ——
   /// 酷狗、酷我那两家是按关键词搜的，没有时长就没法从搜索结果里挑对版本，
   /// 很容易匹配到现场版或翻唱。
+  /// [skipPublicSources] 给已经自己问过公益源的调用方用（扣扣音乐那边
+  /// 把公益源提到了官方地址**前面**，因为官方只给 128k）。不跳过的话每首
+  /// 歌会把同一个请求对着公益服务打两遍 —— 作者明说了「切勿短时间批量」。
   Future<String?> resolve({
     required String platform,
     required String songId,
     String? keyword,
     int durationMs = 0,
+    bool skipPublicSources = false,
   }) async {
     await load();
     final cfg = config.value;
@@ -219,7 +223,7 @@ class UnblockSourceService {
     // 这两家认不认 `tx` 我没能在本地验证（沙箱连不上它们），所以
     // KugouPublicSources 里带了自熄火：非酷狗的源连撞 3 次没结果就判定
     // 这家不支持，本次运行不再问它，不会每首 QQ 歌都白等两个请求。
-    if (platform == 'kg' || platform == 'tx') {
+    if (!skipPublicSources && (platform == 'kg' || platform == 'tx')) {
       final url = await KugouPublicSources.resolve(
         songId,
         source: platform,

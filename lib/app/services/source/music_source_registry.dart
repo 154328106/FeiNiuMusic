@@ -5,6 +5,7 @@ import '../player_service.dart';
 import 'feiniu_source.dart';
 import 'music_source.dart';
 import 'netease_source.dart';
+import 'qq_source.dart';
 import 'kugou_source.dart';
 
 /// 当前音乐数据源。
@@ -23,11 +24,18 @@ class MusicSourceRegistry {
   static final List<MusicSource> all = [
     FeiniuSource.instance,
     NetEaseSource.instance,
-    // QQ 音乐摘掉了：它的取址接口会返回一个**打不开的** purl（日志里
-    // 大片 `Failed to open …aqqmusic…`），而接口本身不给状态码，起播前
-    // 没法分辨真假地址，预筛形同虚设 —— 表现成「显示可播 23 首，一首都
-    // 放不出声」。酷狗那边给 status，拿不到就是真拿不到，可信得多。
-    // 代码留在仓库里，哪天 QQ 那边有解了把这行加回来即可。
+    // 扣扣音乐 2026-09-02 曾被摘掉：它的取址接口会返回一个**打不开的**
+    // purl（日志里大片 `Failed to open …aqqmusic…`），而接口本身不给状态码，
+    // 起播前没法分辨真假，预筛形同虚设 —— 表现成「显示可播 23 首，一首都
+    // 放不出声」。
+    //
+    // 2026-09-10 加回来，那两条都有对策了：
+    // - 假地址：QQPlaybackService._verifiedOfficialUrl 起播前用 1 字节的
+    //   Range 请求探一下，开不了就当没有，预筛重新可信。
+    // - 128k：公益源（haitangw）用同一个 songmid 给的是 QQ 自己的 flac，
+    //   实测多为 24bit Hi-Res，已提到官方地址前面。
+    // 真出问题就把这一行再删掉，其余代码不受影响。
+    QQSource.instance,
     KugouSource.instance,
   ];
 

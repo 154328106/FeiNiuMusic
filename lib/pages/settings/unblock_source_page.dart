@@ -253,7 +253,7 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
           final host = Uri.tryParse(url)?.host ?? '?';
           final bytes = await KugouPublicSources.contentLength(url);
           buf.writeln('  ${entry.key}：$host ${_sizeDesc(bytes)}'
-              ' → ${_durationVerdict(bytes, url, qqSec)}');
+              ' → ${_bitrateVerdict(bytes, qqSec)}');
         }
         buf.writeln('');
       }
@@ -283,18 +283,29 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
     return '${(bytes / 1024 / 1024).toStringAsFixed(1)}MB';
   }
 
-  /// 用文件大小反推时长，和 QQ 报的比。
+  /// 报**隐含码率**，不再报「估算时长」。
   ///
-  /// 码率按扩展名估：flac 约 900kbps（112KB/s），mp3 按 320k（40KB/s）。
-  /// 估得糙，但翻唱/现场版跟原版的时长差通常在几十秒量级，够看出来。
-  static String _durationVerdict(int? bytes, String url, int qqSec) {
+  /// 上一版按 900kbps 反推时长再和 QQ 比，结果 5 首里 4 首判「对不上」——
+  /// 是尺子错了：那几首是 24bit Hi-Res flac（1650~1880kbps），按 900 算
+  /// 自然差出一倍。真正的判据是这个比值本身：用文件大小除以 **QQ 报的
+  /// 时长**，几首都落在同一个合理的 flac 区间，就说明拿到的确实是那首歌
+  /// （配错歌的话这个比值会散得到处都是）。
+  static String _bitrateVerdict(int? bytes, int qqSec) {
     if (bytes == null || bytes <= 0 || qqSec <= 0) return '无法比对';
-    final isFlac = url.toLowerCase().contains('.flac');
-    final bytesPerSecond = isFlac ? 112000 : 40000;
-    final estSec = bytes ~/ bytesPerSecond;
-    final diff = (estSec - qqSec).abs();
-    final tag = diff <= qqSec * 0.15 ? '吻合' : '对不上';
-    return '估算 ${_mmss(estSec)}，差 ${diff}s（$tag）';
+    final kbps = (bytes * 8 / qqSec / 1000).round();
+    final String tag;
+    if (kbps >= 1300) {
+      tag = 'Hi-Res flac';
+    } else if (kbps >= 700) {
+      tag = '标准 flac';
+    } else if (kbps >= 250) {
+      tag = '320k 级';
+    } else if (kbps >= 90) {
+      tag = '128k 级';
+    } else {
+      tag = '偏小，可疑';
+    }
+    return '$kbps kbps（$tag）';
   }
 
   Future<void> _save() async {

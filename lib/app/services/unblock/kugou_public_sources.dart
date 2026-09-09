@@ -215,6 +215,16 @@ class KugouPublicSources {
     }
   }
 
+  /// 两家的源代号不一样，得分别翻译。
+  ///
+  /// haitangw 认 `tx`（实测 code 0 + 真地址）；zddyr 明说自己支持
+  /// `kg/kw/qq/migu/kuwo/netease/wy` —— QQ 在它那儿叫 `qq`。我当初按洛雪
+  /// 那套约定给两家都传 `tx`，zddyr 就一直回 400「source 无效」。
+  static String _sourceCode(String endpoint, String platform) {
+    if (platform != 'tx') return platform;
+    return endpoint == 'zddyr' ? 'qq' : 'tx';
+  }
+
   /// `{"code":0,"data":{"url":"..."}}`
   ///
   /// 它的 `rid` 本来就是通用的「这个源的曲目 id」，换源只要改 source。
@@ -222,7 +232,11 @@ class KugouPublicSources {
     try {
       final res = await _dio.post<String>(
         'https://musicserver.haitangw.cc/v1/music/resolve-url',
-        data: {'source': source, 'rid': rid, 'level': 'lossless'},
+        data: {
+          'source': _sourceCode('haitangw', source),
+          'rid': rid,
+          'level': 'lossless',
+        },
         options: Options(headers: {'Content-Type': 'application/json'}),
       );
       _probe('haitangw', source, res);
@@ -238,7 +252,7 @@ class KugouPublicSources {
       final res = await _dio.get<String>(
         'https://yy.zddyr.top/lx/api/',
         queryParameters: {
-          'source': source,
+          'source': _sourceCode('zddyr', source),
           'quality': 'flac',
           // `mainHash` 是酷狗的叫法。非酷狗的源它到底收哪个参数名我没法在
           // 本地验证（沙箱连不上这两家），所以三个常见写法一起发 —— 用不上

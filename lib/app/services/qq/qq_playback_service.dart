@@ -1,9 +1,11 @@
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../state/song_source.dart';
 import '../../state/song_state.dart';
+import '../unblock/kugou_public_sources.dart';
 import '../unblock/unblock_source.dart';
 import 'qq_api_client.dart';
 import 'qq_models.dart';
@@ -43,19 +45,75 @@ class QQPlaybackService {
   /// 音源是按歌名搜、再比时长挑版本的，只给一个 mid 它对不上。
   final Map<String, (String, int)> _matchHints = {};
 
+  /// 只用来验官方地址能不能打开，超时给短一点：这一步是卡在起播路径上的。
+  static final Dio _probeDio = Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 4),
+      receiveTimeout: const Duration(seconds: 4),
+      validateStatus: (_) => true,
+      followRedirects: true,
+    ),
+  );
+
+  /// 官方地址，但**验过能打开**才返回。
+  ///
+  /// QQ 会返回一个打不开的 purl，而且接口本身不给状态码 —— 起播前分辨不出
+  /// 真假，预筛形同虚设，表现成「队列显示可播 23 首、一首都放不出声」。
+  /// 这就是当初把扣扣音乐从源列表里摘掉的直接原因。现在拿 1 字节的 Range
+  /// 请求探一下：能开才算数。
+  ///
+  /// 用 Range 而不是 HEAD：QQ 的 CDN 对 HEAD 的支持不稳，Range 更接近播放器
+  /// 真正会发的请求。
+  Future<String?> _verifiedOfficialUrl(String mid, String? mediaMid) async {
+    final url = await QQApiClient.instance.songUrl(mid, mediaMid: mediaMid);
+    if (url == null) return null;
+    try {
+      final res = await _probeDio.get<void>(
+        url,
+        options: Options(
+          headers: {'Range': 'bytes=0-1'},
+          responseType: ResponseType.stream,
+        ),
+      );
+      final code = res.statusCode ?? 0;
+      if (code == 200 || code == 206) return url;
+      debugPrint('[QQ] $mid 官方地址打不开（HTTP $code），丢弃');
+      return null;
+    } catch (e) {
+      debugPrint('[QQ] $mid 官方地址探测失败，丢弃：$e');
+      return null;
+    }
+  }
+
   Future<String?> resolveStreamUrl(String mid, {String? mediaMid}) async {
     final cached = _cache[mid];
     if (cached != null && !cached.isExpired) return cached.url;
     if (_unresolvable.contains(mid)) return null;
     try {
-      var url = await QQApiClient.instance.songUrl(mid, mediaMid: mediaMid);
-      // 官方给不出（会员曲）就问第三方音源。没配密钥时一个请求都不会发。
+      // 顺序是「公益源 → 官方 → 其余音源」，和网易云/酷狗反着来，两个理由：
+      //
+      // 1. 官方只给 128k（320k 要绿钻，硬要会拿到打不开的假地址，见
+      //    QQApiClient.songUrl 那段）。而 haitangw 用**同一个 songmid** 给的
+      //    是 QQ 自己的 flac：真机实测 5 首，文件名是 QQ 的 F000{media_mid}
+      //    格式，按 QQ 报的时长反推码率落在 1647~1879kbps（24bit Hi-Res）与
+      //    960kbps（标准 flac），比值集中说明配的就是那首歌。
+      // 2. 官方那个假地址正是 2026-09-02 把扣扣音乐整个摘掉的原因，先问公益
+      //    源能绕开大部分。
       final hint = _matchHints[mid];
+      var url = await KugouPublicSources.resolve(
+        mid,
+        source: 'tx',
+        // 不让它「排队太久就让路」：让出去下一站是 128k，白白降一档音质。
+        allowBail: false,
+      );
+      url ??= await _verifiedOfficialUrl(mid, mediaMid);
+      // 还没有就走完整音源链。公益源上面已经问过了，别再打一遍。
       url ??= await UnblockSourceService.instance.resolve(
         platform: 'tx',
         songId: mid,
         keyword: hint?.$1,
         durationMs: hint?.$2 ?? 0,
+        skipPublicSources: true,
       );
       if (url == null) {
         _unresolvable.add(mid);
