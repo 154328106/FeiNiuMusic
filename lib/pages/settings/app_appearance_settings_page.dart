@@ -762,10 +762,41 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                   return AppSettingSwitchTile(
                     title: '导航栏描边',
                     subtitle: framed
-                        ? '底栏画一圈发丝描边，和背景分得开'
+                        ? '底栏画一圈描边，和背景分得开'
                         : '不画描边，底栏只靠底色和投影',
                     value: framed,
                     onChanged: AppBackgroundSettings.setNavBarFrameEnabled,
+                  );
+                },
+              ),
+              ValueListenableBuilder<bool>(
+                valueListenable: AppBackgroundSettings.navBarFrameEnabled,
+                builder: (context, framed, _) {
+                  if (!framed) return const SizedBox.shrink();
+                  return ValueListenableBuilder<Color?>(
+                    valueListenable: AppBackgroundSettings.navBarFrameColor,
+                    builder: (context, frameColor, _) {
+                      final fallback = Theme.of(context).brightness ==
+                              Brightness.dark
+                          ? Colors.white.withValues(alpha: 0.24)
+                          : Colors.black.withValues(alpha: 0.18);
+                      return _ColorSettingTile(
+                        title: '导航栏描边颜色',
+                        subtitle: frameColor == null
+                            ? '默认发丝色，点击自定义'
+                            : '自定义颜色，长按恢复默认',
+                        color: frameColor ?? fallback,
+                        onPick: () => _showColorPickerDialog(
+                          context,
+                          initial: frameColor ?? fallback,
+                          onSelected: AppBackgroundSettings.setNavBarFrameColor,
+                        ),
+                        onReset: frameColor == null
+                            ? null
+                            : () =>
+                                  AppBackgroundSettings.setNavBarFrameColor(null),
+                      );
+                    },
                   );
                 },
               ),

@@ -189,6 +189,7 @@ class ModernNavigationBar extends StatelessWidget {
         AppBackgroundSettings.navBarColor,
         AppBackgroundSettings.navBarOpacity,
         AppBackgroundSettings.navBarFrameEnabled,
+        AppBackgroundSettings.navBarFrameColor,
       ]),
       builder: (context, _) => ValueListenableBuilder<bool>(
       valueListenable: AppBackgroundSettings.panelBlurEnabled,
@@ -263,9 +264,15 @@ class ModernNavigationBar extends StatelessWidget {
         final isDark = Theme.of(context).brightness == Brightness.dark;
         // 描边跟「应用外观 → 底栏描边」走；关掉就整条不画边。
         final framed = AppBackgroundSettings.navBarFrameEnabled.value;
-        final pillBorder = isDark
-            ? Colors.white.withValues(alpha: 0.24)
-            : Colors.black.withValues(alpha: 0.18);
+        // 自定义色按原样用（用户要什么色就什么色，不再乘透明度，
+        // 否则调了颜色还是看不出来）；没自定义就用默认发丝色。
+        final pillBorder =
+            AppBackgroundSettings.navBarFrameColor.value ??
+            (isDark
+                ? Colors.white.withValues(alpha: 0.24)
+                : Colors.black.withValues(alpha: 0.18));
+        final borderWidth =
+            AppBackgroundSettings.navBarFrameColor.value == null ? 1.0 : 1.6;
         return SafeArea(
           top: false,
           child: Padding(
@@ -277,7 +284,7 @@ class ModernNavigationBar extends StatelessWidget {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(kNavPillRadius),
                 border: framed
-                    ? Border.all(color: pillBorder, width: 1)
+                    ? Border.all(color: pillBorder, width: borderWidth)
                     : null,
                 boxShadow: [
                   BoxShadow(

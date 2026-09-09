@@ -25,6 +25,7 @@ class AppBackgroundSettings {
       'setting_mini_player_only_while_playing';
   static const String _prefsNavBarFrameEnabled =
       'setting_nav_bar_frame_enabled';
+  static const String _prefsNavBarFrameColor = 'setting_nav_bar_frame_color';
 
   static final ValueNotifier<String?> backgroundImagePath = ValueNotifier(null);
   static final ValueNotifier<double> backgroundMaskOpacity = ValueNotifier(
@@ -67,6 +68,9 @@ class AppBackgroundSettings {
   ///
   /// 液体玻璃分支自己有一圈底板描边，这个开关只作用于普通（非玻璃）分支。
   static final ValueNotifier<bool> navBarFrameEnabled = ValueNotifier(true);
+
+  /// 底栏描边颜色。null = 用默认的发丝色（亮/暗各一档）。
+  static final ValueNotifier<Color?> navBarFrameColor = ValueNotifier(null);
 
   /// 迷你播放条仅在播放时显示，暂停/停止时隐藏。
   ///
@@ -114,6 +118,8 @@ class AppBackgroundSettings {
         (prefs.getDouble(_prefsNavBarOpacity) ?? 1.0).clamp(0.0, 1.0);
     navBarFrameEnabled.value =
         prefs.getBool(_prefsNavBarFrameEnabled) ?? true;
+    final frameColor = prefs.getInt(_prefsNavBarFrameColor);
+    navBarFrameColor.value = frameColor == null ? null : Color(frameColor);
     miniPlayerOnlyWhilePlaying.value =
         prefs.getBool(_prefsMiniPlayerOnlyWhilePlaying) ?? false;
   }
@@ -195,6 +201,16 @@ class AppBackgroundSettings {
     final v = value.clamp(0.0, 1.0);
     await prefs.setDouble(_prefsNavBarOpacity, v);
     navBarOpacity.value = v;
+  }
+
+  static Future<void> setNavBarFrameColor(Color? color) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (color == null) {
+      await prefs.remove(_prefsNavBarFrameColor);
+    } else {
+      await prefs.setInt(_prefsNavBarFrameColor, color.toARGB32());
+    }
+    navBarFrameColor.value = color;
   }
 
   static Future<void> setNavBarFrameEnabled(bool enabled) async {
