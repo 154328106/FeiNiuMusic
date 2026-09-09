@@ -469,12 +469,17 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // 一个雷达按钮顶掉原来的「刷新 + 播放」两个：没在播就播
-                  // 这首，正在播就换一首，播放时向外扩散。
+                  // 点击 = 播放/暂停，长按 = 换一首。
+                  //
+                  // 原来传的是 onRefresh，而 RadarPlayButton 在「正在播 + 有
+                  // onRefresh」时点击走的是换一首 —— 所以播放中怎么点都暂停
+                  // 不了，那是它的设计而不是 bug。这里改成不传 onRefresh：
+                  // 点击一律交给 onPlay（首页那边是 _togglePlayRoam，本来就
+                  // 会判断「点的是当前播放那首就暂停」），换一首挪到长按。
                   RadarPlayButton(
                     isPlaying: widget.isPlaying,
                     onPlay: widget.onPlay,
-                    onRefresh: widget.onRefresh,
+                    onLongPress: widget.onRefresh,
                   ),
                 ],
               ),

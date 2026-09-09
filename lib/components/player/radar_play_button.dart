@@ -13,6 +13,7 @@ class RadarPlayButton extends StatefulWidget {
     required this.isPlaying,
     required this.onPlay,
     this.onRefresh,
+    this.onLongPress,
     this.size = 48,
     this.semanticsLabel,
   });
@@ -25,6 +26,9 @@ class RadarPlayButton extends StatefulWidget {
 
   /// 给了它就变成「正在播时点击 = 换一首」，漫游卡用的就是这个语义。
   final VoidCallback? onRefresh;
+
+  /// 长按动作。首页那张漫游卡用它放「换一首」—— 点击要留给播放/暂停。
+  final VoidCallback? onLongPress;
 
   final double size;
 
@@ -93,6 +97,7 @@ class RadarPlayButtonState extends State<RadarPlayButton>
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: _handleTap,
+        onLongPress: widget.onLongPress,
         child: SizedBox(
           width: widget.size,
           height: widget.size,

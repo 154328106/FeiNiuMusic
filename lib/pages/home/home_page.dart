@@ -1271,6 +1271,9 @@ class _HomePageState extends State<HomePage>
                       context,
                       hasBottomNav: useBottomNavigation,
                       showMiniPlayer: false,
+                      // 默认的 24 是给「内容底下还要留口气」用的，首页内容
+                      // 刚好卡在一屏边缘，这 24 就是还能挪一小段的原因。
+                      minPadding: 8,
                     ),
                   ),
             children: [

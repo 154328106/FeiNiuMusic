@@ -1441,6 +1441,16 @@ class _SpectrumRingState extends State<_SpectrumRing>
   int _beatIndex = 0;
   final math.Random _rand = math.Random(20260909);
 
+  /// 每根条固定的灵敏度（0.35~1.35）。
+  ///
+  /// 只靠每拍随机是不够的：那样整体轮廓仍然是一条光滑的弧，只是每帧抖一下，
+  /// 看久了就是「很规律」。给每根条一个**固定不变**的高低偏好，整环才有
+  /// 参差的骨架 —— 真频谱里每个频段的能量本来就天生不等。
+  late final List<double> _sens = List<double>.generate(
+    _barCount,
+    (i) => 0.35 + math.Random(i * 7919 + 17).nextDouble() * 1.0,
+  );
+
   @override
   void initState() {
     super.initState();
@@ -1486,7 +1496,7 @@ class _SpectrumRingState extends State<_SpectrumRing>
       final seed = _seed[i];
       final texture =
           (0.5 + 0.5 * math.sin(_phase * speed + seed)) *
-          (0.08 + 0.13 * (1 - band)) *
+          (0.05 + 0.10 * (1 - band)) *
           _gain;
       // 衰减：低频拖一点（余音），高频干脆（碎音）。这个差别是「有节奏感」
       // 的关键 —— 一刀切的衰减率听觉上就是一团糊。
@@ -1518,9 +1528,11 @@ class _SpectrumRingState extends State<_SpectrumRing>
       if (band > 0.55) {
         hit += 0.34 * ((band - 0.55) / 0.45) * (0.4 + 0.6 * _rand.nextDouble());
       }
-      // 每根条各自抖一点，别整排削平成一条弧。
-      hit *= 0.72 + 0.56 * _rand.nextDouble();
       if (hit <= 0) continue;
+      // 这一拍这根不响：让参差感来自「谁响谁不响」，而不只是「响多高」。
+      if (_rand.nextDouble() < 0.20) continue;
+      // 固定灵敏度 × 每拍随机，两层叠起来才够乱。
+      hit *= _sens[i] * (0.65 + 0.7 * _rand.nextDouble());
       _levels[i] = math.min(1.0, _levels[i] + hit * _gain);
     }
   }
