@@ -202,11 +202,16 @@ class ModernNavigationBar extends StatelessWidget {
         // 底色与深浅度可在「应用外观 → 底部导航栏」自定义；
         // 未自定义时跟随主题表面色。开了模糊时底色本就接近透明（靠
         // BackdropFilter 出效果），此时深浅度只按比例微调，不然一调就糊死。
+        // 未自定义时用 surfaceContainerHigh 而不是 surface：页面背景本身就是
+        // surface，两者同色的话胶囊整个糊进背景里，实机反馈「有点糊、不明显」。
         final navTint =
-            AppBackgroundSettings.navBarColor.value ?? scheme.surface;
+            AppBackgroundSettings.navBarColor.value ??
+            scheme.surfaceContainerHigh;
         final navOpacity = AppBackgroundSettings.navBarOpacity.value;
+        // 开模糊时底色本该很淡（靠 BackdropFilter 出效果），但页面背景是纯色
+        // 时模糊等于没模糊，0.08 的底色会让胶囊彻底消失。给它一个下限。
         final barColor = isBlurred
-            ? navTint.withValues(alpha: 0.08 * navOpacity)
+            ? navTint.withValues(alpha: (0.28 * navOpacity).clamp(0.0, 1.0))
             : navTint.withValues(alpha: navOpacity);
         // 胶囊本体：一条定高的 Row，圆角/悬浮由外层负责。
         Widget pill = Material(
@@ -252,8 +257,8 @@ class ModernNavigationBar extends StatelessWidget {
         // 免得浅色背景下这条整个糊进去看不出边界。
         final isDark = Theme.of(context).brightness == Brightness.dark;
         final pillBorder = isDark
-            ? Colors.white.withValues(alpha: 0.18)
-            : Colors.black.withValues(alpha: 0.10);
+            ? Colors.white.withValues(alpha: 0.24)
+            : Colors.black.withValues(alpha: 0.18);
         return SafeArea(
           top: false,
           child: Padding(
@@ -268,10 +273,10 @@ class ModernNavigationBar extends StatelessWidget {
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(
-                      alpha: isDark ? 0.34 : 0.14,
+                      alpha: isDark ? 0.40 : 0.20,
                     ),
-                    blurRadius: 16,
-                    offset: const Offset(0, 5),
+                    blurRadius: 20,
+                    offset: const Offset(0, 6),
                   ),
                 ],
               ),

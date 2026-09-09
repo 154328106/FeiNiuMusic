@@ -683,8 +683,24 @@ class _HomePageState extends State<HomePage>
     );
   }
 
+  /// 首页大图当前展示的是「正在播放」而不是漫游推荐。
+  ///
+  /// 首页关掉了迷你播放条（见 AppPageScaffold.showMiniPlayer），不借这张图的话
+  /// 整个首页看不到当前在放什么。
+  bool get _heroShowsNowPlaying =>
+      _player.isPlayingSignal.value &&
+      _player.currentSongSignal.value != null;
+
+  /// 大图上的小标签：借去显示当前播放时改成「正在播放」，否则还是漫游的标签。
+  String get _heroDisplayLabel =>
+      _heroShowsNowPlaying ? '正在播放' : _heroLabel.value;
+
   /// 漫游歌曲为空时，用第一首收藏/最近歌曲兜底，保证 Hero 始终有内容
   SongEntity? get _heroSong {
+    // 播放中就把这张大图借给「正在播放」；停下来它自己变回漫游。
+    // _togglePlayRoam 里本来就有「点的是当前播放那首就 togglePlayPause」的
+    // 分支，所以按钮语义不用另外改。
+    if (_heroShowsNowPlaying) return _player.currentSongSignal.value;
     final roam = _roamSong.value;
     if (roam != null) return roam;
     if (_favoriteSongs.value.isNotEmpty) return _favoriteSongs.value.first;
@@ -1166,7 +1182,7 @@ class _HomePageState extends State<HomePage>
                   child: HomeHeroBanner(
                     key: ValueKey(heroSong.id),
                     song: heroSong,
-                    label: _heroLabel.value,
+                    label: _heroDisplayLabel,
                     onPlay: _togglePlayRoam,
                     isPlaying: _heroIsPlaying,
                     onRefresh: _refreshRoam,

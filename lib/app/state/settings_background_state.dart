@@ -87,13 +87,16 @@ class AppBackgroundSettings {
     contentFrameStyle.value = rawFrame != null
         ? AppContentFrameStyle.fromName(rawFrame)
         // 上一版是个布尔开关，按它迁移一次。
+        //
+        // 注意这里的兜底才是真正生效的默认值 —— 字段声明处的 ValueNotifier
+        // 初始值启动时会被这一行覆盖，只改那边等于没改。
         : ((prefs.getBool(_prefsContentFrame) ?? false)
               ? AppContentFrameStyle.outlined
-              : AppContentFrameStyle.none);
+              : AppContentFrameStyle.cards);
     final frameColor = prefs.getInt(_prefsContentFrameColor);
     contentFrameColor.value = frameColor == null ? null : Color(frameColor);
     contentFrameOpacity.value =
-        (prefs.getDouble(_prefsContentFrameOpacity) ?? 0.8).clamp(0.0, 1.0);
+        (prefs.getDouble(_prefsContentFrameOpacity) ?? 0.15).clamp(0.0, 1.0);
     final navColor = prefs.getInt(_prefsNavBarColor);
     navBarColor.value = navColor == null ? null : Color(navColor);
     navBarOpacity.value =
