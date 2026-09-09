@@ -418,13 +418,37 @@ class MediaKitEngine implements PlayerEngine {
       return;
     }
     await player.seek(target);
-    // 这条日志是给「恢复播放位置到底生效没有」用的：mpv 拒绝 seek 时不抛
-    // 异常，只能靠对比目标位置与 seek 之后的实际位置来判断。
     final waitedMs = DateTime.now().difference(startedAt).inMilliseconds;
+    final waitDesc = waited ? '等加载 ${waitedMs}ms' : '无需等待';
+    // 事后核对，不放在主流程里等 —— 恢复已经够慢了。
+    unawaited(_reportSeekLanding(player, target, waitDesc));
+  }
+
+  /// 核对 seek 有没有真的落下去。
+  ///
+  /// mpv 的位置是异步回报的：`await player.seek()` 刚返回时
+  /// `player.state.position` 还是旧值，直接读会恒为 0ms —— 这条诊断的上一版
+  /// 就是这么废掉的，日志里永远显示「seek 后实际 0ms」，看不出是真没落下去
+  /// 还是只是读早了。改成等一个接近目标的位置事件再打印；等不到才说明
+  /// seek 确实没生效。
+  Future<void> _reportSeekLanding(
+    mk.Player player,
+    Duration target,
+    String waitDesc,
+  ) async {
+    var landed = player.state.position;
+    var ok = true;
+    try {
+      landed = await player.stream.position
+          .firstWhere((p) => (p - target).abs() < const Duration(seconds: 2))
+          .timeout(const Duration(seconds: 3));
+    } catch (_) {
+      ok = false;
+      landed = player.state.position;
+    }
     debugPrint(
-      '[MediaKitEngine] seek 目标 ${target.inMilliseconds}ms，'
-      '${waited ? "等加载 ${waitedMs}ms" : "无需等待"}，'
-      'seek 后实际 ${player.state.position.inMilliseconds}ms',
+      '[MediaKitEngine] seek 目标 ${target.inMilliseconds}ms，$waitDesc，'
+      '${ok ? "已落到" : "3 秒内未落到目标，当前"} ${landed.inMilliseconds}ms',
     );
   }
 

@@ -2959,6 +2959,15 @@ class PlayerService with WidgetsBindingObserver {
     isLoading.value = false;
     _emitSnapshot(force: true);
 
+    // 恢复走完时用户可能已经手动按了播放（预热 + 解锁要几秒，窗口不小）。
+    // 这时候不能收走音频会话，否则刚起播就被掐掉 —— 表现是「按了播放没反应，
+    // 得再按一次」。上面 autoplay 失败的分支用的就是这个判断，收尾这条漏了。
+    if (_activeEngine.playing || isPlaying.value) {
+      _debugLog('restore 收尾：用户已开始播放，不收音频会话');
+      _statsService.flush();
+      return;
+    }
+
     try {
       await _setAudioSessionActive(false);
     } catch (_) {}
@@ -3083,11 +3092,17 @@ class PlayerService with WidgetsBindingObserver {
         session.prepareFailed = true;
         return;
       }
+      // 预热 + 解锁要好几秒，这期间用户完全可能已经手动按了播放。这时候
+      // 不能再把上次的位置按下去 —— 那会把正在听的歌一把拽到几十秒外。
+      final alreadyPlaying = _activeEngine.playing || isPlaying.value;
+      if (alreadyPlaying) {
+        _debugLog('restore：用户已开始播放，放弃回填位置');
+      }
       await _activateLogicalIndex(
         session.index,
-        initialPosition: session.position,
+        initialPosition: alreadyPlaying ? null : session.position,
       );
-      if (session.position > Duration.zero) {
+      if (!alreadyPlaying && session.position > Duration.zero) {
         _publishRestoredPosition(session.position);
       }
       // 加载源期间用户可能已点漫游开始播放（_queueGeneration 已递增）：
