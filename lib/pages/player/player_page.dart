@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -1316,6 +1317,11 @@ class _ArtworkShadowContainer extends StatelessWidget {
             ),
           ],
         );
+      case PlayerCoverStyle.spectrum:
+        // 封面缩到 76%，空出来的外环留给频谱条。
+        return _SpectrumRing(
+          child: Center(child: Transform.scale(scale: 0.76, child: _plainCover())),
+        );
       case PlayerCoverStyle.square:
       case PlayerCoverStyle.circle:
         return _plainCover();
@@ -1388,6 +1394,155 @@ class _ArtworkShadowContainer extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
+/// 圆形封面外圈的频谱环。
+///
+/// **这是模拟的，不是真频谱。** 播放器那两个引擎（just_audio 的 AVPlayer、
+/// media_kit 的 mpv）都不向 Dart 侧吐 PCM，要拿真数据得写原生音频 tap 并
+/// fork 插件，不在这里做。
+///
+/// 为了不显得假，模拟遵循真频谱分析仪的几个手感：
+///   1. **上冲快、回落慢** —— 每根条用两段不同时间常数的泄漏积分逼近目标值，
+///      这是「像分析仪」最关键的一点，匀速涨落一眼就假；
+///   2. **分频段性格** —— 低频段慢而重、高频段快而碎；
+///   3. **不互质的正弦叠加** —— 三个频率比不成整数倍，肉眼看不出周期；
+///   4. **起停有惯性** —— 暂停不是瞬间归零，是缓缓落下。
+class _SpectrumRing extends StatefulWidget {
+  const _SpectrumRing({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_SpectrumRing> createState() => _SpectrumRingState();
+}
+
+class _SpectrumRingState extends State<_SpectrumRing>
+    with SingleTickerProviderStateMixin {
+  static const int _barCount = 72;
+
+  late final AnimationController _driver = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 1),
+  )..repeat();
+  final Stopwatch _clock = Stopwatch()..start();
+  final List<double> _levels = List<double>.filled(_barCount, 0);
+  final List<double> _seed = List<double>.generate(
+    _barCount,
+    // 固定种子：每次进播放页的相位分布一致，不会因为随机而忽然「换了个样子」。
+    (i) => math.Random(i * 2654435761).nextDouble() * math.pi * 2,
+  );
+  double _gain = 0;
+  double _phase = 0;
+  Duration _last = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _driver.addListener(_step);
+  }
+
+  @override
+  void dispose() {
+    _driver.removeListener(_step);
+    _driver.dispose();
+    super.dispose();
+  }
+
+  void _step() {
+    final now = _clock.elapsed;
+    var dt = (now - _last).inMicroseconds / 1e6;
+    _last = now;
+    // 掉帧/切后台回来时 dt 会很大，钳一下免得整环炸开。
+    if (dt <= 0 || dt > 0.1) dt = 1 / 60;
+
+    final playing = PlayerService.instance.isPlaying.value;
+    // 起停都留惯性：暂停时缓缓落下，比瞬间归零自然。
+    _gain += (playing ? 1.0 - _gain : -_gain) *
+        (1 - math.exp(-dt * (playing ? 3.5 : 1.8)));
+    _phase += dt;
+
+    for (var i = 0; i < _barCount; i++) {
+      final band = i / (_barCount - 1);
+      // 低频段慢而重，高频段快而碎。
+      final speed = 1.3 + band * 6.5;
+      final weight = 1.0 - band * 0.5;
+      final seed = _seed[i];
+      final drive =
+          0.5 * math.sin(_phase * speed + seed) +
+          0.3 * math.sin(_phase * speed * 1.73 + seed * 2.1) +
+          0.2 * math.sin(_phase * speed * 0.41 + seed * 0.7);
+      var target = ((drive + 1) / 2) * weight * _gain;
+      // 平方一下压低小值：真频谱的静默段是贴底的，线性映射会显得整环在「呼吸」。
+      target *= target;
+      final k = target > _levels[i] ? 24.0 : 6.0;
+      _levels[i] += (target - _levels[i]) * (1 - math.exp(-dt * k));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.primary;
+    return Stack(
+      fit: StackFit.passthrough,
+      children: [
+        Positioned.fill(
+          child: IgnorePointer(
+            child: RepaintBoundary(
+              child: CustomPaint(
+                painter: _SpectrumPainter(
+                  levels: _levels,
+                  color: color,
+                  repaint: _driver,
+                ),
+              ),
+            ),
+          ),
+        ),
+        widget.child,
+      ],
+    );
+  }
+}
+
+class _SpectrumPainter extends CustomPainter {
+  _SpectrumPainter({
+    required this.levels,
+    required this.color,
+    required Listenable repaint,
+  }) : super(repaint: repaint);
+
+  final List<double> levels;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = Offset(size.width / 2, size.height / 2);
+    final r = size.shortestSide / 2;
+    // 封面缩到 0.76，条带从它外沿再往外长一点点。
+    final inner = r * 0.79;
+    final maxLen = r * 0.19;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = math.max(1.6, r * 0.018);
+    final n = levels.length;
+    for (var i = 0; i < n; i++) {
+      final v = levels[i].clamp(0.0, 1.0);
+      final len = maxLen * v;
+      // 太短的不画：贴着封面的一圈小点反而脏。
+      if (len < 1.0) continue;
+      final a = (i / n) * 2 * math.pi - math.pi / 2;
+      final dir = Offset(math.cos(a), math.sin(a));
+      paint.color = color.withValues(alpha: 0.22 + 0.68 * v);
+      canvas.drawLine(c + dir * inner, c + dir * (inner + len), paint);
+    }
+  }
+
+  // 重绘由 repaint（AnimationController）驱动，这里恒 false 即可。
+  @override
+  bool shouldRepaint(covariant _SpectrumPainter oldDelegate) =>
+      oldDelegate.color != color;
+}
+
 // 碟片类封面（CD / 黑胶）
 //
 // 半径比例按真实盘片尺寸换算（孔径 / 盘片直径 = 孔半径 / 盘片半径）：

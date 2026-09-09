@@ -30,13 +30,17 @@ enum PlayerCoverStyle {
   cd,
 
   /// 黑胶唱片：黑色盘面 + 纹路 + 金环，封面缩到中心标签区。
-  vinyl;
+  vinyl,
+
+  /// 频谱圆盘：圆形封面 + 外圈跟着播放起伏的频谱条。
+  spectrum;
 
   String get label => switch (this) {
     PlayerCoverStyle.square => '方形封面',
     PlayerCoverStyle.circle => '圆形封面',
     PlayerCoverStyle.cd => 'CD 碟片',
     PlayerCoverStyle.vinyl => '黑胶唱片',
+    PlayerCoverStyle.spectrum => '频谱圆盘',
   };
 
   String get description => switch (this) {
@@ -44,10 +48,14 @@ enum PlayerCoverStyle {
     PlayerCoverStyle.circle => '裁成正圆，无中心孔',
     PlayerCoverStyle.cd => '封面印在盘面上，中间挖孔',
     PlayerCoverStyle.vinyl => '黑胶盘面，封面作为中心贴标',
+    PlayerCoverStyle.spectrum => '圆形封面，外圈频谱跟着播放起伏',
   };
 
   /// 非方形样式才谈得上「旋转」。
-  bool get spinnable => this != PlayerCoverStyle.square;
+  ///
+  /// 频谱盘也不转：外圈那一环条带跟着转就看不出是在跟音乐跳了。
+  bool get spinnable =>
+      this != PlayerCoverStyle.square && this != PlayerCoverStyle.spectrum;
 
   static PlayerCoverStyle fromName(String? raw) => PlayerCoverStyle.values
       .firstWhere((e) => e.name == raw, orElse: () => PlayerCoverStyle.circle);

@@ -52,10 +52,14 @@ Widget _coverStyleThumb(BuildContext context, PlayerCoverStyle style) {
       height: 22,
       decoration: BoxDecoration(
         color: scheme.primary.withValues(alpha: 0.55),
-        shape: style == PlayerCoverStyle.circle
+        shape:
+            style == PlayerCoverStyle.circle ||
+                style == PlayerCoverStyle.spectrum
             ? BoxShape.circle
             : BoxShape.rectangle,
-        borderRadius: style == PlayerCoverStyle.circle
+        borderRadius:
+            style == PlayerCoverStyle.circle ||
+                style == PlayerCoverStyle.spectrum
             ? null
             : BorderRadius.circular(5),
       ),
