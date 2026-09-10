@@ -262,12 +262,6 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
         }
         buf.writeln('');
       }
-      if (KugouPublicSources.probes.isNotEmpty) {
-        buf.writeln('原始返回：');
-        for (final e in KugouPublicSources.probes.entries) {
-          buf.writeln('${e.key} → ${e.value}');
-        }
-      }
     } catch (e) {
       buf.writeln('探测出错：$e');
     }

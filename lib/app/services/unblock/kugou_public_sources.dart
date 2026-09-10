@@ -101,9 +101,13 @@ class KugouPublicSources {
   /// 每个「接口 × 源」组合只留一次原始返回，用来判断到底是不支持还是没货。
   /// 没法在本地联网验证这两家认不认 `tx`，只能让真机来回答。
   ///
-  /// 除了打日志也存一份：设置页的「探测」按钮直接把它显示出来，省得用户
-  /// 还要去导日志。key 是 `接口/源`。
-  static final Map<String, String> probes = {};
+  /// 各接口**最近一次**响应，连同它是给哪个 rid 的。key 是 `接口/源`。
+  ///
+  /// 早先这里是「本次运行只记第一条」，结果被 App 后台的解析抢先占了坑 ——
+  /// 探测报告里贴出来的原始返回根本不是探测自己发的那次请求，我据此判过一次
+  /// 「vkeys 会换歌」，是错的。现在每次都覆盖，并且带上 rid，让调用方能核对
+  /// 这条到底是不是自己那次的。
+  static final Map<String, ({String rid, String summary})> probes = {};
   static final Set<String> _probeLogged = {};
 
   /// 清掉一次探测的痕迹，让「探测」按钮可以反复按。
@@ -293,7 +297,7 @@ class KugouPublicSources {
         },
         options: Options(headers: {'Content-Type': 'application/json'}),
       );
-      _probe('haitangw', source, res);
+      _probe('haitangw', source, rid, res);
       return _pickUrl(
         res,
         endpoint: 'haitangw',
@@ -321,7 +325,7 @@ class KugouPublicSources {
           if (source != 'kg') ...{'songmid': rid, 'id': rid},
         },
       );
-      _probe('zddyr', source, res);
+      _probe('zddyr', source, rid, res);
       return _pickUrl(
         res,
         endpoint: 'zddyr',
@@ -334,16 +338,15 @@ class KugouPublicSources {
     }
   }
 
-  /// vkeys 解不出这个 mid 时会**换一首歌顶上**，不是报错。
+  /// 两道校验，都靠 vkeys 自己返回的元数据，不用额外请求。
   ///
-  /// 真机实测：拿周杰伦《晴天》(`0039MnYb0qxYhV`) 去问，它回的是
-  /// `mid: 000x5f2H3FYvJg / song: 晴天 (DJ版) / singer: 钻进月亮怀 /
-  /// quality: 音乐试听 / 0.46MB / 51kbps`。这是最坏的一类错误 —— 文件能正常
-  /// 播，听到的却是另一首歌，光看状态码和体积都发现不了。
-  ///
-  /// 好在它把证据一起交出来了：返回里带 `mid`。对不上就是换了歌，直接丢弃。
-  /// 这个判据精确、免费、不用额外请求，比下面那道体积闸强得多 —— 体积闸只拦
-  /// 得住片段，拦不住「一首完整的翻唱」。
+  /// 1. **mid 要对得上**。它解不出某个 mid 时会不会去搜个同名的顶上，我**没有
+  ///    证实** —— 两次看到的可疑样本后来都发现是探针被 App 后台解析污染了
+  ///    （见 [probes] 的注释）。但这道比对精确又免费，对的响应一条都不会误杀，
+  ///    留着当保险。真发生了日志会写明白。
+  /// 2. **`quality` 里写着「试听」的丢掉**。这是实锤：解不开的会员曲它回的是
+  ///    一分钟左右的试听片段（`quality: 音乐试听`、0.9MB 上下、几十 kbps），
+  ///    地址和状态码都挑不出毛病。不拦就是播一小会儿自动跳。
   static bool _vkeysIsSameSong(Response<String> res, String rid) {
     final body = res.data;
     if (body == null || body.isEmpty) return true;
@@ -402,7 +405,7 @@ class KugouPublicSources {
         'https://api.vkeys.cn/v2/music/tencent/geturl',
         queryParameters: {'mid': rid, 'quality': 10},
       );
-      _probe('vkeys', source, res);
+      _probe('vkeys', source, rid, res);
       if (!_vkeysIsSameSong(res, rid)) return null;
       return _pickUrl(
         res,
@@ -420,25 +423,38 @@ class KugouPublicSources {
   ///
   /// 这两家认不认 `tx` 只能靠真机日志回答：如果返回里写着「不支持的源」
   /// 之类的话，一眼就能定论；如果是正常的「没有这首」，那就还有戏。
-  static void _probe(String name, String source, Response<String> res) {
+  static void _probe(
+    String name,
+    String source,
+    String rid,
+    Response<String> res,
+  ) {
     if (source == 'kg') return;
     final combo = '$name/$source';
-    if (!_probeLogged.add(combo)) return;
     final body = (res.data ?? '').replaceAll(RegExp(r'\s+'), ' ');
     final brief = body.length > 600 ? '${body.substring(0, 600)}…' : body;
-    probes[combo] = 'HTTP ${res.statusCode}：$brief';
+    probes[combo] = (rid: rid, summary: 'HTTP ${res.statusCode}：$brief');
+    // 日志只留第一条，免得起播时每首歌刷一屏。
+    if (!_probeLogged.add(combo)) return;
     debugPrint('[公益音源] 探针 $combo HTTP ${res.statusCode}：$brief');
   }
 
   /// 诊断用：**每一家都**问一遍（不像 [_resolveOnce] 那样先命中先返回），
   /// 好知道各家分别认不认这个源。返回 `接口名 -> 地址(或 null)`。
-  static Future<Map<String, String?>> probeAll(
+  /// 返回 `接口名 -> (地址, 原始返回)`。
+  ///
+  /// `raw` 只在 [probes] 里那条**确实是本次 rid** 的时候才给 —— 否则说明中途
+  /// 被 App 后台的解析插了队，这时候宁可报「没抓到」，也绝不贴一个标错了歌的
+  /// 样本出来。上一版就是没这道核对，害我拿别人的响应下了个错结论。
+  static Future<Map<String, ({String? url, String? raw})>> probeAll(
     String rid,
     String source,
   ) async {
-    final out = <String, String?>{};
+    final out = <String, ({String? url, String? raw})>{};
     for (final name in _endpoints) {
-      out[name] = await _call(name, rid, source);
+      final url = await _call(name, rid, source);
+      final p = probes['$name/$source'];
+      out[name] = (url: url, raw: p != null && p.rid == rid ? p.summary : null);
     }
     return out;
   }
