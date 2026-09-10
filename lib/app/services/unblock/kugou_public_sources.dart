@@ -179,9 +179,16 @@ class KugouPublicSources {
     return completer.future;
   }
 
-  /// 问的顺序。haitangw 排头是实测结果（QQ 那轮 50 首几乎全中）；lxmusic
-  /// 垫底当兜底 —— 它是官方 lx-music-api-server，协议最规整，但我们没验过。
-  static const List<String> _endpoints = ['haitangw', 'zddyr', 'ceseet'];
+  /// 问的顺序。haitangw 排头是实测结果（QQ 那轮 50 首几乎全中）。
+  ///
+  /// **第三个兜底槽位试过三家，全躺，已经撤掉**（2026-09-10 真机逐个探过）：
+  /// - `88.lxmusic.中国` → 404，`/lxmusicv3/` 没了，只剩 `/lxmusicv4/...?sign=`
+  /// - `lxmusicapi.onrender.com` → 503 `Service Suspended`，实例被永久停用
+  /// - `m-api.ceseet.me` → 403 `error code: 1000`（Cloudflare 拦截）
+  ///
+  /// 留着只会让每首没货的歌多挨一次超时。以后再找到候选，往这个数组加一行
+  /// 加一个取址方法就能用探测按钮验。
+  static const List<String> _endpoints = ['haitangw', 'zddyr'];
 
   /// 上一次真正给出地址的那家，下次从它开始问。
   ///
@@ -193,8 +200,6 @@ class KugouPublicSources {
     switch (endpoint) {
       case 'zddyr':
         return _zddyr(rid, source);
-      case 'ceseet':
-        return _ceseet(rid, source);
       default:
         return _haitangw(rid, source);
     }
@@ -297,48 +302,6 @@ class KugouPublicSources {
       return _pickUrl(
         res,
         endpoint: 'zddyr',
-        source: source,
-        codeField: 'code',
-        okCodes: const [0, 200],
-      );
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// lx-music-api-server 系的公开实例，当 haitangw / zddyr 的兜底。
-  ///
-  /// 这套协议是生态里最规整的：`/url/{源}/{id}/{音质}`，源代号 kg/tx/wy/kw/mg
-  /// 和我们一致，成功返回 `{"code":0,"data":"<地址>"}`（data 直接是字符串）。
-  ///
-  /// **换到第三个实例了**，前两个真机探测都躺了：
-  /// - `88.lxmusic.中国`：`/lxmusicv3/` 已 404（服务器活着，页脚 MusicDownloader），
-  ///   只剩 `/lxmusicv4/...?sign=<64位hex>`。sign 是确定性的（同参数两次跑一致，
-  ///   不含时间戳），但算法在脚本自带的 SHA-256 实现里，为一个兜底去反不划算。
-  /// - `lxmusicapi.onrender.com`：HTTP 503 `Service Suspended`，实例被永久停用，
-  ///   不是休眠。
-  ///
-  /// 现在这个来自 fish-music 音源，它的 `X-Request-Key` 就是**空串** —— 不需要
-  /// 密钥，这也是选它的原因。
-  ///
-  /// 说明白它的定位：haitangw 真机 5/5 全中且都是 Hi-Res，这一层纯粹是冗余，
-  /// 只在前两家都没货时才被问到。它再挂也不影响现状。
-  static Future<String?> _ceseet(String rid, String source) async {
-    try {
-      final res = await _dio.get<String>(
-        'https://m-api.ceseet.me/url/'
-        '${_sourceCode('ceseet', source)}/$rid/flac',
-        options: Options(
-          headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'lx-music-desktop/2.7.0',
-          },
-        ),
-      );
-      _probe('ceseet', source, res);
-      return _pickUrl(
-        res,
-        endpoint: 'ceseet',
         source: source,
         codeField: 'code',
         okCodes: const [0, 200],
