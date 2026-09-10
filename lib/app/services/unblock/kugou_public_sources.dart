@@ -191,7 +191,12 @@ class KugouPublicSources {
   /// - `m-api.ceseet.me` → 403 `error code: 1000`（Cloudflare 拦截）
   ///
   /// 第四个候选 vkeys 只认 QQ（见 [_vkeys]），排最后。
-  static const List<String> _endpoints = ['haitangw', 'zddyr', 'vkeys'];
+  static const List<String> _endpoints = [
+    'haitangw',
+    'zddyr',
+    'vkeys',
+    'xinghai',
+  ];
 
   /// 上一次真正给出地址的那家，下次从它开始问。
   ///
@@ -205,6 +210,8 @@ class KugouPublicSources {
         return _zddyr(rid, source);
       case 'vkeys':
         return _vkeys(rid, source);
+      case 'xinghai':
+        return _xinghai(rid, source);
       default:
         return _haitangw(rid, source);
     }
@@ -258,7 +265,9 @@ class KugouPublicSources {
   /// 那套约定给两家都传 `tx`，zddyr 就一直回 400「source 无效」。
   static String _sourceCode(String endpoint, String platform) {
     if (platform != 'tx') return platform;
-    return endpoint == 'zddyr' ? 'qq' : 'tx';
+    // zddyr 明说自己支持 `kg/kw/qq/migu/kuwo/netease/wy`；星海是它自己在
+    // 403 提示里推荐的后继，多半同源码，先按同样的代号试。
+    return (endpoint == 'zddyr' || endpoint == 'xinghai') ? 'qq' : 'tx';
   }
 
   /// `{"code":0,"data":{"url":"..."}}`
@@ -361,6 +370,42 @@ class KugouPublicSources {
       return false;
     }
     return true;
+  }
+
+  /// 星海音乐源。**来路是 zddyr 自己的 403 提示里推荐的后继**：
+  /// 「推荐使用星海音乐源：https://zrcdy.dpdns.org/lx/vers.php」。
+  ///
+  /// 扫过的 39 个脚本里有 3 个在用它，接口形态 `?source=&songmid=&quality=`，
+  /// 和 zddyr 是一路的。**没验证过**，沙箱连不上（这批站一律 TLS 握不上手）。
+  ///
+  /// 一个我先说在前面的疑点：如果它和 zddyr 真同源，很可能有**同样的**
+  /// 「QQ 仅对认证用户开放」限制 —— 那它对 QQ 就没用，只能给酷狗当备份。
+  /// 真是那样的话，_noteRefusal 会在第一次 403 时就把它标记掉，每次运行
+  /// 只浪费一个请求。
+  static Future<String?> _xinghai(String rid, String source) async {
+    try {
+      final res = await _dio.get<String>(
+        'https://zrcdy.dpdns.org/lx/api/api.php',
+        queryParameters: {
+          'source': _sourceCode('xinghai', source),
+          'quality': 'flac',
+          // 它的 id 参数叫 songmid；酷狗那边到底收哪个名字没证据，
+          // 几个常见写法一起发，用不上的被忽略就是了。
+          'songmid': rid,
+          if (source == 'kg') ...{'hash': rid, 'mainHash': rid},
+        },
+      );
+      _probe('xinghai', source, rid, res);
+      return _pickUrl(
+        res,
+        endpoint: 'xinghai',
+        source: source,
+        codeField: 'code',
+        okCodes: const [0, 200],
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   /// vkeys 的 QQ 取址。**只认 QQ**，别的源直接跳过。
