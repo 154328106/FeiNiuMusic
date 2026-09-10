@@ -186,9 +186,8 @@ class KugouPublicSources {
   /// - `lxmusicapi.onrender.com` → 503 `Service Suspended`，实例被永久停用
   /// - `m-api.ceseet.me` → 403 `error code: 1000`（Cloudflare 拦截）
   ///
-  /// 留着只会让每首没货的歌多挨一次超时。以后再找到候选，往这个数组加一行
-  /// 加一个取址方法就能用探测按钮验。
-  static const List<String> _endpoints = ['haitangw', 'zddyr'];
+  /// 第四个候选 vkeys 只认 QQ（见 [_vkeys]），排最后。
+  static const List<String> _endpoints = ['haitangw', 'zddyr', 'vkeys'];
 
   /// 上一次真正给出地址的那家，下次从它开始问。
   ///
@@ -200,6 +199,8 @@ class KugouPublicSources {
     switch (endpoint) {
       case 'zddyr':
         return _zddyr(rid, source);
+      case 'vkeys':
+        return _vkeys(rid, source);
       default:
         return _haitangw(rid, source);
     }
@@ -302,6 +303,36 @@ class KugouPublicSources {
       return _pickUrl(
         res,
         endpoint: 'zddyr',
+        source: source,
+        codeField: 'code',
+        okCodes: const [0, 200],
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// vkeys 的 QQ 取址。**只认 QQ**，别的源直接跳过。
+  ///
+  /// 出处是「洛雪音乐源 1.0.0 v2-fix」，不要密钥。和前面三个候选不同，它不是
+  /// lx-music-api-server 那套 `/url/{源}/{id}/{音质}`，而是自己的 v2 接口，
+  /// 每个平台一条路径（这里只接 tencent —— 别的平台路径我没证据，不猜）。
+  ///
+  /// **`quality` 是数字不是字符串**：脚本里 tx 的映射表是
+  /// `{'128k':'6','320k':'8','flac':'10','flac24bit':'11'}`，传进来的本来就是
+  /// 映射后的值。这里要 `10`（无损 flac）—— 11 是 Hi-Res，但没把握服务端一定
+  /// 给，而这一层是兜底：haitangw 漏掉时能拿到无损已经远好过退回官方 128k。
+  static Future<String?> _vkeys(String rid, String source) async {
+    if (source != 'tx') return null;
+    try {
+      final res = await _dio.get<String>(
+        'https://api.vkeys.cn/v2/music/tencent/geturl',
+        queryParameters: {'mid': rid, 'quality': 10},
+      );
+      _probe('vkeys', source, res);
+      return _pickUrl(
+        res,
+        endpoint: 'vkeys',
         source: source,
         codeField: 'code',
         okCodes: const [0, 200],
