@@ -228,6 +228,8 @@ class UnblockSourceService {
         songId,
         source: platform,
         allowBail: paidAvailable,
+        // 用来拦试听片段：vkeys 会对部分会员曲回 30 秒的 0.9MB 片段。
+        durationMs: durationMs,
       );
       if (url != null) return url;
     }

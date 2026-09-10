@@ -128,10 +128,13 @@ class KugouPublicSources {
   /// （[rid] 传 songmid）。QQ 这条是推测 —— 这两家本来就是洛雪音源脚本里
   /// 扒出来的，`tx` 是那套约定里的标准代号，而我们手上正好有 songmid。
   /// 不支持也只是白问一次就自动停，不会比现在更差。
+  /// [durationMs] 是这首歌应有的时长，用来拦试听片段（见 [_looksComplete]）。
+  /// 传 0 表示不知道，那道闸就退化成一个很松的绝对下限。
   static Future<String?> resolve(
     String rid, {
     String source = 'kg',
     bool allowBail = true,
+    int durationMs = 0,
   }) async {
     if (rid.isEmpty) return null;
     if (_allRefused(source)) return null;
@@ -154,7 +157,7 @@ class KugouPublicSources {
         }
         final wait = _minInterval - DateTime.now().difference(_lastAt);
         if (wait > Duration.zero) await Future<void>.delayed(wait);
-        final url = await _resolveOnce(rid, source);
+        final url = await _resolveOnce(rid, source, durationMs);
         _lastAt = DateTime.now();
         if (url != null) {
           _consecutiveFailures[source] = 0;
@@ -206,7 +209,20 @@ class KugouPublicSources {
     }
   }
 
-  static Future<String?> _resolveOnce(String rid, String source) async {
+  /// 会返回试听片段、需要验体积的接口。
+  ///
+  /// vkeys 真机实测 5 首里有 2 首回的是 0.9MB 的 30 秒片段（晴天、孤勇者），
+  /// 地址和状态码都挑不出毛病 —— 只有体积不对。不拦的话播 30 秒就自动跳，
+  /// 表现成「歌总是莫名跳过」，很难看出是音源的问题。
+  ///
+  /// haitangw / zddyr 不在此列：它们给的一直是完整文件，多花一次 HEAD 不值。
+  static const Set<String> _needsSizeCheck = {'vkeys'};
+
+  static Future<String?> _resolveOnce(
+    String rid,
+    String source,
+    int durationMs,
+  ) async {
     final order = [
       _lastGood,
       for (final e in _endpoints)
@@ -215,7 +231,13 @@ class KugouPublicSources {
     for (final name in order) {
       final combo = '$name/$source';
       if (_unsupported.contains(combo)) continue;
-      final url = await _call(name, rid, source);
+      var url = await _call(name, rid, source);
+      if (url != null && _needsSizeCheck.contains(name)) {
+        if (!await _looksComplete(url, durationMs)) {
+          debugPrint('[公益音源] $name 给的是试听片段，丢弃：$source/$rid');
+          url = null;
+        }
+      }
       if (url != null) {
         _lastGood = name;
         debugPrint('[公益音源] $name 命中 $source/$rid');
@@ -312,6 +334,18 @@ class KugouPublicSources {
     }
   }
 
+  /// 用体积反推：比「这个时长最低限度该有多大」还小的，就是试听片段。
+  ///
+  /// 下限按 96kbps（12000 字节/秒）算 —— 真曲子再怎么压也不会比这更小，
+  /// 而 30 秒片段对一首四分钟的歌来说差着一个数量级，卡得很稳。
+  /// 拿不到 content-length 就放行：探测本身失败不算证据，宁可放过也别误杀。
+  static Future<bool> _looksComplete(String url, int durationMs) async {
+    final bytes = await contentLength(url);
+    if (bytes == null || bytes <= 0) return true;
+    if (durationMs > 0) return bytes >= durationMs ~/ 1000 * 12000;
+    return bytes >= 1024 * 1024;
+  }
+
   /// vkeys 的 QQ 取址。**只认 QQ**，别的源直接跳过。
   ///
   /// 出处是「洛雪音乐源 1.0.0 v2-fix」，不要密钥。和前面三个候选不同，它不是
@@ -351,7 +385,7 @@ class KugouPublicSources {
     final combo = '$name/$source';
     if (!_probeLogged.add(combo)) return;
     final body = (res.data ?? '').replaceAll(RegExp(r'\s+'), ' ');
-    final brief = body.length > 200 ? '${body.substring(0, 200)}…' : body;
+    final brief = body.length > 600 ? '${body.substring(0, 600)}…' : body;
     probes[combo] = 'HTTP ${res.statusCode}：$brief';
     debugPrint('[公益音源] 探针 $combo HTTP ${res.statusCode}：$brief');
   }
