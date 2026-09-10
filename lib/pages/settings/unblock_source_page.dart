@@ -243,7 +243,7 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
         buf.writeln('${target.name} - ${target.artists}');
         buf.writeln('  mid ${target.mid} · QQ ${_mmss(qqSec)}'
             '${target.payPlay ? ' · 会员曲' : ''}');
-        final results = await KugouPublicSources.probeBoth(target.mid, 'tx');
+        final results = await KugouPublicSources.probeAll(target.mid, 'tx');
         for (final entry in results.entries) {
           final url = entry.value;
           if (url == null) {
@@ -478,10 +478,10 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
             title: '诊断',
             children: [
               AppSettingTile(
-                title: '探测扣扣音乐公益源',
+                title: '探测公益音源',
                 subtitle: _probing
-                    ? '正在探测…（5 首，约十几秒）'
-                    : '拿 5 首歌问 haitangw / zddyr，比对时长看是不是同一首',
+                    ? '正在探测…（5 首 × 3 家，约半分钟）'
+                    : '拿 5 首 QQ 歌问 haitangw / zddyr / lxmusic，看各家给什么',
                 trailing: _probing
                     ? const SizedBox(
                         width: 18,

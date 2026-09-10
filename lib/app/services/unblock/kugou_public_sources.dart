@@ -179,22 +179,37 @@ class KugouPublicSources {
     return completer.future;
   }
 
+  /// 问的顺序。haitangw 排头是实测结果（QQ 那轮 50 首几乎全中）；lxmusic
+  /// 垫底当兜底 —— 它是官方 lx-music-api-server，协议最规整，但我们没验过。
+  static const List<String> _endpoints = ['haitangw', 'zddyr', 'lxmusic'];
+
   /// 上一次真正给出地址的那家，下次从它开始问。
   ///
   /// 一家挂了的时候，固定顺序意味着每首歌都要先白等它一次。记住赢家能把
   /// 这份浪费省掉 —— 这正是 201 那个 bug 被放大的原因。
   static String _lastGood = 'haitangw';
 
+  static Future<String?> _call(String endpoint, String rid, String source) {
+    switch (endpoint) {
+      case 'zddyr':
+        return _zddyr(rid, source);
+      case 'lxmusic':
+        return _lxmusic(rid, source);
+      default:
+        return _haitangw(rid, source);
+    }
+  }
+
   static Future<String?> _resolveOnce(String rid, String source) async {
-    final order = _lastGood == 'zddyr'
-        ? const ['zddyr', 'haitangw']
-        : const ['haitangw', 'zddyr'];
+    final order = [
+      _lastGood,
+      for (final e in _endpoints)
+        if (e != _lastGood) e,
+    ];
     for (final name in order) {
       final combo = '$name/$source';
       if (_unsupported.contains(combo)) continue;
-      final url = name == 'haitangw'
-          ? await _haitangw(rid, source)
-          : await _zddyr(rid, source);
+      final url = await _call(name, rid, source);
       if (url != null) {
         _lastGood = name;
         debugPrint('[公益音源] $name 命中 $source/$rid');
@@ -224,8 +239,7 @@ class KugouPublicSources {
   /// 就把整个源熄火 10 分钟 —— 真机日志里那两行 `tx 连续 5 次没结果` 就是
   /// 这么来的，跟服务好不好一点关系都没有。
   static bool _allRefused(String source) =>
-      _unsupported.contains('haitangw/$source') &&
-      _unsupported.contains('zddyr/$source');
+      _endpoints.every((e) => _unsupported.contains('$e/$source'));
 
   /// 两家的源代号不一样，得分别翻译。
   ///
@@ -292,6 +306,41 @@ class KugouPublicSources {
     }
   }
 
+  /// 官方 lx-music-api-server 的公开实例，当 haitangw / zddyr 的兜底。
+  ///
+  /// 从桌面上那三个音源包（共 57 个脚本去重后）统计出来的：15 个脚本在用它，
+  /// 是整个生态里用得最多的后端之一，协议也最规整 —— 路径就是
+  /// `/lxmusicv3/url/{源}/{id}/{音质}`，源代号 kg/tx/wy/kw/mg 和我们一致。
+  ///
+  /// 域名 88.lxmusic.中国 用 punycode 写：Dart 的 Uri 对 IDN 支持不保证。
+  ///
+  /// **没验证过**：沙箱对这些站在做 TLS 层拦截，一个都握不上手。排在最后
+  /// 就是这个原因 —— 前两家先走，它只在别人都没货时才被问到。
+  static Future<String?> _lxmusic(String rid, String source) async {
+    try {
+      final res = await _dio.get<String>(
+        'https://88.lxmusic.xn--fiqs8s/lxmusicv3/url/'
+        '${_sourceCode('lxmusic', source)}/$rid/flac',
+        options: Options(
+          headers: {
+            'X-Request-Key': 'lxmusic',
+            'Content-Type': 'application/json',
+          },
+        ),
+      );
+      _probe('lxmusic', source, res);
+      return _pickUrl(
+        res,
+        endpoint: 'lxmusic',
+        source: source,
+        codeField: 'code',
+        okCodes: const [0, 200],
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 每个「接口 × 源」组合打一次原始返回。
   ///
   /// 这两家认不认 `tx` 只能靠真机日志回答：如果返回里写着「不支持的源」
@@ -306,13 +355,14 @@ class KugouPublicSources {
     debugPrint('[公益音源] 探针 $combo HTTP ${res.statusCode}：$brief');
   }
 
-  /// 诊断用：两家**都**问一遍（不像 [_resolveOnce] 那样先命中先返回），
-  /// 好知道每一家分别认不认这个源。返回 `接口名 -> 地址(或 null)`。
-  static Future<Map<String, String?>> probeBoth(String rid, String source) async {
-    return {
-      'haitangw': await _haitangw(rid, source),
-      'zddyr': await _zddyr(rid, source),
-    };
+  /// 诊断用：**每一家都**问一遍（不像 [_resolveOnce] 那样先命中先返回），
+  /// 好知道各家分别认不认这个源。返回 `接口名 -> 地址(或 null)`。
+  static Future<Map<String, String?>> probeAll(String rid, String source) async {
+    final out = <String, String?>{};
+    for (final name in _endpoints) {
+      out[name] = await _call(name, rid, source);
+    }
+    return out;
   }
 
   /// 诊断用：取文件大小，用来反推时长、判断拿到的是不是同一首歌。
@@ -355,6 +405,9 @@ class KugouPublicSources {
     final data = json['data'];
     final candidates = <Object?>[
       json['url'],
+      // lx-music-api-server 的成功返回是 {"code":0,"data":"https://..."} ——
+      // data 直接就是地址字符串，不是对象。
+      if (data is String) data,
       if (data is Map) ...[data['url'], data['music'], data['play_url']],
     ];
     for (final value in candidates) {
