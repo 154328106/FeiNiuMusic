@@ -24,6 +24,7 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
 
   bool _enabled = true;
   bool _testing = false;
+
   /// 密钥/接口地址默认遮住。它们平时没有再看一眼的必要，露着只是徒增
   /// 截图和旁人瞄一眼的风险。
   bool _revealSecrets = false;
@@ -241,8 +242,10 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
         );
         final qqSec = target.durationMs ~/ 1000;
         buf.writeln('${target.name} - ${target.artists}');
-        buf.writeln('  mid ${target.mid} · QQ ${_mmss(qqSec)}'
-            '${target.payPlay ? ' · 会员曲' : ''}');
+        buf.writeln(
+          '  mid ${target.mid} · QQ ${_mmss(qqSec)}'
+          '${target.payPlay ? ' · 会员曲' : ''}',
+        );
         final results = await KugouPublicSources.probeAll(target.mid, 'tx');
         for (final entry in results.entries) {
           final url = entry.value;
@@ -252,8 +255,10 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
           }
           final host = Uri.tryParse(url)?.host ?? '?';
           final bytes = await KugouPublicSources.contentLength(url);
-          buf.writeln('  ${entry.key}：$host ${_sizeDesc(bytes)}'
-              ' → ${_bitrateVerdict(bytes, qqSec)}');
+          buf.writeln(
+            '  ${entry.key}：$host ${_sizeDesc(bytes)}'
+            ' → ${_bitrateVerdict(bytes, qqSec)}',
+          );
         }
         buf.writeln('');
       }
@@ -381,18 +386,13 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
               ),
               AppSettingSwitchTile(
                 title: '显示密钥与接口地址',
-                subtitle: _revealSecrets
-                    ? '当前明文显示，注意别截图'
-                    : '默认遮住，避免截图或旁人看到',
+                subtitle: _revealSecrets ? '当前明文显示，注意别截图' : '默认遮住，避免截图或旁人看到',
                 value: _revealSecrets,
                 onChanged: (v) => setState(() => _revealSecrets = v),
               ),
               if (!_revealSecrets) ...[
                 AppSettingTile(title: 'API 密钥', subtitle: _keysSummary()),
-                AppSettingTile(
-                  title: '接口地址',
-                  subtitle: _templateSummary(),
-                ),
+                AppSettingTile(title: '接口地址', subtitle: _templateSummary()),
               ] else ...[
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
@@ -417,8 +417,7 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                     autocorrect: false,
                     decoration: const InputDecoration(
                       labelText: '接口地址',
-                      helperText:
-                          '占位符：{source} 平台代号、{id} 歌曲 id、{quality} 音质',
+                      helperText: '占位符：{source} 平台代号、{id} 歌曲 id、{quality} 音质',
                       border: OutlineInputBorder(),
                     ),
                   ),

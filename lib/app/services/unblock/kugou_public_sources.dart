@@ -364,7 +364,10 @@ class KugouPublicSources {
 
   /// 诊断用：**每一家都**问一遍（不像 [_resolveOnce] 那样先命中先返回），
   /// 好知道各家分别认不认这个源。返回 `接口名 -> 地址(或 null)`。
-  static Future<Map<String, String?>> probeAll(String rid, String source) async {
+  static Future<Map<String, String?>> probeAll(
+    String rid,
+    String source,
+  ) async {
     final out = <String, String?>{};
     for (final name in _endpoints) {
       out[name] = await _call(name, rid, source);
