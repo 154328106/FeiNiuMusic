@@ -248,17 +248,22 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
         );
         final results = await KugouPublicSources.probeAll(target.mid, 'tx');
         for (final entry in results.entries) {
-          final url = entry.value;
+          final url = entry.value.url;
           if (url == null) {
             buf.writeln('  ${entry.key}：没给地址');
-            continue;
+          } else {
+            final host = Uri.tryParse(url)?.host ?? '?';
+            final bytes = await KugouPublicSources.contentLength(url);
+            buf.writeln(
+              '  ${entry.key}：$host ${_sizeDesc(bytes)}'
+              ' → ${_bitrateVerdict(bytes, qqSec)}',
+            );
           }
-          final host = Uri.tryParse(url)?.host ?? '?';
-          final bytes = await KugouPublicSources.contentLength(url);
-          buf.writeln(
-            '  ${entry.key}：$host ${_sizeDesc(bytes)}'
-            ' → ${_bitrateVerdict(bytes, qqSec)}',
-          );
+          // 原始返回跟着这首歌走，且只在确认是本次请求的响应时才贴 ——
+          // 上一版是全局只留第一条，被 App 后台的解析抢了坑，贴出来的样本
+          // 根本不是探测自己发的那次，我据此下过一个错结论。
+          final raw = entry.value.raw;
+          if (raw != null) buf.writeln('    ↳ $raw');
         }
         buf.writeln('');
       }
