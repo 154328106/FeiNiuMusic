@@ -228,9 +228,6 @@ class UnblockSourceService {
         songId,
         source: platform,
         allowBail: paidAvailable,
-        // 星海要歌名。这里只有「歌名 歌手」，先整条传过去 —— 它到底怎么用
-        // 这个字段没证据，真配不上日志会显出来。
-        name: keyword,
       );
       if (url != null) return url;
     }

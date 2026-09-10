@@ -132,13 +132,10 @@ class KugouPublicSources {
   /// （[rid] 传 songmid）。QQ 这条是推测 —— 这两家本来就是洛雪音源脚本里
   /// 扒出来的，`tx` 是那套约定里的标准代号，而我们手上正好有 songmid。
   /// 不支持也只是白问一次就自动停，不会比现在更差。
-  /// [name] 是歌名。星海那家**必须**要（它的 410 明说「需提供 name 和
-  /// songmid 参数」），拿不到就跳过它，不白发请求。
   static Future<String?> resolve(
     String rid, {
     String source = 'kg',
     bool allowBail = true,
-    String? name,
   }) async {
     if (rid.isEmpty) return null;
     if (_allRefused(source)) return null;
@@ -161,7 +158,7 @@ class KugouPublicSources {
         }
         final wait = _minInterval - DateTime.now().difference(_lastAt);
         if (wait > Duration.zero) await Future<void>.delayed(wait);
-        final url = await _resolveOnce(rid, source, name);
+        final url = await _resolveOnce(rid, source);
         _lastAt = DateTime.now();
         if (url != null) {
           _consecutiveFailures[source] = 0;
@@ -194,12 +191,16 @@ class KugouPublicSources {
   /// - `m-api.ceseet.me` → 403 `error code: 1000`（Cloudflare 拦截）
   ///
   /// 第四个候选 vkeys 只认 QQ（见 [_vkeys]），排最后。
-  static const List<String> _endpoints = [
-    'haitangw',
-    'zddyr',
-    'vkeys',
-    'xinghai',
-  ];
+  /// **试过又撤掉的第四家，别再回头接了**（2026-09-10 真机逐个探完）：
+  /// - `88.lxmusic.中国` → 404，v3 路径没了，只剩 `/lxmusicv4/...?sign=`
+  /// - `lxmusicapi.onrender.com` → 503 `Service Suspended`，实例被永久停用
+  /// - `m-api.ceseet.me` → 403 `error code: 1000`（Cloudflare 拦截）
+  /// - `zrcdy.dpdns.org`（星海，zddyr 在 403 提示里推荐的后继）→ 先回
+  ///   `410 需提供 name 和 songmid`，补上 name 后回 PHP 致命错误：它的
+  ///   `api.php:15` 要 require 的路径里赫然是 **yy.zddyr.top** —— 星海就是
+  ///   zddyr 的代理壳，部署还是坏的。就算修好，请求转给 zddyr 一样是
+  ///   「QQ 仅对认证用户开放」。这条路从设计上通不了。
+  static const List<String> _endpoints = ['haitangw', 'zddyr', 'vkeys'];
 
   /// 上一次真正给出地址的那家，下次从它开始问。
   ///
@@ -207,41 +208,30 @@ class KugouPublicSources {
   /// 这份浪费省掉 —— 这正是 201 那个 bug 被放大的原因。
   static String _lastGood = 'haitangw';
 
-  static Future<String?> _call(
-    String endpoint,
-    String rid,
-    String source,
-    String? name,
-  ) {
+  static Future<String?> _call(String endpoint, String rid, String source) {
     switch (endpoint) {
       case 'zddyr':
         return _zddyr(rid, source);
       case 'vkeys':
         return _vkeys(rid, source);
-      case 'xinghai':
-        return _xinghai(rid, source, name);
       default:
         return _haitangw(rid, source);
     }
   }
 
-  static Future<String?> _resolveOnce(
-    String rid,
-    String source,
-    String? name,
-  ) async {
+  static Future<String?> _resolveOnce(String rid, String source) async {
     final order = [
       _lastGood,
       for (final e in _endpoints)
         if (e != _lastGood) e,
     ];
-    for (final endpoint in order) {
-      final combo = '$endpoint/$source';
+    for (final name in order) {
+      final combo = '$name/$source';
       if (_unsupported.contains(combo)) continue;
-      final url = await _call(endpoint, rid, source, name);
+      final url = await _call(name, rid, source);
       if (url != null) {
-        _lastGood = endpoint;
-        debugPrint('[公益音源] $endpoint 命中 $source/$rid');
+        _lastGood = name;
+        debugPrint('[公益音源] $name 命中 $source/$rid');
         return url;
       }
     }
@@ -277,9 +267,7 @@ class KugouPublicSources {
   /// 那套约定给两家都传 `tx`，zddyr 就一直回 400「source 无效」。
   static String _sourceCode(String endpoint, String platform) {
     if (platform != 'tx') return platform;
-    // zddyr 明说自己支持 `kg/kw/qq/migu/kuwo/netease/wy`；星海是它自己在
-    // 403 提示里推荐的后继，多半同源码，先按同样的代号试。
-    return (endpoint == 'zddyr' || endpoint == 'xinghai') ? 'qq' : 'tx';
+    return endpoint == 'zddyr' ? 'qq' : 'tx';
   }
 
   /// `{"code":0,"data":{"url":"..."}}`
@@ -384,48 +372,6 @@ class KugouPublicSources {
     return true;
   }
 
-  /// 星海音乐源。**来路是 zddyr 自己的 403 提示里推荐的后继**：
-  /// 「推荐使用星海音乐源：https://zrcdy.dpdns.org/lx/vers.php」。
-  ///
-  /// 扫过的 39 个脚本里有 3 个在用它，接口形态 `?source=&songmid=&quality=`，
-  /// 和 zddyr 是一路的。**没验证过**，沙箱连不上（这批站一律 TLS 握不上手）。
-  ///
-  /// 第一次接的时候只发了 songmid，它回 `410 此接口已废弃，请升级至新版本。
-  /// 需提供 name 和 songmid 参数。` —— 不是废了，是要歌名。补上 name 再试。
-  /// （之前担心的「和 zddyr 同源、同样要认证」倒是没出现，它压根没走到那步。）
-  static Future<String?> _xinghai(
-    String rid,
-    String source,
-    String? name,
-  ) async {
-    // 它 410 里写死了「需提供 name 和 songmid 参数」，没歌名就别白发了。
-    if (name == null || name.trim().isEmpty) return null;
-    try {
-      final res = await _dio.get<String>(
-        'https://zrcdy.dpdns.org/lx/api/api.php',
-        queryParameters: {
-          'source': _sourceCode('xinghai', source),
-          'quality': 'flac',
-          'name': name.trim(),
-          // 它的 id 参数叫 songmid；酷狗那边到底收哪个名字没证据，
-          // 几个常见写法一起发，用不上的被忽略就是了。
-          'songmid': rid,
-          if (source == 'kg') ...{'hash': rid, 'mainHash': rid},
-        },
-      );
-      _probe('xinghai', source, rid, res);
-      return _pickUrl(
-        res,
-        endpoint: 'xinghai',
-        source: source,
-        codeField: 'code',
-        okCodes: const [0, 200],
-      );
-    } catch (_) {
-      return null;
-    }
-  }
-
   /// vkeys 的 QQ 取址。**只认 QQ**，别的源直接跳过。
   ///
   /// 出处是「洛雪音乐源 1.0.0 v2-fix」，不要密钥。和前面三个候选不同，它不是
@@ -486,17 +432,13 @@ class KugouPublicSources {
   /// 样本出来。上一版就是没这道核对，害我拿别人的响应下了个错结论。
   static Future<Map<String, ({String? url, String? raw})>> probeAll(
     String rid,
-    String source, {
-    String? name,
-  }) async {
+    String source,
+  ) async {
     final out = <String, ({String? url, String? raw})>{};
-    for (final endpoint in _endpoints) {
-      final url = await _call(endpoint, rid, source, name);
-      final p = probes['$endpoint/$source'];
-      out[endpoint] = (
-        url: url,
-        raw: p != null && p.rid == rid ? p.summary : null,
-      );
+    for (final name in _endpoints) {
+      final url = await _call(name, rid, source);
+      final p = probes['$name/$source'];
+      out[name] = (url: url, raw: p != null && p.rid == rid ? p.summary : null);
     }
     return out;
   }

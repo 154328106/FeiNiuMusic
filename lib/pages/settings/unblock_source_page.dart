@@ -246,11 +246,7 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
           '  mid ${target.mid} · QQ ${_mmss(qqSec)}'
           '${target.payPlay ? ' · 会员曲' : ''}',
         );
-        final results = await KugouPublicSources.probeAll(
-          target.mid,
-          'tx',
-          name: target.name,
-        );
+        final results = await KugouPublicSources.probeAll(target.mid, 'tx');
         for (final entry in results.entries) {
           final url = entry.value.url;
           if (url == null) {
