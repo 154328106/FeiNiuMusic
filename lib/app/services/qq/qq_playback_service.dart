@@ -121,8 +121,6 @@ class QQPlaybackService {
         source: 'tx',
         // 不让它「排队太久就让路」：让出去下一站是 128k，白白降一档音质。
         allowBail: false,
-        // 用来拦试听片段：vkeys 会对部分会员曲回 30 秒的 0.9MB 片段。
-        durationMs: hint?.$2 ?? 0,
       );
       url ??= await _verifiedOfficialUrl(mid, mediaMid);
       // 还没有就走完整音源链。公益源上面已经问过了，别再打一遍。
