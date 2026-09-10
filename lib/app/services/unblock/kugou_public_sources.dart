@@ -306,25 +306,31 @@ class KugouPublicSources {
     }
   }
 
-  /// 官方 lx-music-api-server 的公开实例，当 haitangw / zddyr 的兜底。
+  /// lx-music-api-server 的公开实例，当 haitangw / zddyr 的兜底。
   ///
-  /// 从桌面上那三个音源包（共 57 个脚本去重后）统计出来的：15 个脚本在用它，
-  /// 是整个生态里用得最多的后端之一，协议也最规整 —— 路径就是
-  /// `/lxmusicv3/url/{源}/{id}/{音质}`，源代号 kg/tx/wy/kw/mg 和我们一致。
+  /// 从桌面上那三个音源包（去重后 39 个脚本）统计出来的：这套后端是整个生态
+  /// 里用得最多的，协议也最规整 —— `/url/{源}/{id}/{音质}`，源代号
+  /// kg/tx/wy/kw/mg 和我们一致，成功返回是 `{"code":0,"data":"<地址>"}`。
   ///
-  /// 域名 88.lxmusic.中国 用 punycode 写：Dart 的 Uri 对 IDN 支持不保证。
+  /// **为什么不是 88.lxmusic.中国**：那个实例更主流（15 个脚本在用），但真机
+  /// 实测 `/lxmusicv3/` 已经 404（服务器活着，页脚写着 MusicDownloader），
+  /// 现在只剩 `/lxmusicv4/...?sign=<64位十六进制>`。那个 sign 是确定性的
+  /// （同参数两次跑结果一致，不含时间戳），但算法在脚本自带的 SHA-256 实现
+  /// 里，挖出来不划算 —— onrender 这个实例是同一套 v3 协议且不要签名。
   ///
-  /// **没验证过**：沙箱对这些站在做 TLS 层拦截，一个都握不上手。排在最后
-  /// 就是这个原因 —— 前两家先走，它只在别人都没货时才被问到。
+  /// **代价**：onrender 免费实例会休眠，冷启动第一发大概率吃满 5 秒超时。
+  /// 它排在最后，只有前两家都没货才问得到；真持续挂了，连续 5 次失败会触发
+  /// 10 分钟熄火，不会一直拖着起播。
   static Future<String?> _lxmusic(String rid, String source) async {
     try {
       final res = await _dio.get<String>(
-        'https://88.lxmusic.xn--fiqs8s/lxmusicv3/url/'
+        'https://lxmusicapi.onrender.com/url/'
         '${_sourceCode('lxmusic', source)}/$rid/flac',
         options: Options(
           headers: {
-            'X-Request-Key': 'lxmusic',
+            'X-Request-Key': 'share-v3',
             'Content-Type': 'application/json',
+            'User-Agent': 'lx-music-desktop/2.7.0',
           },
         ),
       );
