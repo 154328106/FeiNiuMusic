@@ -334,6 +334,45 @@ class KugouPublicSources {
     }
   }
 
+  /// vkeys 解不出这个 mid 时会**换一首歌顶上**，不是报错。
+  ///
+  /// 真机实测：拿周杰伦《晴天》(`0039MnYb0qxYhV`) 去问，它回的是
+  /// `mid: 000x5f2H3FYvJg / song: 晴天 (DJ版) / singer: 钻进月亮怀 /
+  /// quality: 音乐试听 / 0.46MB / 51kbps`。这是最坏的一类错误 —— 文件能正常
+  /// 播，听到的却是另一首歌，光看状态码和体积都发现不了。
+  ///
+  /// 好在它把证据一起交出来了：返回里带 `mid`。对不上就是换了歌，直接丢弃。
+  /// 这个判据精确、免费、不用额外请求，比下面那道体积闸强得多 —— 体积闸只拦
+  /// 得住片段，拦不住「一首完整的翻唱」。
+  static bool _vkeysIsSameSong(Response<String> res, String rid) {
+    final body = res.data;
+    if (body == null || body.isEmpty) return true;
+    Object? json;
+    try {
+      json = jsonDecode(body);
+    } catch (_) {
+      return true;
+    }
+    if (json is! Map) return true;
+    final data = json['data'];
+    if (data is! Map) return true;
+    final got = data['mid'];
+    if (got is String && got.isNotEmpty && got != rid) {
+      debugPrint(
+        '[公益音源] vkeys 换了歌：要 $rid，回的是 $got'
+        '（${data['song']} - ${data['singer']}），丢弃',
+      );
+      return false;
+    }
+    // mid 对得上也可能只给试听：它自己在 quality 里写明了。
+    final quality = data['quality'];
+    if (quality is String && quality.contains('试听')) {
+      debugPrint('[公益音源] vkeys 只给试听（$quality），丢弃：$rid');
+      return false;
+    }
+    return true;
+  }
+
   /// 用体积反推：比「这个时长最低限度该有多大」还小的，就是试听片段。
   ///
   /// 下限按 96kbps（12000 字节/秒）算 —— 真曲子再怎么压也不会比这更小，
@@ -364,6 +403,7 @@ class KugouPublicSources {
         queryParameters: {'mid': rid, 'quality': 10},
       );
       _probe('vkeys', source, res);
+      if (!_vkeysIsSameSong(res, rid)) return null;
       return _pickUrl(
         res,
         endpoint: 'vkeys',
