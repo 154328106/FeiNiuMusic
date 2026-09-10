@@ -132,10 +132,13 @@ class KugouPublicSources {
   /// （[rid] 传 songmid）。QQ 这条是推测 —— 这两家本来就是洛雪音源脚本里
   /// 扒出来的，`tx` 是那套约定里的标准代号，而我们手上正好有 songmid。
   /// 不支持也只是白问一次就自动停，不会比现在更差。
+  /// [name] 是歌名。星海那家**必须**要（它的 410 明说「需提供 name 和
+  /// songmid 参数」），拿不到就跳过它，不白发请求。
   static Future<String?> resolve(
     String rid, {
     String source = 'kg',
     bool allowBail = true,
+    String? name,
   }) async {
     if (rid.isEmpty) return null;
     if (_allRefused(source)) return null;
@@ -158,7 +161,7 @@ class KugouPublicSources {
         }
         final wait = _minInterval - DateTime.now().difference(_lastAt);
         if (wait > Duration.zero) await Future<void>.delayed(wait);
-        final url = await _resolveOnce(rid, source);
+        final url = await _resolveOnce(rid, source, name);
         _lastAt = DateTime.now();
         if (url != null) {
           _consecutiveFailures[source] = 0;
@@ -204,32 +207,41 @@ class KugouPublicSources {
   /// 这份浪费省掉 —— 这正是 201 那个 bug 被放大的原因。
   static String _lastGood = 'haitangw';
 
-  static Future<String?> _call(String endpoint, String rid, String source) {
+  static Future<String?> _call(
+    String endpoint,
+    String rid,
+    String source,
+    String? name,
+  ) {
     switch (endpoint) {
       case 'zddyr':
         return _zddyr(rid, source);
       case 'vkeys':
         return _vkeys(rid, source);
       case 'xinghai':
-        return _xinghai(rid, source);
+        return _xinghai(rid, source, name);
       default:
         return _haitangw(rid, source);
     }
   }
 
-  static Future<String?> _resolveOnce(String rid, String source) async {
+  static Future<String?> _resolveOnce(
+    String rid,
+    String source,
+    String? name,
+  ) async {
     final order = [
       _lastGood,
       for (final e in _endpoints)
         if (e != _lastGood) e,
     ];
-    for (final name in order) {
-      final combo = '$name/$source';
+    for (final endpoint in order) {
+      final combo = '$endpoint/$source';
       if (_unsupported.contains(combo)) continue;
-      final url = await _call(name, rid, source);
+      final url = await _call(endpoint, rid, source, name);
       if (url != null) {
-        _lastGood = name;
-        debugPrint('[公益音源] $name 命中 $source/$rid');
+        _lastGood = endpoint;
+        debugPrint('[公益音源] $endpoint 命中 $source/$rid');
         return url;
       }
     }
@@ -378,17 +390,23 @@ class KugouPublicSources {
   /// 扫过的 39 个脚本里有 3 个在用它，接口形态 `?source=&songmid=&quality=`，
   /// 和 zddyr 是一路的。**没验证过**，沙箱连不上（这批站一律 TLS 握不上手）。
   ///
-  /// 一个我先说在前面的疑点：如果它和 zddyr 真同源，很可能有**同样的**
-  /// 「QQ 仅对认证用户开放」限制 —— 那它对 QQ 就没用，只能给酷狗当备份。
-  /// 真是那样的话，_noteRefusal 会在第一次 403 时就把它标记掉，每次运行
-  /// 只浪费一个请求。
-  static Future<String?> _xinghai(String rid, String source) async {
+  /// 第一次接的时候只发了 songmid，它回 `410 此接口已废弃，请升级至新版本。
+  /// 需提供 name 和 songmid 参数。` —— 不是废了，是要歌名。补上 name 再试。
+  /// （之前担心的「和 zddyr 同源、同样要认证」倒是没出现，它压根没走到那步。）
+  static Future<String?> _xinghai(
+    String rid,
+    String source,
+    String? name,
+  ) async {
+    // 它 410 里写死了「需提供 name 和 songmid 参数」，没歌名就别白发了。
+    if (name == null || name.trim().isEmpty) return null;
     try {
       final res = await _dio.get<String>(
         'https://zrcdy.dpdns.org/lx/api/api.php',
         queryParameters: {
           'source': _sourceCode('xinghai', source),
           'quality': 'flac',
+          'name': name.trim(),
           // 它的 id 参数叫 songmid；酷狗那边到底收哪个名字没证据，
           // 几个常见写法一起发，用不上的被忽略就是了。
           'songmid': rid,
@@ -468,13 +486,17 @@ class KugouPublicSources {
   /// 样本出来。上一版就是没这道核对，害我拿别人的响应下了个错结论。
   static Future<Map<String, ({String? url, String? raw})>> probeAll(
     String rid,
-    String source,
-  ) async {
+    String source, {
+    String? name,
+  }) async {
     final out = <String, ({String? url, String? raw})>{};
-    for (final name in _endpoints) {
-      final url = await _call(name, rid, source);
-      final p = probes['$name/$source'];
-      out[name] = (url: url, raw: p != null && p.rid == rid ? p.summary : null);
+    for (final endpoint in _endpoints) {
+      final url = await _call(endpoint, rid, source, name);
+      final p = probes['$endpoint/$source'];
+      out[endpoint] = (
+        url: url,
+        raw: p != null && p.rid == rid ? p.summary : null,
+      );
     }
     return out;
   }

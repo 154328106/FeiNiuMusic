@@ -48,10 +48,13 @@ class QQPlaybackService {
   /// 5 首就能把起播拖到四五秒。
   final Set<String> _unresolvable = {};
 
-  /// 给第三方音源做匹配用的「歌名 歌手」和时长。
+  /// 给第三方音源做匹配用的线索。
   ///
-  /// 音源是按歌名搜、再比时长挑版本的，只给一个 mid 它对不上。
-  final Map<String, (String, int)> _matchHints = {};
+  /// - [keyword]「歌名 歌手」：按歌名搜的那几家要用，只给 mid 它对不上；
+  /// - [title] 纯歌名：星海要的是这个（它的 410 明说「需提供 name」）；
+  /// - [durationMs] 时长：搜出来一堆版本时靠它挑对的那个。
+  final Map<String, ({String keyword, String title, int durationMs})>
+  _matchHints = {};
 
   /// 只用来验官方地址能不能打开，超时给短一点：这一步是卡在起播路径上的。
   static final Dio _probeDio = Dio(
@@ -121,14 +124,15 @@ class QQPlaybackService {
         source: 'tx',
         // 不让它「排队太久就让路」：让出去下一站是 128k，白白降一档音质。
         allowBail: false,
+        name: hint?.title,
       );
       url ??= await _verifiedOfficialUrl(mid, mediaMid);
       // 还没有就走完整音源链。公益源上面已经问过了，别再打一遍。
       url ??= await UnblockSourceService.instance.resolve(
         platform: 'tx',
         songId: mid,
-        keyword: hint?.$1,
-        durationMs: hint?.$2 ?? 0,
+        keyword: hint?.keyword,
+        durationMs: hint?.durationMs ?? 0,
         skipPublicSources: true,
       );
       if (url == null) {
@@ -158,8 +162,9 @@ class QQPlaybackService {
       if (mid == null) continue;
       // 先记下匹配线索，后面走音源兜底时要用。
       _matchHints[mid] ??= (
-        '${song.title} ${song.artistDisplayName}'.trim(),
-        song.durationMs ?? 0,
+        keyword: '${song.title} ${song.artistDisplayName}'.trim(),
+        title: song.title,
+        durationMs: song.durationMs ?? 0,
       );
       if (_cache[mid]?.isExpired == false) continue;
       if (_unresolvable.contains(mid)) continue;
