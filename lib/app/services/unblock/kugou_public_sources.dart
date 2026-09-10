@@ -181,7 +181,7 @@ class KugouPublicSources {
 
   /// 问的顺序。haitangw 排头是实测结果（QQ 那轮 50 首几乎全中）；lxmusic
   /// 垫底当兜底 —— 它是官方 lx-music-api-server，协议最规整，但我们没验过。
-  static const List<String> _endpoints = ['haitangw', 'zddyr', 'lxmusic'];
+  static const List<String> _endpoints = ['haitangw', 'zddyr', 'ceseet'];
 
   /// 上一次真正给出地址的那家，下次从它开始问。
   ///
@@ -193,8 +193,8 @@ class KugouPublicSources {
     switch (endpoint) {
       case 'zddyr':
         return _zddyr(rid, source);
-      case 'lxmusic':
-        return _lxmusic(rid, source);
+      case 'ceseet':
+        return _ceseet(rid, source);
       default:
         return _haitangw(rid, source);
     }
@@ -306,38 +306,39 @@ class KugouPublicSources {
     }
   }
 
-  /// lx-music-api-server 的公开实例，当 haitangw / zddyr 的兜底。
+  /// lx-music-api-server 系的公开实例，当 haitangw / zddyr 的兜底。
   ///
-  /// 从桌面上那三个音源包（去重后 39 个脚本）统计出来的：这套后端是整个生态
-  /// 里用得最多的，协议也最规整 —— `/url/{源}/{id}/{音质}`，源代号
-  /// kg/tx/wy/kw/mg 和我们一致，成功返回是 `{"code":0,"data":"<地址>"}`。
+  /// 这套协议是生态里最规整的：`/url/{源}/{id}/{音质}`，源代号 kg/tx/wy/kw/mg
+  /// 和我们一致，成功返回 `{"code":0,"data":"<地址>"}`（data 直接是字符串）。
   ///
-  /// **为什么不是 88.lxmusic.中国**：那个实例更主流（15 个脚本在用），但真机
-  /// 实测 `/lxmusicv3/` 已经 404（服务器活着，页脚写着 MusicDownloader），
-  /// 现在只剩 `/lxmusicv4/...?sign=<64位十六进制>`。那个 sign 是确定性的
-  /// （同参数两次跑结果一致，不含时间戳），但算法在脚本自带的 SHA-256 实现
-  /// 里，挖出来不划算 —— onrender 这个实例是同一套 v3 协议且不要签名。
+  /// **换到第三个实例了**，前两个真机探测都躺了：
+  /// - `88.lxmusic.中国`：`/lxmusicv3/` 已 404（服务器活着，页脚 MusicDownloader），
+  ///   只剩 `/lxmusicv4/...?sign=<64位hex>`。sign 是确定性的（同参数两次跑一致，
+  ///   不含时间戳），但算法在脚本自带的 SHA-256 实现里，为一个兜底去反不划算。
+  /// - `lxmusicapi.onrender.com`：HTTP 503 `Service Suspended`，实例被永久停用，
+  ///   不是休眠。
   ///
-  /// **代价**：onrender 免费实例会休眠，冷启动第一发大概率吃满 5 秒超时。
-  /// 它排在最后，只有前两家都没货才问得到；真持续挂了，连续 5 次失败会触发
-  /// 10 分钟熄火，不会一直拖着起播。
-  static Future<String?> _lxmusic(String rid, String source) async {
+  /// 现在这个来自 fish-music 音源，它的 `X-Request-Key` 就是**空串** —— 不需要
+  /// 密钥，这也是选它的原因。
+  ///
+  /// 说明白它的定位：haitangw 真机 5/5 全中且都是 Hi-Res，这一层纯粹是冗余，
+  /// 只在前两家都没货时才被问到。它再挂也不影响现状。
+  static Future<String?> _ceseet(String rid, String source) async {
     try {
       final res = await _dio.get<String>(
-        'https://lxmusicapi.onrender.com/url/'
-        '${_sourceCode('lxmusic', source)}/$rid/flac',
+        'https://m-api.ceseet.me/url/'
+        '${_sourceCode('ceseet', source)}/$rid/flac',
         options: Options(
           headers: {
-            'X-Request-Key': 'share-v3',
             'Content-Type': 'application/json',
             'User-Agent': 'lx-music-desktop/2.7.0',
           },
         ),
       );
-      _probe('lxmusic', source, res);
+      _probe('ceseet', source, res);
       return _pickUrl(
         res,
-        endpoint: 'lxmusic',
+        endpoint: 'ceseet',
         source: source,
         codeField: 'code',
         okCodes: const [0, 200],

@@ -481,7 +481,7 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                 title: '探测公益音源',
                 subtitle: _probing
                     ? '正在探测…（5 首 × 3 家，约半分钟）'
-                    : '拿 5 首 QQ 歌问 haitangw / zddyr / lxmusic，看各家给什么',
+                    : '拿 5 首 QQ 歌问 haitangw / zddyr / ceseet，看各家给什么',
                 trailing: _probing
                     ? const SizedBox(
                         width: 18,
