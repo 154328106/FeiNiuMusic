@@ -113,9 +113,7 @@ class QQSource implements MusicSource {
       return const [];
     }
     final songs = await _api.playlistSongs(tid);
-    final entities = [
-      for (final s in songs) QQPlaybackService.toSongEntity(s),
-    ];
+    final entities = [for (final s in songs) QQPlaybackService.toSongEntity(s)];
     debugPrint('[QQSource] 我喜欢 ${entities.length} 首（tid=$tid）');
     if (entities.isNotEmpty) _favoriteCache = entities;
     return entities;
