@@ -222,6 +222,117 @@ class QQApiClient {
   ///
   /// 走 `fcg_ucc_getcdinfo_byids_cp` 这条老接口：纯 GET、免登录、字段稳定。
   /// musicu 上那个 GetPlaylistDetail 试过，返回是空的。
+  /// 登录用户自己的歌单（含「我喜欢」）。未登录返回空。
+  ///
+  /// 走两条路，主路失败自动退到老接口 —— 这两个端点我都没法在本地验证
+  /// （要登录态），与其赌一个，不如都接上，日志会说清是哪条通的。
+  ///
+  /// 「我喜欢」在 QQ 这边是一张 `dirid == 201` 的特殊歌单，[favoriteTid]
+  /// 就是从这里认出来的。
+  Future<List<QQPlaylist>> userPlaylists() async {
+    final uin = QQAuth.instance.uin;
+    if (uin.isEmpty || uin == '0') return const [];
+    final viaMusicu = await _userPlaylistsViaMusicu(uin);
+    if (viaMusicu.isNotEmpty) {
+      debugPrint('[QQ] 用户歌单 ${viaMusicu.length} 张（musicu）');
+      return viaMusicu;
+    }
+    final viaDiss = await _userPlaylistsViaDiss(uin);
+    debugPrint('[QQ] 用户歌单 ${viaDiss.length} 张（fcg_user_created_diss）');
+    return viaDiss;
+  }
+
+  /// 「我喜欢」的歌单 id。取不到返回 null。
+  int? favoriteTid(List<QQPlaylist> lists) {
+    for (final p in lists) {
+      if (p.dirId == 201) return p.id;
+    }
+    // dirid 认不出来时退而求其次按名字找。
+    for (final p in lists) {
+      if (p.name == '我喜欢' || p.name.contains('喜欢')) return p.id;
+    }
+    return null;
+  }
+
+  Future<List<QQPlaylist>> _userPlaylistsViaMusicu(String uin) async {
+    try {
+      final json = await _musicuCall({
+        'comm': {
+          'ct': 24,
+          'cv': 0,
+          'format': 'json',
+          'uin': int.tryParse(uin) ?? 0,
+        },
+        'req_0': {
+          'module': 'music.musicasset.PlaylistBaseRead',
+          'method': 'GetPlaylistByUin',
+          'param': {'uin': uin},
+        },
+      });
+      final data = json['req_0'];
+      if (data is! Map) return const [];
+      final list = (data['data'] as Map?)?['v_playlist'];
+      if (list is! List) return const [];
+      final out = <QQPlaylist>[];
+      for (final raw in list.whereType<Map>()) {
+        final tid = _asInt(raw['tid'] ?? raw['dissid']);
+        if (tid == null || tid == 0) continue;
+        out.add(
+          QQPlaylist(
+            id: tid,
+            name: (raw['dirName'] ?? raw['title'] ?? '未命名').toString(),
+            coverUrl: (raw['picUrl'] ?? raw['cover'])?.toString(),
+            trackCount: _asInt(raw['songNum'] ?? raw['song_cnt']) ?? 0,
+            dirId: _asInt(raw['dirid']),
+          ),
+        );
+      }
+      return out;
+    } on QQApiException catch (e) {
+      debugPrint('[QQ] 用户歌单（musicu）失败：${e.message}');
+      return const [];
+    }
+  }
+
+  Future<List<QQPlaylist>> _userPlaylistsViaDiss(String uin) async {
+    try {
+      final json = await _getJson(
+        'https://c.y.qq.com/rsc/fcgi-bin/fcg_user_created_diss'
+        '?hostuin=$uin&sin=0&size=200&format=json&inCharset=utf8'
+        '&outCharset=utf-8&notice=0&platform=yqq.json&needNewCode=0',
+        referer: 'https://y.qq.com/portal/profile.html',
+      );
+      final list = (json['data'] as Map?)?['disslist'];
+      if (list is! List) return const [];
+      final out = <QQPlaylist>[];
+      for (final raw in list.whereType<Map>()) {
+        final tid = _asInt(raw['dissid'] ?? raw['tid']);
+        if (tid == null || tid == 0) continue;
+        out.add(
+          QQPlaylist(
+            id: tid,
+            name: (raw['diss_name'] ?? '未命名').toString(),
+            coverUrl: raw['diss_cover']?.toString(),
+            trackCount: _asInt(raw['song_cnt']) ?? 0,
+            dirId: _asInt(raw['dirid']),
+          ),
+        );
+      }
+      return out;
+    } on QQApiException catch (e) {
+      debugPrint('[QQ] 用户歌单（diss）失败：${e.message}');
+      return const [];
+    }
+  }
+
+  /// QQ 的数字字段一会儿是 int 一会儿是字符串，统一收一下。
+  static int? _asInt(Object? value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value.trim());
+    return null;
+  }
+
   Future<List<QQSong>> playlistSongs(int tid) async {
     final json = await _getJson(
       'https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg'

@@ -1,16 +1,22 @@
 import 'package:flutter/material.dart';
 
+import '../../state/song_source.dart';
 import '../../state/song_state.dart';
+import '../played_song_cache.dart';
 import '../qq/qq_api_client.dart';
+import '../qq/qq_auth.dart';
 import '../qq/qq_models.dart';
 import '../qq/qq_playback_service.dart';
 import 'music_source.dart';
 
 /// QQ 音乐数据源。
 ///
-/// 和网易云的关键差别：这边**完全不需要登录**。搜索、推荐歌单、歌单内容、
-/// 取播放地址走的都是免登录接口，所以 [isAvailable] 恒为 true，也没有
-/// 「收藏 / 最近播放」这种账号维度的区块 —— 那两条留空，首页会自动不显示。
+/// 搜索、推荐歌单、榜单、取播放地址都走免登录接口，所以 [isAvailable]
+/// 恒为 true —— 不登录也能用。
+///
+/// 登录之后额外多出「我的歌单」和「收藏（我喜欢）」。这两块 2026-09-11 才
+/// 补上：QQ 当初是按纯免登录源做的，扫码登录是后加的，`fullFeed` 里这两个
+/// 分支一直写死 `return const []`，所以登录了也什么都不显示。
 class QQSource implements MusicSource {
   QQSource._();
 
@@ -21,6 +27,12 @@ class QQSource implements MusicSource {
   /// 推荐歌单缓存。首页的大图、最新歌曲都从第一张推荐歌单里取，
   /// 每次各拉一遍纯属浪费。
   List<QQPlaylist>? _playlistCache;
+
+  /// 登录用户自己的歌单缓存（含「我喜欢」）。
+  List<QQPlaylist>? _cloudCache;
+
+  /// 「我喜欢」歌曲缓存。
+  List<SongEntity>? _favoriteCache;
 
   /// 首页推荐歌曲缓存。
   ///
@@ -55,6 +67,8 @@ class QQSource implements MusicSource {
   void reset() {
     _playlistCache = null;
     _songCache = null;
+    _cloudCache = null;
+    _favoriteCache = null;
   }
 
   Future<List<QQPlaylist>> _ensurePlaylists() async {
@@ -73,6 +87,40 @@ class QQSource implements MusicSource {
   /// 用热歌 / 新歌 / 飙升三个公开榜拼出来。QQ 的「每日推荐」和推荐歌单那套
   /// musicu 模块实测返回是空的（多半要登录），榜单这条是纯 GET 的老接口，
   /// 免登录、字段稳。
+  bool get _isLoggedIn => QQAuth.instance.isLoggedIn.value;
+
+  Future<List<QQPlaylist>> _cloudPlaylists() async {
+    if (!_isLoggedIn) return const [];
+    final cached = _cloudCache;
+    if (cached != null && cached.isNotEmpty) return cached;
+    final lists = await _api.userPlaylists();
+    // 空结果不进缓存，理由同 _ensurePlaylists：否则拉空一次就永远是空。
+    if (lists.isNotEmpty) _cloudCache = lists;
+    return lists;
+  }
+
+  /// 「我喜欢」。QQ 把它做成一张 dirid == 201 的特殊歌单，所以先取歌单列表
+  /// 找到它，再按普通歌单拉内容。
+  Future<List<SongEntity>> _favorites() async {
+    if (!_isLoggedIn) return const [];
+    final cached = _favoriteCache;
+    if (cached != null && cached.isNotEmpty) return cached;
+    final lists = await _cloudPlaylists();
+    if (lists.isEmpty) return const [];
+    final tid = _api.favoriteTid(lists);
+    if (tid == null) {
+      debugPrint('[QQSource] 歌单里没认出「我喜欢」，收藏留空');
+      return const [];
+    }
+    final songs = await _api.playlistSongs(tid);
+    final entities = [
+      for (final s in songs) QQPlaybackService.toSongEntity(s),
+    ];
+    debugPrint('[QQSource] 我喜欢 ${entities.length} 首（tid=$tid）');
+    if (entities.isNotEmpty) _favoriteCache = entities;
+    return entities;
+  }
+
   Future<List<SongEntity>> _recommendedSongs() async {
     final cached = _songCache;
     if (cached != null && cached.isNotEmpty) return cached;
@@ -113,9 +161,15 @@ class QQSource implements MusicSource {
     try {
       switch (kind) {
         case HomeFeed.favorites:
+          return await _favorites();
         case HomeFeed.recentPlayed:
-          // 都要登录才有，先留空。首页对空区块本来就不渲染。
-          return const [];
+          // QQ 的播放历史接口不稳，和酷狗那边一个处理：用本机播过的记录。
+          // 用户想在这块看到的本来就是「我刚才听的」。
+          await PlayedSongCache.instance.ensureLoaded();
+          return PlayedSongCache.instance.recent(
+            limit: limit,
+            idPrefix: SongSource.qqPrefix,
+          );
         case HomeFeed.latestSongs:
           return await _recommendedSongs();
       }
@@ -145,7 +199,16 @@ class QQSource implements MusicSource {
   @override
   Future<List<SourcePlaylist>> playlists({int limit = 10}) async {
     try {
-      final lists = await _ensurePlaylists();
+      // 登录了就把**自己的歌单**排前面，推荐歌单往后补齐。原来这里只有推荐，
+      // 所以登录之后「歌单」里看到的还是别人的。
+      final mine = await _cloudPlaylists();
+      final recommended = await _ensurePlaylists();
+      final seen = <int>{for (final p in mine) p.id};
+      final lists = [
+        ...mine,
+        for (final p in recommended)
+          if (seen.add(p.id)) p,
+      ];
       return [
         for (final p in lists.take(limit))
           SourcePlaylist(

@@ -95,10 +95,15 @@ class QQPlaylist {
     required this.name,
     required this.coverUrl,
     required this.trackCount,
+    this.dirId,
   });
 
   final int id;
   final String name;
   final String? coverUrl;
   final int trackCount;
+
+  /// 用户歌单才有的目录 id。`201` 是「我喜欢」那张特殊歌单。
+  /// 推荐歌单没有这个字段，为 null。
+  final int? dirId;
 }
