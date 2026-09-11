@@ -10,6 +10,7 @@ class QQSong {
     required this.mid,
     required this.name,
     required this.artists,
+    this.singers = const [],
     required this.album,
     required this.albumMid,
     required this.mediaMid,
@@ -24,6 +25,9 @@ class QQSong {
 
   /// 多位歌手用 ` / ` 连接后的显示名。
   final String artists;
+
+  /// 歌手的名字与 mid，按接口返回的顺序。用来取歌手头像。
+  final List<({String name, String mid})> singers;
   final String album;
 
   /// 专辑 mid，用来拼封面地址。
@@ -50,6 +54,18 @@ class QQSong {
 
     // 歌手：musicu 用 singer，搜索用 singer 或 singername。
     final singerList = (json['singer'] as List?) ?? const [];
+    // 把 name 和 mid 成对留住：歌手头像要靠 mid 拼
+    // （`T001R500x500M000{mid}.jpg`，和专辑图 T002 同一套）。只留 artists
+    // 那串拼好的名字是不够的 —— 多歌手时按名字匹配上了第二位，却只能拿到
+    // 第一位的 mid，头像就会张冠李戴。
+    final singers = <({String name, String mid})>[];
+    for (final raw in singerList.whereType<Map>()) {
+      final n = raw['name'];
+      final m = raw['mid'];
+      if (n is String && n.isNotEmpty && m is String && m.isNotEmpty) {
+        singers.add((name: n, mid: m));
+      }
+    }
     var artists = singerList
         .whereType<Map>()
         .map((e) => e['name'])
@@ -79,6 +95,7 @@ class QQSong {
       mid: mid,
       name: (json['name'] ?? json['songname']) as String? ?? '',
       artists: artists,
+      singers: singers,
       album: albumName,
       albumMid: (albumMid != null && albumMid.isEmpty) ? null : albumMid,
       mediaMid: (json['file'] as Map?)?['media_mid'] as String?,

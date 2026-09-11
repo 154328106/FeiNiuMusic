@@ -1,5 +1,6 @@
 export 'common/alphabet_indexer.dart';
 export 'common/app_list_tile.dart';
+export 'common/artist_avatar.dart';
 export 'common/artwork_widget.dart';
 export 'common/content_frame.dart';
 export 'common/glass_panel.dart';

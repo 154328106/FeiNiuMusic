@@ -463,27 +463,18 @@ class _ArtistAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final radius = size / 2;
-    final initial = name.isNotEmpty ? name.characters.first : '?';
-
-    if (coverId != null && coverId!.isNotEmpty) {
-      final coverUrl = FeiNiuApiClient.instance.coverUrl(
-        coverId!,
-        size: FeiNiuApiClient.coverRequestSize,
-      );
-      // 有封面图：完整显示图片，不叠加首字母
-      return CircleAvatar(
-        radius: radius,
-        backgroundImage: CachedNetworkImageProvider(
-          coverUrl,
-          headers: FeiNiuApiClient.imageAuthHeaders(),
-        ),
-      );
-    }
-
-    return CircleAvatar(
-      radius: radius,
-      child: Text(initial),
+    // 库里那张多半是专辑封面（NAS 拿该歌手某张专辑的封面充数），所以交给
+    // ArtistAvatar 先去找真人照片，找不到才回退到它。
+    return ArtistAvatar(
+      name: name,
+      size: size,
+      fallbackUrl: (coverId != null && coverId!.isNotEmpty)
+          ? FeiNiuApiClient.instance.coverUrl(
+              coverId!,
+              size: FeiNiuApiClient.coverRequestSize,
+            )
+          : null,
+      fallbackHeaders: FeiNiuApiClient.imageAuthHeaders(),
     );
   }
 }

@@ -1251,30 +1251,23 @@ class _ArtistHeaderAvatar extends StatelessWidget {
     final radius = size / 2;
     final initial = name.isNotEmpty ? name.characters.first : '?';
 
-    // 歌手自身图片
-    if (coverId != null && coverId!.isNotEmpty) {
-      final coverUrl = FeiNiuApiClient.instance.coverUrl(
-        coverId!,
-        size: FeiNiuApiClient.coverRequestSize,
-      );
-      return CircleAvatar(
-        radius: radius,
-        backgroundImage: CachedNetworkImageProvider(
-          coverUrl,
-          headers: FeiNiuApiClient.imageAuthHeaders(),
-        ),
-      );
-    }
-
-    // 无歌手图片：用代表性歌曲封面（原 ArtworkWidget 行为），圆角处理
-    return ClipOval(
-      child: ArtworkWidget(
-        song: fallback,
-        size: size,
-        borderRadius: radius,
-        placeholder: CircleAvatar(
-          radius: radius,
-          child: Text(initial),
+    // 顺序：真人照片 → 库里的歌手图（多半是专辑封面）→ 代表作封面 → 首字母。
+    return ArtistAvatar(
+      name: name,
+      size: size,
+      fallbackUrl: (coverId != null && coverId!.isNotEmpty)
+          ? FeiNiuApiClient.instance.coverUrl(
+              coverId!,
+              size: FeiNiuApiClient.coverRequestSize,
+            )
+          : null,
+      fallbackHeaders: FeiNiuApiClient.imageAuthHeaders(),
+      placeholder: ClipOval(
+        child: ArtworkWidget(
+          song: fallback,
+          size: size,
+          borderRadius: radius,
+          placeholder: CircleAvatar(radius: radius, child: Text(initial)),
         ),
       ),
     );
