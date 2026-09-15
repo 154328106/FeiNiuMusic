@@ -17,14 +17,24 @@ class SourceFeedPage extends StatefulWidget {
     super.key,
     this.kind,
     this.playlistId,
+    this.loader,
     required this.title,
-  }) : assert(kind != null || playlistId != null, 'kind 与 playlistId 至少给一个');
+  }) : assert(
+         kind != null || playlistId != null || loader != null,
+         'kind / playlistId / loader 至少给一个',
+       );
 
-  /// 首页那几条流之一。给了 [playlistId] 时为 null。
+  /// 首页那几条流之一。给了 [playlistId] 或 [loader] 时为 null。
   final HomeFeed? kind;
 
   /// 歌单 id（带源前缀）。给了它就展示这个歌单，而不是某条流。
   final String? playlistId;
+
+  /// 直接给一个取歌函数 —— 「酷狗每日推荐 / 私人漫游」这种既不是歌单、
+  /// 也不在 [HomeFeed] 枚举里的一次性列表走这条。
+  ///
+  /// 优先级最高：给了它就不看 [playlistId] / [kind]。
+  final Future<List<SongEntity>> Function()? loader;
 
   final String title;
 
@@ -61,10 +71,16 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
   Future<void> _load() async {
     setState(() => _loading = true);
     // 这里要完整列表，不是首页那份预览。
+    final loader = widget.loader;
     final playlistId = widget.playlistId;
-    final songs = playlistId != null
-        ? await _source.playlistSongs(playlistId)
-        : await _source.fullFeed(widget.kind!, limit: 500);
+    final List<SongEntity> songs;
+    if (loader != null) {
+      songs = await loader();
+    } else if (playlistId != null) {
+      songs = await _source.playlistSongs(playlistId);
+    } else {
+      songs = await _source.fullFeed(widget.kind!, limit: 500);
+    }
     if (!mounted) return;
     setState(() {
       _songs = songs;

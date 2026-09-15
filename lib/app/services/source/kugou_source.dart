@@ -118,29 +118,32 @@ class KugouSource implements MusicSource {
     }
   }
 
-  /// 私人漫游。要登录；拿不到就退每日推荐 —— 空着一个入口比给点别的更糟。
+  /// 私人漫游。
+  ///
+  /// **官方接口对这个账号是不通的**：2026-09-16 真机实测，即使已登录（云端歌单
+  /// 和「我喜欢」都取得到，token 有效）也一律 `error_code 200101`，试过六种参数
+  /// 组合结果一样。Beans 的包里同样有「酷狗私人漫游无个性化结果 / 使用每日推荐
+  /// 兜底」两句文案，说明它撞的是同一堵墙 —— 大概率是账号/风控级限制
+  /// （和一直拿不到的 dfid 有关）。所以别再往参数和登录态上找原因。
+  ///
+  /// 兜底**故意不用每日推荐**：那样两个入口内容完全一样，等于摆了两个同样的
+  /// 按钮。改用榜单混合（TOP500 + 飙升 + 新歌，按天做种子打乱），内容是真的
+  /// 不同，也更像「漫游」该有的样子。
   Future<List<SongEntity>> personalRadio() async {
-    if (!isLoggedIn) {
-      lastError = '私人漫游需要先登录酷狗';
-      return const [];
-    }
-    try {
-      final songs = await _api.personalRadio();
-      if (songs.isNotEmpty) {
-        return [for (final s in songs) KugouPlaybackService.toSongEntity(s)];
+    if (isLoggedIn) {
+      try {
+        final songs = await _api.personalRadio();
+        if (songs.isNotEmpty) {
+          return [for (final s in songs) KugouPlaybackService.toSongEntity(s)];
+        }
+        debugPrint('[KugouSource] 私人漫游无结果，退榜单混合');
+      } on KugouApiException catch (e) {
+        debugPrint('[KugouSource] personalRadio error: ${e.message}，退榜单混合');
       }
-      debugPrint('[KugouSource] 私人漫游无结果，退每日推荐');
-    } on KugouApiException catch (e) {
-      debugPrint('[KugouSource] personalRadio error: ${e.message}，退每日推荐');
-    }
-    final fallback = await dailyRecommend();
-    if (fallback.isEmpty) {
-      lastError = '私人漫游和每日推荐都读不到';
     } else {
-      // 别静默替换：用户点的是漫游，给的是推荐，得让他知道。
-      lastError = '私人漫游暂时没有个性化结果，先放每日推荐';
+      debugPrint('[KugouSource] 未登录，私人漫游直接退榜单混合');
     }
-    return fallback;
+    return _recommendedSongs();
   }
 
   /// 「我喜欢」。酷狗把它当成一张普通的云端歌单，靠名字认。
@@ -254,15 +257,18 @@ class KugouSource implements MusicSource {
       final cached = _rankCache;
       final ranks = (cached != null && cached.isNotEmpty)
           ? cached
-          : await _api.rankList(limit: 20);
+          : await _api.rankList(limit: 55);
       if (ranks.isNotEmpty) _rankCache = ranks;
       // 登录了就把自己的歌单排前面 —— 那才是用户想点的。
       //
-      // 榜单只留 12 个：它有 20 个，全放会把歌单广场整个挤到 limit 之外，
-      // 而广场才是「发现新歌单」的那块。
+      // 三段的配额：云端歌单（几个）→ 榜单 20 个 → 歌单广场 30 个，合计五十来条，
+      // 调用方给的 limit 要够装（首页那个入口传 60）。
+      //
+      // 榜单不全放：ocean 接口能给 55 个，全塞进来会把广场整个挤到 limit 之外，
+      // 而广场才是「发现新歌单」的那块。20 个够覆盖常看的那几个榜。
       final lists = [
         ...await _cloudPlaylists(),
-        ...ranks.take(12),
+        ...ranks.take(20),
         ...await _plazaPlaylists(),
       ];
       return [

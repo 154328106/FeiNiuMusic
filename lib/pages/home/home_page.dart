@@ -813,21 +813,23 @@ class _HomePageState extends State<HomePage>
           icon: Icons.wb_sunny_rounded,
           label: '每日推荐',
           accent: const Color(0xFFF97316),
-          onTap: () => _playSourceList('每日推荐', source.dailyRecommend),
+          onTap: () => _openSourceSongList('每日推荐', source.dailyRecommend),
         ),
         HomeShortcutItem(
           icon: Icons.radio_rounded,
           label: '私人漫游',
           accent: const Color(0xFF14B8A6),
-          onTap: () => _playSourceList('私人漫游', source.personalRadio),
+          onTap: () => _openSourceSongList('私人漫游', source.personalRadio),
         ),
         HomeShortcutItem(
           icon: Icons.queue_music_rounded,
           label: '歌单',
           accent: const Color(0xFF3B82F6),
+          // 60 而不是 30：酷狗这块要装「云端歌单 + 20 个榜单 + 30 个歌单广场」，
+          // 传 30 的话广场只露一半，而广场是这个入口最有价值的部分。
           onTap: () => _openSourcePlaylists(
             '${source.label}歌单',
-            () => source.playlists(limit: 30),
+            () => source.playlists(limit: 60),
           ),
         ),
         HomeShortcutItem(
@@ -923,6 +925,22 @@ class _HomePageState extends State<HomePage>
         ),
       ),
     ];
+  }
+
+  /// 打开「某个源的一次性歌曲列表」页（酷狗每日推荐 / 私人漫游）。
+  ///
+  /// 和 [_playSourceList] 的区别：那个一点就起播整队，这个先让你看见列表、
+  /// 点哪首播哪首。除了符合直觉，还顺带省请求 —— [SourceFeedPage] 只从你
+  /// 点中的位置往后解 25 首，而不是进来就把整份都解一遍。
+  void _openSourceSongList(
+    String title,
+    Future<List<SongEntity>> Function() loader,
+  ) {
+    Navigator.of(context).push(
+      buildAppPageRoute<void>(
+        (_) => SourceFeedPage(loader: loader, title: title),
+      ),
+    );
   }
 
   void _openSourcePlaylists(

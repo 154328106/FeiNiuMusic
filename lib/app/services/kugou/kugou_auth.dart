@@ -6,6 +6,8 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../unblock/kugou_public_sources.dart';
+
 /// 酷狗账号与设备标识。
 ///
 /// 拆成单独一份而不是塞进 [KugouApiClient]，是因为它有两半职责：
@@ -131,6 +133,9 @@ class KugouAuth {
     for (final key in ['userid', 'token', 'nickname', 'avatar', 'vipType']) {
       _data.remove(key);
     }
+    // 公益源的地址缓存也要清：会员状态变了，缓存里那些地址的音质档位
+    // 就不一定对得上新账号了。
+    KugouPublicSources.clearCache();
     _apply();
     await _persist();
   }

@@ -138,6 +138,8 @@ class KugouPublicSources {
     bool allowBail = true,
   }) async {
     if (rid.isEmpty) return null;
+    final hit = _cached(source, rid);
+    if (hit != null) return hit;
     if (_allRefused(source)) return null;
     final skip = _skipUntil[source];
     if (skip != null && DateTime.now().isBefore(skip)) return null;
@@ -174,6 +176,7 @@ class KugouPublicSources {
             );
           }
         }
+        if (url != null) _putCache(source, rid, url);
         completer.complete(url);
       } catch (e) {
         _lastAt = DateTime.now();
@@ -181,6 +184,51 @@ class KugouPublicSources {
       }
     });
     return completer.future;
+  }
+
+  // ---------------------------------------------------------------------
+  // 地址缓存
+  //
+  // 同一个 id 在一次起播里会被问好几遍（播放器为整个队列构建播放源，加上
+  // 首页多个区块同时要数据），日志里能看到同一个 hash 几秒内出现三四次。
+  // 这些重复请求打的是公益服务，纯属浪费。
+  //
+  // **TTL 只给 10 分钟**：酷狗 CDN 的地址形如
+  // `/202609160617/<md5>/v3/...`，路径里嵌的是签发时刻 + 签名，**真实有效
+  // 窗口没法从单次响应读出来**。而浪费的大头本来就是「同一次建队列内」和
+  // 「几秒到一分钟内的连续点击」，10 分钟已经全覆盖；赌更长的窗口收益很小，
+  // 代价却是「放到一半断」这种最难归因的故障。
+  // ---------------------------------------------------------------------
+
+  static const Duration _cacheTtl = Duration(minutes: 10);
+
+  /// 上限防止无限增长：一次听歌不会碰到几百首，满了就整份丢掉重来
+  /// （按时间逐条淘汰要维护顺序，不值得为这点收益加复杂度）。
+  static const int _cacheMax = 400;
+
+  static final Map<String, (String, DateTime)> _urlCache = {};
+
+  static String? _cached(String source, String rid) {
+    final entry = _urlCache['$source:$rid'];
+    if (entry == null) return null;
+    if (DateTime.now().difference(entry.$2) > _cacheTtl) {
+      _urlCache.remove('$source:$rid');
+      return null;
+    }
+    return entry.$1;
+  }
+
+  static void _putCache(String source, String rid, String url) {
+    if (_urlCache.length >= _cacheMax) {
+      debugPrint('[公益音源] 地址缓存满 $_cacheMax 条，整份清空');
+      _urlCache.clear();
+    }
+    _urlCache['$source:$rid'] = (url, DateTime.now());
+  }
+
+  /// 换账号 / 手动重试时清掉 —— 会员状态变了，之前拿到的地址档位也就不对了。
+  static void clearCache() {
+    _urlCache.clear();
   }
 
   /// 问的顺序。haitangw 排头是实测结果（QQ 那轮 50 首几乎全中）。
