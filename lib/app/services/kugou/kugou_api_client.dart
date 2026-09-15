@@ -378,6 +378,12 @@ class KugouApiClient {
       );
       if (result.length >= limit) break;
     }
+    // 成功也要留一行：只在失败时打日志的话，「解析成功」和「压根没调用」
+    // 在日志里长得一模一样，上次就只能靠人眼去 App 里确认。
+    debugPrint(
+      '[Kugou] 歌单广场 ${result.length} 个'
+      '（页面 ${html.length ~/ 1024}KB，正则命中 ${_plazaPattern.allMatches(html).length}）',
+    );
     return result;
   }
 
@@ -399,6 +405,9 @@ class KugouApiClient {
         if (seen.add(song.hash)) songs.add(song);
       }
     }
+    // 带上 specialid：日志要能证明「这条是我这次请求产生的」，否则并发下
+    // 分不清是哪个歌单的结果。
+    debugPrint('[Kugou] 广场歌单 $specialId 取到 ${songs.length} 首');
     return songs.length <= limit ? songs : songs.sublist(0, limit);
   }
 

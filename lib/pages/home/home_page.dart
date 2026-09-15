@@ -116,6 +116,14 @@ class _HomePageState extends State<HomePage>
   Timer? _roamAutoTimer;
   bool _roamAutoBusy = false;
 
+  /// 首页快捷入口（每日推荐 / 私人FM / 心动模式）是否正在装队列。
+  ///
+  /// 这几个入口一点就是**整队**一百多首，而队列里每一首都要向第三方音源
+  /// 要一次地址。实测连点五下心动模式，8 秒内 GD 音乐台被打了近 70 次 ——
+  /// 那是公益服务，酷狗那几家早就做了串行 + 350ms + 排队上限，这里反而
+  /// 是全链最敞的口子。所以在途期间直接忽略重复点击。
+  bool _playListBusy = false;
+
   /// 轮播间隔。每一跳都是一次 roam-next 网络请求，太密既费流量也没意义。
   static const Duration _roamAutoInterval = Duration(minutes: 2);
 
@@ -904,19 +912,31 @@ class _HomePageState extends State<HomePage>
     String label,
     Future<List<SongEntity>> Function() loader,
   ) async {
-    final songs = await loader();
-    if (!mounted) return;
-    if (songs.isEmpty) {
-      AppToast.showGlobal('$label暂无内容', type: ToastType.error);
+    // 在途就直接回绝，别再起第二队 —— 原因见 [_playListBusy]。
+    if (_playListBusy) {
+      AppToast.showGlobal('正在加载$label，稍等一下', type: ToastType.info);
       return;
     }
-    final queue = await _source.prepareQueue(songs);
-    if (!mounted) return;
-    if (queue.isEmpty) {
-      AppToast.showGlobal('$label里的歌都取不到播放地址', type: ToastType.error);
-      return;
+    _playListBusy = true;
+    try {
+      final songs = await loader();
+      if (!mounted) return;
+      if (songs.isEmpty) {
+        AppToast.showGlobal('$label暂无内容', type: ToastType.error);
+        return;
+      }
+      final queue = await _source.prepareQueue(songs);
+      if (!mounted) return;
+      if (queue.isEmpty) {
+        AppToast.showGlobal('$label里的歌都取不到播放地址', type: ToastType.error);
+        return;
+      }
+      _player.playQueue(queue, 0);
+    } finally {
+      // finally 而不是放在末尾：中间任何一步抛异常，标志位都得放掉，
+      // 否则这个入口就永久点不动了。
+      _playListBusy = false;
     }
-    _player.playQueue(queue, 0);
   }
 
   /// 右上角搜索 → 综合搜索页。搜的是当前源：网易云走网易云的搜索页。
