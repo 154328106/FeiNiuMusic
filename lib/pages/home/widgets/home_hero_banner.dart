@@ -4,6 +4,9 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../../app/services/feiniu/api_client.dart';
+import '../../../app/services/lyrics/lyrics_service.dart';
+import '../../../app/services/player_service.dart';
+import '../../../app/state/player_state.dart';
 import '../../../app/state/settings_layout_state.dart';
 import '../../../app/state/song_state.dart';
 import '../../../app/utils/cover_dominant_color.dart';
@@ -40,6 +43,13 @@ class HomeHeroBanner extends StatelessWidget {
   /// 这首 hero 歌当前是否正在播放。true 时大按钮显示暂停图标。
   final bool isPlaying;
 
+  /// 这首 hero 歌是否就是播放器当前那首（**不管在播还是暂停**）。
+  ///
+  /// 和 [isPlaying] 分开是必须的：只有它为 true 时，卡片上显示实时歌词和
+  /// 进度才是对的 —— 否则你在听别的歌，卡片却在放这首的歌词和进度条，
+  /// 那是纯粹的错误信息。暂停时仍然要显示（停在半首歌上很正常）。
+  final bool isCurrentTrack;
+
   /// 换一首按钮回调。为 null 时不显示刷新按钮。
   final VoidCallback? onRefresh;
 
@@ -63,6 +73,7 @@ class HomeHeroBanner extends StatelessWidget {
     required this.song,
     required this.onPlay,
     this.isPlaying = false,
+    this.isCurrentTrack = false,
     this.label = '漫游 · 随心听',
     this.onRefresh,
     this.onArtworkTap,
@@ -253,6 +264,7 @@ class HomeHeroBanner extends StatelessWidget {
       onRefresh: onRefresh,
       onArtworkTap: onArtworkTap,
       isPlaying: isPlaying,
+      isCurrentTrack: isCurrentTrack,
     );
   }
 }
@@ -267,6 +279,7 @@ class _CompactHeroCard extends StatefulWidget {
     required this.onPlay,
     required this.onRefresh,
     required this.isPlaying,
+    required this.isCurrentTrack,
     this.onArtworkTap,
   });
 
@@ -275,6 +288,7 @@ class _CompactHeroCard extends StatefulWidget {
   final VoidCallback? onRefresh;
   final VoidCallback? onArtworkTap;
   final bool isPlaying;
+  final bool isCurrentTrack;
 
   @override
   State<_CompactHeroCard> createState() => _CompactHeroCardState();
@@ -399,6 +413,69 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
     );
   }
 
+  /// 副标题行：正在播这首时显示实时歌词，否则显示歌手。
+  ///
+  /// 三重兜底，缺一不可 —— 卡片只有 96 高，这行必须**永远有内容**，
+  /// 空一行比显示歌手更糟：
+  ///   1. 不是当前这首 → 歌手（你在听别的歌，显示这首的歌词是错的）
+  ///   2. 是当前这首但没有歌词（纯音乐 / 没搜到）→ 歌手
+  ///   3. 有歌词但当前时刻是空行（前奏 / 间奏）→ 歌手
+  Widget _buildSubtitle(ColorScheme scheme, SongEntity? song) {
+    final fallback = song?.artistDisplayName ?? '今天想听点什么';
+    if (!widget.isCurrentTrack) return _subtitleText(scheme, fallback, false);
+    return ValueListenableBuilder<String?>(
+      valueListenable: LyricsService.instance.currentLineText,
+      builder: (context, line, _) {
+        final text = (line == null || line.trim().isEmpty) ? null : line.trim();
+        return _subtitleText(scheme, text ?? fallback, text != null);
+      },
+    );
+  }
+
+  Widget _subtitleText(ColorScheme scheme, String text, bool isLyric) {
+    return Text(
+      text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        fontSize: 13,
+        // 歌词比歌手名重要一点，给它主色和稍重的字重，一眼能分出这行是什么。
+        fontWeight: isLyric ? FontWeight.w600 : FontWeight.w400,
+        color: isLyric ? scheme.onSurface : scheme.onSurfaceVariant,
+      ),
+    );
+  }
+
+  /// 卡片底部那条进度。只在播这首时出现。
+  ///
+  /// 做成贴着卡片下沿的 2px 细条，而不是给按钮套进度环 —— 按钮上已经有
+  /// 掠光和雷达动效了，再叠一圈会糊成一团。
+  Widget _buildProgressBar(ColorScheme scheme) {
+    if (!widget.isCurrentTrack) return const SizedBox.shrink();
+    return ValueListenableBuilder<PlaybackSnapshot>(
+      valueListenable: PlayerService.instance.snapshot,
+      builder: (context, snap, _) {
+        final total = snap.duration?.inMilliseconds ?? 0;
+        // 时长还没拿到时不画 —— 画个 0 宽的条会闪一下。
+        if (total <= 0) return const SizedBox.shrink();
+        final ratio = (snap.position.inMilliseconds / total).clamp(0.0, 1.0);
+        return Align(
+          alignment: Alignment.bottomLeft,
+          child: FractionallySizedBox(
+            widthFactor: ratio,
+            child: Container(
+              height: 2,
+              decoration: BoxDecoration(
+                color: scheme.primary.withValues(alpha: 0.85),
+                borderRadius: BorderRadius.circular(1),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildCard({
     required ColorScheme scheme,
     required bool isDark,
@@ -473,15 +550,7 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
                           ),
                         ),
                         const SizedBox(height: 4),
-                        Text(
-                          song?.artistDisplayName ?? '今天想听点什么',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
+                        _buildSubtitle(scheme, song),
                       ],
                     ),
                   ),
@@ -502,6 +571,10 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
                 ],
               ),
             ),
+          ),
+          // 进度条放最后 = 画在最上层，压在掠光和内容之上。
+          Positioned.fill(
+            child: IgnorePointer(child: _buildProgressBar(scheme)),
           ),
         ],
       ),

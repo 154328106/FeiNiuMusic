@@ -1121,6 +1121,17 @@ class _HomePageState extends State<HomePage>
     return _player.currentSongSignal.value?.id == hero.id;
   }
 
+  /// hero 卡上那首是不是播放器当前那首（**不看在播还是暂停**）。
+  ///
+  /// 卡片的实时歌词和进度条挂在这个条件上，而不是 [_heroIsPlaying]：
+  /// 暂停时停在半首歌上很正常，那会儿歌词和进度照样该显示；反过来，
+  /// 你在听别的歌时卡片绝不能显示这首的歌词 —— 那是错误信息。
+  bool get _heroIsCurrentTrack {
+    final hero = _heroSong;
+    if (hero == null) return false;
+    return _player.currentSongSignal.value?.id == hero.id;
+  }
+
   /// 首页内容不足一屏时不让它滚动。
   ///
   /// 默认的 AlwaysScrollableScrollPhysics（RefreshIndicator 需要它才能下拉刷新）
@@ -1391,6 +1402,7 @@ class _HomePageState extends State<HomePage>
                         label: _heroDisplayLabel,
                         onPlay: _togglePlayRoam,
                         isPlaying: _heroIsPlaying,
+                        isCurrentTrack: _heroIsCurrentTrack,
                         onRefresh: _refreshRoam,
                         onArtworkTap: _heroArtworkTapped,
                       ),
