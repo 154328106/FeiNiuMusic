@@ -619,6 +619,37 @@ class NetEaseApiClient {
         .toList();
   }
 
+  /// 心动模式。给一首「种子歌」和它所在的歌单，返回一条相似歌队列。
+  ///
+  /// 官方客户端只从「我喜欢的音乐」进得去，所以 [playlistId] 传红心歌单、
+  /// [songId] 传该歌单里的任意一首。`type` 必须是 `fromPlayOne`，换成别的
+  /// 值服务端会返回空 data 而不报错。
+  ///
+  /// 响应每条把歌裹在 `songInfo` 下，偶尔直接平铺，两种都认（同 [newSongs]）。
+  Future<List<NetEaseSong>> intelligenceList({
+    required int songId,
+    required int playlistId,
+    int count = 30,
+  }) async {
+    final json = await _request('/api/playmode/intelligence/list', {
+      'songId': songId,
+      'type': 'fromPlayOne',
+      'playlistId': playlistId,
+      'startMusicId': songId,
+      'count': count,
+    }, _Scheme.weapi);
+    final data = json['data'] as List? ?? const [];
+    final songs = <NetEaseSong>[];
+    for (final item in data.whereType<Map<String, dynamic>>()) {
+      final nested = item['songInfo'];
+      final song = nested is Map<String, dynamic>
+          ? NetEaseSong.fromJson(nested)
+          : NetEaseSong.fromJson(item);
+      if (song != null) songs.add(song);
+    }
+    return songs;
+  }
+
   /// 红心 / 取消红心。
   ///
   /// 网易云这个接口对参数形状不稳定，按顺序试三种，任一返回 200 即成功

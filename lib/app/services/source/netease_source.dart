@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -280,6 +281,50 @@ class NetEaseSource implements MusicSource {
     } on NetEaseApiException catch (e) {
       lastError = '私人 FM 读取失败：${e.message}';
       debugPrint('[NetEaseSource] personalFm error: ${e.message}');
+      return const [];
+    }
+  }
+
+  /// 心动模式。以「我喜欢的音乐」里的一首作种子，生成一条相似歌队列。
+  ///
+  /// 种子随机取而不是固定第一首 —— 固定的话每次进来都是同一条队列，
+  /// 「心动」就没意义了。只在前 50 首里挑：红心歌单可能上千首，
+  /// [NetEaseApiClient.playlistTracks] 拉全量太慢。
+  Future<List<SongEntity>> heartbeatMode() async {
+    final playlistId = await _ensureLikedPlaylist();
+    if (playlistId == null) {
+      lastError ??= '心动模式需要先登录网易云';
+      return const [];
+    }
+    try {
+      final liked = await _api.playlistTracks(playlistId);
+      if (liked.isEmpty) {
+        lastError = '「我喜欢的音乐」是空的，心动模式没有种子歌';
+        return const [];
+      }
+      final pool = liked.length > 50 ? 50 : liked.length;
+      final seed = liked[Random().nextInt(pool)];
+      final songs = await _api.intelligenceList(
+        songId: seed.id,
+        playlistId: playlistId,
+      );
+      if (songs.isEmpty) {
+        lastError = '心动模式没有返回歌曲';
+        return const [];
+      }
+      // 种子歌自己不一定在返回里，补到队首，听起来才是"从这首开始"。
+      final queue = _toEntities([
+        if (!songs.any((s) => s.id == seed.id)) seed,
+        ...songs,
+      ]);
+      debugPrint(
+        '[NetEaseSource] heartbeat seed=${seed.name} '
+        'id=${seed.id} got=${queue.length}',
+      );
+      return queue;
+    } on NetEaseApiException catch (e) {
+      lastError = '心动模式读取失败：${e.message}';
+      debugPrint('[NetEaseSource] heartbeatMode error: ${e.message}');
       return const [];
     }
   }

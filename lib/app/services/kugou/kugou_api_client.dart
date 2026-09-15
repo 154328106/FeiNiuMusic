@@ -321,6 +321,97 @@ class KugouApiClient {
   }
 
   // ---------------------------------------------------------------------
+  // 歌单广场
+  //
+  // 酷狗把这块的 JSON 接口关掉了：`m.kugou.com/plist/index?json=true` 现在
+  // 只回一个模板壳（2026-09-16 实测），所以只能抓官网页面。Beans 1.6.6 的
+  // 「更换歌单广场接口」就是改成了抓 HTML，下面的正则取自它的包。
+  // ---------------------------------------------------------------------
+
+  /// 官网歌单广场页面里的一条：`<li class="s_<specialid>">` + 标题 + gcid + 封面。
+  static final RegExp _plazaPattern = RegExp(
+    r'<li class="s_(\d+)"[\s\S]*?<a[^>]+title="([^"]+)" '
+    r'href="https://www\.kugou\.com/songlist/(gcid_[^/]+)/"'
+    r'[\s\S]*?_src="([^"]+)"',
+  );
+
+  /// 取纯文本。[_getJson] 会去解析 JSON，抓页面得用这个。
+  Future<String> _getText(String url) async {
+    final Response<String> response;
+    try {
+      response = await _dio.get<String>(url);
+    } on DioException catch (e) {
+      throw KugouApiException('网络请求失败：${e.message ?? e.type.name}');
+    }
+    if (response.statusCode != 200) {
+      throw KugouApiException(
+        'HTTP ${response.statusCode}',
+        code: response.statusCode,
+      );
+    }
+    return response.data ?? '';
+  }
+
+  /// 歌单广场。免登录。
+  ///
+  /// 页面同时给出 specialid 和 gcid，这里只留 specialid —— 按 gcid 取歌要走
+  /// 带签名的 gateway（`/pubsongs/v2/get_other_list_file_nofilt`，实测在没有
+  /// dfid 的情况下一律 `error_code 20010`），而 [specialSongs] 用的免签名接口
+  /// 只认 specialid，正好绕开设备注册那条死路。
+  Future<List<KugouPlaylist>> plazaPlaylists({int limit = 30}) async {
+    final html = await _getText('https://www.kugou.com/yy/html/special.html');
+    final result = <KugouPlaylist>[];
+    final seen = <int>{};
+    for (final m in _plazaPattern.allMatches(html)) {
+      final id = int.tryParse(m.group(1) ?? '');
+      final name = _unescapeHtml(m.group(2) ?? '').trim();
+      if (id == null || name.isEmpty || !seen.add(id)) continue;
+      final cover = m.group(4)?.trim();
+      result.add(
+        KugouPlaylist(
+          id: id,
+          name: name,
+          coverUrl: (cover == null || cover.isEmpty) ? null : cover,
+          // 页面上不带歌曲数，点进去才知道。
+          trackCount: 0,
+        ),
+      );
+      if (result.length >= limit) break;
+    }
+    return result;
+  }
+
+  /// 歌单广场里某个歌单的歌。
+  ///
+  /// 走免签名的 mobilecdn 老接口（和搜索同一家主机），不需要 dfid。
+  /// 一页 30 首，翻到够为止。
+  Future<List<KugouSong>> specialSongs(int specialId, {int limit = 60}) async {
+    final seen = <String>{};
+    final songs = <KugouSong>[];
+    for (var page = 1; page <= 4 && songs.length < limit; page++) {
+      final json = await _getJson(
+        'https://mobilecdn.kugou.com/api/v3/special/song'
+        '?specialid=$specialId&page=$page&pagesize=30',
+      );
+      final batch = _toSongs(_at(json, ['data', 'info']) as List?);
+      if (batch.isEmpty) break;
+      for (final song in batch) {
+        if (seen.add(song.hash)) songs.add(song);
+      }
+    }
+    return songs.length <= limit ? songs : songs.sublist(0, limit);
+  }
+
+  /// 歌单标题是从 HTML 属性里抠出来的，实体得还原。
+  static String _unescapeHtml(String input) => input
+      .replaceAll('&amp;', '&')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#39;', "'")
+      .replaceAll('&nbsp;', ' ');
+
+  // ---------------------------------------------------------------------
   // 网关：签名请求 / 扫码登录 / 云端歌单
   //
   // 上面那些接口全是免登录的纯 GET 老接口，这一段不一样：走 gateway，

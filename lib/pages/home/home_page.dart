@@ -856,6 +856,12 @@ class _HomePageState extends State<HomePage>
         onTap: () => _playNetEaseList('私人 FM', source.personalFm),
       ),
       HomeShortcutItem(
+        icon: Icons.favorite_rounded,
+        label: '心动模式',
+        accent: const Color(0xFFF43F5E),
+        onTap: () => _playNetEaseList('心动模式', source.heartbeatMode),
+      ),
+      HomeShortcutItem(
         icon: Icons.leaderboard_rounded,
         label: '排行榜',
         accent: const Color(0xFFEC4899),

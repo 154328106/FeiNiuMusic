@@ -27,6 +27,10 @@ class KugouSource implements MusicSource {
 
   List<KugouPlaylist>? _rankCache;
 
+  /// 歌单广场缓存。它是抓官网 HTML 来的（一次 140KB），别每次进歌单页都抓。
+  /// [playlistSongs] 也靠这份认出「这个 id 是广场歌单」，要走另一个接口。
+  List<KugouPlaylist>? _plazaCache;
+
   /// 云端歌单缓存。首页歌单区块和「我喜欢」都从这份里取，避免同一次加载
   /// 里把 get_all_list 请求两遍。
   List<KugouPlaylist>? _cloudCache;
@@ -67,6 +71,7 @@ class KugouSource implements MusicSource {
   void reset() {
     _rankCache = null;
     _songCache = null;
+    _plazaCache = null;
     _cloudCache = null;
     _favoriteCache = null;
     _songInflight = null;
@@ -80,6 +85,24 @@ class KugouSource implements MusicSource {
     final lists = await _api.userPlaylists();
     _cloudCache = lists;
     return lists;
+  }
+
+  /// 歌单广场。单独 catch —— 它是抓官网 HTML 的，页面改版就解不出来，
+  /// 不能让它把同一次调用里的榜单和云端歌单一起带走。
+  Future<List<KugouPlaylist>> _plazaPlaylists() async {
+    final cached = _plazaCache;
+    if (cached != null) return cached;
+    try {
+      final lists = await _api.plazaPlaylists(limit: 30);
+      if (lists.isEmpty) {
+        debugPrint('[KugouSource] 歌单广场解析为空，官网页面可能改版了');
+      }
+      _plazaCache = lists;
+      return lists;
+    } on KugouApiException catch (e) {
+      debugPrint('[KugouSource] plazaPlaylists error: ${e.message}');
+      return const [];
+    }
   }
 
   /// 「我喜欢」。酷狗把它当成一张普通的云端歌单，靠名字认。
@@ -196,7 +219,14 @@ class KugouSource implements MusicSource {
           : await _api.rankList(limit: 20);
       if (ranks.isNotEmpty) _rankCache = ranks;
       // 登录了就把自己的歌单排前面 —— 那才是用户想点的。
-      final lists = [...await _cloudPlaylists(), ...ranks];
+      //
+      // 榜单只留 12 个：它有 20 个，全放会把歌单广场整个挤到 limit 之外，
+      // 而广场才是「发现新歌单」的那块。
+      final lists = [
+        ...await _cloudPlaylists(),
+        ...ranks.take(12),
+        ...await _plazaPlaylists(),
+      ];
       return [
         for (final p in lists.take(limit))
           SourcePlaylist(
@@ -220,12 +250,19 @@ class KugouSource implements MusicSource {
     final listId = int.tryParse(raw);
     if (listId == null) return const [];
     try {
-      // 云端歌单和榜单是两套接口，按 id 在哪份缓存里出现来分。
+      // 云端歌单 / 榜单 / 歌单广场是三套接口，按 id 在哪份缓存里出现来分。
+      // 广场放在最前面判：它的 specialid 和榜单 rankid 是两套编号，撞不上，
+      // 但落到 rankSongs 上只会拿到空列表，表现成「歌单是空的」。
+      final plaza = _plazaCache ?? const <KugouPlaylist>[];
       final cloud = _cloudCache ?? const <KugouPlaylist>[];
-      final isCloud = cloud.any((p) => p.id == listId);
-      final songs = isCloud
-          ? await _api.userPlaylistSongs(listId)
-          : await _api.rankSongs(listId, limit: 100);
+      final List<KugouSong> songs;
+      if (plaza.any((p) => p.id == listId)) {
+        songs = await _api.specialSongs(listId, limit: 100);
+      } else if (cloud.any((p) => p.id == listId)) {
+        songs = await _api.userPlaylistSongs(listId);
+      } else {
+        songs = await _api.rankSongs(listId, limit: 100);
+      }
       return [for (final s in songs) KugouPlaybackService.toSongEntity(s)];
     } on KugouApiException catch (e) {
       debugPrint('[KugouSource] playlistSongs error: ${e.message}');
