@@ -110,7 +110,7 @@ class KugouSource implements MusicSource {
     try {
       final songs = await _api.dailyRecommend();
       if (songs.isEmpty) lastError = '每日推荐没有返回歌曲';
-      return _toEntities(songs);
+      return [for (final s in songs) KugouPlaybackService.toSongEntity(s)];
     } on KugouApiException catch (e) {
       lastError = '每日推荐读取失败：${e.message}';
       debugPrint('[KugouSource] dailyRecommend error: ${e.message}');
@@ -126,7 +126,9 @@ class KugouSource implements MusicSource {
     }
     try {
       final songs = await _api.personalRadio();
-      if (songs.isNotEmpty) return _toEntities(songs);
+      if (songs.isNotEmpty) {
+        return [for (final s in songs) KugouPlaybackService.toSongEntity(s)];
+      }
       debugPrint('[KugouSource] 私人漫游无结果，退每日推荐');
     } on KugouApiException catch (e) {
       debugPrint('[KugouSource] personalRadio error: ${e.message}，退每日推荐');
