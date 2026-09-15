@@ -135,15 +135,43 @@ class KugouApiClient {
   // ---------------------------------------------------------------------
 
   /// 排行榜列表。
+  ///
+  /// 优先走 ocean 网关：实测给 **55 个**榜单（TOP500 / 国潮 / 民谣 / 纯音乐 /
+  /// 电音…），而移动站那个老接口只有 20 来个。两边的 rankid 是同一套编号
+  /// （8888 = TOP500 在两边都是它），所以取歌仍旧用 [rankSongs]。
+  ///
+  /// 老接口留作兜底 —— 网关要签名，签名方案哪天变了不至于整块榜单消失。
   Future<List<KugouPlaylist>> rankList({int limit = 12}) async {
+    try {
+      final json = await _gateway(
+        '/ocean/v6/rank/list',
+        params: const {'page': '1', 'pagesize': '80'},
+      );
+      final ranks = _parseRanks(_at(json, ['data', 'info']) as List?, limit);
+      if (ranks.isNotEmpty) {
+        debugPrint('[Kugou] 榜单 ${ranks.length} 个（ocean v6）');
+        return ranks;
+      }
+      debugPrint('[Kugou] ocean 榜单返回空，回落移动站');
+    } on KugouApiException catch (e) {
+      debugPrint('[Kugou] ocean 榜单失败，回落移动站：${e.message}');
+    }
     final json = await _getJson('https://m.kugou.com/rank/list?json=true');
-    final list = _at(json, ['rank', 'list']) as List? ?? const [];
+    final ranks = _parseRanks(_at(json, ['rank', 'list']) as List?, limit);
+    debugPrint('[Kugou] 榜单 ${ranks.length} 个（移动站兜底）');
+    return ranks;
+  }
+
+  /// 两个榜单接口的条目形状能共用一套解析：都是
+  /// `rankid` / `rankname` / `imgurl`（封面带 `{size}` 模板）。
+  static List<KugouPlaylist> _parseRanks(List? list, int limit) {
     final result = <KugouPlaylist>[];
-    for (final item in list.whereType<Map<String, dynamic>>()) {
+    for (final item in (list ?? const []).whereType<Map<String, dynamic>>()) {
       final id = (item['rankid'] ?? item['id']) as num?;
       final name = (item['rankname'] ?? item['name'])?.toString() ?? '';
       if (id == null || name.isEmpty) continue;
-      var cover = (item['imgurl'] ?? item['banner7url'])?.toString();
+      var cover = (item['imgurl'] ?? item['img_cover'] ?? item['banner7url'])
+          ?.toString();
       if (cover != null) cover = cover.replaceAll('{size}', '400');
       result.add(
         KugouPlaylist(
@@ -156,6 +184,61 @@ class KugouApiClient {
       if (result.length >= limit) break;
     }
     return result;
+  }
+
+  /// 每日推荐。**免登录就给 30 首**（2026-09-16 实测，mid 传假设备也照给）。
+  ///
+  /// 歌在 `data.song_list`，字段是 `hash` / `filename` / `author_name`，
+  /// [KugouSong.fromJson] 现成就认。
+  Future<List<KugouSong>> dailyRecommend() async {
+    final json = await _gateway(
+      '/everyday_song_recommend',
+      baseUrl: 'https://everydayrec.service.kugou.com',
+      params: const {'platform': 'android'},
+    );
+    final songs = _toSongs(_at(json, ['data', 'song_list']) as List?);
+    debugPrint('[Kugou] 每日推荐 ${songs.length} 首');
+    return songs;
+  }
+
+  /// 私人漫游。
+  ///
+  /// **要登录态**：未登录时一律 `error_code 200101`，而且和参数无关 ——
+  /// 2026-09-16 试过六种参数组合（mode / song_pool_id / userid / platform /
+  /// area_code 全给上）结果一模一样，所以别再往参数上找原因。
+  /// [_baseParams] 登录后会自动带 token / userid，这里不用额外传。
+  ///
+  /// 响应形状没能预先取到样本（未登录拿不到），所以几个候选键都试；
+  /// 真机跑一次看日志里的 `[Kugou] 私人漫游` 就知道命中了哪个。
+  Future<List<KugouSong>> personalRadio() async {
+    final json = await _gateway(
+      '/v2/personal_recommend',
+      baseUrl: 'https://persnfm.service.kugou.com',
+      params: const {'mode': 'normal', 'song_pool_id': '0'},
+    );
+    final code = (json['error_code'] as num?)?.toInt();
+    if (code != null && code != 0) {
+      throw KugouApiException('私人漫游不可用（error_code=$code）', code: code);
+    }
+    for (final path in const [
+      ['data', 'song_list'],
+      ['data', 'songs'],
+      ['data', 'info'],
+      ['data', 'list'],
+    ]) {
+      final songs = _toSongs(_at(json, path) as List?);
+      if (songs.isNotEmpty) {
+        debugPrint('[Kugou] 私人漫游 ${songs.length} 首（命中 ${path.join('.')}）');
+        return songs;
+      }
+    }
+    // data 直接是数组的情况。用 `is List` 而不是 `as List?` —— 接口在拒绝时
+    // 会把 data 填成空字符串（`{"data":"","error_code":200101}`），
+    // 强转会抛 TypeError。
+    final raw = json['data'];
+    final songs = _toSongs(raw is List ? raw : null);
+    debugPrint('[Kugou] 私人漫游 ${songs.length} 首（data 非对象形状）');
+    return songs;
   }
 
   /// 榜单内的歌。

@@ -13,6 +13,7 @@ import '../../app/services/feiniu/api_models.dart';
 import '../../app/services/player_service.dart';
 import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';
+import '../../app/services/source/kugou_source.dart';
 import '../../app/services/source/netease_source.dart';
 import '../../app/state/settings_state.dart';
 import '../../app/state/song_state.dart';
@@ -116,7 +117,8 @@ class _HomePageState extends State<HomePage>
   Timer? _roamAutoTimer;
   bool _roamAutoBusy = false;
 
-  /// 首页快捷入口（每日推荐 / 私人FM / 心动模式）是否正在装队列。
+  /// 首页「一点就整队播放」类入口是否正在装队列（网易云的每日推荐 / 私人FM /
+  /// 心动模式，酷狗的每日推荐 / 私人漫游）。
   ///
   /// 这几个入口一点就是**整队**一百多首，而队列里每一首都要向第三方音源
   /// 要一次地址。实测连点五下心动模式，8 秒内 GD 音乐台被打了近 70 次 ——
@@ -795,12 +797,47 @@ class _HomePageState extends State<HomePage>
     Navigator.of(context).pushNamed(AppRoutes.playlists);
   }
 
-  /// 四个快捷入口。飞牛是曲库维度（歌单/歌手/专辑/风格），网易云换成它
-  /// 自己有的那几样，没有的一律不放 —— 摆个点进去是空的入口更糟。
+  /// 首页快捷入口，按源给不同的一组。飞牛是曲库维度（歌单/歌手/专辑/风格），
+  /// 网易云和酷狗各换成它自己有的那几样，**没有的能力一律不放** ——
+  /// 摆个点进去是空的入口更糟。
   List<HomeShortcutItem> _shortcutItems() {
     // 飞牛之外的源没有歌手 / 专辑 / 风格那套曲库概念，摆着点进去是空的 ——
     // 网易云那次已经这么改过，QQ 这次漏了，还落到飞牛那一套上，点「歌单」
     // 直接报 "No host specified in URI"（访客模式压根没连 NAS）。
+    // 酷狗比扣扣音乐多两样：每日推荐（免登录）和私人漫游（要登录，
+    // 拿不到会退每日推荐）。同样遵循「没有的能力不摆出来」。
+    if (_source.id == 'kugou') {
+      final source = KugouSource.instance;
+      return [
+        HomeShortcutItem(
+          icon: Icons.wb_sunny_rounded,
+          label: '每日推荐',
+          accent: const Color(0xFFF97316),
+          onTap: () => _playSourceList('每日推荐', source.dailyRecommend),
+        ),
+        HomeShortcutItem(
+          icon: Icons.radio_rounded,
+          label: '私人漫游',
+          accent: const Color(0xFF14B8A6),
+          onTap: () => _playSourceList('私人漫游', source.personalRadio),
+        ),
+        HomeShortcutItem(
+          icon: Icons.queue_music_rounded,
+          label: '歌单',
+          accent: const Color(0xFF3B82F6),
+          onTap: () => _openSourcePlaylists(
+            '${source.label}歌单',
+            () => source.playlists(limit: 30),
+          ),
+        ),
+        HomeShortcutItem(
+          icon: Icons.search_rounded,
+          label: '搜索',
+          accent: const Color(0xFFEC4899),
+          onTap: _openSearch,
+        ),
+      ];
+    }
     if (_source.id != 'feiniu' && _source.id != 'netease') {
       final source = _source;
       return [
@@ -855,19 +892,19 @@ class _HomePageState extends State<HomePage>
         icon: Icons.wb_sunny_rounded,
         label: '每日推荐',
         accent: const Color(0xFFF97316),
-        onTap: () => _playNetEaseList('每日推荐', source.dailyRecommend),
+        onTap: () => _playSourceList('每日推荐', source.dailyRecommend),
       ),
       HomeShortcutItem(
         icon: Icons.radio_rounded,
         label: '私人FM',
         accent: const Color(0xFF14B8A6),
-        onTap: () => _playNetEaseList('私人 FM', source.personalFm),
+        onTap: () => _playSourceList('私人 FM', source.personalFm),
       ),
       HomeShortcutItem(
         icon: Icons.favorite_rounded,
         label: '心动模式',
         accent: const Color(0xFFF43F5E),
-        onTap: () => _playNetEaseList('心动模式', source.heartbeatMode),
+        onTap: () => _playSourceList('心动模式', source.heartbeatMode),
       ),
       HomeShortcutItem(
         icon: Icons.leaderboard_rounded,
@@ -908,7 +945,7 @@ class _HomePageState extends State<HomePage>
   ///
   /// 这两样没有对应的列表页 —— 点了就是要听，先筛掉拿不到地址的再起播，
   /// 否则队列会卡在第一首不动。
-  Future<void> _playNetEaseList(
+  Future<void> _playSourceList(
     String label,
     Future<List<SongEntity>> Function() loader,
   ) async {
@@ -925,7 +962,13 @@ class _HomePageState extends State<HomePage>
         AppToast.showGlobal('$label暂无内容', type: ToastType.error);
         return;
       }
-      final queue = await _source.prepareQueue(songs);
+      // **先按队列上限切，再去解地址。** 顺序反了（原来就是）的话：
+      // prepareQueue 把 120+ 首全解一遍，playQueue 里的 _capQueue 再截到
+      // 上限（实测 80），多解的四十多首直接扔掉 —— 而每一首都是一次
+      // 第三方音源请求。startIndex 恒为 0，所以取头部就等于 _capQueue 的结果。
+      final cap = AppPlaybackQueueSettings.maxQueueLength.value;
+      final trimmed = songs.length > cap ? songs.sublist(0, cap) : songs;
+      final queue = await _source.prepareQueue(trimmed);
       if (!mounted) return;
       if (queue.isEmpty) {
         AppToast.showGlobal('$label里的歌都取不到播放地址', type: ToastType.error);

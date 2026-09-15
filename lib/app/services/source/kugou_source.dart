@@ -105,6 +105,42 @@ class KugouSource implements MusicSource {
     }
   }
 
+  /// 每日推荐。免登录可用。
+  Future<List<SongEntity>> dailyRecommend() async {
+    try {
+      final songs = await _api.dailyRecommend();
+      if (songs.isEmpty) lastError = '每日推荐没有返回歌曲';
+      return _toEntities(songs);
+    } on KugouApiException catch (e) {
+      lastError = '每日推荐读取失败：${e.message}';
+      debugPrint('[KugouSource] dailyRecommend error: ${e.message}');
+      return const [];
+    }
+  }
+
+  /// 私人漫游。要登录；拿不到就退每日推荐 —— 空着一个入口比给点别的更糟。
+  Future<List<SongEntity>> personalRadio() async {
+    if (!isLoggedIn) {
+      lastError = '私人漫游需要先登录酷狗';
+      return const [];
+    }
+    try {
+      final songs = await _api.personalRadio();
+      if (songs.isNotEmpty) return _toEntities(songs);
+      debugPrint('[KugouSource] 私人漫游无结果，退每日推荐');
+    } on KugouApiException catch (e) {
+      debugPrint('[KugouSource] personalRadio error: ${e.message}，退每日推荐');
+    }
+    final fallback = await dailyRecommend();
+    if (fallback.isEmpty) {
+      lastError = '私人漫游和每日推荐都读不到';
+    } else {
+      // 别静默替换：用户点的是漫游，给的是推荐，得让他知道。
+      lastError = '私人漫游暂时没有个性化结果，先放每日推荐';
+    }
+    return fallback;
+  }
+
   /// 「我喜欢」。酷狗把它当成一张普通的云端歌单，靠名字认。
   Future<List<SongEntity>> _favorites() async {
     if (!isLoggedIn) return const [];
