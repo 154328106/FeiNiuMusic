@@ -117,15 +117,6 @@ class _HomePageState extends State<HomePage>
   Timer? _roamAutoTimer;
   bool _roamAutoBusy = false;
 
-  /// 首页「一点就整队播放」类入口是否正在装队列（网易云的每日推荐 / 私人FM /
-  /// 心动模式，酷狗的每日推荐 / 私人漫游）。
-  ///
-  /// 这几个入口一点就是**整队**一百多首，而队列里每一首都要向第三方音源
-  /// 要一次地址。实测连点五下心动模式，8 秒内 GD 音乐台被打了近 70 次 ——
-  /// 那是公益服务，酷狗那几家早就做了串行 + 350ms + 排队上限，这里反而
-  /// 是全链最敞的口子。所以在途期间直接忽略重复点击。
-  bool _playListBusy = false;
-
   /// 轮播间隔。每一跳都是一次 roam-next 网络请求，太密既费流量也没意义。
   static const Duration _roamAutoInterval = Duration(minutes: 2);
 
@@ -216,7 +207,10 @@ class _HomePageState extends State<HomePage>
       return;
     }
     if (AppLayoutSettings.playerRouteActive.value) return;
-    if (_heroIsPlaying) return;
+    // 在播**或暂停**都不换 —— 原来只判 _heroIsPlaying，于是暂停期间那个
+    // 两分钟的定时器照样把卡片上的歌换掉了。用户明确要求：当前这首还在
+    // 播放器里（不管在播还是停着），就别刷成别的歌。
+    if (_heroIsCurrentTrack) return;
     _roamAutoBusy = true;
     unawaited(
       _refreshRoam(silent: true).whenComplete(() => _roamAutoBusy = false),
@@ -714,6 +708,17 @@ class _HomePageState extends State<HomePage>
   bool get _heroShowsNowPlaying {
     if (_player.currentSongSignal.value == null) return false;
     if (_player.isPlayingSignal.value) return true;
+    // **暂停不再只挽留 3 秒。**
+    //
+    // 原来 3 秒一过卡片就翻回漫游推荐那首，连带两个现象：卡片「自己刷走了」，
+    // 以及再点播放时 _togglePlayRoam 里的 playingThis 已经为 false，掉进
+    // _playRoam() 从头播漫游那首 —— 看着就是「暂停久了变成从头播」。
+    // 注释里记着上一次为同类问题把窗口从 0 延到 3 秒，显然还是不够；
+    // 正确的条件不是「刚暂停多久」而是「播放器还停在这首上没有」。
+    //
+    // 用 position > 0 而不是仅 currentSong != null：区分「暂停在半首歌上」
+    // 和「刚启动恢复了队列但一秒没播过」，后者该让漫游推荐正常出场。
+    if (_player.snapshot.value.position > Duration.zero) return true;
     final until = _heroLingerUntil;
     return until != null && DateTime.now().isBefore(until);
   }
@@ -766,11 +771,30 @@ class _HomePageState extends State<HomePage>
   /// 展示漫游推荐时不挂这个：那首歌还没开始放，点整卡没有合理去处，
   /// 让用户只能点按钮反而更清楚。卡片内的播放/换一首按钮在上层，会先
   /// 吃掉点击，不会误触发。
+  /// 大卡片空白处的点击。
+  ///
+  /// 分两种语义：
+  /// - 正在播（或暂停在这首上）→ 进播放/歌词页，看当前这首；
+  /// - 没在播 → 把这张卡背后的**那一整条队列**摊开成列表。卡片上只露一首，
+  ///   但它本来就是从一个队列里挑出来的，看不到其余几十首挺可惜。
+  ///
+  /// 队列是空的时候不挂手势 —— 点开一个空列表比点不动更糟。
   Widget _wrapHeroTap(Widget banner) {
-    if (!_heroShowsNowPlaying) return banner;
+    if (_heroShowsNowPlaying) {
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => Navigator.of(context).pushNamed(AppRoutes.player),
+        child: banner,
+      );
+    }
+    final queue = _roamQueue.value;
+    if (queue.isEmpty) return banner;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () => Navigator.of(context).pushNamed(AppRoutes.player),
+      onTap: () => _openSourceSongList(
+        _heroDisplayLabel,
+        () async => _roamQueue.value,
+      ),
       child: banner,
     );
   }
@@ -894,20 +918,22 @@ class _HomePageState extends State<HomePage>
         icon: Icons.wb_sunny_rounded,
         label: '每日推荐',
         accent: const Color(0xFFF97316),
-        onTap: () => _playSourceList('每日推荐', source.dailyRecommend),
+        // 改成先出列表：这两个入口一点就是装一百多首的整队，要等好几秒才
+        // 出声，期间界面毫无反应 —— 用户的原话是「点完它半天没反应，还以为
+        // 死机了」。出列表是立刻的，而且 SourceFeedPage 只从你点中的位置往后
+        // 解 25 首，比原来进来就解整队还省。
+        onTap: () => _openSourceSongList('每日推荐', source.dailyRecommend),
       ),
       HomeShortcutItem(
         icon: Icons.radio_rounded,
         label: '私人FM',
         accent: const Color(0xFF14B8A6),
-        onTap: () => _playSourceList('私人 FM', source.personalFm),
+        onTap: () => _openSourceSongList('私人 FM', source.personalFm),
       ),
-      HomeShortcutItem(
-        icon: Icons.favorite_rounded,
-        label: '心动模式',
-        accent: const Color(0xFFF43F5E),
-        onTap: () => _playSourceList('心动模式', source.heartbeatMode),
-      ),
+      // 心动模式的入口按用户要求撤掉（2026-09-16）。
+      // `NetEaseSource.heartbeatMode()` 和它那条接口链都留着 —— 实测是通的
+      // （`/api/playmode/intelligence/list`，见它的注释），要加回来只是这里
+      // 补一个 HomeShortcutItem 的事，别把下面的实现一起删了。
       HomeShortcutItem(
         icon: Icons.leaderboard_rounded,
         label: '排行榜',
@@ -927,11 +953,14 @@ class _HomePageState extends State<HomePage>
     ];
   }
 
-  /// 打开「某个源的一次性歌曲列表」页（酷狗每日推荐 / 私人漫游）。
+  /// 打开「某个源的一次性歌曲列表」页。
   ///
-  /// 和 [_playSourceList] 的区别：那个一点就起播整队，这个先让你看见列表、
-  /// 点哪首播哪首。除了符合直觉，还顺带省请求 —— [SourceFeedPage] 只从你
-  /// 点中的位置往后解 25 首，而不是进来就把整份都解一遍。
+  /// 首页那几个「一点就是一批歌」的入口都走这里（网易云每日推荐 / 私人FM，
+  /// 酷狗每日推荐 / 私人漫游，以及没在播时点漫游大卡片）。
+  ///
+  /// 先出列表而不是直接起播，有两个好处：点下去**立刻**有反应（原来要等
+  /// 几秒装完整队才出声，看着像卡死），以及 [SourceFeedPage] 只从你点中的
+  /// 位置往后解 25 首，比进来就把整份解一遍省得多。
   void _openSourceSongList(
     String title,
     Future<List<SongEntity>> Function() loader,
@@ -959,46 +988,13 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  /// 拉一批网易云的歌直接开播（每日推荐 / 私人 FM）。
-  ///
-  /// 这两样没有对应的列表页 —— 点了就是要听，先筛掉拿不到地址的再起播，
-  /// 否则队列会卡在第一首不动。
-  Future<void> _playSourceList(
-    String label,
-    Future<List<SongEntity>> Function() loader,
-  ) async {
-    // 在途就直接回绝，别再起第二队 —— 原因见 [_playListBusy]。
-    if (_playListBusy) {
-      AppToast.showGlobal('正在加载$label，稍等一下', type: ToastType.info);
-      return;
-    }
-    _playListBusy = true;
-    try {
-      final songs = await loader();
-      if (!mounted) return;
-      if (songs.isEmpty) {
-        AppToast.showGlobal('$label暂无内容', type: ToastType.error);
-        return;
-      }
-      // **先按队列上限切，再去解地址。** 顺序反了（原来就是）的话：
-      // prepareQueue 把 120+ 首全解一遍，playQueue 里的 _capQueue 再截到
-      // 上限（实测 80），多解的四十多首直接扔掉 —— 而每一首都是一次
-      // 第三方音源请求。startIndex 恒为 0，所以取头部就等于 _capQueue 的结果。
-      final cap = AppPlaybackQueueSettings.maxQueueLength.value;
-      final trimmed = songs.length > cap ? songs.sublist(0, cap) : songs;
-      final queue = await _source.prepareQueue(trimmed);
-      if (!mounted) return;
-      if (queue.isEmpty) {
-        AppToast.showGlobal('$label里的歌都取不到播放地址', type: ToastType.error);
-        return;
-      }
-      _player.playQueue(queue, 0);
-    } finally {
-      // finally 而不是放在末尾：中间任何一步抛异常，标志位都得放掉，
-      // 否则这个入口就永久点不动了。
-      _playListBusy = false;
-    }
-  }
+  // `_playSourceList`（一点就起播整队）已经删掉：首页那五个入口全改成先出
+  // 列表了，它零调用点。它身上的两处防护也跟着没了必要 ——
+  //   · 在途防抖（_playListBusy）：出列表是立刻的，不再有「连点各建一条
+  //     120 首队列」这回事；点歌那步的防抖由 SourceFeedPage 的 _preparing 管。
+  //   · 先截断再解析：SourceFeedPage 本来就只从点中的位置往后解 25 首，
+  //     比「按队列上限截断再全解」更省。
+  // 要恢复「一点就播」的话去 git 历史里翻，别照着记忆重写。
 
   /// 右上角搜索 → 综合搜索页。搜的是当前源：网易云走网易云的搜索页。
   void _openSearch() {

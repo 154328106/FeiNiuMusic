@@ -446,30 +446,29 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
     );
   }
 
-  /// 卡片底部那条进度。只在播这首时出现。
+  /// 围着播放按钮的进度环。只在播这首时出现。
   ///
-  /// 做成贴着卡片下沿的 2px 细条，而不是给按钮套进度环 —— 按钮上已经有
-  /// 掠光和雷达动效了，再叠一圈会糊成一团。
-  Widget _buildProgressBar(ColorScheme scheme) {
+  /// 选圆环而不是「封面圆角框描边」：圆角矩形的描边进度得自写 CustomPainter
+  /// （算圆角弧长、按比例截断路径），而底栏的迷你播放器早就用同样的圆环了，
+  /// 形态是验证过的。[size] 要比按钮本身大一点，环才不会压在按钮边上。
+  Widget _buildProgressRing(ColorScheme scheme, double size) {
     if (!widget.isCurrentTrack) return const SizedBox.shrink();
     return ValueListenableBuilder<PlaybackSnapshot>(
       valueListenable: PlayerService.instance.snapshot,
       builder: (context, snap, _) {
         final total = snap.duration?.inMilliseconds ?? 0;
-        // 时长还没拿到时不画 —— 画个 0 宽的条会闪一下。
+        // 时长还没拿到时不画：画个 value=0 的环会先闪一下再跳。
         if (total <= 0) return const SizedBox.shrink();
         final ratio = (snap.position.inMilliseconds / total).clamp(0.0, 1.0);
-        return Align(
-          alignment: Alignment.bottomLeft,
-          child: FractionallySizedBox(
-            widthFactor: ratio,
-            child: Container(
-              height: 2,
-              decoration: BoxDecoration(
-                color: scheme.primary.withValues(alpha: 0.85),
-                borderRadius: BorderRadius.circular(1),
-              ),
-            ),
+        return SizedBox(
+          width: size,
+          height: size,
+          child: CircularProgressIndicator(
+            value: ratio,
+            strokeWidth: 2,
+            backgroundColor: scheme.onSurface.withValues(alpha: 0.12),
+            color: scheme.primary,
+            strokeCap: StrokeCap.round,
           ),
         );
       },
@@ -563,18 +562,28 @@ class _CompactHeroCardState extends State<_CompactHeroCard>
                   // 不了，那是它的设计而不是 bug。这里改成不传 onRefresh：
                   // 点击一律交给 onPlay（首页那边是 _togglePlayRoam，本来就
                   // 会判断「点的是当前播放那首就暂停」），换一首挪到长按。
-                  RadarPlayButton(
-                    isPlaying: widget.isPlaying,
-                    onPlay: widget.onPlay,
-                    onLongPress: widget.onRefresh,
+                  // 按钮 48，环 56 —— 留 4px 间距，环不会贴在按钮边上。
+                  // 环用 IgnorePointer，点击照常穿到按钮上。
+                  SizedBox(
+                    width: 56,
+                    height: 56,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        IgnorePointer(
+                          child: _buildProgressRing(scheme, 56),
+                        ),
+                        RadarPlayButton(
+                          isPlaying: widget.isPlaying,
+                          onPlay: widget.onPlay,
+                          onLongPress: widget.onRefresh,
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
-          ),
-          // 进度条放最后 = 画在最上层，压在掠光和内容之上。
-          Positioned.fill(
-            child: IgnorePointer(child: _buildProgressBar(scheme)),
           ),
         ],
       ),
