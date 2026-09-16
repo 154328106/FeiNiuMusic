@@ -477,58 +477,64 @@ class _SongsPageState extends State<SongsPage>
     );
   }
 
-  /// 一次最多为多少首歌预取地址。
+  /// 后台每批为多少首歌预取地址。只用在**起播之后**。
+  static const int _backgroundBatch = 10;
+
+  /// 点中的那首放不了时，往后再试几首。
   ///
-  /// 整个列表全预取意味着为其中每首会员曲都问一次第三方音源 —— 一次收听
-  /// 根本听不到那么后面，纯属白花请求。从点中的位置往后取一段就够。
-  static const int _prepareWindow = 25;
+  /// 不能只试一首：QQ 那边一半以上的歌拿不到地址，试一首大概率还是空。
+  /// 也不能试太多，那就退回「点一下等半天」了。
+  static const int _fallbackProbe = 5;
 
   Future<void> _playFromSource(List<SongEntity> songs, int index) async {
     final tapped = songs[index];
-    final head = songs.skip(index).take(_prepareWindow).toList();
-    final queue = await _source.prepareQueue(head);
-    if (!mounted || queue.isEmpty) return;
-
-    // 队列只给这一段，剩下的等播到队尾再续。
-    //
-    // 把整个列表塞进队列是没用的：播放器会为整个队列构建播放源，窗口外的
-    // 歌照样被逐个解析，音源请求一点没省。
-    await _player.playQueue(queue, _startIndexFor(head, 0, tapped, queue));
-    // 续接器要在 playQueue 之后挂 —— playQueue 内部会先清空它。
-    var offset = index + _prepareWindow;
-    _player.queueExtender = () async {
-      if (offset >= songs.length) return const <SongEntity>[];
-      final next = songs.skip(offset).take(_prepareWindow).toList();
-      offset += _prepareWindow;
-      return _source.prepareQueue(next);
-    };
-  }
-
-  /// 筛完之后点中的那首落在哪。
-  ///
-  /// 原来「找不到就从 0 开始」。QQ 那边一半以上的歌拿不到地址，于是点谁都
-  /// 从头播 —— 看着就像「点了没反应，永远播同一首」。改成往后找**原列表里
-  /// 第一首还留着的歌**：语义上就是「这首放不了，接着往下播」。
-  int _startIndexFor(
-    List<SongEntity> original,
-    int index,
-    SongEntity tapped,
-    List<SongEntity> queue,
-  ) {
-    final direct = queue.indexWhere((s) => s.id == tapped.id);
-    if (direct >= 0) return direct;
-    final kept = {for (final s in queue) s.id};
-    for (var i = index + 1; i < original.length; i++) {
-      if (!kept.contains(original[i].id)) continue;
-      final moved = queue.indexWhere((s) => s.id == original[i].id);
-      if (moved >= 0) {
-        AppToast.showGlobal('这首暂时放不了，已跳到下一首');
-        return moved;
+    // **只同步解点中的那一首**，理由同 SourceFeedPage._play：播放器本来就
+    // 逐首按需解地址，这一轮批量解析只是预筛。原来同步解 25 首，没有会员的
+    // 账号等于 25 首全过公益源、每首约 1 秒 —— 这就是「歌曲页点开要等很久，
+    // 过一会（缓存热了）又好了」的原因。
+    var queue = await _source.prepareQueue([tapped]);
+    var nextOffset = index + 1;
+    if (queue.isEmpty) {
+      // 点中的这首真放不了：往后再试一小段，保住原来「已跳到下一首」的
+      // 行为 —— 那条对 QQ 很关键，不能因为改快了就丢掉。
+      final probe = songs.skip(nextOffset).take(_fallbackProbe).toList();
+      if (probe.isNotEmpty) {
+        queue = await _source.prepareQueue(probe);
+        nextOffset += probe.length;
       }
+      if (!mounted) return;
+      if (queue.isEmpty) {
+        AppToast.showGlobal('这首暂时放不了');
+        return;
+      }
+      AppToast.showGlobal('这首暂时放不了，已跳到下一首');
     }
-    AppToast.showGlobal('这首暂时放不了');
-    return 0;
+    if (!mounted) return;
+
+    // 后台填充 + 队尾续接共用这个游标。不用加锁：取批次和推进游标之间
+    // 没有 await（同 SourceFeedPage 里那段注释）。
+    Future<List<SongEntity>> nextBatch() async {
+      if (nextOffset >= songs.length) return const <SongEntity>[];
+      final next = songs.skip(nextOffset).take(_backgroundBatch).toList();
+      nextOffset += _backgroundBatch;
+      return _source.prepareQueue(next);
+    }
+
+    await _player.playQueueFilledToLimit(
+      queue,
+      0,
+      fetchMore: (_) => nextBatch(),
+    );
+    // 续接器要在上面那句之后挂 —— playQueue 内部会先清空它。
+    _player.queueExtender = nextBatch;
   }
+
+  // `_startIndexFor` 已删（改成只解点中那一首后，它没有调用点了）。
+  //
+  // 它解决的问题仍然存在，逻辑挪进了 [_playFromSource] 的 `_fallbackProbe`
+  // 那一段，别再退回原样：**「筛完找不到点中那首就从 0 开始」是错的** ——
+  // QQ 那边一半以上的歌拿不到地址，于是点谁都从头播，表现成「点了没反应，
+  // 永远播同一首」。正确语义是「这首放不了，接着往下播」。
 
   void _showSortSheet() {
     showModalBottomSheet(

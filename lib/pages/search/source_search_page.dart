@@ -57,19 +57,43 @@ class _SourceSearchPageState extends State<SourceSearchPage> {
     });
   }
 
+  /// 后台每批为多少首歌预取地址。只用在起播之后。
+  static const int _backgroundBatch = 10;
+
   Future<void> _play(int index) async {
     if (_preparing) return;
     final tapped = _results[index];
     setState(() => _preparing = true);
     List<SongEntity> queue;
     try {
-      queue = await _source.prepareQueue(_results);
+      // **只同步解点中的那一首。** 原来是 `prepareQueue(_results)` ——
+      // 把**整个搜索结果**一次全解，连窗口都没有。没有会员的账号等于
+      // 几十首全过公益源、每首约 1 秒，点一下要等半分钟。
+      // 播放器本来就逐首按需解地址，这轮批量只是预筛（同 songs_page）。
+      queue = await _source.prepareQueue([tapped]);
     } finally {
       if (mounted) setState(() => _preparing = false);
     }
-    if (!mounted || queue.isEmpty) return;
-    final moved = queue.indexWhere((s) => s.id == tapped.id);
-    await _player.playQueue(queue, moved >= 0 ? moved : 0);
+    if (!mounted) return;
+    if (queue.isEmpty) {
+      AppToast.showGlobal('这首取不到播放地址', type: ToastType.error);
+      return;
+    }
+    var offset = index + 1;
+    Future<List<SongEntity>> nextBatch() async {
+      if (offset >= _results.length) return const <SongEntity>[];
+      final next = _results.skip(offset).take(_backgroundBatch).toList();
+      offset += _backgroundBatch;
+      return _source.prepareQueue(next);
+    }
+
+    await _player.playQueueFilledToLimit(
+      queue,
+      0,
+      fetchMore: (_) => nextBatch(),
+    );
+    // 续接器要挂在上面那句之后：playQueue 内部会先清空它。
+    _player.queueExtender = nextBatch;
   }
 
   @override

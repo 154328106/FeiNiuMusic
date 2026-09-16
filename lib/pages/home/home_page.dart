@@ -99,12 +99,12 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage>
     with SignalsMixin, PrimaryTabRefreshMixin {
-  /// 一次交给播放器的队列长度。
+  /// 后台每批为多少首歌预取地址。**只用在起播之后。**
   ///
-  /// 队列多长，第三方音源就要被问多少次 —— 播放器会为整个队列构建
-  /// 播放源，不是只解析当前这首。所以队列本身要短，播到尾部再靠
-  /// queueExtender 续下一段。
-  static const int _prepareWindow = 25;
+  /// 同步那一步只解要播的那一首 —— 播放器本来就逐首按需解地址，批量那轮
+  /// 只是预筛（剔掉没地址的歌免得队列卡住），不是播放的必要条件。
+  /// 批次小一点下一首就更早可用；大了第一次追加来得太晚。
+  static const int _backgroundBatch = 10;
 
   final FeiNiuApiClient _api = FeiNiuApiClient.instance;
   final PlayerService _player = PlayerService.instance;
@@ -633,11 +633,12 @@ class _HomePageState extends State<HomePage>
       // 一批 status=2）。真正的杠杆是队列本身要短。
       //
       // 队尾由播放器的漫游续接负责（_roamQueueExtender），听得到底自然会续。
-      final head = songs.take(_prepareWindow).toList();
-      final prepared = await _source.prepareQueue(head);
+      // 只同步解大图那一首。剩下的交给漫游续接器（_roamQueueExtender）——
+      // 这条路本来就有续接机制，不需要再叠一个后台填充。
+      final prepared = await _source.prepareQueue([first]);
       if (!mounted) return;
       if (prepared.isEmpty) {
-        AppToast.showGlobal('这批歌都取不到播放地址', type: ToastType.error);
+        AppToast.showGlobal('这首取不到播放地址', type: ToastType.error);
         return;
       }
       // 大图那首若被筛掉了就从头播，别把索引落在别人身上。
@@ -1198,21 +1199,30 @@ class _HomePageState extends State<HomePage>
         ? full.indexWhere((s) => s.id == song.id)
         : playIndex.clamp(0, full.length - 1);
     final from = start < 0 ? 0 : start;
-    queue = await _source.prepareQueue(
-      full.skip(from).take(_prepareWindow).toList(),
-    );
-    if (!mounted || queue.isEmpty) return;
-    final idx = song != null ? queue.indexWhere((s) => s.id == song.id) : 0;
-    await _player.playQueue(queue, idx >= 0 ? idx : 0);
-    // 续接器必须在 playQueue **之后**挂：playQueue 内部会先把 queueExtender
-    // 清空，先挂就等于没挂。
-    var offset = from + _prepareWindow;
-    _player.queueExtender = () async {
+    // **只同步解要播的那一首**，其余后台补。原来同步解 25 首，没有会员的
+    // 账号等于 25 首全过公益源、每首约 1 秒（同 songs_page / 搜索页）。
+    queue = await _source.prepareQueue([full[from]]);
+    if (!mounted) return;
+    if (queue.isEmpty) {
+      AppToast.showGlobal('这首取不到播放地址', type: ToastType.error);
+      return;
+    }
+    var offset = from + 1;
+    Future<List<SongEntity>> nextBatch() async {
       if (offset >= full.length) return const <SongEntity>[];
-      final next = full.skip(offset).take(_prepareWindow).toList();
-      offset += _prepareWindow;
+      final next = full.skip(offset).take(_backgroundBatch).toList();
+      offset += _backgroundBatch;
       return _source.prepareQueue(next);
-    };
+    }
+
+    await _player.playQueueFilledToLimit(
+      queue,
+      0,
+      fetchMore: (_) => nextBatch(),
+    );
+    // 续接器必须在上面那句**之后**挂：playQueue 内部会先把 queueExtender
+    // 清空，先挂就等于没挂。
+    _player.queueExtender = nextBatch;
   }
 
   /// 请求某一数据源的完整列表（按队列上限）。
