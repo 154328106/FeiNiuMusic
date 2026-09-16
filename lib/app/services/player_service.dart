@@ -1303,9 +1303,17 @@ class PlayerService with WidgetsBindingObserver {
     int cap,
     int gen,
   ) async {
-    final acc = <SongEntity>[];
+    // **每批到手就追加，不攒到最后一次性给。**
+    //
+    // 原来是攒满 cap 再 `_appendToQueue(acc)` 一次 —— 用户实测从点歌到列表
+    // 出现要等约 16 秒，这期间队列里一直只有点中的那 1 首（看着像"没获取到"）。
+    // 现在第一批（10 首）约两秒就进队列，下一首立刻可用。
+    //
+    // 能这么改的前提是上面 `_appendToQueue` 已经不再重载引擎 —— 否则每批
+    // 追加都卡顿一下，8 批就是 8 下，比等 16 秒更糟。
+    var added = 0;
     var page = 1;
-    while (base.length + acc.length < cap) {
+    while (base.length + added < cap) {
       // **每批之前都要检查代次。**
       //
       // 原来只在循环跑完后检查一次，于是用户切到别的歌单后，这个循环还会
@@ -1319,17 +1327,18 @@ class PlayerService with WidgetsBindingObserver {
         }
         return;
       }
+      final List<SongEntity> next;
       try {
-        final next = await fetchMore(page++);
-        if (next.isEmpty) break;
-        acc.addAll(next);
+        next = await fetchMore(page++);
       } catch (_) {
         break; // 网络/分页失败即停止填充，不影响已开始的播放
       }
+      if (next.isEmpty) break;
+      // 取回来之后再查一次：这一批花了几秒，期间用户可能已经换了队列。
+      if (gen != _queueGeneration) return;
+      added += next.length;
+      await _appendToQueue(next);
     }
-    if (acc.isEmpty) return;
-    if (gen != _queueGeneration) return; // 用户已切换播放，丢弃本次填充
-    await _appendToQueue(acc);
   }
 
   void _maybePrefetchByRemaining(Duration positionValue) {
@@ -3630,9 +3639,26 @@ class PlayerService with WidgetsBindingObserver {
       newCurrentIdx = capped.$2;
     }
     queue.value = allSongs;
-
-    // 重建引擎路由并重载当前 run（保持位置/播放态）。
+    // 引擎路由表跟着变长。这一步只是改两个数组，不碰引擎。
     _applyEngineKinds(await _computeEngineKinds(allSongs));
+
+    // **纯追加到队尾时不重载引擎。**
+    //
+    // 原来无条件走 `_activateLogicalIndex(..., initialPosition: pos)`，那是
+    // 「停掉当前音源 → 重建 → seek 回原位 → 继续播」，听感上就是**卡顿一下**。
+    // 后台填充每追加一批就卡一下，用户实测能听出来。
+    //
+    // 而这一步本来就不必要：引擎只装载当前 run，逻辑层才是驱动者 ——
+    // 当前这首播完时 `_handleEngineCompleted` 会 `_advanceToLogicalIndex`，
+    // 该跨 run 就自己装载新 run。所以新追加的歌**不需要现在就进引擎**，
+    // 等播到了自然会装。代价只是它和当前这首之间不是同 run 的无缝衔接，
+    // 而那和平时跨 run 切歌是同一种体验。
+    //
+    // 只有索引发生位移时才必须重载：`_capQueue` 截断会把当前歌的下标挪走，
+    // 那时引擎里装的 run 和逻辑队列就对不上了。
+    final shifted = capped != null || newCurrentIdx != currentIdx;
+    if (!shifted) return;
+
     try {
       await _activateLogicalIndex(newCurrentIdx, initialPosition: pos);
       if (wasPlaying && !_activeEngine.playing) {
