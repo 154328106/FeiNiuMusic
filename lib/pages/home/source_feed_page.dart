@@ -143,7 +143,11 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
       return _source.prepareQueue(next);
     }
 
-    await _player.playQueueFilledToLimit(head, 0, fetchMore: (_) => nextBatch());
+    await _player.playQueueFilledToLimit(
+      head,
+      0,
+      fetchMore: (_) => nextBatch(),
+    );
     // 必须挂在上面那句**之后**：playQueue 内部第一件事就是把 queueExtender 清空。
     _player.queueExtender = nextBatch;
   }
