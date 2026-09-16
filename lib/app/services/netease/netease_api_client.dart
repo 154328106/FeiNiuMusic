@@ -588,6 +588,64 @@ class NetEaseApiClient {
         .toList();
   }
 
+  /// 歌单广场。**不需要登录**（2026-09-16 实测，weapi 裸调用就给）。
+  ///
+  /// [cat] 是分类名，取值来自 [playlistCategories]（实测 70 个：00后 / ACG /
+  /// R&B-Soul / 乡村 / KTV …），`全部` 表示不限。`more` 为 true 说明还有下一页，
+  /// 但这里只把歌单返回给调用方，翻页由 [offset] 控制。
+  Future<List<NetEasePlaylist>> plazaPlaylists({
+    String cat = '全部',
+    int limit = 30,
+    int offset = 0,
+  }) async {
+    final json = await _request('/api/playlist/list', {
+      'cat': cat,
+      'order': 'hot',
+      'limit': limit,
+      'offset': offset,
+      'total': true,
+    }, _Scheme.weapi);
+    return _toPlaylists(json['playlists'] as List?);
+  }
+
+  /// 精品歌单。也不需要登录。
+  ///
+  /// 它**不用 offset 翻页**，靠上一页最后一条的 `updateTime` 当 `lasttime`；
+  /// 首页传 0 即可。这里只取第一页，够首页用了。
+  Future<List<NetEasePlaylist>> highQualityPlaylists({
+    String cat = '全部',
+    int limit = 30,
+  }) async {
+    final json = await _request('/api/playlist/highquality/list', {
+      'cat': cat,
+      'limit': limit,
+      'lasttime': 0,
+      'total': true,
+    }, _Scheme.weapi);
+    return _toPlaylists(json['playlists'] as List?);
+  }
+
+  /// 歌单分类目录。实测 70 个。
+  Future<List<String>> playlistCategories() async {
+    final json = await _request(
+      '/api/playlist/catalogue',
+      const {},
+      _Scheme.weapi,
+    );
+    final sub = json['sub'] as List? ?? const [];
+    return [
+      for (final item in sub.whereType<Map<String, dynamic>>())
+        if ((item['name'] as String?)?.isNotEmpty ?? false)
+          item['name'] as String,
+    ];
+  }
+
+  static List<NetEasePlaylist> _toPlaylists(List? list) => (list ?? const [])
+      .whereType<Map<String, dynamic>>()
+      .map(NetEasePlaylist.fromJson)
+      .whereType<NetEasePlaylist>()
+      .toList();
+
   /// 推荐新歌。不需要登录。
   ///
   /// 返回里歌曲有时裹在 `song` 字段下、有时就是条目本身，两种都认。

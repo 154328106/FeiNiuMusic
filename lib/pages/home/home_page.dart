@@ -839,11 +839,17 @@ class _HomePageState extends State<HomePage>
           accent: const Color(0xFFF97316),
           onTap: () => _openSourceSongList('每日推荐', source.dailyRecommend),
         ),
+        // 这一格原来是「私人漫游」，2026-09-16 换成新碟。
+        //
+        // 原因：漫游的官方接口对这个账号一律 `error_code 200101`（已登录也
+        // 一样，大概率要有效 dfid），永远走兜底，内容和别的入口重复，等于
+        // 摆了个假入口。`personalRadio()` 的实现留着没删 —— 哪天 dfid 通了
+        // 补回一个 HomeShortcutItem 就行。
         HomeShortcutItem(
-          icon: Icons.radio_rounded,
-          label: '私人漫游',
+          icon: Icons.album_rounded,
+          label: '新碟',
           accent: const Color(0xFF14B8A6),
-          onTap: () => _openSourceSongList('私人漫游', source.personalRadio),
+          onTap: () => _openSourcePlaylists('新碟上架', source.albums),
         ),
         HomeShortcutItem(
           icon: Icons.queue_music_rounded,

@@ -31,6 +31,10 @@ class KugouSource implements MusicSource {
   /// [playlistSongs] 也靠这份认出「这个 id 是广场歌单」，要走另一个接口。
   List<KugouPlaylist>? _plazaCache;
 
+  /// 新碟缓存。同时也是 [playlistSongs] 认出「这个 id 是专辑」的依据 ——
+  /// 专辑要走 album/song，和歌单/榜单/广场都不是一个接口。
+  List<KugouPlaylist>? _albumCache;
+
   /// 云端歌单缓存。首页歌单区块和「我喜欢」都从这份里取，避免同一次加载
   /// 里把 get_all_list 请求两遍。
   List<KugouPlaylist>? _cloudCache;
@@ -72,6 +76,7 @@ class KugouSource implements MusicSource {
     _rankCache = null;
     _songCache = null;
     _plazaCache = null;
+    _albumCache = null;
     _cloudCache = null;
     _favoriteCache = null;
     _songInflight = null;
@@ -101,6 +106,28 @@ class KugouSource implements MusicSource {
       return lists;
     } on KugouApiException catch (e) {
       debugPrint('[KugouSource] plazaPlaylists error: ${e.message}');
+      return const [];
+    }
+  }
+
+  /// 新碟上架。免登录。返回的是 [SourcePlaylist]，点进去按专辑取歌。
+  Future<List<SourcePlaylist>> albums({int limit = 30}) async {
+    try {
+      final cached = _albumCache;
+      final list = cached ?? await _api.newAlbums(limit: limit);
+      _albumCache = list;
+      return [
+        for (final a in list)
+          SourcePlaylist(
+            id: '$id:${a.id}',
+            name: a.name,
+            coverId: a.coverUrl,
+            trackCount: a.trackCount,
+          ),
+      ];
+    } on KugouApiException catch (e) {
+      lastError = '新碟读取失败：${e.message}';
+      debugPrint('[KugouSource] albums error: ${e.message}');
       return const [];
     }
   }
@@ -294,13 +321,16 @@ class KugouSource implements MusicSource {
     final listId = int.tryParse(raw);
     if (listId == null) return const [];
     try {
-      // 云端歌单 / 榜单 / 歌单广场是三套接口，按 id 在哪份缓存里出现来分。
-      // 广场放在最前面判：它的 specialid 和榜单 rankid 是两套编号，撞不上，
-      // 但落到 rankSongs 上只会拿到空列表，表现成「歌单是空的」。
+      // 云端歌单 / 榜单 / 歌单广场 / 新碟是四套接口，按 id 在哪份缓存里
+      // 出现来分。挨个判而不是靠 id 范围猜：这几套编号各自独立，撞不上，
+      // 但一旦分错就是拿到空列表，表现成「点进去是空的」，很难归因。
       final plaza = _plazaCache ?? const <KugouPlaylist>[];
+      final albums = _albumCache ?? const <KugouPlaylist>[];
       final cloud = _cloudCache ?? const <KugouPlaylist>[];
       final List<KugouSong> songs;
-      if (plaza.any((p) => p.id == listId)) {
+      if (albums.any((p) => p.id == listId)) {
+        songs = await _api.albumSongs(listId, limit: 100);
+      } else if (plaza.any((p) => p.id == listId)) {
         songs = await _api.specialSongs(listId, limit: 100);
       } else if (cloud.any((p) => p.id == listId)) {
         songs = await _api.userPlaylistSongs(listId);

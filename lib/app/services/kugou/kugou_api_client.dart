@@ -186,6 +186,50 @@ class KugouApiClient {
     return result;
   }
 
+  /// 新碟上架。免签名、免登录（实测总量 1500 张）。
+  Future<List<KugouPlaylist>> newAlbums({int limit = 30}) async {
+    final json = await _getJson(
+      'https://mobilecdn.kugou.com/api/v3/album/list'
+      '?withsong=0&page=1&pagesize=$limit',
+    );
+    final list = _at(json, ['data', 'info']) as List? ?? const [];
+    final result = <KugouPlaylist>[];
+    for (final item in list.whereType<Map<String, dynamic>>()) {
+      final id = item['albumid'] as num?;
+      final name = item['albumname']?.toString() ?? '';
+      if (id == null || name.isEmpty) continue;
+      var cover = item['imgurl']?.toString();
+      if (cover != null) cover = cover.replaceAll('{size}', '400');
+      final singer = item['singername']?.toString() ?? '';
+      result.add(
+        KugouPlaylist(
+          id: id.toInt(),
+          // 专辑名后面缀上歌手：光看专辑名常常不知道是谁的。
+          name: singer.isEmpty ? name : '$name · $singer',
+          coverUrl: (cover == null || cover.isEmpty) ? null : cover,
+          trackCount: 0,
+        ),
+      );
+    }
+    debugPrint('[Kugou] 新碟 ${result.length} 张');
+    return result;
+  }
+
+  /// 专辑里的歌。
+  ///
+  /// **路径是单数 `album/song`。** 复数的 `album/songs` 返回
+  /// `Access Deny ! No Actions !`（2026-09-16 实测）—— Beans 包里那个字符串
+  /// 写的是复数，照抄会踩空。
+  Future<List<KugouSong>> albumSongs(int albumId, {int limit = 60}) async {
+    final json = await _getJson(
+      'https://mobilecdn.kugou.com/api/v3/album/song'
+      '?albumid=$albumId&page=1&pagesize=$limit',
+    );
+    final songs = _toSongs(_at(json, ['data', 'info']) as List?);
+    debugPrint('[Kugou] 专辑 $albumId 取到 ${songs.length} 首');
+    return songs;
+  }
+
   /// 每日推荐。**免登录就给 30 首**（2026-09-16 实测，mid 传假设备也照给）。
   ///
   /// 歌在 `data.song_list`，字段是 `hash` / `filename` / `author_name`，

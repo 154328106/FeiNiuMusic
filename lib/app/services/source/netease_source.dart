@@ -34,6 +34,10 @@ class NetEaseSource implements MusicSource {
   /// 「我喜欢的音乐」歌单 id：用户歌单里的第一个。
   int? _likedPlaylistId;
 
+  /// 歌单广场缓存。免登录且内容变化不快，一次会话取一遍就够 ——
+  /// 每次进「歌单」页都重拉，等于白打两个请求。
+  List<NetEasePlaylist>? _plazaCache;
+
   @override
   String get id => 'netease';
 
@@ -66,6 +70,7 @@ class NetEaseSource implements MusicSource {
   void reset() {
     _uid = null;
     _likedPlaylistId = null;
+    _plazaCache = null;
     // 在途的那几发是按旧账号发的，别让它们的结果被后来者领走。
     _inflight.clear();
     // 落盘的那份也要清，否则换账号后还会拿上一个人的 uid 去取收藏。
@@ -171,6 +176,33 @@ class NetEaseSource implements MusicSource {
       lastError = '读取歌单失败：${e.message}';
       debugPrint('[NetEaseSource] userPlaylists error: ${e.message}');
       return null;
+    }
+  }
+
+  /// 歌单广场（精品 + 全部分类的热门）。
+  ///
+  /// 单独 catch：广场是加分项，它挂了不该把「我的歌单」一起带走。
+  /// 精品放前面、普通热门跟后面，加起来够填满调用方给的 limit。
+  Future<List<NetEasePlaylist>> _plazaPlaylists(int limit) async {
+    final cached = _plazaCache;
+    if (cached != null) return cached;
+    try {
+      final hq = await _api.highQualityPlaylists(limit: 12);
+      final hot = await _api.plazaPlaylists(limit: limit);
+      final seen = <int>{};
+      final merged = <NetEasePlaylist>[
+        for (final p in [...hq, ...hot])
+          if (seen.add(p.id)) p,
+      ];
+      debugPrint(
+        '[NetEaseSource] 歌单广场 ${merged.length} 个'
+        '（精品 ${hq.length} + 热门 ${hot.length}）',
+      );
+      _plazaCache = merged;
+      return merged;
+    } on NetEaseApiException catch (e) {
+      debugPrint('[NetEaseSource] plazaPlaylists error: ${e.message}');
+      return const [];
     }
   }
 
@@ -360,9 +392,16 @@ class NetEaseSource implements MusicSource {
     try {
       final uid = await _ensureUid();
       // 登录了就给自己的歌单，否则退推荐歌单（这个接口不需要登录）。
-      final lists = uid != null
+      final mine = uid != null
           ? await _api.userPlaylists(uid)
           : await _api.personalizedPlaylists(limit: limit);
+      // 自己的歌单排前面，后面接歌单广场 —— 广场是纯发现向的，实测免登录
+      // 可用、还能翻页。精品那一份单独取：它按 lasttime 翻页，和普通广场
+      // 不是一套，混在一起翻页会乱，所以只取第一批放在前面当"精选"。
+      final lists = [
+        ...mine,
+        ...await _plazaPlaylists(limit),
+      ];
       final capped = lists.length <= limit ? lists : lists.sublist(0, limit);
       return capped
           .map(
