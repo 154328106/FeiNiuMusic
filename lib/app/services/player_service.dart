@@ -650,7 +650,20 @@ class PlayerService with WidgetsBindingObserver {
     // 引擎相同但不在同一 run，必须走重新激活而不是 seekToNext）。
     if (cur >= 0 && cur < list.length) {
       final bounds = _runBounds(logicalIndex);
-      final sameRun = cur >= bounds.start && cur <= bounds.end;
+      // **光看逻辑 run 不够，还要确认引擎真的装载了目标那一首。**
+      //
+      // `_runBounds` 是按 `_engineKinds`（逻辑路由表）算的，而
+      // `_appendToQueue` 追加时**不再重载引擎**（为了不卡顿），所以引擎实际
+      // 装载的序列可能比逻辑 run 短得多 —— 后台填充时逻辑 run 是 [0..79]，
+      // 引擎里却只有点中的那 1 首。只判 sameRun 的话会对一个没有下一首的
+      // 引擎调 seekToNext，什么都不会发生：表现就是「点封面不切歌」，
+      // 以及更严重的「第一首播完就停住」。
+      //
+      // 下面 `skipToIndex` 那处本来就多了这层检查，是对的写法，这里照它补。
+      final engineHasIt =
+          logicalIndex >= _activeRunStart &&
+          logicalIndex < _activeRunStart + _activeEngine.sequenceLength;
+      final sameRun = cur >= bounds.start && cur <= bounds.end && engineHasIt;
       if (sameRun) {
         await _activeEngine.seekToNext();
         if (shouldResume && !_activeEngine.playing) {
@@ -2364,7 +2377,12 @@ class PlayerService with WidgetsBindingObserver {
     // 同 run 判定用 _runBounds 覆盖范围（转码歌是单例 run，prev 虽同引擎但
     // 不在当前 run 时必须走重新激活，不能 seekToPrevious 跨到别首转码歌）。
     final bounds = _runBounds(idx);
-    final sameRun = prev >= bounds.start && prev <= bounds.end;
+    // 同样要确认引擎装载了上一首（理由见 _advanceToLogicalIndex 里那段：
+    // 追加不重载引擎后，逻辑 run 可能比引擎实际序列长）。
+    final engineHasIt =
+        prev >= _activeRunStart &&
+        prev < _activeRunStart + _activeEngine.sequenceLength;
+    final sameRun = prev >= bounds.start && prev <= bounds.end && engineHasIt;
     if (sameRun) {
       await _activeEngine.seekToPrevious();
     } else {
