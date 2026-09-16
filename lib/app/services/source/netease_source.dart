@@ -398,10 +398,7 @@ class NetEaseSource implements MusicSource {
       // 自己的歌单排前面，后面接歌单广场 —— 广场是纯发现向的，实测免登录
       // 可用、还能翻页。精品那一份单独取：它按 lasttime 翻页，和普通广场
       // 不是一套，混在一起翻页会乱，所以只取第一批放在前面当"精选"。
-      final lists = [
-        ...mine,
-        ...await _plazaPlaylists(limit),
-      ];
+      final lists = [...mine, ...await _plazaPlaylists(limit)];
       final capped = lists.length <= limit ? lists : lists.sublist(0, limit);
       return capped
           .map(
