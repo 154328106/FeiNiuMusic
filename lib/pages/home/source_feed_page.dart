@@ -54,11 +54,12 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
   /// 「点了没用」，于是用户会连点好几下 —— 每一下又各自发一轮请求，更慢。
   bool _preparing = false;
 
-  /// 一次最多为多少首歌准备地址。
+  /// 后台每批为多少首歌准备地址。
   ///
-  /// 整张歌单几百首全问一遍要好几秒，而且后面那些等真播到了早过期了。
-  /// 从点中的位置往后取一段就够，播完这段会自然续。
-  static const int _prepareWindow = 25;
+  /// 只用在**起播之后**的后台填充里 —— 同步那一步只解你点的那一首。
+  /// 批次小一点，下一首就能更早可用（每首过公益源约 1 秒，10 首约 10 秒
+  /// 就能追加一批）；批次大了第一次追加会来得太晚。
+  static const int _backgroundBatch = 10;
 
   MusicSource get _source => MusicSourceRegistry.instance.current.value;
 
@@ -91,39 +92,60 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
   /// 起播。网易云队列先筛掉取不到地址的歌，否则会卡在第一首不动。
   Future<void> _play(int index) async {
     if (_preparing) return; // 准备中再点没有意义，反而各发一轮请求
-    var queue = _songs;
-    var start = index;
-    int? extendFrom;
-    if (_source.id != 'feiniu') {
-      final tapped = _songs[index];
-      // 从点中的位置往后取一段，别把整张歌单都问一遍。
-      final window = _songs.skip(index).take(_prepareWindow).toList();
-      setState(() => _preparing = true);
-      try {
-        queue = await _source.prepareQueue(window);
-      } finally {
-        if (mounted) setState(() => _preparing = false);
-      }
-      if (!mounted || queue.isEmpty) return;
-      // 筛完索引会变，按歌曲 id 重新定位；点中的那首若被筛掉就从头播。
-      final moved = queue.indexWhere((s) => s.id == tapped.id);
-      start = moved >= 0 ? moved : 0;
-      extendFrom = index + _prepareWindow;
+    if (_source.id == 'feiniu') {
+      // 飞牛是自己的 NAS，地址是确定的，不需要预解析。
+      await _player.playQueue(_songs, index);
+      return;
     }
-    await _player.playQueue(queue, start);
-    // 队尾续接：播到这一段末尾时再准备下一段，而不是一次性把整张歌单塞进
-    // 队列 —— 那样播放器会为整队构建播放源，窗口就白设了。必须挂在
-    // playQueue **之后**：playQueue 内部会先把 queueExtender 清空。
-    final from = extendFrom;
-    if (from != null) {
-      var offset = from;
-      _player.queueExtender = () async {
-        if (offset >= _songs.length) return const <SongEntity>[];
-        final next = _songs.skip(offset).take(_prepareWindow).toList();
-        offset += _prepareWindow;
-        return _source.prepareQueue(next);
-      };
+
+    // **只同步解「你点的这一首」，解完立刻起播，其余交给后台。**
+    //
+    // 原来这里同步解 25 首（_prepareWindow）。而没有会员的账号，官方给的是
+    // 试听片段，等于 25 首全要过一遍公益源、每首约 1 秒 —— 点一下要等二十
+    // 多秒才出声，用户的原话是「点完半天没反应，还以为死机了」。
+    //
+    // 能这么改的前提是：**播放器本来就逐首按需解地址**
+    // （`PlayerService._resolvePlayableUri`，网易云/QQ/酷狗都有分支，注释里
+    // 还写着「地址有时效，不能用 song.uri 里存的那份」）。所以那一整轮批量
+    // 解析从来不是播放的必要条件，它只是个预筛 —— 提前剔掉没地址的歌，
+    // 免得队列卡住。点中的这首同步解掉，卡第一首的问题就已经解决了；
+    // 后面那些真没地址的，播到了由播放器跳过，代价远小于每次都等二十秒。
+    final tapped = _songs[index];
+    setState(() => _preparing = true);
+    List<SongEntity> head;
+    try {
+      head = await _source.prepareQueue([tapped]);
+    } finally {
+      if (mounted) setState(() => _preparing = false);
     }
+    if (!mounted) return;
+    if (head.isEmpty) {
+      AppToast.showGlobal('这首取不到播放地址', type: ToastType.error);
+      return;
+    }
+
+    // 后台把队列填到上限。用 playQueueFilledToLimit 而不是 queueExtender：
+    // 后者只在「切歌且队列快播完」时触发，**且随机模式下压根不触发**
+    // （见 PlayerService 里那个 playbackMode != shuffle 的判断）——
+    // 只解一首再靠它续接，在随机模式下会卡死在一首歌上。
+    // 后台填充和队尾续接共用这一个游标。
+    //
+    // 不需要加锁或标志位：取批次和推进游标之间没有 await，所以两个调用方
+    // 不可能拿到同一批，也不会跳过某一批 —— 最多是追加顺序交错一点。
+    // （第一版在这儿加了个 `filling` 标志，结果是死锁：后台填满上限后就
+    // 不再调 fetchMore，标志永远不会被清掉，续接器被永久堵死，歌单比上限
+    // 长时播到 80 首就断了。）
+    var offset = index + 1;
+    Future<List<SongEntity>> nextBatch() async {
+      if (offset >= _songs.length) return const <SongEntity>[];
+      final next = _songs.skip(offset).take(_backgroundBatch).toList();
+      offset += _backgroundBatch;
+      return _source.prepareQueue(next);
+    }
+
+    await _player.playQueueFilledToLimit(head, 0, fetchMore: (_) => nextBatch());
+    // 必须挂在上面那句**之后**：playQueue 内部第一件事就是把 queueExtender 清空。
+    _player.queueExtender = nextBatch;
   }
 
   @override
