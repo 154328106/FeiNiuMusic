@@ -38,6 +38,9 @@ class NetEaseSource implements MusicSource {
   /// 每次进「歌单」页都重拉，等于白打两个请求。
   List<NetEasePlaylist>? _plazaCache;
 
+  /// 分类名缓存。这份基本是静态的，没必要每次进页面都问。
+  List<String>? _categoryCache;
+
   @override
   String get id => 'netease';
 
@@ -176,6 +179,48 @@ class NetEaseSource implements MusicSource {
       lastError = '读取歌单失败：${e.message}';
       debugPrint('[NetEaseSource] userPlaylists error: ${e.message}');
       return null;
+    }
+  }
+
+  /// 歌单广场的分类名。实测 70 个。
+  Future<List<String>> playlistCategories() async {
+    final cached = _categoryCache;
+    if (cached != null) return cached;
+    try {
+      final cats = await _api.playlistCategories();
+      _categoryCache = cats;
+      debugPrint('[NetEaseSource] 歌单分类 ${cats.length} 个');
+      return cats;
+    } on NetEaseApiException catch (e) {
+      debugPrint('[NetEaseSource] playlistCategories error: ${e.message}');
+      return const [];
+    }
+  }
+
+  /// 按分类取歌单广场。
+  ///
+  /// 分类下**不掺自己的歌单、也不掺精品** —— 选了「华语」就该只看华语，
+  /// 混进别的会让分类失去意义。
+  Future<List<SourcePlaylist>> playlistsByCategory(
+    String cat, {
+    int limit = 50,
+  }) async {
+    try {
+      final lists = await _api.plazaPlaylists(cat: cat, limit: limit);
+      debugPrint('[NetEaseSource] 分类「$cat」${lists.length} 个歌单');
+      return [
+        for (final p in lists)
+          SourcePlaylist(
+            id: SongSource.encodeNetease(p.id),
+            name: p.name,
+            coverId: p.coverUrl,
+            trackCount: p.trackCount,
+          ),
+      ];
+    } on NetEaseApiException catch (e) {
+      lastError = '分类歌单读取失败：${e.message}';
+      debugPrint('[NetEaseSource] playlistsByCategory error: ${e.message}');
+      return const [];
     }
   }
 

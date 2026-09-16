@@ -955,6 +955,11 @@ class _HomePageState extends State<HomePage>
           '歌单',
           () => source.playlists(limit: 50),
           emptyHint: '登录网易云后这里是你的歌单；未登录时给的是推荐歌单。',
+          // 只有网易云传这两个，所以只有它的歌单页会出现顶部分类条。
+          // 「全部」走上面那个 loader（你的歌单 + 精品 + 热门混排），
+          // 选了具体分类就只看那个分类的广场歌单。
+          categoriesLoader: source.playlistCategories,
+          categoryLoader: source.playlistsByCategory,
         ),
       ),
     ];
@@ -983,6 +988,8 @@ class _HomePageState extends State<HomePage>
     String title,
     Future<List<SourcePlaylist>> Function() loader, {
     String? emptyHint,
+    Future<List<String>> Function()? categoriesLoader,
+    Future<List<SourcePlaylist>> Function(String cat)? categoryLoader,
   }) {
     Navigator.of(context).push(
       buildAppPageRoute<void>(
@@ -990,6 +997,8 @@ class _HomePageState extends State<HomePage>
           title: title,
           loader: loader,
           emptyHint: emptyHint,
+          categoriesLoader: categoriesLoader,
+          categoryLoader: categoryLoader,
         ),
       ),
     );
