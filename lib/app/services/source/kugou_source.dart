@@ -33,7 +33,13 @@ class KugouSource implements MusicSource {
 
   /// 新碟缓存。同时也是 [playlistSongs] 认出「这个 id 是专辑」的依据 ——
   /// 专辑要走 album/song，和歌单/榜单/广场都不是一个接口。
+  ///
+  /// 首页入口 2026-09-16 换成了歌手，所以这份现在只在你手动调 [albums] 时
+  /// 才会有内容。接口和路由都留着，想把「歌单」做成带 tab 的页面时直接用。
   List<KugouPlaylist>? _albumCache;
+
+  /// 歌手缓存。作用同上 —— 歌手要走 singer/song。
+  List<KugouPlaylist>? _singerCache;
 
   /// 云端歌单缓存。首页歌单区块和「我喜欢」都从这份里取，避免同一次加载
   /// 里把 get_all_list 请求两遍。
@@ -77,6 +83,7 @@ class KugouSource implements MusicSource {
     _songCache = null;
     _plazaCache = null;
     _albumCache = null;
+    _singerCache = null;
     _cloudCache = null;
     _favoriteCache = null;
     _songInflight = null;
@@ -128,6 +135,28 @@ class KugouSource implements MusicSource {
     } on KugouApiException catch (e) {
       lastError = '新碟读取失败：${e.message}';
       debugPrint('[KugouSource] albums error: ${e.message}');
+      return const [];
+    }
+  }
+
+  /// 歌手浏览（按人气）。免登录。点进去按歌手取歌。
+  Future<List<SourcePlaylist>> artists({int limit = 30}) async {
+    try {
+      final cached = _singerCache;
+      final list = cached ?? await _api.singerList(limit: limit);
+      _singerCache = list;
+      return [
+        for (final s in list)
+          SourcePlaylist(
+            id: '$id:${s.id}',
+            name: s.name,
+            coverId: s.coverUrl,
+            trackCount: s.trackCount,
+          ),
+      ];
+    } on KugouApiException catch (e) {
+      lastError = '歌手读取失败：${e.message}';
+      debugPrint('[KugouSource] artists error: ${e.message}');
       return const [];
     }
   }
@@ -326,9 +355,12 @@ class KugouSource implements MusicSource {
       // 但一旦分错就是拿到空列表，表现成「点进去是空的」，很难归因。
       final plaza = _plazaCache ?? const <KugouPlaylist>[];
       final albums = _albumCache ?? const <KugouPlaylist>[];
+      final singers = _singerCache ?? const <KugouPlaylist>[];
       final cloud = _cloudCache ?? const <KugouPlaylist>[];
       final List<KugouSong> songs;
-      if (albums.any((p) => p.id == listId)) {
+      if (singers.any((p) => p.id == listId)) {
+        songs = await _api.singerSongs(listId, limit: 100);
+      } else if (albums.any((p) => p.id == listId)) {
         songs = await _api.albumSongs(listId, limit: 100);
       } else if (plaza.any((p) => p.id == listId)) {
         songs = await _api.specialSongs(listId, limit: 100);

@@ -230,6 +230,45 @@ class KugouApiClient {
     return songs;
   }
 
+  /// 歌手列表（按人气）。免签名、免登录（实测总量 265 万）。
+  Future<List<KugouPlaylist>> singerList({int limit = 30}) async {
+    final json = await _getJson(
+      'https://mobilecdn.kugou.com/api/v3/singer/list'
+      '?page=1&pagesize=$limit',
+    );
+    final list = _at(json, ['data', 'info']) as List? ?? const [];
+    final result = <KugouPlaylist>[];
+    for (final item in list.whereType<Map<String, dynamic>>()) {
+      final id = item['singerid'] as num?;
+      final name = item['singername']?.toString() ?? '';
+      if (id == null || name.isEmpty) continue;
+      var cover = item['imgurl']?.toString();
+      if (cover != null) cover = cover.replaceAll('{size}', '400');
+      result.add(
+        KugouPlaylist(
+          id: id.toInt(),
+          name: name,
+          coverUrl: (cover == null || cover.isEmpty) ? null : cover,
+          // songcount 这个接口里恒为 0，别指望它。
+          trackCount: 0,
+        ),
+      );
+    }
+    debugPrint('[Kugou] 歌手 ${result.length} 位');
+    return result;
+  }
+
+  /// 某个歌手的歌。
+  Future<List<KugouSong>> singerSongs(int singerId, {int limit = 60}) async {
+    final json = await _getJson(
+      'https://mobilecdn.kugou.com/api/v3/singer/song'
+      '?singerid=$singerId&page=1&pagesize=$limit',
+    );
+    final songs = _toSongs(_at(json, ['data', 'info']) as List?);
+    debugPrint('[Kugou] 歌手 $singerId 取到 ${songs.length} 首');
+    return songs;
+  }
+
   /// 每日推荐。**免登录就给 30 首**（2026-09-16 实测，mid 传假设备也照给）。
   ///
   /// 歌在 `data.song_list`，字段是 `hash` / `filename` / `author_name`，

@@ -306,15 +306,42 @@ class NetEaseSource implements MusicSource {
     }
   }
 
-  /// 私人 FM。每次调用给一批新的，播完再要。
-  Future<List<SongEntity>> personalFm() async {
+  /// 私人 FM。
+  ///
+  /// **`/api/v1/radio/get` 一次只给 3 首**，那是接口本身的行为（它是个电台，
+  /// 设计上就是边听边要）。直接返回的话列表页上永远只有 3 条，看着像坏了。
+  /// 所以这里连着要几轮攒够一批 —— 每轮都是新的 3 首，按 id 去重。
+  ///
+  /// 轮数别设太大：每轮一次请求，攒 24 首要 8 轮。碰上接口给重复的就提前停，
+  /// 免得为了凑数空转。
+  Future<List<SongEntity>> personalFm({int want = 24}) async {
+    final songs = <NetEaseSong>[];
+    final seen = <int>{};
     try {
-      return _toEntities(await _api.personalFm());
+      for (var round = 0; round < 10 && songs.length < want; round++) {
+        final batch = await _api.personalFm();
+        if (batch.isEmpty) break;
+        var added = 0;
+        for (final s in batch) {
+          if (seen.add(s.id)) {
+            songs.add(s);
+            added++;
+          }
+        }
+        // 一整轮全是重复的，说明这个账号的电台池已经转完了，再要也是这些。
+        if (added == 0) break;
+      }
     } on NetEaseApiException catch (e) {
-      lastError = '私人 FM 读取失败：${e.message}';
-      debugPrint('[NetEaseSource] personalFm error: ${e.message}');
-      return const [];
+      // 已经攒到一些就先用着，别因为后面某轮失败把前面的也扔了。
+      if (songs.isEmpty) {
+        lastError = '私人 FM 读取失败：${e.message}';
+        debugPrint('[NetEaseSource] personalFm error: ${e.message}');
+        return const [];
+      }
+      debugPrint('[NetEaseSource] personalFm 中途失败，已攒 ${songs.length} 首');
     }
+    debugPrint('[NetEaseSource] 私人FM ${songs.length} 首');
+    return _toEntities(songs);
   }
 
   /// 心动模式。以「我喜欢的音乐」里的一首作种子，生成一条相似歌队列。

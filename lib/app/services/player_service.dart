@@ -1306,6 +1306,19 @@ class PlayerService with WidgetsBindingObserver {
     final acc = <SongEntity>[];
     var page = 1;
     while (base.length + acc.length < cap) {
+      // **每批之前都要检查代次。**
+      //
+      // 原来只在循环跑完后检查一次，于是用户切到别的歌单后，这个循环还会
+      // 一批一批取到填满上限（80 首 = 8 批，每批十来秒的串行取址）——
+      // 而那些请求占着取址管道，用户新点的那一首就排在它们后面等。
+      // 表现就是「跨歌单切换时不是秒播，要多等一会」。
+      // 更何况这些结果最后还会因为代次变了被整个丢掉，纯浪费。
+      if (gen != _queueGeneration) {
+        if (kDebugMode) {
+          debugPrint('PlayerService 后台填充：队列已换代，放弃剩余批次');
+        }
+        return;
+      }
       try {
         final next = await fetchMore(page++);
         if (next.isEmpty) break;
