@@ -28,11 +28,12 @@ class SourcePlaylistsPage extends StatefulWidget {
   /// 空列表时的说明。多半是「没登录」。
   final String? emptyHint;
 
-  /// 分类名列表。给了它（且给了 [categoryLoader]）才会在顶部显示分类条。
+  /// 分类，按组给（组名 → 该组的分类名）。给了它（且给了 [categoryLoader]）
+  /// 才会在右上角出现筛选按钮。
   ///
   /// 两个都是可选的：酷狗/QQ 的歌单、排行榜、歌手那几个入口都不传，
   /// 页面行为和以前完全一样。
-  final Future<List<String>> Function()? categoriesLoader;
+  final Future<Map<String, List<String>>> Function()? categoriesLoader;
 
   /// 按分类取歌单。选中某个分类时用它，选「全部」时仍走 [loader]。
   final Future<List<SourcePlaylist>> Function(String cat)? categoryLoader;
@@ -45,8 +46,8 @@ class _SourcePlaylistsPageState extends State<SourcePlaylistsPage> {
   List<SourcePlaylist> _items = const [];
   bool _loading = true;
 
-  /// 分类条。空 = 不显示（没传 loader，或者取分类失败）。
-  List<String> _categories = const [];
+  /// 分类，按组。空 = 不显示筛选按钮（没传 loader，或者取分类失败）。
+  Map<String, List<String>> _categories = const {};
 
   /// 当前选中的分类。null = 「全部」，走 [SourcePlaylistsPage.loader]。
   String? _cat;
@@ -64,9 +65,9 @@ class _SourcePlaylistsPageState extends State<SourcePlaylistsPage> {
   /// 取分类名。失败就不显示分类条 —— 它是加分项，不该把歌单列表一起拖垮。
   Future<void> _loadCategories() async {
     try {
-      final cats = await widget.categoriesLoader!();
-      if (!mounted || cats.isEmpty) return;
-      setState(() => _categories = cats);
+      final groups = await widget.categoriesLoader!();
+      if (!mounted || groups.isEmpty) return;
+      setState(() => _categories = groups);
     } catch (e) {
       debugPrint('[SourcePlaylistsPage] 取分类失败：$e');
     }
@@ -102,10 +103,24 @@ class _SourcePlaylistsPageState extends State<SourcePlaylistsPage> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final cat = _cat;
     return AppPageScaffold(
       appBar: AppTopBar(
-        title: widget.title,
+        // 选了分类就写在标题里 —— 筛选态必须一眼看得见，否则翻着翻着
+        // 忘了自己还在某个分类下，会以为「歌单怎么变少了」。
+        title: cat == null ? widget.title : '${widget.title} · $cat',
         actions: [
+          if (_categories.isNotEmpty)
+            IconButton(
+              tooltip: '分类',
+              icon: Icon(
+                cat == null
+                    ? Icons.filter_list_rounded
+                    : Icons.filter_list_off_rounded,
+                color: cat == null ? null : scheme.primary,
+              ),
+              onPressed: _loading ? null : _pickCategory,
+            ),
           IconButton(
             tooltip: '刷新',
             icon: const Icon(Icons.refresh_rounded),
@@ -113,52 +128,89 @@ class _SourcePlaylistsPageState extends State<SourcePlaylistsPage> {
           ),
         ],
       ),
-      body: _categories.isEmpty
-          ? _buildBody(scheme)
-          : Column(
-              children: [
-                _buildCategoryBar(scheme),
-                Expanded(child: _buildBody(scheme)),
-              ],
-            ),
+      body: _buildBody(scheme),
     );
   }
 
-  /// 顶部分类条。横向滚动的一排 chip，第一个是「全部」。
+  /// 弹出分类选择。
   ///
-  /// 网易云有 70 个分类，没法一屏铺开，也不值得为「先看看效果」做成分组
-  /// 网格 —— 横滚一排正是网易云自己的做法。真要按语种/风格/场景分组，
-  /// `/api/playlist/catalogue` 的响应里有 `categories`（组名）和每项的
-  /// `category`（组 id），到时候按它分。
-  Widget _buildCategoryBar(ColorScheme scheme) {
-    return SizedBox(
-      height: 48,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        itemCount: _categories.length + 1,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (context, i) {
-          final cat = i == 0 ? null : _categories[i - 1];
-          final selected = _cat == cat;
-          return ChoiceChip(
-            label: Text(cat ?? '全部'),
-            selected: selected,
-            // 加载中不让切，否则连点几下会有好几发请求在飞，最后哪个先回
-            // 显示哪个 —— 列表和选中的 chip 对不上。
-            onSelected: _loading ? null : (_) => _selectCategory(cat),
-            showCheckmark: false,
-            labelStyle: TextStyle(
-              fontSize: 13,
-              color: selected ? scheme.onPrimary : scheme.onSurfaceVariant,
-            ),
-            selectedColor: scheme.primary,
-            backgroundColor: scheme.surfaceContainerHighest,
-            side: BorderSide.none,
-            visualDensity: VisualDensity.compact,
-          );
-        },
+  /// 做成弹出层而不是顶部横滑条：70 个分类横滑要划十几屏才看得完，
+  /// 而且没有结构。这里按接口给的组分段（热门 / 语种 / 风格 / 场景 /
+  /// 情感 / 主题），一屏能扫完大半。
+  Future<void> _pickCategory() async {
+    final scheme = Theme.of(context).colorScheme;
+    final picked = await showModalBottomSheet<String?>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      // 不占满整屏：留一截能看见下面的列表，知道自己是在筛选而不是换了页面。
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.75,
       ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 「全部」单独放最上面，它不属于任何组。
+                _catChip(sheetContext, null, scheme),
+                for (final entry in _categories.entries) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(top: 16, bottom: 8),
+                    child: Text(
+                      entry.key,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final name in entry.value)
+                        _catChip(sheetContext, name, scheme),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    // 关掉弹层等于放弃选择（picked 为 null 且没点过「全部」）。
+    // 「全部」返回的是哨兵字符串，见 _catChip。
+    if (picked == null) return;
+    _selectCategory(picked == _allSentinel ? null : picked);
+  }
+
+  /// 「全部」的哨兵值。
+  ///
+  /// `showModalBottomSheet` 关闭时也返回 null，没法用 null 表示「选了全部」
+  /// —— 那样点「全部」和划走关掉就分不开了。
+  static const String _allSentinel = r'\__all__';
+
+  Widget _catChip(BuildContext sheetContext, String? cat, ColorScheme scheme) {
+    final selected = _cat == cat;
+    return ChoiceChip(
+      label: Text(cat ?? '全部'),
+      selected: selected,
+      onSelected: (_) =>
+          Navigator.of(sheetContext).pop(cat ?? _allSentinel),
+      showCheckmark: false,
+      labelStyle: TextStyle(
+        fontSize: 13,
+        color: selected ? scheme.onPrimary : scheme.onSurfaceVariant,
+      ),
+      selectedColor: scheme.primary,
+      backgroundColor: scheme.surfaceContainerHighest,
+      side: BorderSide.none,
+      visualDensity: VisualDensity.compact,
     );
   }
 

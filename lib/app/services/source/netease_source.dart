@@ -38,8 +38,8 @@ class NetEaseSource implements MusicSource {
   /// 每次进「歌单」页都重拉，等于白打两个请求。
   List<NetEasePlaylist>? _plazaCache;
 
-  /// 分类名缓存。这份基本是静态的，没必要每次进页面都问。
-  List<String>? _categoryCache;
+  /// 分类缓存。这份基本是静态的，没必要每次进页面都问。
+  Map<String, List<String>>? _categoryCache;
 
   @override
   String get id => 'netease';
@@ -182,18 +182,22 @@ class NetEaseSource implements MusicSource {
     }
   }
 
-  /// 歌单广场的分类名。实测 70 个。
-  Future<List<String>> playlistCategories() async {
+  /// 歌单广场的分类，按组给（热门 / 语种 / 风格 / 场景 / 情感 / 主题）。
+  Future<Map<String, List<String>>> playlistCategoryGroups() async {
     final cached = _categoryCache;
     if (cached != null) return cached;
     try {
-      final cats = await _api.playlistCategories();
-      _categoryCache = cats;
-      debugPrint('[NetEaseSource] 歌单分类 ${cats.length} 个');
-      return cats;
+      final groups = await _api.playlistCategoryGroups();
+      _categoryCache = groups;
+      final total = groups.values.fold<int>(0, (n, v) => n + v.length);
+      debugPrint(
+        '[NetEaseSource] 歌单分类 ${groups.length} 组 / $total 项'
+        '（${groups.keys.join("、")}）',
+      );
+      return groups;
     } on NetEaseApiException catch (e) {
-      debugPrint('[NetEaseSource] playlistCategories error: ${e.message}');
-      return const [];
+      debugPrint('[NetEaseSource] playlistCategoryGroups error: ${e.message}');
+      return const {};
     }
   }
 

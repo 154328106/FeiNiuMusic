@@ -590,7 +590,7 @@ class NetEaseApiClient {
 
   /// 歌单广场。**不需要登录**（2026-09-16 实测，weapi 裸调用就给）。
   ///
-  /// [cat] 是分类名，取值来自 [playlistCategories]（实测 70 个：00后 / ACG /
+  /// [cat] 是分类名，取值来自 [playlistCategoryGroups]（实测 70 个：00后 / ACG /
   /// R&B-Soul / 乡村 / KTV …），`全部` 表示不限。`more` 为 true 说明还有下一页，
   /// 但这里只把歌单返回给调用方，翻页由 [offset] 控制。
   Future<List<NetEasePlaylist>> plazaPlaylists({
@@ -625,19 +625,46 @@ class NetEaseApiClient {
     return _toPlaylists(json['playlists'] as List?);
   }
 
-  /// 歌单分类目录。实测 70 个。
-  Future<List<String>> playlistCategories() async {
+  /// 歌单分类目录，**按组返回**。实测 70 个分类分 5 组。
+  ///
+  /// 响应里 `categories` 是组号到组名的映射（`{0:语种, 1:风格, 2:场景,
+  /// 3:情感, 4:主题}`），`sub` 每项带 `category`（组号）和 `hot`（是否热门，
+  /// 实测 15 个）。这里把热门单独拎成第一组 —— 70 个平铺出来太难找。
+  ///
+  /// 返回的 Map 保持插入顺序（热门 → 语种 → 风格 → 场景 → 情感 → 主题），
+  /// 调用方直接按顺序渲染即可。
+  Future<Map<String, List<String>>> playlistCategoryGroups() async {
     final json = await _request(
       '/api/playlist/catalogue',
       const {},
       _Scheme.weapi,
     );
-    final sub = json['sub'] as List? ?? const [];
-    return [
-      for (final item in sub.whereType<Map<String, dynamic>>())
-        if ((item['name'] as String?)?.isNotEmpty ?? false)
-          item['name'] as String,
+    final sub = (json['sub'] as List? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .where((e) => (e['name'] as String?)?.isNotEmpty ?? false)
+        .toList();
+    final groupNames = <String, String>{
+      for (final e in (json['categories'] as Map? ?? const {}).entries)
+        e.key.toString(): e.value.toString(),
+    };
+
+    final result = <String, List<String>>{};
+    final hot = [
+      for (final e in sub)
+        if (e['hot'] == true) e['name'] as String,
     ];
+    if (hot.isNotEmpty) result['热门'] = hot;
+    // 按组号排序，让「语种/风格/场景/情感/主题」保持接口给的先后。
+    final byGroup = <int, List<String>>{};
+    for (final e in sub) {
+      final g = (e['category'] as num?)?.toInt() ?? -1;
+      byGroup.putIfAbsent(g, () => []).add(e['name'] as String);
+    }
+    for (final g in byGroup.keys.toList()..sort()) {
+      final label = groupNames['$g'] ?? '其他';
+      result[label] = byGroup[g]!;
+    }
+    return result;
   }
 
   static List<NetEasePlaylist> _toPlaylists(List? list) => (list ?? const [])
