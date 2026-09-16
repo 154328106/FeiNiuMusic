@@ -3129,10 +3129,30 @@ class PlayerService with WidgetsBindingObserver {
       // **只取副作用，丢掉返回值**：prepareQueue 会把取不到地址的歌过滤掉，
       // 而恢复要的是忠实还原上次的队列，不能在这里悄悄改变它的长度。
       // 预热失败也不该拖垮恢复，所以单独 catch。
-      try {
-        await NetEasePlaybackService.instance.prepareQueue(session.queue);
-      } catch (e) {
-        _debugLog('restore 预热地址失败（不影响恢复）：$e');
+      //
+      // **分块预热，每块之间看一眼用户有没有开始新播放。**
+      //
+      // 原来是一整条队列一次 await。队列现在会被后台填到上限（80 首），
+      // 没有会员的账号等于 80 首全过公益源 —— 冷启动要转很久，而这期间
+      // 用户点别的歌**点不动**（playQueue 开头 `await _initFuture` 等着
+      // 恢复走完）。下面那两处 `_queueGeneration != 0` 的放弃检查也全在这
+      // 一大坨 await 之后，等于形同虚设。
+      //
+      // 分块之后，用户一点歌最多等一块（十来首）就能抢到播放器。
+      const warmChunk = 10;
+      for (var i = 0; i < session.queue.length; i += warmChunk) {
+        if (_queueGeneration != 0) {
+          _debugLog('restore 预热中断：用户已开始新播放');
+          session.prepareFailed = true;
+          return;
+        }
+        final chunk = session.queue.skip(i).take(warmChunk).toList();
+        try {
+          await NetEasePlaybackService.instance.prepareQueue(chunk);
+        } catch (e) {
+          _debugLog('restore 预热地址失败（不影响恢复）：$e');
+          break;
+        }
       }
       // 双引擎架构：按 run 加载恢复的当前曲所在引擎。
       _applyEngineKinds(await _computeEngineKinds(session.queue));
