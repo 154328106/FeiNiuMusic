@@ -762,12 +762,35 @@ class PlayerService with WidgetsBindingObserver {
         kind: kind,
       );
     }
+    // **第三方源的 run 要设上限。**
+    //
+    // 装载一个 run 会把 run 里**每一首**都解一次地址。飞牛是自家 NAS、
+    // 地址确定，装多少都便宜，所以保持原来的长 run（同 run 内切歌无缝）。
+    // 但网易云/QQ/酷狗是逐首解，酷狗和 QQ 还被公益源的串行通道限流 ——
+    // 25 首同类的队列会形成一个 25 长的 run，实测装载要 8 秒，而这 8 秒
+    // 发生在 `_activateLogicalIndex` 的锁内、**无法中断**，表现就是
+    // 「冷启动转圈时点歌点不动」和「切歌要等一下」。
+    //
+    // 上限之后，跨过边界会触发一次新 run 装载 —— 那条路本来就存在
+    // （今天跨引擎切歌走的就是它），只是变频繁了一点。
+    final list = queue.value;
+    final song = logicalIndex < list.length ? list[logicalIndex] : null;
+    final remoteResolve =
+        song != null && (song.isNetease || song.isQQ || song.isKugou);
+    // 往前留两首（够「上一首」无缝），整个 run 最多 6 首。
+    final maxBefore = remoteResolve ? 2 : k.length;
+    final maxRun = remoteResolve ? 6 : k.length;
+
     var s = logicalIndex;
-    while (s > 0 && k[s - 1] == kind && !(s - 1 < tc.length && tc[s - 1])) {
+    while (s > 0 &&
+        logicalIndex - s < maxBefore &&
+        k[s - 1] == kind &&
+        !(s - 1 < tc.length && tc[s - 1])) {
       s--;
     }
     var e = logicalIndex;
     while (e < k.length - 1 &&
+        (e - s + 1) < maxRun &&
         k[e + 1] == kind &&
         !(e + 1 < tc.length && tc[e + 1])) {
       e++;
@@ -857,12 +880,13 @@ class PlayerService with WidgetsBindingObserver {
     final bounds = _runBounds(logicalIndex);
     final targetKind = bounds.kind;
     final target = _engineFor(targetKind);
-    if (kDebugMode) {
-      debugPrint(
-        '[PlayerService] activateLocked kind=$targetKind '
-        'run=[${bounds.start},${bounds.end}] local=${bounds.localIndex}',
-      );
-    }
+    // release 也输出：run 有多长直接决定装载要解多少个地址，是排查
+    // 「点歌要等」「冷启动转圈」的第一手数据。之前包在 kDebugMode 里，
+    // 结果线上日志看不到 run 长度，我为此连猜错两次。
+    _debugLog(
+      'activateLocked kind=$targetKind '
+      'run=[${bounds.start},${bounds.end}] local=${bounds.localIndex}',
+    );
 
     // 切换引擎：停止旧引擎，避免双音源/旧音频线程占用输出。
     // 无论旧引擎是 just_audio 还是 media_kit 都必须 stop（不只是 pause）：
