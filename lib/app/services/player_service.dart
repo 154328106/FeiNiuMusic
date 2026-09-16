@@ -3155,7 +3155,32 @@ class PlayerService with WidgetsBindingObserver {
         }
       }
       // 双引擎架构：按 run 加载恢复的当前曲所在引擎。
-      _applyEngineKinds(await _computeEngineKinds(session.queue));
+      //
+      // **分块算路由，每块之间查代次。**
+      //
+      // 这里是冷启动真正的耗时所在：`_computeEngineKinds` 对队列里每一首调
+      // `routeForSong`，而算路由要解地址 —— 恢复一条 73 首的酷狗队列就是 73
+      // 次「20018 → 公益源」，实测 22 秒。而它原本是一次 `Future.wait` 大
+      // await，中间没有检查点，所以 `playQueue` 开头那个 `await _initFuture`
+      // 会把用户的点击整整堵住 22 秒（上一版只分块了网易云那个预热，而恢复
+      // 的是酷狗队列，等于改了个没用的地方）。
+      //
+      // `_computeEngineKinds` 对输入是纯函数，按块算完拼起来即可。
+      const routeChunk = 5;
+      final routedKinds = <EngineKind>[];
+      final routedFlags = <bool>[];
+      for (var i = 0; i < session.queue.length; i += routeChunk) {
+        if (_queueGeneration != 0) {
+          _debugLog('restore 算路由中断：用户已开始新播放');
+          session.prepareFailed = true;
+          return;
+        }
+        final chunk = session.queue.skip(i).take(routeChunk).toList();
+        final part = await _computeEngineKinds(chunk);
+        routedKinds.addAll(part.kinds);
+        routedFlags.addAll(part.transcodeFlags);
+      }
+      _applyEngineKinds((kinds: routedKinds, transcodeFlags: routedFlags));
       // 构建源期间用户可能已开始新的播放：放弃 apply，避免 setAudioSources
       // 覆盖用户刚选的队列。
       if (_queueGeneration != 0) {
@@ -3547,10 +3572,27 @@ class PlayerService with WidgetsBindingObserver {
       await _clearPersistedPlaybackState();
       return;
     }
+    // **只存当前曲附近的一段，不存整条队列。**
+    //
+    // 恢复时要为存下来的**每一首**算引擎路由，而算路由要解地址 —— 一条 80 首
+    // 的酷狗队列实测冷启动要 22 秒，这期间用户点别的歌点不动。
+    //
+    // 80 首这个长度本身是后台填充的副产物（填到 `maxQueueLength` 为止），
+    // 不是用户手挑的，没必要忠实还原。存「前 5 首 + 当前 + 后 19 首」够用：
+    // 前几首留给「上一首」，后面的等播到了由续接器补。
+    // 这也把冷启动代价恢复到后台填充之前的量级。
+    const persistWindow = 25;
+    const keepBefore = 5;
+    final cur = currentIndex.value;
+    final start = (cur - keepBefore) < 0 ? 0 : cur - keepBefore;
+    final end = (start + persistWindow) > list.length
+        ? list.length
+        : start + persistWindow;
+    final saved = list.sublist(start, end);
     final prefs = await SharedPreferences.getInstance();
-    final serialized = jsonEncode(list.map((e) => e.toMap()).toList());
+    final serialized = jsonEncode(saved.map((e) => e.toMap()).toList());
     await prefs.setString(_prefsQueueKey, serialized);
-    await prefs.setInt(_prefsIndexKey, currentIndex.value);
+    await prefs.setInt(_prefsIndexKey, cur - start);
     await prefs.setInt(
       _prefsPositionKey,
       _positionForPersistence().inMilliseconds,
