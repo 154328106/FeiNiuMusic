@@ -200,8 +200,7 @@ class _SourcePlaylistsPageState extends State<SourcePlaylistsPage> {
     return ChoiceChip(
       label: Text(cat ?? '全部'),
       selected: selected,
-      onSelected: (_) =>
-          Navigator.of(sheetContext).pop(cat ?? _allSentinel),
+      onSelected: (_) => Navigator.of(sheetContext).pop(cat ?? _allSentinel),
       showCheckmark: false,
       labelStyle: TextStyle(
         fontSize: 13,
