@@ -3654,10 +3654,24 @@ class PlayerService with WidgetsBindingObserver {
     // 等播到了自然会装。代价只是它和当前这首之间不是同 run 的无缝衔接，
     // 而那和平时跨 run 切歌是同一种体验。
     //
-    // 只有索引发生位移时才必须重载：`_capQueue` 截断会把当前歌的下标挪走，
-    // 那时引擎里装的 run 和逻辑队列就对不上了。
-    final shifted = capped != null || newCurrentIdx != currentIdx;
-    if (!shifted) return;
+    // 只有**当前歌的下标真的移动了**才必须重载 —— 那时引擎里装的 run 和
+    // 逻辑队列对不上。
+    //
+    // 不能用 `capped != null` 来判断（第一版就是这么写的，结果最后一批
+    // 追加到刚好 80 首时还是卡顿一下）：`_capQueue` 有两支，
+    //   · 当前歌落在末尾 cap 区间内 → 保留尾部、**砍掉最旧的前部** →
+    //     下标前移，必须重载；
+    //   · 否则 → 保留 `[idx, idx+cap)`，新下标为 0。当 idx 本来就是 0 时
+    //     （后台填充正是这种：点的那首在队首），**只砍掉了队尾**，
+    //     当前歌一动没动，重载纯属白卡一下。
+    // 两支里「下标没变」只可能出现在第二支且 idx==0，也就是只删了尾巴的
+    // 情况，所以拿下标是否变化来判断是充分的。
+    //
+    // 另加一条保险：引擎装的 run 若越过了新队列的末尾（截断把 run 里的
+    // 条目砍掉了），逻辑与物理也对不上，同样得重载。
+    final runOverruns =
+        _activeRunStart + _activeEngine.sequenceLength > allSongs.length;
+    if (newCurrentIdx == currentIdx && !runOverruns) return;
 
     try {
       await _activateLogicalIndex(newCurrentIdx, initialPosition: pos);
