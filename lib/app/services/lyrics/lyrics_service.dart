@@ -216,6 +216,20 @@ class LyricsService {
   }
 
   void _onPositionChanged() {
+    // **进度只喂给「确实属于当前这首」的歌词模型。**
+    //
+    // 切歌是瞬间的，而歌词是异步拉的 —— 中间那段时间里 controller 装的还是
+    // 上一首的模型。把新歌的进度喂进去，flutter_lyric 会拿超出范围的行号去
+    // 索引，抛 RangeError；而它在 notifyListeners 里抛，一次切歌能刷出二十
+    // 多条 `Another exception was thrown`（实测日志：
+    // `RangeError (length): Invalid value: Not in inclusive range 0..15: 16`
+    // ← 新进度落在第 16 行，而旧歌词只有 16 行）。
+    //
+    // 等 [_loadForSong] 把新模型装好，snapshot.song 与当前歌对上，
+    // 后续的进度 tick 自然恢复。
+    final loaded = snapshot.value.song;
+    final current = _player.currentSong.value;
+    if (loaded == null || current == null || loaded.id != current.id) return;
     final pos = _player.position.value;
     controller.setProgress(pos);
     _scheduleLyriconPosition(pos);
