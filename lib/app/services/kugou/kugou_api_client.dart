@@ -22,6 +22,27 @@ class KugouApiException implements Exception {
       'KugouApiException($message${code == null ? '' : ', code=$code'})';
 }
 
+/// 加进云端歌单时要回传给酷狗的一首歌。
+///
+/// 这四个字段都能从播放器里的 `SongEntity` 取回，不用再打一次网络：
+/// `name` = title，`hash` = `kg:` 前缀解码，
+/// **`album_id` 存在 `codec`、`mixsongid` 存在 `audioSpec`**
+/// —— 见 `KugouPlaybackService.toSongEntity`（借既有字段存取址引用，
+/// 不为它们新开数据库列）。
+class KugouAddSongRef {
+  const KugouAddSongRef({
+    required this.name,
+    required this.hash,
+    this.albumId = 0,
+    this.mixSongId = 0,
+  });
+
+  final String name;
+  final String hash;
+  final int albumId;
+  final int mixSongId;
+}
+
 /// 酷狗音乐接口。
 ///
 /// 三家里最省事的一家：没有加密，只有一个 MD5 签名，而且**取播放地址时
@@ -960,6 +981,86 @@ class KugouApiClient {
     }
     debugPrint('[Kugou] 歌单 $listId 共 ${all.length} 首');
     return _toSongs(all.take(limit).toList());
+  }
+
+  /// 「我喜欢」那张特殊歌单的 listid。
+  ///
+  /// 酷狗**没有独立的收藏接口** —— 收藏一首歌就是往「我喜欢」这个歌单里加歌
+  /// （KuGouMusicApi 里也找不到 favorite/love 之类的写模块，只有 add_song）。
+  /// 所以红心和「添加到歌单」共用 [addSongsToPlaylist]，区别只是 listid。
+  Future<int?> favoritePlaylistId() async {
+    final lists = await userPlaylists(limit: 200);
+    for (final p in lists) {
+      if (p.name == '我喜欢') return p.id;
+    }
+    return null;
+  }
+
+  /// 往云端歌单加歌。
+  ///
+  /// 端点与载荷照 KuGouMusicApi 的 `playlist_tracks_add`：
+  /// `POST /cloudlist.service/v6/add_song`，**android 签名**——跟 [userPlaylists]
+  /// 用的是同一套 [_gateway]，不是 `/playlist/sort` 那类要 RSA+AES 的新协议。
+  Future<void> addSongsToPlaylist(
+    int listId,
+    List<KugouAddSongRef> songs,
+  ) async {
+    final auth = KugouAuth.instance;
+    if (!auth.isLoggedIn.value) {
+      throw KugouApiException('请先登录酷狗音乐');
+    }
+    if (songs.isEmpty) return;
+    final clienttime = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final json = await _gateway(
+      '/cloudlist.service/v6/add_song',
+      method: 'POST',
+      params: {
+        'last_time': '$clienttime',
+        'last_area': 'gztx',
+        'userid': auth.userId,
+        'token': auth.token,
+      },
+      data: {
+        'userid': int.tryParse(auth.userId) ?? 0,
+        'token': auth.token,
+        'listid': listId,
+        'list_ver': 0,
+        'type': 0,
+        'slow_upload': 1,
+        'scene': 'false;null',
+        'data': [
+          for (final s in songs)
+            {
+              'number': 1,
+              'name': s.name,
+              'hash': s.hash,
+              'size': 0,
+              'sort': 0,
+              'timelen': 0,
+              'bitrate': 0,
+              'album_id': s.albumId,
+              'mixsongid': s.mixSongId,
+            },
+        ],
+      },
+      headers: const {'Content-Type': 'application/json'},
+    );
+
+    // 返回体字段不太稳定：成功一般是 status=1 / errcode=0。
+    // 两个都读不到就当成功（别因为解析口径把真的成功报成失败）。
+    final status = json['status'];
+    final errcode = json['errcode'] ?? json['error_code'];
+    final ok =
+        (status is int ? status == 1 : status == null) &&
+        (errcode is int ? errcode == 0 : errcode == null);
+    if (!ok) {
+      final msg = _strOf(json, const ['error', 'errmsg', 'msg', 'error_msg']);
+      throw KugouApiException(
+        msg.isEmpty ? '酷狗返回失败（status=$status errcode=$errcode）' : msg,
+        code: errcode is int ? errcode : null,
+      );
+    }
+    debugPrint('[Kugou] 已加入歌单 $listId：${songs.length} 首');
   }
 
   // ------------------------- 网关用到的小工具 -------------------------

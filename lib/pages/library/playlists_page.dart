@@ -1905,6 +1905,9 @@ class _PlaylistPickerSheetState extends State<PlaylistPickerSheet>
 Future<bool> showAddToPlaylistDialog(
   BuildContext context, {
   required List<String> songIds,
+  // 酷狗加歌除了 hash 还要 name / album_id / mixsongid，光靠 id 凑不出来，
+  // 所以能拿到完整实体的调用方请一并传进来。飞牛那条路只用 id，可以不传。
+  List<SongEntity>? songs,
 }) async {
   final ids = songIds.where((e) => e.trim().isNotEmpty).toList();
   if (ids.isEmpty) return false;
@@ -1917,6 +1920,9 @@ Future<bool> showAddToPlaylistDialog(
   final source = SongSource.fromSongId(ids.first);
   final sameSourceIds = ids
       .where((e) => SongSource.fromSongId(e) == source)
+      .toList();
+  final sameSourceSongs = songs
+      ?.where((s) => SongSource.fromSongId(s.id) == source)
       .toList();
   final cap = actions.capabilityOf(source);
 
@@ -2037,6 +2043,7 @@ Future<bool> showAddToPlaylistDialog(
                                   source,
                                   playlist.id,
                                   sameSourceIds,
+                                  songs: sameSourceSongs,
                                 );
                                 if (!context.mounted) return;
                                 Navigator.pop(dialogContext, true);

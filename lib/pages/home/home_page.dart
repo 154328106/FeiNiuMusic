@@ -29,7 +29,6 @@ import '../songs/song_detail_sheet.dart';
 import '../songs/songs_page.dart';
 import 'source_feed_page.dart';
 import 'source_playlists_page.dart';
-import 'widgets/home_cover_carousel.dart';
 import 'widgets/home_hero_banner.dart';
 import 'widgets/home_large_layout.dart';
 import 'widgets/home_quick_actions.dart';
@@ -1463,31 +1462,9 @@ class _HomePageState extends State<HomePage>
 
               const SizedBox(height: 20),
 
-              // 3. 我的歌单 — 横向封面轮播（尺寸小于专辑）
-              // 歌单区块暂时只支持飞牛：详情页与缓存仍是飞牛强类型。
-              // 换源后显示飞牛歌单会是错的，先隐藏。
-              if (_source.id == 'feiniu' && _playlists.value.isNotEmpty) ...[
-                HomeSectionHeader(title: '我的歌单', onViewAll: _openPlaylistsPage),
-                AppContentFrame(
-                  child: HomeCoverCarousel(
-                  coverSize: AppLayoutSettings.tvMode.value ? 140 : 100,
-                  borderRadius: 14,
-                  centerText: true,
-                  items: [
-                    for (final p in _playlists.value)
-                      HomeCoverItem(
-                        coverId: p.coverId,
-                        updatedAt: p.updatedAt,
-                        title: p.name,
-                        // 歌单没有数量副标题，空串不占行，避免卡片下方留白
-                        subtitle: '',
-                        onTap: () => _openPlaylistDetail(p),
-                      ),
-                  ],
-                ),
-                ),
-                const SizedBox(height: 16),
-              ],
+              // 3.「我的歌单」区块已移除（2026-09-18）：上面的快捷方格里已经有
+              // 「歌单」入口，点进去是同一份内容，首页再横排一遍是重复的。
+              // 入口保留在方格里，这里不再渲染。
 
               // 4. 最新歌曲 — 紧凑竖排行列表
               if (_recentTracks.value.isNotEmpty) ...[

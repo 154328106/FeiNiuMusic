@@ -151,7 +151,11 @@ mixin SongMultiSelectMixin<T extends StatefulWidget>
   Future<void> addSelectedToPlaylist() async {
     final ids = _selectedIds.value.toList();
     if (ids.isEmpty) return;
-    final added = await showAddToPlaylistDialog(context, songIds: ids);
+    final added = await showAddToPlaylistDialog(
+      context,
+      songIds: ids,
+      songs: selectedSongs,
+    );
     if (!mounted) return;
     if (added) await onMultiSelectDone?.call();
   }

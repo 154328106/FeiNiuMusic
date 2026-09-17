@@ -269,7 +269,11 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
               leading: const Icon(Icons.add_to_photos_outlined),
               title: '添加到歌单',
               onTap: () async {
-                await showAddToPlaylistDialog(context, songIds: [song.id]);
+                await showAddToPlaylistDialog(
+                  context,
+                  songIds: [song.id],
+                  songs: [song],
+                );
                 if (!context.mounted) return;
                 Navigator.of(context).pop();
               },

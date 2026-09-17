@@ -48,10 +48,13 @@ class SongActionCapability {
 ///
 /// | 源   | 读我的歌单 | 加歌进歌单 | 收藏 |
 /// |------|-----------|-----------|------|
-/// | 飞牛 | ✅        | ✅        | ✅   |
-/// | 酷狗 | ✅        | ❌ 待做   | ❌ 待做 |
-/// | 网易 | ✅        | ❌ 待做   | ✅   |
-/// | QQ   | ✅        | ❌ 待做   | ❌ 待做 |
+/// | 飞牛 | ✅        | ✅        | ✅          |
+/// | 酷狗 | ✅        | ✅        | ✅（仅添加） |
+/// | 网易 | ✅        | ❌ 待做   | ✅          |
+/// | QQ   | ✅        | ❌ 待做   | ❌ 待做      |
+///
+/// 酷狗的收藏就是「往『我喜欢』歌单加歌」（它没有独立的收藏接口），所以只做了
+/// 添加；取消收藏要另一个 del_song 接口，暂未实现，点了会如实提示。
 ///
 /// 「待做」= 那几家的私有写接口还没实现（需要各自的签名方案），不是这里少写了
 /// 分支。补齐时只改本文件对应分支即可，UI 不用动。
@@ -90,8 +93,8 @@ class SongActionsService {
           label: '酷狗音乐',
           loggedIn: KugouAuth.instance.isLoggedIn.value,
           canReadPlaylists: true,
-          canAddToPlaylist: false,
-          canFavorite: false,
+          canAddToPlaylist: true,
+          canFavorite: true,
         );
       case SongSource.netease:
         return SongActionCapability(
@@ -230,20 +233,51 @@ class SongActionsService {
         if (!ok) throw StateError('网易云收藏接口返回失败');
         return;
       case SongSource.kugou:
+        // 酷狗没有独立的收藏接口：收藏 = 往「我喜欢」这个歌单里加歌。
+        // 取消收藏要用 del_song（另一个接口），先不做，如实报出来。
+        if (!value) {
+          throw UnsupportedError('酷狗暂不支持取消收藏，请到酷狗 App 里操作');
+        }
+        final listId = await KugouApiClient.instance.favoritePlaylistId();
+        if (listId == null) {
+          throw StateError('没找到酷狗「我喜欢」歌单');
+        }
+        await KugouApiClient.instance.addSongsToPlaylist(listId, [
+          _kugouRef(song),
+        ]);
+        return;
       case SongSource.qq:
         throw UnsupportedError('${cap.label}暂不支持收藏');
     }
   }
 
+  /// 把一首酷狗歌曲转成加歌载荷。
+  ///
+  /// 四个字段全部来自 [SongEntity]，不用再打一次网络 —— `album_id` 藏在 `codec`、
+  /// `mixsongid` 藏在 `audioSpec`（见 `KugouPlaybackService.toSongEntity`）。
+  static KugouAddSongRef _kugouRef(SongEntity song) {
+    final hash = SongSource.decodeKugou(song.id) ?? '';
+    if (hash.isEmpty) throw StateError('这首歌没有酷狗 hash');
+    return KugouAddSongRef(
+      name: song.title,
+      hash: hash,
+      albumId: int.tryParse(song.codec ?? '') ?? 0,
+      mixSongId: int.tryParse(song.audioSpec ?? '') ?? 0,
+    );
+  }
+
   /// 把歌曲加进该来源的某个歌单。
   ///
-  /// [songIds] 是带来源前缀的 [SongEntity.id]（调用方手里一般就是这个）。
-  /// 目前只有飞牛支持；其余源抛 [UnsupportedError]，调用方据此给明确提示。
+  /// [songIds] 是带来源前缀的 [SongEntity.id]；[songs] 是对应的完整实体。
+  /// **酷狗必须有 [songs]** —— 它的加歌接口除了 hash 还要 name / album_id /
+  /// mixsongid，光靠 id 凑不出来。拿不到实体的调用方（如歌单页多选）传 null 即可，
+  /// 飞牛那条路只用 id，不受影响。
   Future<void> addToPlaylist(
     SongSource source,
     String playlistId,
-    List<String> songIds,
-  ) async {
+    List<String> songIds, {
+    List<SongEntity>? songs,
+  }) async {
     final cap = capabilityOf(source);
     if (!cap.canAddToPlaylist) {
       throw UnsupportedError('${cap.label}暂不支持添加到歌单');
@@ -257,6 +291,17 @@ class SongActionsService {
         await _fnPlaylist.addTracks(playlistId, songIds);
         return;
       case SongSource.kugou:
+        final list = songs ?? const <SongEntity>[];
+        if (list.isEmpty) {
+          throw StateError('缺少歌曲信息，请从播放页或歌曲列表里操作');
+        }
+        final listId = int.tryParse(playlistId) ?? 0;
+        if (listId <= 0) throw StateError('酷狗歌单 id 异常');
+        await KugouApiClient.instance.addSongsToPlaylist(
+          listId,
+          list.map(_kugouRef).toList(),
+        );
+        return;
       case SongSource.netease:
       case SongSource.qq:
         throw UnsupportedError('${cap.label}暂不支持添加到歌单');
