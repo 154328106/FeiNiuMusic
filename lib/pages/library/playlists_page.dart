@@ -18,6 +18,8 @@ import '../../app/services/feiniu/playlist_service.dart';
 import '../../app/services/feiniu/track_service.dart';
 import '../../app/services/song_match/backend_match_client.dart';
 import '../../app/services/player_service.dart';
+import '../../app/services/song_actions_service.dart';
+import '../../app/state/song_source.dart';
 import '../../app/state/settings_layout_state.dart';
 import '../../app/state/settings_playback_state.dart';
 import '../../app/state/song_state.dart';
@@ -1907,17 +1909,40 @@ Future<bool> showAddToPlaylistDialog(
   final ids = songIds.where((e) => e.trim().isNotEmpty).toList();
   if (ids.isEmpty) return false;
 
+  // 按**歌曲来源**路由（2026-09-18）：酷狗的歌进酷狗账号的歌单、网易的进网易，
+  // 不再一律发飞牛 NAS —— NAS 只认自己曲库的 GUID，外部 id 根本存不了，
+  // 以前的表现就是弹框恒「暂无歌单」、点了也静默失败。
+  // 多选理论上可能混源，这里以第一首为准，且只带同源的那些。
+  final actions = SongActionsService.instance;
+  final source = SongSource.fromSongId(ids.first);
+  final sameSourceIds = ids
+      .where((e) => SongSource.fromSongId(e) == source)
+      .toList();
+  final cap = actions.capabilityOf(source);
+
+  if (!cap.loggedIn) {
+    AppToast.show(context, '请先登录${cap.label}', type: ToastType.error);
+    return false;
+  }
+
   final service = FeiNiuPlaylistService.instance;
-  final playlists = await service.getPlaylistList();
+  final playlists = await actions.myPlaylists(source);
   if (!context.mounted) return false;
+
+  // 只有飞牛支持在这里直接新建歌单；其它源先不做。
+  final canCreate = source == SongSource.feiniu;
 
   final result = await showDialog<bool>(
     context: context,
     builder: (dialogContext) {
       return AppDialog(
         title: '添加到歌单',
-        confirmText: '新建歌单',
+        confirmText: canCreate ? '新建歌单' : '知道了',
         onConfirm: () {
+          if (!canCreate) {
+            Navigator.pop(dialogContext, false);
+            return;
+          }
           Future.delayed(const Duration(milliseconds: 100), () {
             if (!context.mounted) return;
             _showPlaylistNameDialog(
@@ -1928,7 +1953,7 @@ Future<bool> showAddToPlaylistDialog(
               fallbackName: '新建歌单',
               onSubmit: (name) async {
                 final created = await service.createPlaylist(name);
-                await service.addTracks(created.guid, ids);
+                await service.addTracks(created.guid, sameSourceIds);
                 if (!context.mounted) return;
                 AppToast.show(context, '已添加到歌单: ${created.name}');
               },
@@ -1938,52 +1963,103 @@ Future<bool> showAddToPlaylistDialog(
         content: ConstrainedBox(
           constraints: const BoxConstraints(maxHeight: 300),
           child: playlists.isEmpty
-              ? const Center(
-                  child: Text('暂无歌单', style: TextStyle(color: Colors.grey)),
+              ? Center(
+                  child: Text(
+                    '${cap.label}暂无歌单',
+                    style: const TextStyle(color: Colors.grey),
+                  ),
                 )
-              : ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: playlists.length,
-                  itemBuilder: (context, index) {
-                    final playlist = playlists[index];
-                    return AppListTile(
-                      leading:
-                          playlist.coverId != null &&
-                              playlist.coverId!.isNotEmpty
-                          ? ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
-                              child: CachedNetworkImage(
-                                imageUrl: FeiNiuApiClient.instance.coverUrl(
-                                  playlist.coverId!,
-                                  size: FeiNiuApiClient.coverRequestSize,
-                                  updatedAt: playlist.updatedAt,
-                                ),
-                                httpHeaders: FeiNiuApiClient.imageAuthHeaders(),
-                                width: 40,
-                                height: 40,
-                                memCacheWidth: 40,
-                                memCacheHeight: 40,
-                                fit: BoxFit.cover,
-                                errorWidget: (_, _, _) => Icon(
-                                  Icons.queue_music,
-                                  color: Theme.of(context).colorScheme.primary,
-                                ),
-                              ),
-                            )
-                          : Icon(
-                              Icons.queue_music,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                      title: playlist.name,
-                      subtitle: null,
-                      onTap: () async {
-                        await service.addTracks(playlist.guid, ids);
-                        if (!context.mounted) return;
-                        Navigator.pop(dialogContext, true);
-                        AppToast.show(context, '已添加到歌单: ${playlist.name}');
-                      },
-                    );
-                  },
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 该源还不支持写入时先说清楚，别让用户点了才发现没反应。
+                    if (!cap.canAddToPlaylist)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          '${cap.label}暂不支持添加到歌单，仅可查看',
+                          style: const TextStyle(
+                            color: Colors.orange,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    Flexible(
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: playlists.length,
+                        itemBuilder: (context, index) {
+                          final playlist = playlists[index];
+                          final cover = playlist.coverId;
+                          final hasCover = cover != null && cover.isNotEmpty;
+                          // 封面约定同 SongEntity.coverId：http 开头是外链
+                          // （酷狗/网易/QQ），否则是飞牛的 coverId。
+                          final isRemote = hasCover && cover.startsWith('http');
+                          return AppListTile(
+                            leading: hasCover
+                                ? ClipRRect(
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: CachedNetworkImage(
+                                      imageUrl: isRemote
+                                          ? cover
+                                          : FeiNiuApiClient.instance.coverUrl(
+                                              cover,
+                                              size: FeiNiuApiClient
+                                                  .coverRequestSize,
+                                            ),
+                                      httpHeaders: isRemote
+                                          ? null
+                                          : FeiNiuApiClient.imageAuthHeaders(),
+                                      width: 40,
+                                      height: 40,
+                                      memCacheWidth: 40,
+                                      memCacheHeight: 40,
+                                      fit: BoxFit.cover,
+                                      errorWidget: (_, _, _) => Icon(
+                                        Icons.queue_music,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.primary,
+                                      ),
+                                    ),
+                                  )
+                                : Icon(
+                                    Icons.queue_music,
+                                    color: Theme.of(context).colorScheme.primary,
+                                  ),
+                            title: playlist.name,
+                            subtitle: playlist.trackCount > 0
+                                ? '${playlist.trackCount} 首'
+                                : null,
+                            onTap: () async {
+                              try {
+                                await actions.addToPlaylist(
+                                  source,
+                                  playlist.id,
+                                  sameSourceIds,
+                                );
+                                if (!context.mounted) return;
+                                Navigator.pop(dialogContext, true);
+                                AppToast.show(
+                                  context,
+                                  '已添加到歌单: ${playlist.name}',
+                                );
+                              } catch (e) {
+                                // 以前这里没有 try/catch，失败就整个静默 ——
+                                // 用户只看到「点了没反应」。
+                                if (!context.mounted) return;
+                                AppToast.show(
+                                  context,
+                                  SongActionsService.describeError(e),
+                                  type: ToastType.error,
+                                );
+                              }
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ),
         ),
       );

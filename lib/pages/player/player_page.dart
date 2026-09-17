@@ -8,7 +8,7 @@ import 'package:skeletonizer/skeletonizer.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
 import '../../app/router/app_router.dart';
-import '../../app/services/feiniu/favorite_service.dart';
+import '../../app/services/song_actions_service.dart';
 import '../../app/services/lyrics/lyrics_service.dart';
 import '../../app/services/player_service.dart';
 import '../../app/state/settings_state.dart';
@@ -916,7 +916,6 @@ class _PosterFavoriteButton extends StatefulWidget {
 }
 
 class _PosterFavoriteButtonState extends State<_PosterFavoriteButton> {
-  final FeiNiuFavoriteService _favoriteService = FeiNiuFavoriteService.instance;
   bool _isFavorite = false;
   bool _loading = false;
 
@@ -947,10 +946,11 @@ class _PosterFavoriteButtonState extends State<_PosterFavoriteButton> {
     }
     setState(() => _loading = true);
     try {
-      final favIds = await _favoriteService.getFavoriteIds();
+      // 按来源取收藏态（飞牛查 NAS，网易/酷狗/QQ 各回各家）。
+      final fav = await SongActionsService.instance.isFavorite(song);
       if (!mounted || widget.song?.id != song.id) return;
       setState(() {
-        _isFavorite = favIds.contains(song.id);
+        _isFavorite = fav;
         _loading = false;
       });
     } catch (_) {
@@ -962,26 +962,25 @@ class _PosterFavoriteButtonState extends State<_PosterFavoriteButton> {
     final song = widget.song;
     if (_loading || song == null) return;
     setState(() => _loading = true);
+    final next = !_isFavorite;
     try {
-      if (_isFavorite) {
-        await _favoriteService.unfavorite(song.id);
-        if (!mounted) return;
-        setState(() {
-          _isFavorite = false;
-          _loading = false;
-        });
-        AppToast.show(context, '已取消收藏');
-      } else {
-        await _favoriteService.favorite(song.id);
-        if (!mounted) return;
-        setState(() {
-          _isFavorite = true;
-          _loading = false;
-        });
-        AppToast.show(context, '已收藏');
-      }
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      // 同 song_detail_sheet：以前一律发飞牛，在线音源的歌必失败；
+      // 而且这里连提示都没有（静默 catch），点了完全没反馈。
+      await SongActionsService.instance.setFavorite(song, next);
+      if (!mounted) return;
+      setState(() {
+        _isFavorite = next;
+        _loading = false;
+      });
+      AppToast.show(context, next ? '已收藏' : '已取消收藏');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      AppToast.show(
+        context,
+        SongActionsService.describeError(e),
+        type: ToastType.error,
+      );
     }
   }
 

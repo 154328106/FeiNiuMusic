@@ -8,16 +8,34 @@ class FeiNiuFavoriteService {
 
   final FeiNiuApiClient _api = FeiNiuApiClient.instance;
 
+  /// 一次翻页抓多少条（取全量时用）。
+  static const int _allPageSize = 200;
+
+  /// 取全量收藏：按 [_allPageSize] 逐页翻到底。
+  ///
+  /// ⚠️ **不再依赖 `size: -1`**（2026-09-18 修）：服务端对 `size=-1` 不返回数据，
+  /// 导致收藏状态恒为空（小红心永远不亮）。所有工作正常的页面传的都是正数 size。
+  Future<List<dynamic>> _fetchAllFavorites() async {
+    final all = <dynamic>[];
+    for (var p = 1; ; p++) {
+      final pageData = await _api.getFavoriteList(page: p, size: _allPageSize);
+      all.addAll(pageData.list);
+      if (pageData.list.length < _allPageSize) break;
+      if (pageData.total > 0 && all.length >= pageData.total) break;
+      if (p >= 50) break; // 兜底，防服务端 total 异常导致死循环
+    }
+    return all;
+  }
+
   /// 获取收藏歌曲 ID 集合
   Future<Set<String>> getFavoriteIds() async {
-    final pageData = await _api.getFavoriteList();
-    return pageData.list.map((t) => t.guid).toSet();
+    final list = await _fetchAllFavorites();
+    return list.map((t) => t.guid as String).toSet();
   }
 
   /// 获取收藏歌曲列表
   Future<List<dynamic>> getFavoriteList() async {
-    final pageData = await _api.getFavoriteList();
-    return pageData.list;
+    return _fetchAllFavorites();
   }
 
   /// 收藏歌曲

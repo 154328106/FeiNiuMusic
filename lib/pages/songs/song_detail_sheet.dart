@@ -5,8 +5,8 @@ import 'package:flutter/material.dart';
 
 import '../../app/router/app_page_route.dart';
 import '../../app/services/feiniu/api_client.dart';
-import '../../app/services/feiniu/favorite_service.dart';
 import '../../app/services/feiniu/transcode_service.dart';
+import '../../app/services/song_actions_service.dart';
 import '../../app/services/player/player_engine.dart';
 import '../../app/services/player_service.dart';
 import '../../app/state/settings_state.dart';
@@ -52,8 +52,6 @@ class SongDetailSheet extends StatefulWidget {
 }
 
 class _SongDetailSheetState extends State<SongDetailSheet> {
-  final FeiNiuFavoriteService _favoriteService =
-      FeiNiuFavoriteService.instance;
   bool _isFavorite = false;
   bool _loadingFavorite = true;
 
@@ -85,7 +83,8 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
 
   Future<void> _loadFavoriteState() async {
     try {
-      final isFav = await _favoriteService.isFavorite(widget.song.id);
+      // 按来源取收藏态：飞牛查 NAS，网易/酷狗/QQ 各回各家（见 SongActionsService）。
+      final isFav = await SongActionsService.instance.isFavorite(widget.song);
       if (!mounted) return;
       setState(() {
         _isFavorite = isFav;
@@ -99,21 +98,22 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
 
   Future<void> _toggleFavorite() async {
     if (_loadingFavorite) return;
+    final next = !_isFavorite;
     try {
-      if (_isFavorite) {
-        await _favoriteService.unfavorite(widget.song.id);
-        if (!mounted) return;
-        setState(() => _isFavorite = false);
-        AppToast.show(context, '已取消收藏');
-      } else {
-        await _favoriteService.favorite(widget.song.id);
-        if (!mounted) return;
-        setState(() => _isFavorite = true);
-        AppToast.show(context, '已收藏');
-      }
+      // 以前这里**一律**把 song.id 当飞牛 trackGUID 发给 NAS，在线音源的歌
+      // （id 带 kg:/ne:/qq: 前缀）必然失败 → 恒提示「操作失败」。
+      // 现在按来源分发，且失败原因如实透出（没登录 / 该源还不支持）。
+      await SongActionsService.instance.setFavorite(widget.song, next);
+      if (!mounted) return;
+      setState(() => _isFavorite = next);
+      AppToast.show(context, next ? '已收藏' : '已取消收藏');
     } catch (e) {
       if (!mounted) return;
-      AppToast.show(context, '操作失败', type: ToastType.error);
+      AppToast.show(
+        context,
+        SongActionsService.describeError(e),
+        type: ToastType.error,
+      );
     }
   }
 

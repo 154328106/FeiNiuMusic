@@ -9,16 +9,37 @@ class FeiNiuPlaylistService {
 
   final FeiNiuApiClient _api = FeiNiuApiClient.instance;
 
-  /// 获取歌单列表（分页）。
+  /// 一次翻页抓多少条（取全量时用）。
+  static const int _allPageSize = 200;
+
+  /// 获取歌单列表。
   ///
-  /// 默认 `size: -1`（一次返回全部），供歌单选择器等需要完整列表的场景使用；
-  /// 歌单页传入 `page`/`size` 做滚动加载更多。
-  Future<List<FeiNiuPlaylist>> getPlaylistList({
-    int page = 1,
-    int size = -1,
-  }) async {
-    final pageData = await _api.getPlaylistList(page: page, size: size);
-    return pageData.list;
+  /// 不传 `page`/`size` = **取全量**（歌单选择器等场景）：内部按 [_allPageSize]
+  /// 逐页翻到底再合并。
+  ///
+  /// ⚠️ 这里**不再用 `size: -1` 表示「一次返回全部」**（2026-09-18 修）：
+  /// 服务端对 `size=-1` 不返回数据，导致「添加到歌单」弹框恒显示「暂无歌单」。
+  /// 佐证：首页(`size:10`)、歌单页(显式分页)、收藏页(显式分页)全都传正数且正常，
+  /// 全项目只有这里和 `getFavoriteList` 用 `-1`，而这两处正好就是坏掉的两个功能。
+  /// 歌单页传入 `page`/`size` 做滚动加载更多，行为不变。
+  Future<List<FeiNiuPlaylist>> getPlaylistList({int? page, int? size}) async {
+    if (page != null || size != null) {
+      final pageData = await _api.getPlaylistList(
+        page: page ?? 1,
+        size: size ?? _allPageSize,
+      );
+      return pageData.list;
+    }
+    final all = <FeiNiuPlaylist>[];
+    for (var p = 1; ; p++) {
+      final pageData = await _api.getPlaylistList(page: p, size: _allPageSize);
+      all.addAll(pageData.list);
+      // 取够了 / 这一页没满 / 服务端没返回数据 → 到底了
+      if (pageData.list.length < _allPageSize) break;
+      if (pageData.total > 0 && all.length >= pageData.total) break;
+      if (p >= 50) break; // 兜底，别因为服务端 total 异常转成死循环
+    }
+    return all;
   }
 
   /// 获取歌单内歌曲
