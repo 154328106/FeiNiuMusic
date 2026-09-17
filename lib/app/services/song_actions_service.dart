@@ -9,6 +9,7 @@ import 'kugou/kugou_auth.dart';
 import 'netease/netease_api_client.dart';
 import 'qq/qq_api_client.dart';
 import 'qq/qq_auth.dart';
+import 'source/kugou_source.dart';
 import 'source/music_source.dart';
 
 /// 某个来源在「收藏 / 添加到歌单」上的能力。
@@ -191,15 +192,21 @@ class SongActionsService {
 
   /// 查询是否已收藏。
   ///
-  /// 网易目前没有便宜的「单曲是否已收藏」接口，恒返回 false（红心不回显，
-  /// 但点击仍然生效）。补上之后改这里即可。
+  /// 网易/QQ 目前没有便宜的「单曲是否已收藏」接口，恒返回 false（红心不回显，
+  /// 但点击仍生效）。酷狗靠「我喜欢」歌单里有没有这首 hash 判断。
   Future<bool> isFavorite(SongEntity song) async {
     try {
       switch (song.source) {
         case SongSource.feiniu:
           return await _fnFavorite.isFavorite(song.id);
-        case SongSource.netease:
         case SongSource.kugou:
+          final hash = SongSource.decodeKugou(song.id);
+          if (hash == null || !KugouAuth.instance.isLoggedIn.value) {
+            return false;
+          }
+          final hashes = await KugouSource.instance.favoriteHashes();
+          return hashes.contains(hash);
+        case SongSource.netease:
         case SongSource.qq:
           return false;
       }
@@ -245,6 +252,8 @@ class SongActionsService {
         await KugouApiClient.instance.addSongsToPlaylist(listId, [
           _kugouRef(song),
         ]);
+        // 清「我喜欢」缓存，让红心状态下次能立刻回显为已收藏。
+        KugouSource.instance.invalidateFavoriteCache();
         return;
       case SongSource.qq:
         throw UnsupportedError('${cap.label}暂不支持收藏');

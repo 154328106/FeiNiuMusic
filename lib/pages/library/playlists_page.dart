@@ -198,7 +198,16 @@ class _PlaylistsPageState extends State<PlaylistsPage>
     if (AppLayoutSettings.tvMode.value) {
       _gridColumns.value = TvLayout.gridColumns(width);
     } else {
-      var cols = prefs.getInt(_prefsGridColumns) ?? 2;
+      var cols = prefs.getInt(_prefsGridColumns) ?? 3;
+      // 一次性迁移（2026-09-18）：老版本默认 2 列，封面偏大不好看。首次进入
+      // 新版把列数提到 3（音乐 App 歌单的常规布局，更紧凑精致），写入标记后
+      // 不再干预 —— 用户之后自己调的（含调回 2）都会保留。
+      const migratedKey = 'playlists_grid_cols_migrated_v2';
+      if (!(prefs.getBool(migratedKey) ?? false)) {
+        cols = 3;
+        await prefs.setBool(migratedKey, true);
+        await prefs.setInt(_prefsGridColumns, 3);
+      }
       if (cols < 2) cols = 2;
       if (cols > 4) cols = 4;
       _gridColumns.value = cols;
@@ -1228,6 +1237,15 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
           centerTitle: true,
           backgroundColor: Colors.transparent,
           elevation: 0,
+          // 显式返回按钮：透明栏 + 浅色内容下，默认自动返回箭头会跟背景撞色
+          // 看不见（用户反馈「进歌单没有返回按钮」）。给个明确颜色兜底。
+          leading: _multiSelect.value
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+                  color: Theme.of(context).colorScheme.onSurface,
+                  onPressed: () => Navigator.of(context).maybePop(),
+                ),
         ),
         body: Watch.builder(
           builder: (context) {

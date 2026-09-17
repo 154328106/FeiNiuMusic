@@ -202,6 +202,24 @@ class KugouSource implements MusicSource {
     return _recommendedSongs();
   }
 
+  /// 「我喜欢」里所有歌曲的酷狗 hash 集合，供收藏状态（红心）回显用。
+  ///
+  /// 复用 [_favorites] 的缓存，不额外打网络。未登录返回空集。
+  Future<Set<String>> favoriteHashes() async {
+    final songs = await _favorites();
+    final set = <String>{};
+    for (final s in songs) {
+      final h = SongSource.decodeKugou(s.id);
+      if (h != null && h.isNotEmpty) set.add(h);
+    }
+    return set;
+  }
+
+  /// 收藏发生变化（加入/移除「我喜欢」）后清掉缓存，让下次回显读到最新。
+  void invalidateFavoriteCache() {
+    _favoriteCache = null;
+  }
+
   /// 「我喜欢」。酷狗把它当成一张普通的云端歌单，靠名字认。
   Future<List<SongEntity>> _favorites() async {
     if (!isLoggedIn) return const [];
