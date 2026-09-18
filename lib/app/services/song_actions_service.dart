@@ -51,7 +51,7 @@ class SongActionCapability {
 /// |------|-----------|-----------|------|
 /// | 飞牛 | ✅        | ✅        | ✅          |
 /// | 酷狗 | ✅        | ✅        | ✅（仅添加） |
-/// | 网易 | ✅        | ❌ 待做   | ✅          |
+/// | 网易 | ✅        | ✅        | ✅          |
 /// | QQ   | ✅        | ❌ 待做   | ❌ 待做      |
 ///
 /// 酷狗的收藏就是「往『我喜欢』歌单加歌」（它没有独立的收藏接口），所以只做了
@@ -102,7 +102,7 @@ class SongActionsService {
           label: '网易云音乐',
           loggedIn: NetEaseApiClient.instance.isLoggedIn,
           canReadPlaylists: true,
-          canAddToPlaylist: false,
+          canAddToPlaylist: true,
           canFavorite: true,
         );
       case SongSource.qq:
@@ -312,6 +312,20 @@ class SongActionsService {
         );
         return;
       case SongSource.netease:
+        final pid = int.tryParse(playlistId) ?? 0;
+        if (pid <= 0) throw StateError('网易歌单 id 异常');
+        // 网易加歌只认数字 songId，从 id 前缀解出来。
+        final neIds = <int>[];
+        for (final sid in songIds) {
+          final n = SongSource.decodeNetease(sid);
+          if (n != null) neIds.add(n);
+        }
+        if (neIds.isEmpty) throw StateError('这些歌没有网易云 id');
+        await NetEaseApiClient.instance.playlistManipulateTracks(
+          playlistId: pid,
+          songIds: neIds,
+        );
+        return;
       case SongSource.qq:
         throw UnsupportedError('${cap.label}暂不支持添加到歌单');
     }

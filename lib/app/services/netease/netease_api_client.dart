@@ -760,4 +760,35 @@ class NetEaseApiClient {
     }
     return false;
   }
+
+  /// 往歌单加 / 删歌。[add] 为 true 是加，false 是删。
+  ///
+  /// 标准接口 `/playlist/manipulate/tracks`（NeteaseCloudMusicApi 的
+  /// playlist_tracks），weapi。要点：`trackIds` 是 **JSON 字符串数组**
+  /// （`"[123,456]"`，不是数组本身），`pid` 是歌单数字 id，`imme:'true'` 立即生效。
+  /// code=200 成功；重复添加会返回 code=502「歌曲已存在」，这里也当成功。
+  Future<bool> playlistManipulateTracks({
+    required int playlistId,
+    required List<int> songIds,
+    bool add = true,
+  }) async {
+    if (songIds.isEmpty) return true;
+    final json = await _request(
+      '/api/playlist/manipulate/tracks',
+      {
+        'op': add ? 'add' : 'del',
+        'pid': playlistId,
+        'trackIds': jsonEncode(songIds),
+        'imme': 'true',
+      },
+      _Scheme.weapi,
+    );
+    final code = json['code'];
+    if (code == 200) return true;
+    // 502 = 歌曲已在歌单里，对用户来说等于成功。
+    if (add && code == 502) return true;
+    throw NetEaseApiException(
+      (json['message'] ?? json['msg'] ?? '加入歌单失败（code=$code）').toString(),
+    );
+  }
 }
