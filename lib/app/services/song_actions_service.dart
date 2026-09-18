@@ -52,12 +52,15 @@ class SongActionCapability {
 /// | 飞牛 | ✅        | ✅        | ✅          |
 /// | 酷狗 | ✅        | ✅        | ✅（仅添加） |
 /// | 网易 | ✅        | ✅        | ✅          |
-/// | QQ   | ✅        | ⚠️ 试行   | ⚠️ 试行     |
+/// | QQ   | ✅        | ❌ 不支持  | ❌ 不支持    |
 ///
-/// QQ 的加歌单/收藏（`AddSonglist`，收藏=加进「我喜欢」dirId 201）已接上，但**写接口
-/// 鉴权只带了 uin/authst/tmeLoginType/g_tk，未加 qimei 设备指纹，能否过 QQ 风控尚未
-/// 实机验证**；失败时会把 QQ 的 retCode 抛出来定位。QQ/网易都没有便宜的「单曲是否已
-/// 收藏」查询，红心不回显（但收藏动作生效）。
+/// QQ 的加歌单/收藏（`AddSonglist`）走**安卓客户端协议**，要一整套 QIMEI 设备指纹
+/// 鉴权；本 App 是 web cookie 协议，顶不上（2026-09-18 实机 retCode=1000）。为它移植
+/// qimei 性价比太低（几百行且会随 QQ 风控失效），已止损：QQ 写操作关掉、给明确提示
+/// 让用户去 QQ App 操作，读歌单/播放/解灰不受影响。相关写代码（QQApiClient.
+/// addSongsToPlaylist、QQAuth.gtk/tmeLoginType、_musicuCall 的 post 分支）保留，
+/// 将来若走 web fcg 老接口能复用。
+/// 网易也没有便宜的「单曲是否已收藏」查询，红心不回显（但收藏动作生效）。
 ///
 /// 酷狗的收藏就是「往『我喜欢』歌单加歌」（它没有独立的收藏接口），所以只做了
 /// 添加；取消收藏要另一个 del_song 接口，暂未实现，点了会如实提示。
@@ -120,18 +123,13 @@ class SongActionsService {
           label: 'QQ音乐',
           loggedIn: QQAuth.instance.isLoggedIn.value,
           canReadPlaylists: true,
-          // 写接口鉴权尚未实机验证，先开着让它能试；失败会把 QQ 的 retCode 抛出来。
-          canAddToPlaylist: true,
-          canFavorite: true,
+          // 2026-09-18 止损：QQ 写接口（AddSonglist）走安卓客户端协议，要 QIMEI
+          // 设备指纹整套鉴权，web cookie 协议顶不上（实机 retCode=1000）。不再硬撑，
+          // 关掉写能力、给明确提示，让用户去 QQ App 操作。读歌单/播放/解灰不受影响。
+          canAddToPlaylist: false,
+          canFavorite: false,
         );
     }
-  }
-
-  /// 把一首 QQ 歌曲转成加歌用的 (songId, songType)。songId 借 codec 存（数字）。
-  static ({int songId, int songType})? _qqRef(SongEntity song) {
-    final sid = int.tryParse(song.codec ?? '') ?? 0;
-    if (sid <= 0) return null;
-    return (songId: sid, songType: 0);
   }
 
   /// 「我的歌单」——**可写入**的那种，供「添加到歌单」选择器用。
@@ -276,21 +274,8 @@ class SongActionsService {
         KugouSource.instance.invalidateFavoriteCache();
         return;
       case SongSource.qq:
-        // QQ 收藏 = 加进「我喜欢」(dirId 固定 201)，同 AddSonglist 接口。
-        if (!value) {
-          throw UnsupportedError('QQ暂不支持取消收藏，请到QQ音乐App里操作');
-        }
-        final qref = _qqRef(song);
-        if (qref == null) throw StateError('这首歌没有QQ数字id');
-        final lists = await QQApiClient.instance.userPlaylists();
-        final favTid = QQApiClient.instance.favoriteTid(lists);
-        if (favTid == null) throw StateError('没找到QQ「我喜欢」歌单');
-        await QQApiClient.instance.addSongsToPlaylist(
-          dirId: 201,
-          tid: favTid,
-          songs: [qref],
-        );
-        return;
+        // QQ 收藏走安卓协议要 QIMEI 鉴权，web 协议做不了，直接给明确提示。
+        throw UnsupportedError('QQ收藏需在QQ音乐App里操作');
     }
   }
 
@@ -361,27 +346,8 @@ class SongActionsService {
         );
         return;
       case SongSource.qq:
-        // playlistId 编码是 `tid:dirId`（见 myPlaylists）。
-        final qparts = playlistId.split(':');
-        final qtid = int.tryParse(qparts.first) ?? 0;
-        final qdir = qparts.length > 1 ? int.tryParse(qparts[1]) ?? 0 : 0;
-        if (qtid <= 0) throw StateError('QQ歌单 id 异常');
-        final qlist = songs ?? const <SongEntity>[];
-        if (qlist.isEmpty) {
-          throw StateError('缺少歌曲信息，请从播放页或歌曲列表里操作');
-        }
-        final qrefs = <({int songId, int songType})>[];
-        for (final s in qlist) {
-          final r = _qqRef(s);
-          if (r != null) qrefs.add(r);
-        }
-        if (qrefs.isEmpty) throw StateError('这些歌没有 QQ 数字 id');
-        await QQApiClient.instance.addSongsToPlaylist(
-          dirId: qdir,
-          tid: qtid,
-          songs: qrefs,
-        );
-        return;
+        // QQ 加歌单走安卓协议要 QIMEI 鉴权，web 协议做不了，直接给明确提示。
+        throw UnsupportedError('QQ加歌单需在QQ音乐App里操作');
     }
   }
 }
