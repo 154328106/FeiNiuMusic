@@ -57,15 +57,33 @@ class QQApiClient {
   ///
   /// 走 GET + `data=<json>`：这个接口 GET/POST 都收，GET 少一次预检，
   /// 且和 Beans 那边取 vkey 的方式一致。
-  Future<Map<String, dynamic>> _musicuCall(Map<String, Object?> payload) async {
+  Future<Map<String, dynamic>> _musicuCall(
+    Map<String, Object?> payload, {
+    bool post = false,
+  }) async {
     final Response<String> response;
     try {
-      response = await _dio.get<String>(
-        _musicu,
-        queryParameters: {'format': 'json', 'data': jsonEncode(payload)},
-        // 带上登录态：没登录时 QQAuth 给的是一份游客 Cookie。
-        options: Options(headers: {'Cookie': QQAuth.instance.cookieHeader}),
-      );
+      if (post) {
+        // 写接口（加歌单/收藏）走 POST，payload 作为 JSON body ——
+        // QQMusicApi 的写模块都是 POST，GET 传 data 在写接口上过不去。
+        response = await _dio.post<String>(
+          _musicu,
+          data: jsonEncode(payload),
+          options: Options(
+            headers: {
+              'Cookie': QQAuth.instance.cookieHeader,
+              'Content-Type': 'application/json',
+            },
+          ),
+        );
+      } else {
+        response = await _dio.get<String>(
+          _musicu,
+          queryParameters: {'format': 'json', 'data': jsonEncode(payload)},
+          // 带上登录态：没登录时 QQAuth 给的是一份游客 Cookie。
+          options: Options(headers: {'Cookie': QQAuth.instance.cookieHeader}),
+        );
+      }
     } on DioException catch (e) {
       throw QQApiException('网络请求失败：${e.message ?? e.type.name}');
     }
@@ -282,12 +300,22 @@ class QQApiClient {
           ],
         },
       },
-    });
-    // retCode 可能在 req_1.data.retCode 或 req_1.code。
+    }, post: true);
+    // retCode 可能在 req_1.data.retCode / req_1.code / 顶层 code。
     final ret =
-        _at(json, ['req_1', 'data', 'retCode']) ?? _at(json, ['req_1', 'code']);
+        _at(json, ['req_1', 'data', 'retCode']) ??
+        _at(json, ['req_1', 'code']) ??
+        json['code'];
     if (ret == 0 || ret == 80092) return;
-    throw QQApiException('QQ加歌失败（retCode=$ret）', code: ret is int ? ret : null);
+    // 把能拿到的错误上下文都带上，方便一次定位是鉴权还是参数问题。
+    final commCode = json['code'];
+    final subMsg =
+        _at(json, ['req_1', 'data', 'msg']) ?? _at(json, ['req_1', 'msg']) ?? '';
+    debugPrint('[QQ] add_song 失败 全响应: $json');
+    throw QQApiException(
+      'QQ加歌失败 retCode=$ret comm.code=$commCode ${subMsg ?? ''}'.trim(),
+      code: ret is int ? ret : null,
+    );
   }
 
   /// 「我喜欢」的歌单 id。取不到返回 null。

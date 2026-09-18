@@ -79,6 +79,11 @@ class SongActionsService {
   static String describeError(Object e) {
     if (e is UnsupportedError) return e.message ?? '暂不支持该操作';
     if (e is StateError) return e.message;
+    // 各源的 API 异常都带可读 message（含 QQ 的 retCode），透出来别兜成「操作失败」，
+    // 否则出了问题完全看不出是鉴权、参数还是网络。
+    if (e is QQApiException) return e.message;
+    if (e is KugouApiException) return e.message;
+    if (e is NetEaseApiException) return e.message;
     return '操作失败';
   }
 
