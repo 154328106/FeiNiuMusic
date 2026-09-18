@@ -278,8 +278,7 @@ class QQApiClient {
           'tid': tid,
           'bFmtUtf8': true,
           'v_songInfo': [
-            for (final s in songs)
-              {'songId': s.songId, 'songType': s.songType},
+            for (final s in songs) {'songId': s.songId, 'songType': s.songType},
           ],
         },
       },

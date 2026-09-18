@@ -773,16 +773,12 @@ class NetEaseApiClient {
     bool add = true,
   }) async {
     if (songIds.isEmpty) return true;
-    final json = await _request(
-      '/api/playlist/manipulate/tracks',
-      {
-        'op': add ? 'add' : 'del',
-        'pid': playlistId,
-        'trackIds': jsonEncode(songIds),
-        'imme': 'true',
-      },
-      _Scheme.weapi,
-    );
+    final json = await _request('/api/playlist/manipulate/tracks', {
+      'op': add ? 'add' : 'del',
+      'pid': playlistId,
+      'trackIds': jsonEncode(songIds),
+      'imme': 'true',
+    }, _Scheme.weapi);
     final code = json['code'];
     if (code == 200) return true;
     // 502 = 歌曲已在歌单里，对用户来说等于成功。

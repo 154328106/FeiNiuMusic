@@ -97,9 +97,7 @@ class QQSong {
 
     // 数字 songId：搜索/歌单返回里叫 id 或 songid（musicu 有时是 songInfo.id）。
     final rawId = json['id'] ?? json['songid'] ?? json['songId'];
-    final songId = rawId is int
-        ? rawId
-        : int.tryParse('${rawId ?? ''}') ?? 0;
+    final songId = rawId is int ? rawId : int.tryParse('${rawId ?? ''}') ?? 0;
 
     return QQSong(
       mid: mid,
