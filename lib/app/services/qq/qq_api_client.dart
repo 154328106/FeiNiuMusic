@@ -242,6 +242,55 @@ class QQApiClient {
     return viaDiss;
   }
 
+  /// 往歌单加歌。**QQ 加歌只认数字 songId + songType，不认 mid**。
+  ///
+  /// 接口照 `luren-dc/QQMusicApi` 的 `songlist.add_songs`：
+  /// module `music.musicasset.PlaylistDetailWrite` / method `AddSonglist`，
+  /// param `{dirId, tid, bFmtUtf8, v_songInfo:[{songId, songType}]}`。
+  /// **写接口要登录态**：comm 里带 uin/authst/tmeLoginType/g_tk（[QQAuth]）。
+  ///
+  /// ⚠️ 这条链现有 QQ 读接口是 web musicu、comm 简单；写接口的鉴权是否只靠这四项
+  /// 够（QQ 风控严、开源 python 版还叠了 qimei 设备指纹）**尚未实机验证**，
+  /// 失败时把 retCode 抛出来定位。retCode 0 成功；80092=已存在，也算成功。
+  Future<void> addSongsToPlaylist({
+    required int dirId,
+    required int tid,
+    required List<({int songId, int songType})> songs,
+  }) async {
+    final auth = QQAuth.instance;
+    if (!auth.isLoggedIn.value) throw QQApiException('请先登录QQ音乐');
+    if (songs.isEmpty) return;
+    final json = await _musicuCall({
+      'comm': {
+        'ct': 24,
+        'cv': 0,
+        'format': 'json',
+        'uin': int.tryParse(auth.uin) ?? 0,
+        'authst': auth.authst,
+        'tmeLoginType': auth.tmeLoginType,
+        'g_tk': auth.gtk,
+      },
+      'req_1': {
+        'module': 'music.musicasset.PlaylistDetailWrite',
+        'method': 'AddSonglist',
+        'param': {
+          'dirId': dirId,
+          'tid': tid,
+          'bFmtUtf8': true,
+          'v_songInfo': [
+            for (final s in songs)
+              {'songId': s.songId, 'songType': s.songType},
+          ],
+        },
+      },
+    });
+    // retCode 可能在 req_1.data.retCode 或 req_1.code。
+    final ret =
+        _at(json, ['req_1', 'data', 'retCode']) ?? _at(json, ['req_1', 'code']);
+    if (ret == 0 || ret == 80092) return;
+    throw QQApiException('QQ加歌失败（retCode=$ret）', code: ret is int ? ret : null);
+  }
+
   /// 「我喜欢」的歌单 id。取不到返回 null。
   int? favoriteTid(List<QQPlaylist> lists) {
     for (final p in lists) {

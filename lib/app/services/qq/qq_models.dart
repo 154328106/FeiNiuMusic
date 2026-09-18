@@ -8,6 +8,7 @@ library;
 class QQSong {
   const QQSong({
     required this.mid,
+    required this.songId,
     required this.name,
     required this.artists,
     this.singers = const [],
@@ -20,6 +21,9 @@ class QQSong {
 
   /// 歌曲 mid（QQ 的主键是字符串，不是数字）。
   final String mid;
+
+  /// 数字歌曲 id。**加歌单/收藏接口只认它，不认 mid**。取不到为 0。
+  final int songId;
 
   final String name;
 
@@ -91,8 +95,15 @@ class QQSong {
     final payPlay =
         (pay?['pay_play'] as int?) == 1 || (json['pay_play'] as int?) == 1;
 
+    // 数字 songId：搜索/歌单返回里叫 id 或 songid（musicu 有时是 songInfo.id）。
+    final rawId = json['id'] ?? json['songid'] ?? json['songId'];
+    final songId = rawId is int
+        ? rawId
+        : int.tryParse('${rawId ?? ''}') ?? 0;
+
     return QQSong(
       mid: mid,
+      songId: songId,
       name: (json['name'] ?? json['songname']) as String? ?? '',
       artists: artists,
       singers: singers,

@@ -109,6 +109,22 @@ class QQAuth {
   /// 取播放地址时 `comm` 里要带的 authst。未登录为空串。
   String get authst => _musicKey;
 
+  /// 写接口（加歌单/收藏）鉴权用的 `tmeLoginType`。
+  /// 微信登录的 musickey 以 `W_X` 开头 → 1；QQ 登录 → 2（照 QQMusicApi）。
+  int get tmeLoginType => _musicKey.startsWith('W_X') ? 1 : 2;
+
+  /// QQ 的 CSRF token `g_tk`：对 key 做经典 hash31（起始 5381）。
+  /// 写接口 comm 里要带。未登录返回 0。
+  int get gtk {
+    final key = _musicKey;
+    if (key.isEmpty) return 0;
+    var hash = 5381;
+    for (final c in key.codeUnits) {
+      hash = (hash + (hash << 5) + c) & 0x7fffffff;
+    }
+    return hash & 0x7fffffff;
+  }
+
   Future<void> logout() async {
     _cookies.clear();
     _qrsig = '';

@@ -220,6 +220,7 @@ class QQPlaybackService {
   ///
   /// `mediaMid` 借 [SongEntity.audioSpec] 存：取播放地址要用它拼文件名，
   /// 而为它单开一个数据库列不值当（见 [SongSource] 里关于不改 schema 的说明）。
+  /// 数字 `songId` 同理借 [SongEntity.codec] 存 —— 加歌单/收藏接口只认它。
   static SongEntity toSongEntity(QQSong song) {
     return SongEntity(
       id: SongSource.encodeQQ(song.mid),
@@ -233,6 +234,7 @@ class QQPlaybackService {
       headersJson: jsonEncode(streamHeaders()),
       durationMs: song.durationMs,
       coverId: song.coverUrl,
+      codec: song.songId > 0 ? '${song.songId}' : null,
       audioSpec: song.mediaMid,
       format: 'mp3',
       isVip: song.payPlay,
