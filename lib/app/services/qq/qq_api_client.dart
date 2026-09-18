@@ -310,10 +310,12 @@ class QQApiClient {
     // 把能拿到的错误上下文都带上，方便一次定位是鉴权还是参数问题。
     final commCode = json['code'];
     final subMsg =
-        _at(json, ['req_1', 'data', 'msg']) ?? _at(json, ['req_1', 'msg']) ?? '';
+        _at(json, ['req_1', 'data', 'msg']) ??
+        _at(json, ['req_1', 'msg']) ??
+        '';
     debugPrint('[QQ] add_song 失败 全响应: $json');
     throw QQApiException(
-      'QQ加歌失败 retCode=$ret comm.code=$commCode ${subMsg ?? ''}'.trim(),
+      'QQ加歌失败 retCode=$ret comm.code=$commCode $subMsg'.trim(),
       code: ret is int ? ret : null,
     );
   }
