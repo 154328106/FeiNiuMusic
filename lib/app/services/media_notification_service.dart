@@ -853,6 +853,16 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
   PlaybackState _stateFromSnap(PlaybackSnapshot snap) {
     final playing = snap.isPlaying;
     final queueIndex = _publishedQueueIds.indexOf(snap.song?.id ?? '');
+    // 车载蓝牙歌词：AOSP AVRCP 的 MediaPlayerWrapper.isMetadataSynced()
+    // 只有在「队列当前项的 title/artist 与会话 metadata 一致」时才放行
+    // metadata 更新，否则仅调度 2s 兜底超时；而本 app 播放中高频刷新
+    // playbackState，会不断重置该超时，导致歌词类 metadata 永远到不了
+    // 车机。开启车载歌词时 metadata.title 每句歌词都变化，无法与静态
+    // 队列项保持一致，故此时发布 queueIndex=null（activeQueueItemId=-1）
+    // 让该检查直接放行（无队列的 demo 正常推送同理）。队列内容仍照常
+    // 发布，Android Auto 浏览不受影响，仅失去队列当前位置高亮。
+    final suppressQueueIndex =
+        MediaNotificationSettings.carBluetoothLyrics.value && snap.song != null;
     // 自定义按键（关闭/收藏）只有 Android 通知栏有实现。iOS/macOS 的
     // MPRemoteCommandCenter 没有 custom action：若把 MediaControl.custom
     // 放进 controls，其 action 枚举恰好落到 changeRepeatMode 命令位，
@@ -910,7 +920,7 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
       // 系统媒体进度按 speed 外推剩余播放时间：倍速播放时必须同步真实倍率，
       // 否则通知栏/Android Auto 的进度条以 1× 估算、随倍速漂移。
       speed: player.speed.value,
-      queueIndex: queueIndex >= 0 ? queueIndex : null,
+      queueIndex: !suppressQueueIndex && queueIndex >= 0 ? queueIndex : null,
     );
   }
 
@@ -1155,6 +1165,7 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
       MediaNotificationSettings.lyricOnTop.value,
       MediaNotificationSettings.showCloseAction.value,
       MediaNotificationSettings.showFavoriteAction.value,
+      MediaNotificationSettings.carBluetoothLyrics.value,
       _supportsCustomActions,
     ].join('|');
     if (stateKey == _lastPlaybackStateKey) return;
