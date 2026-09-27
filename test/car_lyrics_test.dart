@@ -8,6 +8,7 @@ void main() {
         carLyricsTitleOverride(
           carLyricsEnabled: false,
           isCurrentSong: true,
+          isPlaying: true,
           currentCarLyricLine: '我们不一样',
         ),
         isNull,
@@ -19,6 +20,19 @@ void main() {
         carLyricsTitleOverride(
           carLyricsEnabled: true,
           isCurrentSong: false,
+          isPlaying: true,
+          currentCarLyricLine: '我们不一样',
+        ),
+        isNull,
+      );
+    });
+
+    test('暂停时返回 null（暂停态回退真实歌名，配合真实 queueIndex 通过 AVRCP 同步检查）', () {
+      expect(
+        carLyricsTitleOverride(
+          carLyricsEnabled: true,
+          isCurrentSong: true,
+          isPlaying: false,
           currentCarLyricLine: '我们不一样',
         ),
         isNull,
@@ -31,6 +45,7 @@ void main() {
           carLyricsTitleOverride(
             carLyricsEnabled: true,
             isCurrentSong: true,
+            isPlaying: true,
             currentCarLyricLine: line,
           ),
           isNull,
@@ -39,11 +54,12 @@ void main() {
       }
     });
 
-    test('开启且为当前歌曲时返回 trim 后的歌词行', () {
+    test('开启、当前歌曲且播放中返回 trim 后的歌词行', () {
       expect(
         carLyricsTitleOverride(
           carLyricsEnabled: true,
           isCurrentSong: true,
+          isPlaying: true,
           currentCarLyricLine: '  我们不一样  ',
         ),
         '我们不一样',
@@ -52,10 +68,11 @@ void main() {
 
     test('覆盖决策不依赖 showLyrics（开关独立）', () {
       // 该纯函数没有 showLyrics 入参，只受 carLyricsEnabled + isCurrentSong
-      // + 歌词行驱动——锁定车载开关与「通知显示歌词」开关独立。
+      // + isPlaying + 歌词行驱动——锁定车载开关与「通知显示歌词」开关独立。
       final override = carLyricsTitleOverride(
         carLyricsEnabled: true,
         isCurrentSong: true,
+        isPlaying: true,
         currentCarLyricLine: '人生短短几个秋',
       );
       expect(override, '人生短短几个秋');
