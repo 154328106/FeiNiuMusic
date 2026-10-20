@@ -32,6 +32,7 @@ import '../../pages/settings/match_settings_page.dart';
 import '../../pages/settings/metadata_match_settings_page.dart';
 import '../../pages/settings/dlna_settings_page.dart';
 import '../../pages/library/albums_page.dart';
+import '../../pages/library/downloads_page.dart';
 import '../../pages/library/artists_page.dart';
 import '../../pages/library/playlists_page.dart';
 import '../../pages/library/genres_page.dart';
@@ -80,6 +81,7 @@ class AppRoutes {
   static const folders = '/folders';
   static const recent = '/recent';
   static const favorites = '/favorites';
+  static const downloads = '/downloads';
   static const search = '/search';
   static const profile = '/profile';
   static const batchMatch = '/songs/batch-match';
@@ -136,6 +138,7 @@ class AppRouter {
     AppRoutes.profile: (_) => const ProfilePage(),
     AppRoutes.recent: (_) => const RecentPlaybackPage(),
     AppRoutes.favorites: (_) => const FavoritePage(),
+    AppRoutes.downloads: (_) => const DownloadsPage(),
     AppRoutes.batchMatch: (context) => BatchMatchPage(
       songs: (ModalRoute.of(context)?.settings.arguments as List<dynamic>? ?? const [])
           .cast<SongEntity>(),

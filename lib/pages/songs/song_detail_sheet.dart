@@ -4,9 +4,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../app/router/app_page_route.dart';
+import '../../app/services/download/download_service.dart';
 import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/feiniu/transcode_service.dart';
 import '../../app/services/song_actions_service.dart';
+import '../../app/state/song_source.dart';
 import '../../app/services/player/player_engine.dart';
 import '../../app/services/player_service.dart';
 import '../../app/state/settings_state.dart';
@@ -115,6 +117,122 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
         type: ToastType.error,
       );
     }
+  }
+
+  /// 「下载到本地」动作项。三态随 [DownloadService] 的 progress / revision
+  /// 实时切换：未下载 → 下载中（带进度）→ 已下载（点击删除）。
+  Widget _buildDownloadTile(SongEntity song) {
+    final service = DownloadService.instance;
+    return AnimatedBuilder(
+      animation: Listenable.merge([service.progress, service.revision]),
+      builder: (context, _) {
+        if (service.isDownloaded(song.id)) {
+          return AppListTile(
+            leading: const Icon(Icons.download_done_rounded),
+            title: '已下载（点击删除）',
+            onTap: () => _confirmDeleteDownload(song),
+          );
+        }
+        final progress = service.progressOf(song.id);
+        if (progress != null) {
+          final label = progress < 0
+              ? '下载中…'
+              : '下载中 ${(progress * 100).clamp(0, 100).toStringAsFixed(0)}%';
+          return AppListTile(
+            leading: SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                value: progress < 0 ? null : progress,
+              ),
+            ),
+            title: label,
+            onTap: null,
+          );
+        }
+        return AppListTile(
+          leading: const Icon(Icons.download_outlined),
+          title: '下载到本地',
+          onTap: () => _pickQualityAndDownload(song),
+        );
+      },
+    );
+  }
+
+  /// 弹档位选择器再下载。只有一个档位（飞牛/酷狗/QQ）时直接下载，不弹框。
+  Future<void> _pickQualityAndDownload(SongEntity song) async {
+    final service = DownloadService.instance;
+    final source = SongSource.fromSongId(song.id);
+    final options = service.qualityOptionsFor(source);
+    if (options.length == 1) {
+      await _startDownload(song, options.first);
+      return;
+    }
+    final picked = await showModalBottomSheet<DownloadQualityOption>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('选择下载音质', style: TextStyle(fontSize: 16)),
+            ),
+            for (final option in options)
+              ListTile(
+                leading: const Icon(Icons.high_quality_rounded),
+                title: Text(option.label),
+                onTap: () => Navigator.pop(ctx, option),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null) return;
+    await _startDownload(song, picked);
+  }
+
+  Future<void> _startDownload(
+    SongEntity song,
+    DownloadQualityOption option,
+  ) async {
+    try {
+      await DownloadService.instance.download(
+        song,
+        qualityId: option.id,
+        qualityLabel: option.label,
+      );
+      if (!mounted) return;
+      AppToast.show(context, '已下载到本地');
+    } catch (e) {
+      if (!mounted) return;
+      AppToast.show(context, '下载失败：$e', type: ToastType.error);
+    }
+  }
+
+  Future<void> _confirmDeleteDownload(SongEntity song) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除下载'),
+        content: Text('确定删除本地文件「${song.title}」？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await DownloadService.instance.delete(song.id);
+    if (!mounted) return;
+    AppToast.show(context, '已删除本地文件');
   }
 
   /// 点击解码 tag：弹出二选一解码器选择。选定后切换当前歌曲的解码引擎并关掉
@@ -278,6 +396,7 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                 Navigator.of(context).pop();
               },
             ),
+            _buildDownloadTile(song),
             AppListTile(
               leading: const Icon(Icons.edit_outlined),
               title: '编辑歌曲信息',

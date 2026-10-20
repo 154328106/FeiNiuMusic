@@ -13,6 +13,7 @@ import 'app/theme/app_glass_theme.dart';
 import 'app/services/audio/stream_cache_service.dart';
 import 'app/services/backup/backup_service.dart';
 import 'app/services/debug_log_service.dart';
+import 'app/services/download/download_service.dart';
 import 'app/services/fn_auto_reconnect_service.dart';
 import 'app/services/island_lyric_service.dart';
 import 'app/services/macos_status_bar_service.dart';
@@ -96,6 +97,9 @@ Future<void> main() async {
   // 转码设置须在 PlayerService（MediaNotificationService.init）之前加载：
   // 启动恢复自动播放时 _sourceForSong 会同步读转码开关，未加载会读到默认关。
   await AppTranscodeSettings.ensureLoaded();
+  // 本地下载映射同理：_sourceForSong 顶部同步读「已下载命中」，须在启动恢复
+  // 自动播放之前载入，否则本次启动自动播的那首已下载歌会白走一次在线解析。
+  await DownloadService.instance.ensureLoaded();
   // 便携模式·换机检测：数据目录跟随 exe，若文件夹被拷到另一台电脑运行，
   // 自动清空本机 NAS 密码/token/安全码（保留服务器地址与用户名），
   // 避免把本机凭据带到别的机器。须在 AuthService.init（恢复会话）之前执行。

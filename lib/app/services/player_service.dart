@@ -14,6 +14,7 @@ import 'package:signals/signals.dart';
 
 import 'db/dao/song_dao.dart';
 import 'audio/stream_cache_service.dart';
+import 'download/download_service.dart';
 import 'cast/dlna_cast_service.dart';
 import 'feiniu/api_client.dart';
 import 'feiniu/api_models.dart';
@@ -4115,6 +4116,13 @@ class PlayerService with WidgetsBindingObserver {
     SongEntity song, {
     bool forceRefresh = false,
   }) async {
+    // 已下载到本地：所有源一律优先播本地文件（离线、零流量、无需解析）。
+    // 放在最顶，先于网易/QQ/酷狗/飞牛各分支。
+    final localFile = DownloadService.instance.localFileFor(song.id);
+    if (localFile != null) {
+      return AudioSource.file(localFile.path);
+    }
+
     // 网易云歌曲：完全绕开飞牛的缓存/转码链路，直接用解析出的临时直链。
     if (song.isNetease) {
       final source = await _neteaseSourceForSong(

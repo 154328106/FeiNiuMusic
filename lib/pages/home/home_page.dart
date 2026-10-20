@@ -821,6 +821,18 @@ class _HomePageState extends State<HomePage>
     Navigator.of(context).pushNamed(AppRoutes.playlists);
   }
 
+  void _openDownloads() {
+    Navigator.of(context).pushNamed(AppRoutes.downloads);
+  }
+
+  /// 「本地」快捷入口：跨源汇总已下载歌曲，各源统一放在快捷区最右。
+  HomeShortcutItem _localShortcut() => HomeShortcutItem(
+    icon: Icons.download_done_rounded,
+    label: '本地',
+    accent: const Color(0xFF22C55E),
+    onTap: _openDownloads,
+  );
+
   /// 首页快捷入口，按源给不同的一组。飞牛是曲库维度（歌单/歌手/专辑/风格），
   /// 网易云和酷狗各换成它自己有的那几样，**没有的能力一律不放** ——
   /// 摆个点进去是空的入口更糟。
@@ -862,12 +874,8 @@ class _HomePageState extends State<HomePage>
             () => source.playlists(limit: 60),
           ),
         ),
-        HomeShortcutItem(
-          icon: Icons.search_rounded,
-          label: '搜索',
-          accent: const Color(0xFFEC4899),
-          onTap: _openSearch,
-        ),
+        // 「搜索」格换成「本地」（搜索在底部导航栏另有入口）。
+        _localShortcut(),
       ];
     }
     if (_source.id != 'feiniu' && _source.id != 'netease') {
@@ -888,6 +896,7 @@ class _HomePageState extends State<HomePage>
           accent: const Color(0xFF14B8A6),
           onTap: _openSearch,
         ),
+        _localShortcut(),
       ];
     }
     if (_source.id != 'netease') {
@@ -910,12 +919,9 @@ class _HomePageState extends State<HomePage>
           accent: const Color(0xFFA855F7),
           onTap: _openAlbumsPage,
         ),
-        HomeShortcutItem(
-          icon: Icons.music_video_rounded,
-          label: '风格',
-          accent: const Color(0xFFF97316),
-          onTap: _openGenresPage,
-        ),
+        // 「风格」格换成「本地」。_openGenresPage 实现保留，风格入口以后要加
+        // 回来只需在这补一个 HomeShortcutItem。
+        _localShortcut(),
       ];
     }
     final source = NetEaseSource.instance;
@@ -930,12 +936,8 @@ class _HomePageState extends State<HomePage>
         // 解 25 首，比原来进来就解整队还省。
         onTap: () => _openSourceSongList('每日推荐', source.dailyRecommend),
       ),
-      HomeShortcutItem(
-        icon: Icons.radio_rounded,
-        label: '私人FM',
-        accent: const Color(0xFF14B8A6),
-        onTap: () => _openSourceSongList('私人 FM', source.personalFm),
-      ),
+      // 「私人FM」格按用户要求换成「本地」（2026-10-21）。
+      // `NetEaseSource.personalFm()` 实现保留，要加回来补一个 HomeShortcutItem 即可。
       // 心动模式的入口按用户要求撤掉（2026-09-16）。
       // `NetEaseSource.heartbeatMode()` 和它那条接口链都留着 —— 实测是通的
       // （`/api/playmode/intelligence/list`，见它的注释），要加回来只是这里
@@ -961,6 +963,7 @@ class _HomePageState extends State<HomePage>
           categoryLoader: source.playlistsByCategory,
         ),
       ),
+      _localShortcut(),
     ];
   }
 

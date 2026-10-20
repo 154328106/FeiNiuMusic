@@ -213,6 +213,8 @@ CREATE TABLE IF NOT EXISTS ${DbConstants.tableReportEvents} (
         await db.execute(
           'CREATE INDEX IF NOT EXISTS idx_report_events_song ON ${DbConstants.tableReportEvents}(songId)',
         );
+        // 版本 18：本地下载表
+        await _createDownloadsTable(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -407,7 +409,30 @@ CREATE TABLE IF NOT EXISTS ${DbConstants.tableReportEvents} (
             'INTEGER NOT NULL DEFAULT 0',
           );
         }
+        if (oldVersion < 18) {
+          // 本地下载表（跨源）。老安装无历史下载数据，直接建空表。
+          await _createDownloadsTable(db);
+        }
       },
+    );
+  }
+
+  /// 本地下载表：以 `SongEntity.id`（带源前缀）为主键，songJson 存整条
+  /// `SongEntity.toMap()` 以免列随 songs 表漂移，另记本地路径 / 来源 / 音质。
+  Future<void> _createDownloadsTable(Database db) async {
+    await db.execute('''
+CREATE TABLE IF NOT EXISTS ${DbConstants.tableDownloads} (
+  id TEXT PRIMARY KEY,
+  songJson TEXT NOT NULL,
+  localPath TEXT NOT NULL,
+  source TEXT NOT NULL,
+  quality TEXT,
+  fileSize INTEGER,
+  downloadedAt INTEGER NOT NULL
+)
+''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_downloads_time ON ${DbConstants.tableDownloads}(downloadedAt)',
     );
   }
 }
