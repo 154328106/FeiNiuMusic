@@ -160,15 +160,12 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
     );
   }
 
-  /// 弹档位选择器再下载。只有一个档位（飞牛/酷狗/QQ）时直接下载，不弹框。
+  /// 弹档位选择器再下载。单档位的源（飞牛/酷狗/QQ）也弹框，让用户看清将下
+  /// 什么质并确认（用户 2026-10-21 要求，行为统一）。
   Future<void> _pickQualityAndDownload(SongEntity song) async {
     final service = DownloadService.instance;
     final source = SongSource.fromSongId(song.id);
     final options = service.qualityOptionsFor(source);
-    if (options.length == 1) {
-      await _startDownload(song, options.first);
-      return;
-    }
     final picked = await showModalBottomSheet<DownloadQualityOption>(
       context: context,
       builder: (ctx) => SafeArea(
