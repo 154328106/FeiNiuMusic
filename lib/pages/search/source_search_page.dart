@@ -5,6 +5,7 @@ import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';
 import '../../app/state/song_state.dart';
 import '../../components/index.dart';
+import '../songs/song_detail_sheet.dart';
 
 /// 通用的「搜当前源」页面。
 ///
@@ -187,8 +188,28 @@ class _SourceSearchPageState extends State<SourceSearchPage> {
             overflow: TextOverflow.ellipsis,
           ),
           onTap: () => _play(index),
+          onLongPress: () => _showSongDetail(song),
         );
       },
+    );
+  }
+
+  /// 长按 → 与歌曲页同款长按面板（下一首播放 / 添加到歌单 / 下载到本地 等）。
+  void _showSongDetail(SongEntity song) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => SongDetailSheet(
+        song: song,
+        onUpdated: (updated) {
+          final i = _results.indexWhere((s) => s.id == updated.id);
+          if (i < 0 || !mounted) return;
+          final next = List<SongEntity>.of(_results);
+          next[i] = updated;
+          setState(() => _results = next);
+        },
+      ),
     );
   }
 }

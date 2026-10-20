@@ -5,6 +5,7 @@ import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';
 import '../../app/state/song_state.dart';
 import '../../components/index.dart';
+import '../songs/song_detail_sheet.dart';
 
 /// 通用的「某个源的某条歌曲流」列表页。
 ///
@@ -226,9 +227,31 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
               overflow: TextOverflow.ellipsis,
             ),
             onTap: () => _play(index),
+            onLongPress: () => _showSongDetail(song),
           ),
         );
       },
+    );
+  }
+
+  /// 长按歌曲 → 弹出与歌曲页同款的长按面板（下一首播放 / 添加到歌单 /
+  /// 下载到本地 / 编辑等）。每日推荐、私人FM、漫游、排行榜/歌单点进来的歌
+  /// 全走本页，所以这一处覆盖所有这些入口。
+  void _showSongDetail(SongEntity song) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => SongDetailSheet(
+        song: song,
+        onUpdated: (updated) {
+          final i = _songs.indexWhere((s) => s.id == updated.id);
+          if (i < 0 || !mounted) return;
+          final next = List<SongEntity>.of(_songs);
+          next[i] = updated;
+          setState(() => _songs = next);
+        },
+      ),
     );
   }
 }
