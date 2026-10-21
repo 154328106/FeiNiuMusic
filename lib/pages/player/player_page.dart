@@ -1221,6 +1221,8 @@ class _PlayerArtwork extends StatelessWidget {
                         style: coverStyle,
                         child: _RotatingArtwork(
                           song: song,
+                          // 频谱样式：中心封面始终旋转（像唱片），不依赖开关。
+                          forceRotate: coverStyle == PlayerCoverStyle.spectrum,
                           buildArtwork: (context, onCoverAvailable) =>
                               ArtworkWidget(
                                 song: song,
@@ -2052,7 +2054,14 @@ class _RotatingArtwork extends StatefulWidget {
   /// true，占位 / 加载失败时回调 false。
   final Widget Function(BuildContext, ValueChanged<bool>) buildArtwork;
 
-  const _RotatingArtwork({required this.song, required this.buildArtwork});
+  /// 强制旋转（不看「旋转封面」开关）。频谱样式用它让中心封面始终像唱片般转。
+  final bool forceRotate;
+
+  const _RotatingArtwork({
+    required this.song,
+    required this.buildArtwork,
+    this.forceRotate = false,
+  });
 
   @override
   State<_RotatingArtwork> createState() => _RotatingArtworkState();
@@ -2084,7 +2093,8 @@ class _RotatingArtworkState extends State<_RotatingArtwork> {
       ]),
       builder: (context, _) {
         final playing = PlayerService.instance.isPlaying.value;
-        final rotateEnabled = PlayerBackgroundSettings.rotateCover.value;
+        final rotateEnabled =
+            PlayerBackgroundSettings.rotateCover.value || widget.forceRotate;
         final artwork = widget.buildArtwork(context, _setCoverAvailable);
         if (rotateEnabled && _hasRealCover) {
           return _RotatingCover(playing: playing, child: artwork);

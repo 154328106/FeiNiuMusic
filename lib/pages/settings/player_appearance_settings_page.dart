@@ -24,45 +24,19 @@ Widget _coverStyleThumb(BuildContext context, PlayerCoverStyle style) {
   final asset = switch (style) {
     PlayerCoverStyle.cd => 'assets/preview/cover_style_cd.jpg',
     PlayerCoverStyle.vinyl => 'assets/preview/cover_style_vinyl.jpg',
-    _ => null,
+    PlayerCoverStyle.circle => 'assets/preview/player_style_circle.png',
+    PlayerCoverStyle.square => 'assets/preview/player_style_square.png',
+    PlayerCoverStyle.spectrum => 'assets/preview/player_style_spectrum.png',
   };
-  if (asset != null) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Image.asset(
-        asset,
-        width: size,
-        height: size,
-        fit: BoxFit.cover,
-        errorBuilder: (_, _, _) =>
-            ColoredBox(color: scheme.surfaceContainerHighest),
-      ),
-    );
-  }
-  return Container(
-    width: size,
-    height: size,
-    alignment: Alignment.center,
-    decoration: BoxDecoration(
-      color: scheme.primary.withValues(alpha: 0.10),
-      borderRadius: BorderRadius.circular(8),
-    ),
-    child: Container(
-      width: 22,
-      height: 22,
-      decoration: BoxDecoration(
-        color: scheme.primary.withValues(alpha: 0.55),
-        shape:
-            style == PlayerCoverStyle.circle ||
-                style == PlayerCoverStyle.spectrum
-            ? BoxShape.circle
-            : BoxShape.rectangle,
-        borderRadius:
-            style == PlayerCoverStyle.circle ||
-                style == PlayerCoverStyle.spectrum
-            ? null
-            : BorderRadius.circular(5),
-      ),
+  return ClipRRect(
+    borderRadius: BorderRadius.circular(8),
+    child: Image.asset(
+      asset,
+      width: size,
+      height: size,
+      fit: BoxFit.cover,
+      errorBuilder: (_, _, _) =>
+          ColoredBox(color: scheme.surfaceContainerHighest),
     ),
   );
 }

@@ -128,6 +128,9 @@ flutter:
     - assets/preview/player_style_vinyl.jpg
     - assets/preview/cover_style_cd.jpg
     - assets/preview/cover_style_vinyl.jpg
+    - assets/preview/player_style_circle.png
+    - assets/preview/player_style_square.png
+    - assets/preview/player_style_spectrum.png
     - assets/preview/style_preview_cover.jpg
     - assets/preview/genre_bg.png
     # 音乐来源图标（「我的 → 音乐来源」用）
@@ -170,7 +173,7 @@ flutter_launcher_icons:
   # Android 8+ 自适应图标：launcher 按形状（圆/方/水滴）裁切并做视差。
   # 背景用徽标底色（纯红），前景用满幅合成图 —— 前景被缩进安全区（内 66%）后
   # 红叠红看不出边界，图形稳居中心不会被裁；legacy 机型仍用 image_path。
-  adaptive_icon_background: "#FC464E"
+  adaptive_icon_background: "#2676F0"
   adaptive_icon_foreground: "assets/icon/app_icon.png"
   # iOS 图标不允许带 alpha（透明）通道，否则 App Store 审核会被拒；
   # 透明区域填充为白色，由 iOS 自行套圆角。
