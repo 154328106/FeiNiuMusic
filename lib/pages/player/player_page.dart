@@ -1321,8 +1321,15 @@ class _ArtworkShadowContainer extends StatelessWidget {
         return _SpectrumRing(
           child: Center(child: Transform.scale(scale: 0.76, child: _plainCover())),
         );
-      case PlayerCoverStyle.square:
       case PlayerCoverStyle.circle:
+        // 圆形封面外加一圈细轨道环 + 一个缓慢绕行的小圆点（仿截图那种
+        // 「卫星轨道」感）。封面缩到 0.84，空出外环给轨道。
+        return _OrbitCircleFrame(
+          child: Center(
+            child: Transform.scale(scale: 0.84, child: _plainCover()),
+          ),
+        );
+      case PlayerCoverStyle.square:
         return _plainCover();
     }
   }
@@ -1571,24 +1578,36 @@ class _SpectrumPainter extends CustomPainter {
   final List<double> levels;
   final Color color;
 
+  /// 每侧括号弧的半张角（弧度）。约 58°，两侧各一段弧「」把圆封面括住，
+  /// 条带随音乐向外扩张；上下留空，不再是整环。
+  static const double _bracketHalfSpan = 1.02;
+
   @override
   void paint(Canvas canvas, Size size) {
     final c = Offset(size.width / 2, size.height / 2);
     final r = size.shortestSide / 2;
-    // 封面缩到 0.76，条带从它外沿再往外长一点点。
+    // 封面缩到 0.76，条带从它外沿再往外长。括号式上下没有条，往外伸得更长些。
     final inner = r * 0.79;
-    final maxLen = r * 0.21;
+    final maxLen = r * 0.205;
     final paint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = math.max(1.6, r * 0.018);
+      ..strokeWidth = math.max(1.8, r * 0.02);
     final n = levels.length;
+    final half = n ~/ 2;
     for (var i = 0; i < n; i++) {
       final v = levels[i].clamp(0.0, 1.0);
       final len = maxLen * v;
       // 太短的不画：贴着封面的一圈小点反而脏。
       if (len < 1.0) continue;
-      final a = (i / n) * 2 * math.pi - math.pi / 2;
+      // 前半分到右括号（基准角 0，指向 +x），后半分到左括号（基准角 π）。
+      // 每侧条带在 [-_bracketHalfSpan, +_bracketHalfSpan] 内从上到下铺开。
+      final right = i < half;
+      final idx = right ? i : i - half;
+      final cnt = right ? half : (n - half);
+      final t = cnt <= 1 ? 0.5 : idx / (cnt - 1);
+      final base = right ? 0.0 : math.pi;
+      final a = base + (t - 0.5) * 2 * _bracketHalfSpan;
       final dir = Offset(math.cos(a), math.sin(a));
       paint.color = color.withValues(alpha: 0.18 + 0.78 * v);
       canvas.drawLine(c + dir * inner, c + dir * (inner + len), paint);
@@ -1599,6 +1618,96 @@ class _SpectrumPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _SpectrumPainter oldDelegate) =>
       oldDelegate.color != color;
+}
+
+// ---------------------------------------------------------------------------
+/// 圆形封面外的「卫星轨道」环：一圈带缺口的细环 + 一个缓慢绕行的小圆点。
+/// 纯装饰、不吃点击；匀速转（12s 一圈），不表达播放状态，只是好看（仿截图）。
+class _OrbitCircleFrame extends StatefulWidget {
+  const _OrbitCircleFrame({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_OrbitCircleFrame> createState() => _OrbitCircleFrameState();
+}
+
+class _OrbitCircleFrameState extends State<_OrbitCircleFrame>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _driver = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 12),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _driver.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.primary;
+    return Stack(
+      fit: StackFit.passthrough,
+      children: [
+        Positioned.fill(
+          child: IgnorePointer(
+            child: RepaintBoundary(
+              child: CustomPaint(
+                painter: _OrbitPainter(color: color, progress: _driver),
+              ),
+            ),
+          ),
+        ),
+        widget.child,
+      ],
+    );
+  }
+}
+
+class _OrbitPainter extends CustomPainter {
+  _OrbitPainter({required this.color, required this.progress})
+    : super(repaint: progress);
+
+  final Color color;
+  final Animation<double> progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = Offset(size.width / 2, size.height / 2);
+    final r = size.shortestSide / 2;
+    final ringR = r * 0.95;
+    // 细环，顶部留一个缺口（像截图那样不闭合）。
+    final ring = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = math.max(1.2, r * 0.012)
+      ..color = color.withValues(alpha: 0.30);
+    const gap = 0.5; // 顶部缺口张角（弧度）
+    canvas.drawArc(
+      Rect.fromCircle(center: c, radius: ringR),
+      -math.pi / 2 + gap / 2,
+      2 * math.pi - gap,
+      false,
+      ring,
+    );
+    // 绕行的小圆点（带一圈柔光）。
+    final a = -math.pi / 2 + progress.value * 2 * math.pi;
+    final p = c + Offset(math.cos(a), math.sin(a)) * ringR;
+    final dotR = math.max(2.5, r * 0.028);
+    canvas.drawCircle(
+      p,
+      dotR * 2.2,
+      Paint()
+        ..color = color.withValues(alpha: 0.22)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+    );
+    canvas.drawCircle(p, dotR, Paint()..color = color.withValues(alpha: 0.95));
+  }
+
+  @override
+  bool shouldRepaint(covariant _OrbitPainter old) => old.color != color;
 }
 
 // 碟片类封面（CD / 黑胶）
@@ -1612,8 +1721,9 @@ const double _kCdHoleRatio = 0.125;
 const double _kCdHubRatio = 0.27;
 const double _kCdStackRingRatio = 0.30;
 
-const double _kVinylHoleRatio = 0.024;
-const double _kVinylLabelRatio = 0.46;
+// 中间贴标图与中心孔都按用户要求「大一点点」：0.46→0.52、0.024→0.05。
+const double _kVinylHoleRatio = 0.05;
+const double _kVinylLabelRatio = 0.52;
 
 /// 「外圆减中心孔」的圆环路径。碟片的裁剪与投影都用它，孔是真镂空。
 Path _discRingPath(Size size, double holeRatio) {
