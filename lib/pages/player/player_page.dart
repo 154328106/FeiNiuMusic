@@ -1428,10 +1428,11 @@ class _SpectrumRingState extends State<_SpectrumRing>
     vsync: this,
     duration: const Duration(seconds: 1),
   )..repeat();
+  // _clock 是可变引用：painter 每次重绘时直接读它算最新相位，不会像传 double
+  // 那样把值定格在构造那一刻（就是上版「没动」的原因）。
   final Stopwatch _clock = Stopwatch()..start();
-  // 呼吸增益（起停惯性）与呼吸相位；弧的张合由它们驱动。
-  double _gain = 0;
-  double _phase = 0;
+  // 呼吸增益（起停惯性）。用单元素可变盒传给 painter，同理避免值拷贝定格。
+  final List<double> _gain = <double>[0];
   Duration _last = Duration.zero;
 
   @override
@@ -1455,10 +1456,12 @@ class _SpectrumRingState extends State<_SpectrumRing>
     if (dt <= 0 || dt > 0.1) dt = 1 / 60;
 
     final playing = PlayerService.instance.isPlaying.value;
+    final g = _gain[0];
     // 起停都留惯性：暂停时缓缓落下，比瞬间归零自然。
-    _gain += (playing ? 1.0 - _gain : -_gain) *
-        (1 - math.exp(-dt * (playing ? 3.5 : 1.8)));
-    _phase += dt;
+    _gain[0] =
+        g +
+        (playing ? 1.0 - g : -g) *
+            (1 - math.exp(-dt * (playing ? 3.5 : 1.8)));
   }
 
   @override
@@ -1472,7 +1475,7 @@ class _SpectrumRingState extends State<_SpectrumRing>
             child: RepaintBoundary(
               child: CustomPaint(
                 painter: _SpectrumPainter(
-                  phase: _phase,
+                  clock: _clock,
                   gain: _gain,
                   color: color,
                   repaint: _driver,
@@ -1489,17 +1492,17 @@ class _SpectrumRingState extends State<_SpectrumRing>
 
 class _SpectrumPainter extends CustomPainter {
   _SpectrumPainter({
-    required this.phase,
+    required this.clock,
     required this.gain,
     required this.color,
     required Listenable repaint,
   }) : super(repaint: repaint);
 
-  /// 呼吸相位（秒，单调递增）：驱动弧的张合。
-  final double phase;
+  /// 计时器（可变引用）：每次重绘读它算最新呼吸相位，避免传 double 定格。
+  final Stopwatch clock;
 
-  /// 起停惯性增益（0~1）：暂停时呼吸幅度缓缓收小，不瞬间停。
-  final double gain;
+  /// 起停惯性增益盒（单元素，可变引用）：暂停时呼吸幅度缓缓收小。
+  final List<double> gain;
   final Color color;
 
   /// 每侧三条同心弧。里到外：由短到长、由细到粗、由虚到实（用户要的渐变）。
@@ -1512,6 +1515,8 @@ class _SpectrumPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final c = Offset(size.width / 2, size.height / 2);
     final r = size.shortestSide / 2;
+    final phase = clock.elapsedMicroseconds / 1e6; // 当前相位（秒）
+    final g = gain[0];
 
     // 三条弧的基准半径（封面缩到 0.56，外沿约 0.56r，从这里往外铺）。
     const radii = <double>[0.66, 0.80, 0.94];
@@ -1523,14 +1528,14 @@ class _SpectrumPainter extends CustomPainter {
         // 一开一合时像涟漪一层层荡开，而不是三条齐步走。
         final breath = 0.5 - 0.5 * math.cos(phase * w - k * 0.5);
         // 暂停时呼吸幅度收小（gain→0 时几乎不动，留一点静态括号）。
-        final openness = 0.30 + 0.70 * breath * (0.25 + 0.75 * gain);
+        final openness = 0.30 + 0.70 * breath * (0.25 + 0.75 * g);
         // 里到外：基础张角 0.42→0.86 rad（小到大），再乘呼吸开合。
         final baseHalf = 0.42 + 0.22 * k;
         final half = baseHalf * openness;
         // 里到外：线宽由细到粗。
         final width = math.max(1.4, r * (0.012 + 0.006 * k));
         // 里到外：更实；再随呼吸轻微亮暗。
-        final alpha = (0.16 + 0.10 * k + 0.22 * breath * gain).clamp(0.0, 0.92);
+        final alpha = (0.16 + 0.10 * k + 0.22 * breath * g).clamp(0.0, 0.92);
         final paint = Paint()
           ..style = PaintingStyle.stroke
           ..strokeCap = StrokeCap.round
