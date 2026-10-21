@@ -18,6 +18,7 @@ import '../../components/common/artwork_widget.dart';
 import '../../components/feedback/app_toast.dart';
 import '../library/library_detail_pages.dart';
 import '../library/playlists_page.dart';
+import '../search/source_search_page.dart';
 import 'song_edit_page.dart';
 
 class SongDetailSheet extends StatefulWidget {
@@ -284,7 +285,12 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
     final artist = song.artistDisplayName;
     final album = song.albumDisplayName;
     final primaryArtist = song.artistDisplayName;
-    final canOpenAlbum = song.albumGuid != null;
+    // 在线源（网易/QQ/酷狗）的歌不在飞牛曲库里，点「歌手/专辑」走飞牛
+    // ArtistDetailPage/AlbumDetailPage 会查到 0 首（空白页）。这类歌改成在当前源
+    // 里搜索歌手名 / 歌手+专辑名。
+    final isOnlineSong = SongSource.fromSongId(song.id) != SongSource.feiniu;
+    final canOpenAlbum =
+        song.albumGuid != null || (isOnlineSong && album.trim().isNotEmpty);
 
     return Container(
       width: double.infinity,
@@ -430,6 +436,17 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
               onTap: () {
                 final nav = Navigator.of(context);
                 nav.pop();
+                // 在线歌：去当前源搜索歌手名（飞牛歌手页查不到在线歌）。
+                if (isOnlineSong) {
+                  if (primaryArtist.trim().isNotEmpty) {
+                    nav.push(
+                      buildAppPageRoute(
+                        (_) => SourceSearchPage(initialQuery: primaryArtist),
+                      ),
+                    );
+                  }
+                  return;
+                }
                 final callback = widget.onOpenArtist;
                 if (callback != null) {
                   callback(primaryArtist);
@@ -456,6 +473,20 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                 onTap: () {
                   final nav = Navigator.of(context);
                   nav.pop();
+                  // 在线歌：去当前源搜索「歌手 专辑」（飞牛专辑页查不到在线歌）。
+                  if (isOnlineSong) {
+                    final q = primaryArtist.trim().isEmpty
+                        ? album
+                        : '$primaryArtist $album';
+                    if (q.trim().isNotEmpty) {
+                      nav.push(
+                        buildAppPageRoute(
+                          (_) => SourceSearchPage(initialQuery: q),
+                        ),
+                      );
+                    }
+                    return;
+                  }
                   final callback = widget.onOpenAlbum;
                   if (callback != null) {
                     callback(song.albumDisplayName);

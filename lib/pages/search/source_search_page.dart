@@ -13,10 +13,13 @@ import '../songs/song_detail_sheet.dart';
 /// 还带扫码登录入口），这里给后加的源用 —— 只做「搜出来、点了能播」，
 /// 数据全走 [MusicSource.search]，加一个新源不用再抄一遍页面。
 class SourceSearchPage extends StatefulWidget {
-  const SourceSearchPage({super.key, this.embedded = false});
+  const SourceSearchPage({super.key, this.embedded = false, this.initialQuery});
 
   /// 作为底部导航的「搜索」页使用时置 true：套 [AppPageScaffold]、挂底栏。
   final bool embedded;
+
+  /// 打开即以此关键词自动搜一次（如从详情面板点「歌手/专辑」跳来）。
+  final String? initialQuery;
 
   @override
   State<SourceSearchPage> createState() => _SourceSearchPageState();
@@ -35,6 +38,18 @@ class _SourceSearchPageState extends State<SourceSearchPage> {
   int _searchToken = 0;
 
   MusicSource get _source => MusicSourceRegistry.instance.current.value;
+
+  @override
+  void initState() {
+    super.initState();
+    final q = widget.initialQuery?.trim();
+    if (q != null && q.isNotEmpty) {
+      _controller.text = q;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _runSearch();
+      });
+    }
+  }
 
   @override
   void dispose() {
