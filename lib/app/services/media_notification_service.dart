@@ -325,14 +325,21 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
       } else if (_cachedCoverUri != null) {
         artUri = _cachedCoverUri;
       } else {
-        // 本地封面尚未就绪时发远程 URL，audio_service 会自动下载并缓存
-        artUri = Uri.tryParse(
-          FeiNiuApiClient.instance.coverUrl(
-            song.coverId!,
-            size: _systemCoverSize,
-            updatedAt: song.updatedAt,
-          ),
-        );
+        // 本地封面尚未就绪时发远程 URL，audio_service 会自动下载并缓存。
+        // 在线源（网易/QQ/酷狗）的 coverId 本身就是公网封面直链，直接用；
+        // 只有飞牛的 id 才拼 NAS /static/cover —— 否则拼成
+        // `…/static/cover?coverId=http://…`，NAS 返回 400，iOS/系统「正在播放」
+        // 首次就以无封面渲染，之后再更新也不刷新（在线歌锁屏/灵动岛永远无封面）。
+        // 与 CoverLocalCache.downloadToLocal 的 http 判断保持一致。
+        artUri = song.coverId!.startsWith('http')
+            ? Uri.tryParse(song.coverId!)
+            : Uri.tryParse(
+                FeiNiuApiClient.instance.coverUrl(
+                  song.coverId!,
+                  size: _systemCoverSize,
+                  updatedAt: song.updatedAt,
+                ),
+              );
       }
     }
 
