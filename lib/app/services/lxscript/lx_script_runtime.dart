@@ -67,6 +67,11 @@ class LxScriptRuntime {
     final reqId = ++_reqSeq;
     final completer = Completer<String?>();
     _invokeWaiters[reqId] = completer;
+    // 关键：重启微任务泵。加载完成后 _pump 会自行取消（见 _startPump），
+    // 而 QuickJS（Android）的 Promise 链全靠它驱动——不重启，HTTP 回调后的
+    // .then 永不执行，整条取址 Promise 卡死到超时。iOS 的 JSCore 有原生事件
+    // 循环不受影响，所以当初只在 Android 上表现为「Future not completed」。
+    _startPump();
     // 洛雪(LX)约定：musicUrl 请求的 info 是 { type: 音质, musicInfo: {歌曲对象} }，
     // 脚本按 info.musicInfo / info.type 取（见 ikun 等脚本的 on(request) 实现）。
     // 之前把歌曲字段平铺在 info 里，脚本读 info.musicInfo 取到 undefined → 请求发空
