@@ -433,9 +433,9 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                 title: '管理脚本音源',
                 subtitle: '导入洛雪(LX)格式的 .js 音源脚本，按平台补充取址',
                 trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => Navigator.of(context).push(
-                  buildAppPageRoute((_) => const LxSourcePage()),
-                ),
+                onTap: () => Navigator.of(
+                  context,
+                ).push(buildAppPageRoute((_) => const LxSourcePage())),
               ),
             ],
           ),
