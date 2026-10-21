@@ -67,11 +67,14 @@ class LxScriptRuntime {
     final reqId = ++_reqSeq;
     final completer = Completer<String?>();
     _invokeWaiters[reqId] = completer;
+    // 洛雪(LX)约定：musicUrl 请求的 info 是 { type: 音质, musicInfo: {歌曲对象} }，
+    // 脚本按 info.musicInfo / info.type 取（见 ikun 等脚本的 on(request) 实现）。
+    // 之前把歌曲字段平铺在 info 里，脚本读 info.musicInfo 取到 undefined → 请求发空
+    // id → 后端一律「无货」。
     final payload = jsonEncode({
       'action': 'musicUrl',
       'source': source,
-      'info': info,
-      'quality': quality,
+      'info': {'type': quality, 'musicInfo': info},
     });
     try {
       _rt.evaluate('globalThis.__lxInvoke($reqId, $payload);');

@@ -169,8 +169,7 @@ class LxSourceManager {
   }) async {
     if (!_loaded) await ensureLoaded();
     if (_runtimes.isEmpty) return null;
-    final info = <String, dynamic>{'songmid': songId, 'songId': songId};
-    if (platform == 'kg') info['hash'] = songId;
+    final info = _musicInfo(platform, songId);
     for (final meta in _metas) {
       if (!meta.enabled) continue;
       if (!meta.sources.contains(platform)) continue;
@@ -205,8 +204,7 @@ class LxSourceManager {
     final enabled = _metas.where((m) => m.enabled).toList();
     if (enabled.isEmpty) return '没有启用的脚本。';
     final buf = StringBuffer('平台 $platform · id $songId\n');
-    final info = <String, dynamic>{'songmid': songId, 'songId': songId};
-    if (platform == 'kg') info['hash'] = songId;
+    final info = _musicInfo(platform, songId);
     var tested = 0;
     for (final meta in enabled) {
       if (!meta.sources.contains(platform)) {
@@ -241,6 +239,22 @@ class LxSourceManager {
       buf.writeln('\n（没有脚本声明支持 $platform —— 换一首该平台的歌再测）');
     }
     return buf.toString().trim();
+  }
+
+  /// 构造传给脚本的 musicInfo（洛雪 info.musicInfo）。酷狗(kg)用 hash、其余
+  /// 平台用 songmid；多塞几个常见 id 键（mid/id/copyrightId），脚本读哪个都能命中。
+  /// 非 kg **不塞 hash**：脚本常用 `musicInfo.hash ?? musicInfo.songmid`，空串 ''
+  /// 不是 nullish，会让 ?? 返回空串、songmid 永远取不到。
+  static Map<String, dynamic> _musicInfo(String platform, String songId) {
+    final info = <String, dynamic>{
+      'songmid': songId,
+      'mid': songId,
+      'id': songId,
+      'copyrightId': songId,
+      'songId': songId,
+    };
+    if (platform == 'kg') info['hash'] = songId;
+    return info;
   }
 
   // ---- 内部 ----
