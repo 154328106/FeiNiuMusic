@@ -193,6 +193,56 @@ class LxSourceManager {
     return null;
   }
 
+  /// 诊断：拿一首真实歌曲（通常是当前播放的）逐个问**所有启用**的脚本，
+  /// 返回逐条报告（命中给 URL 前缀、空/异常如实写）。与 [resolve] 的区别是它
+  /// 不止于第一个命中、把每个脚本的结果都列出来，供「测试」按钮展示。
+  Future<String> testReport({
+    required String platform,
+    required String songId,
+    String quality = 'flac',
+  }) async {
+    await ensureLoaded();
+    final enabled = _metas.where((m) => m.enabled).toList();
+    if (enabled.isEmpty) return '没有启用的脚本。';
+    final buf = StringBuffer('平台 $platform · id $songId\n');
+    final info = <String, dynamic>{'songmid': songId, 'songId': songId};
+    if (platform == 'kg') info['hash'] = songId;
+    var tested = 0;
+    for (final meta in enabled) {
+      if (!meta.sources.contains(platform)) {
+        buf.writeln('• ${meta.name}：不支持 $platform，跳过');
+        continue;
+      }
+      final runtime = _runtimes[meta.id];
+      if (runtime == null) {
+        buf.writeln('• ${meta.name}：运行时未就绪');
+        continue;
+      }
+      tested++;
+      try {
+        final sw = Stopwatch()..start();
+        final url = await runtime.getMusicUrl(
+          source: platform,
+          info: info,
+          quality: quality,
+        );
+        sw.stop();
+        if (url != null && url.isNotEmpty) {
+          final head = url.length > 72 ? '${url.substring(0, 72)}…' : url;
+          buf.writeln('• ${meta.name}：✅ ${sw.elapsedMilliseconds}ms\n  $head');
+        } else {
+          buf.writeln('• ${meta.name}：⚠️ 没取到地址（该源无此曲 / 脚本后端无货）');
+        }
+      } catch (e) {
+        buf.writeln('• ${meta.name}：❌ 异常 $e');
+      }
+    }
+    if (tested == 0) {
+      buf.writeln('\n（没有脚本声明支持 $platform —— 换一首该平台的歌再测）');
+    }
+    return buf.toString().trim();
+  }
+
   // ---- 内部 ----
 
   Future<void> _spawn(LxSource meta) async {
