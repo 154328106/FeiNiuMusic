@@ -1424,40 +1424,15 @@ class _SpectrumRing extends StatefulWidget {
 
 class _SpectrumRingState extends State<_SpectrumRing>
     with SingleTickerProviderStateMixin {
-  static const int _barCount = 72;
-
   late final AnimationController _driver = AnimationController(
     vsync: this,
     duration: const Duration(seconds: 1),
   )..repeat();
   final Stopwatch _clock = Stopwatch()..start();
-  final List<double> _levels = List<double>.filled(_barCount, 0);
-  final List<double> _seed = List<double>.generate(
-    _barCount,
-    // 固定种子：每次进播放页的相位分布一致，不会因为随机而忽然「换了个样子」。
-    (i) => math.Random(i * 2654435761).nextDouble() * math.pi * 2,
-  );
+  // 呼吸增益（起停惯性）与呼吸相位；弧的张合由它们驱动。
   double _gain = 0;
   double _phase = 0;
-  double _dotAngle = -math.pi / 2; // 绕行小圆点的当前角度（仿截图）
   Duration _last = Duration.zero;
-
-  /// 模拟的鼓点速度。真要跟歌变的话得先做节拍检测，这里取一个大多数流行乐
-  /// 都不违和的中间值。
-  static const double _bpm = 124;
-  double _beatPhase = 0;
-  int _beatIndex = 0;
-  final math.Random _rand = math.Random(20260909);
-
-  /// 每根条固定的灵敏度（0.35~1.35）。
-  ///
-  /// 只靠每拍随机是不够的：那样整体轮廓仍然是一条光滑的弧，只是每帧抖一下，
-  /// 看久了就是「很规律」。给每根条一个**固定不变**的高低偏好，整环才有
-  /// 参差的骨架 —— 真频谱里每个频段的能量本来就天生不等。
-  late final List<double> _sens = List<double>.generate(
-    _barCount,
-    (i) => 0.35 + math.Random(i * 7919 + 17).nextDouble() * 1.0,
-  );
 
   @override
   void initState() {
@@ -1484,67 +1459,6 @@ class _SpectrumRingState extends State<_SpectrumRing>
     _gain += (playing ? 1.0 - _gain : -_gain) *
         (1 - math.exp(-dt * (playing ? 3.5 : 1.8)));
     _phase += dt;
-    // 小圆点匀速绕行（约 12s 一圈），不随播放停，纯装饰。
-    _dotAngle += dt * (2 * math.pi / 12);
-
-    // 走节拍时钟。上一版只有正弦叠加、没有任何节拍结构，所以整环只会匀速
-    // 起伏 —— 那就是「太柔」的由来。冲击由 _fireBeat 直接打进 _levels，
-    // 这里只负责往下衰减，攻击瞬间因此是硬的。
-    if (_gain > 0.02) {
-      _beatPhase += dt * (_bpm / 60.0);
-      while (_beatPhase >= 1.0) {
-        _beatPhase -= 1.0;
-        _beatIndex = (_beatIndex + 1) % 8;
-        _fireBeat();
-      }
-    }
-
-    for (var i = 0; i < _barCount; i++) {
-      final band = i / (_barCount - 1);
-      // 底噪纹理：没被鼓点打到的条也留一点细微起伏，不然拍与拍之间整环死平。
-      final speed = 2.0 + band * 9.0;
-      final seed = _seed[i];
-      final texture =
-          (0.5 + 0.5 * math.sin(_phase * speed + seed)) *
-          (0.05 + 0.10 * (1 - band)) *
-          _gain;
-      // 衰减：低频拖一点（余音），高频干脆（碎音）。这个差别是「有节奏感」
-      // 的关键 —— 一刀切的衰减率听觉上就是一团糊。
-      final k = _levels[i] > texture ? (5.0 + band * 10.0) : 26.0;
-      _levels[i] += (texture - _levels[i]) * (1 - math.exp(-dt * k));
-    }
-  }
-
-  /// 一个拍点：按频段分别注入冲击。
-  ///
-  /// 底鼓打低频、军鼓落在 2/4 拍的中频、高频每拍碎响，每 4 拍的重拍更狠。
-  /// 直接加到 _levels 上（而不是设目标值再逼近），攻击才是瞬间的。
-  void _fireBeat() {
-    final downbeat = _beatIndex % 4 == 0;
-    final backbeat = _beatIndex % 4 == 2;
-    for (var i = 0; i < _barCount; i++) {
-      final band = i / (_barCount - 1);
-      var hit = 0.0;
-      // 底鼓：越靠低频越重，重拍加倍。
-      if (band < 0.30) {
-        final w = 1 - band / 0.30;
-        hit += (downbeat ? 1.0 : 0.60) * w * w;
-      }
-      // 军鼓：中频一段，只在 2/4 拍。
-      if (backbeat && band > 0.22 && band < 0.62) {
-        hit += 0.55 * math.sin((band - 0.22) / 0.40 * math.pi);
-      }
-      // 高频碎音：每拍都有，量小且带随机，做出 hi-hat 的毛糙感。
-      if (band > 0.55) {
-        hit += 0.34 * ((band - 0.55) / 0.45) * (0.4 + 0.6 * _rand.nextDouble());
-      }
-      if (hit <= 0) continue;
-      // 这一拍这根不响：让参差感来自「谁响谁不响」，而不只是「响多高」。
-      if (_rand.nextDouble() < 0.20) continue;
-      // 固定灵敏度 × 每拍随机，两层叠起来才够乱。
-      hit *= _sens[i] * (0.65 + 0.7 * _rand.nextDouble());
-      _levels[i] = math.min(1.0, _levels[i] + hit * _gain);
-    }
   }
 
   @override
@@ -1558,9 +1472,8 @@ class _SpectrumRingState extends State<_SpectrumRing>
             child: RepaintBoundary(
               child: CustomPaint(
                 painter: _SpectrumPainter(
-                  levels: _levels,
+                  phase: _phase,
                   gain: _gain,
-                  dotAngle: _dotAngle,
                   color: color,
                   repaint: _driver,
                 ),
@@ -1576,50 +1489,48 @@ class _SpectrumRingState extends State<_SpectrumRing>
 
 class _SpectrumPainter extends CustomPainter {
   _SpectrumPainter({
-    required this.levels,
+    required this.phase,
     required this.gain,
-    required this.dotAngle,
     required this.color,
     required Listenable repaint,
   }) : super(repaint: repaint);
 
-  final List<double> levels;
+  /// 呼吸相位（秒，单调递增）：驱动弧的张合。
+  final double phase;
 
-  /// 起停惯性增益（0~1）：暂停时整体缓缓收拢，不瞬间塌。
+  /// 起停惯性增益（0~1）：暂停时呼吸幅度缓缓收小，不瞬间停。
   final double gain;
-
-  /// 绕行小圆点的角度（弧度）。
-  final double dotAngle;
   final Color color;
 
   /// 每侧三条同心弧。里到外：由短到长、由细到粗、由虚到实（用户要的渐变）。
   static const int _arcsPerSide = 3;
+
+  /// 呼吸周期（秒）：一开一合算一次呼吸。
+  static const double _breathPeriod = 3.2;
 
   @override
   void paint(Canvas canvas, Size size) {
     final c = Offset(size.width / 2, size.height / 2);
     final r = size.shortestSide / 2;
 
-    // 把 72 根模拟电平聚合成三段（低/中/高频），分别驱动内/中/外弧。
-    final bands = <double>[
-      _bandAvg(0.0, 1 / 3),
-      _bandAvg(1 / 3, 2 / 3),
-      _bandAvg(2 / 3, 1.0),
-    ];
-
     // 三条弧的基准半径（封面缩到 0.56，外沿约 0.56r，从这里往外铺）。
     const radii = <double>[0.66, 0.80, 0.94];
+    final w = 2 * math.pi / _breathPeriod;
     for (var side = 0; side < 2; side++) {
       final base = side == 0 ? 0.0 : math.pi; // 右 / 左
       for (var k = 0; k < _arcsPerSide; k++) {
-        final activity = (gain * (0.30 + 0.70 * bands[k])).clamp(0.0, 1.0);
-        // 里到外：基础张角 0.42→0.86 rad（小到大），再被音乐放大。
+        // 呼吸：0~1 平滑一开一合。外弧比内弧略慢半拍（相位差 0.5 rad），
+        // 一开一合时像涟漪一层层荡开，而不是三条齐步走。
+        final breath = 0.5 - 0.5 * math.cos(phase * w - k * 0.5);
+        // 暂停时呼吸幅度收小（gain→0 时几乎不动，留一点静态括号）。
+        final openness = 0.30 + 0.70 * breath * (0.25 + 0.75 * gain);
+        // 里到外：基础张角 0.42→0.86 rad（小到大），再乘呼吸开合。
         final baseHalf = 0.42 + 0.22 * k;
-        final half = baseHalf * (0.45 + 0.55 * activity);
-        // 里到外：线宽 由细到粗。
+        final half = baseHalf * openness;
+        // 里到外：线宽由细到粗。
         final width = math.max(1.4, r * (0.012 + 0.006 * k));
-        // 里到外：更实；同一条再随音乐变亮。
-        final alpha = (0.14 + 0.10 * k + 0.55 * activity).clamp(0.0, 0.95);
+        // 里到外：更实；再随呼吸轻微亮暗。
+        final alpha = (0.16 + 0.10 * k + 0.22 * breath * gain).clamp(0.0, 0.92);
         final paint = Paint()
           ..style = PaintingStyle.stroke
           ..strokeCap = StrokeCap.round
@@ -1635,31 +1546,6 @@ class _SpectrumPainter extends CustomPainter {
         );
       }
     }
-
-    // 绕行小圆点（带柔光），落在最外弧所在半径上，仿截图。
-    final dotRingR = r * radii.last;
-    final p = c + Offset(math.cos(dotAngle), math.sin(dotAngle)) * dotRingR;
-    final dotR = math.max(2.5, r * 0.026);
-    canvas.drawCircle(
-      p,
-      dotR * 2.2,
-      Paint()
-        ..color = color.withValues(alpha: 0.20)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
-    );
-    canvas.drawCircle(p, dotR, Paint()..color = color.withValues(alpha: 0.9));
-  }
-
-  /// 取 [lo, hi) 区间（按比例）内模拟电平的均值。
-  double _bandAvg(double lo, double hi) {
-    final n = levels.length;
-    final a = (lo * n).floor().clamp(0, n - 1);
-    final b = (hi * n).ceil().clamp(1, n);
-    var sum = 0.0;
-    for (var i = a; i < b; i++) {
-      sum += levels[i];
-    }
-    return b > a ? (sum / (b - a)).clamp(0.0, 1.0) : 0.0;
   }
 
   // 重绘由 repaint（AnimationController）驱动，这里恒 false 即可。
