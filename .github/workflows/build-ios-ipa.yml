@@ -33,6 +33,8 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
+          # 与本机/ci-check 一致，钉死避免 stable 漂移（见 ci-check.yml 说明）。
+          flutter-version: 3.47.4
           channel: stable
           cache: true
 

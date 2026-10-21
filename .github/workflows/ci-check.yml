@@ -26,6 +26,10 @@ jobs:
           fetch-depth: 0
       - uses: subosito/flutter-action@v2
         with:
+          # 钉死版本：浮动 channel:stable 会随上游发版漂移（如 3.47.4→3.47.7），
+          # 不同 dart 的 formatter 规则有差，会让「新增文件 format」门禁无故时过时挂。
+          # 与本机开发版本（3.47.4）保持一致，format 检查才确定性可复现。
+          flutter-version: 3.47.4
           channel: stable
           cache: true
       - uses: actions/setup-java@v4
