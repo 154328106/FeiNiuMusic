@@ -92,5 +92,13 @@
 	<string>用于选择本地图片作为歌曲封面</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>用于保存封面图片到相册</string>
+	<!-- 文件共享：让 app 的 Documents 目录出现在系统「文件」App（我的 iPhone →
+	     本应用）与 Finder/iTunes 文件共享里，下载的歌（Documents/downloads/）
+	     无需越狱/巨魔即可查看、拷出。注意 Documents 下的 feiniu_music.db（曲库/
+	     歌单/下载索引）也会一并可见，别手动删它。 -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 </dict>
 </plist>

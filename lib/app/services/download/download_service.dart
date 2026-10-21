@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -131,9 +133,21 @@ class DownloadService {
     return dir;
   }
 
-  static String _safeName(String songId) {
-    final cleaned = songId.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
-    return cleaned.isEmpty ? 'song' : cleaned;
+  /// 下载文件名（无扩展名）：`歌名 - 歌手`，便于在系统「文件」App 里辨认；
+  /// 末尾加 6 位 id 短哈希保唯一，避免同名歌互相覆盖、同一首重下又命中自己。
+  /// 去掉文件名非法字符（Windows/iOS 都忌 `\/:*?"<>|`），长度截断。
+  static String _downloadBaseName(SongEntity song) {
+    final title = song.title.trim();
+    final artist = song.artistDisplayName.trim();
+    var name = artist.isEmpty ? title : '$title - $artist';
+    name = name.replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1f]'), '_').trim();
+    if (name.length > 80) name = name.substring(0, 80).trim();
+    if (name.isEmpty) name = 'song';
+    final shortId = md5
+        .convert(utf8.encode(song.id))
+        .toString()
+        .substring(0, 6);
+    return '${name}_$shortId';
   }
 
   /// 下载一首歌。[qualityId] 来自 [qualityOptionsFor]；[qualityLabel] 入库展示。
@@ -156,7 +170,7 @@ class DownloadService {
         throw StateError('取不到可下载的地址');
       }
       final dir = await _downloadsDir();
-      final base = p.join(dir.path, _safeName(id));
+      final base = p.join(dir.path, _downloadBaseName(song));
       final result = await _httpDownloadToFile(
         resolved.url,
         resolved.headers,
