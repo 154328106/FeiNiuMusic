@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'free_unblock_sources.dart';
 import 'kugou_public_sources.dart';
+import '../lxscript/lx_source_manager.dart';
 
 /// 第三方音源（解锁灰色 / 会员歌曲的播放地址）。
 ///
@@ -291,6 +292,18 @@ class UnblockSourceService {
         }
       }
       debugPrint('[Unblock] ${keys.length} 个密钥全部未命中：$platform/$songId');
+    }
+
+    // LX（洛雪）脚本音源：用户导入的第三方脚本，按平台代号匹配取址。放在官方
+    // ID 源（GD / zddyr / 聆澜）之后、关键词兜底之前 —— 它们按原始 id 取址更准，
+    // 脚本作为它们都未命中时的补充；脚本能给到无损/Hi-Res 时也算额外收益。
+    final lxUrl = await LxSourceManager.instance.resolve(
+      platform: platform,
+      songId: songId,
+    );
+    if (lxUrl != null) {
+      debugPrint('[Unblock] LX 脚本命中 $platform/$songId');
+      return lxUrl;
     }
 
     // 最后一层：按歌名搜的免费兜底（酷狗 → 酷我）。GD 上面已经试过了。

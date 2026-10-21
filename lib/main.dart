@@ -37,6 +37,7 @@ import 'app/state/settings_match.dart';
 import 'app/services/source/music_source_registry.dart';
 import 'app/services/netease/netease_api_client.dart';
 import 'app/services/unblock/unblock_source.dart';
+import 'app/services/lxscript/lx_source_manager.dart';
 import 'app/state/settings_state.dart';
 
 Future<void> main() async {
@@ -139,6 +140,9 @@ Future<void> main() async {
   unawaited(KugouApiClient.instance.ensureDeviceRegistered());
   await MusicSourceRegistry.instance.ensureLoaded();
   await UnblockSourceService.instance.load();
+  // LX 脚本音源：后台起已启用脚本的 JS 运行时（不阻塞启动；解灰链调用前
+  // resolve 内部也会 ensureLoaded 兜底）。
+  unawaited(LxSourceManager.instance.ensureLoaded());
   // 网易云的 MUSIC_U 会过期，过期后表现很隐蔽：收藏、播放记录忽然变空，
   // 界面上却还是「已登录」。启动时续一发，不等它 —— 续期慢不该拖开屏。
   await NetEaseApiClient.instance.load();

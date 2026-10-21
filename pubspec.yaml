@@ -40,6 +40,8 @@ dependencies:
   crypto: ^3.0.6
   # 网易云接口加密需要 AES-128-CBC/ECB（RAW RSA 用 Dart 原生 BigInt.modPow）
   pointycastle: ^3.7.0
+  # LX（洛雪）脚本音源在应用内跑 JS：iOS 走系统 JavaScriptCore、Android 走 QuickJS。
+  flutter_js: ^0.8.0
   signals: ^6.3.0
   signals_flutter: ^6.3.0
   just_audio: ^0.10.5

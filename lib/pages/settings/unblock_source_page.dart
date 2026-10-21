@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../../app/router/app_page_route.dart';
 import '../../app/services/qq/qq_api_client.dart';
 import '../../app/services/unblock/kugou_public_sources.dart';
 import '../../app/services/unblock/unblock_source.dart';
 import '../../components/index.dart';
+import 'lx_source_page.dart';
 
 /// 第三方音源设置。
 ///
@@ -422,6 +424,19 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                   ),
                 ),
               ],
+            ],
+          ),
+          AppSettingSection(
+            title: 'LX 脚本音源',
+            children: [
+              AppSettingTile(
+                title: '管理脚本音源',
+                subtitle: '导入洛雪(LX)格式的 .js 音源脚本，按平台补充取址',
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.of(context).push(
+                  buildAppPageRoute((_) => const LxSourcePage()),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 16),
