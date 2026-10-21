@@ -86,7 +86,7 @@ class LxScriptRuntime {
       _rt.evaluate('globalThis.__lxInvoke($reqId, $payload);');
       _drain();
       return await completer.future.timeout(
-        timeout ?? const Duration(seconds: 20),
+        timeout ?? const Duration(seconds: 10),
       );
     } catch (e) {
       debugPrint('[LX] getMusicUrl 失败：$e');

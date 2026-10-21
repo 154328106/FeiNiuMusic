@@ -176,10 +176,12 @@ class LxSourceManager {
       final runtime = _runtimes[meta.id];
       if (runtime == null) continue;
       try {
+        // 播放解灰链是逐个等的，给个更短超时：卡住的脚本别拖慢起播。
         final url = await runtime.getMusicUrl(
           source: platform,
           info: info,
           quality: quality,
+          timeout: const Duration(seconds: 6),
         );
         if (url != null && url.isNotEmpty) {
           debugPrint('[LX] ${meta.name} 命中 $platform/$songId');
@@ -203,38 +205,49 @@ class LxSourceManager {
     await ensureLoaded();
     final enabled = _metas.where((m) => m.enabled).toList();
     if (enabled.isEmpty) return '没有启用的脚本。';
-    final buf = StringBuffer('平台 $platform · id $songId\n');
     final info = _musicInfo(platform, songId);
+
+    // 并行测所有支持该平台的脚本：一个卡住不拖累其它，整体最多等一个超时。
+    final lines = List<String>.filled(enabled.length, '');
     var tested = 0;
-    for (final meta in enabled) {
+    final futures = <Future<void>>[];
+    for (var i = 0; i < enabled.length; i++) {
+      final meta = enabled[i];
       if (!meta.sources.contains(platform)) {
-        buf.writeln('• ${meta.name}：不支持 $platform，跳过');
+        lines[i] = '• ${meta.name}：不支持 $platform，跳过';
         continue;
       }
       final runtime = _runtimes[meta.id];
       if (runtime == null) {
-        buf.writeln('• ${meta.name}：运行时未就绪');
+        lines[i] = '• ${meta.name}：运行时未就绪';
         continue;
       }
       tested++;
-      try {
+      futures.add(() async {
         final sw = Stopwatch()..start();
-        final url = await runtime.getMusicUrl(
-          source: platform,
-          info: info,
-          quality: quality,
-        );
-        sw.stop();
-        if (url != null && url.isNotEmpty) {
-          final head = url.length > 72 ? '${url.substring(0, 72)}…' : url;
-          buf.writeln('• ${meta.name}：✅ ${sw.elapsedMilliseconds}ms\n  $head');
-        } else {
-          buf.writeln('• ${meta.name}：⚠️ 没取到地址（该源无此曲 / 脚本后端无货）');
+        try {
+          final url = await runtime.getMusicUrl(
+            source: platform,
+            info: info,
+            quality: quality,
+          );
+          sw.stop();
+          if (url != null && url.isNotEmpty) {
+            final head = url.length > 72 ? '${url.substring(0, 72)}…' : url;
+            lines[i] = '• ${meta.name}：✅ ${sw.elapsedMilliseconds}ms\n  $head';
+          } else {
+            lines[i] =
+                '• ${meta.name}：⚠️ 没取到（该源无此曲 / 后端无货，${sw.elapsedMilliseconds}ms）';
+          }
+        } catch (e) {
+          lines[i] = '• ${meta.name}：❌ 异常 $e';
         }
-      } catch (e) {
-        buf.writeln('• ${meta.name}：❌ 异常 $e');
-      }
+      }());
     }
+    await Future.wait(futures);
+
+    final buf = StringBuffer('平台 $platform · id $songId\n')
+      ..writeln(lines.where((l) => l.isNotEmpty).join('\n'));
     if (tested == 0) {
       buf.writeln('\n（没有脚本声明支持 $platform —— 换一首该平台的歌再测）');
     }
