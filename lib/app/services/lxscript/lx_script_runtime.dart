@@ -82,6 +82,7 @@ class LxScriptRuntime {
       'info': {'type': quality, 'musicInfo': info},
     });
     try {
+      debugPrint('[LX] invoke reqId=$reqId source=$source');
       _rt.evaluate('globalThis.__lxInvoke($reqId, $payload);');
       _drain();
       return await completer.future.timeout(
@@ -136,6 +137,7 @@ class LxScriptRuntime {
       final id = map['id'];
       final url = (map['url'] ?? '').toString();
       final options = _asMap(map['options']);
+      debugPrint('[LX] lx_http id=$id url=$url');
       _doHttp(id, url, options);
       return null;
     });
@@ -143,6 +145,9 @@ class LxScriptRuntime {
     _rt.onMessage('lx_result', (dynamic args) {
       final map = _asMap(args);
       final id = map['reqId'];
+      debugPrint(
+        '[LX] lx_result reqId=$id url?=${(map['url'] ?? '').toString().isNotEmpty} err=${map['err']}',
+      );
       final waiter = id is int ? _invokeWaiters[id] : null;
       if (waiter != null && !waiter.isCompleted) {
         final url = map['url'];
@@ -182,6 +187,7 @@ class LxScriptRuntime {
         rawHeaders.forEach((k, v) => headers[k.toString()] = v);
       }
       dynamic body = options['body'] ?? options['form'] ?? options['data'];
+      debugPrint('[LX] http $method $url');
       // form 对象按表单编码；其余按原样（字符串/JSON）交给 dio。
       final resp = await _dio.request<dynamic>(
         url,
@@ -210,8 +216,10 @@ class LxScriptRuntime {
         ),
         'body': parsedBody,
       };
+      debugPrint('[LX] http ok ${resp.statusCode} $url');
       _resolveHttp(id, null, result);
     } catch (e) {
+      debugPrint('[LX] http err $url -> $e');
       _resolveHttp(id, e.toString(), null);
     }
   }
@@ -223,6 +231,7 @@ class LxScriptRuntime {
     try {
       _rt.evaluate('globalThis.__lxHttpResolve($id, $errJson, $resJson);');
       _drain();
+      debugPrint('[LX] http resolve 回灌 id=$id err=${err != null}');
     } catch (e) {
       debugPrint('[LX] HTTP 回灌失败：$e');
     }
