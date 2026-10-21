@@ -1,0 +1,74 @@
+name: build-android-apk
+
+# 可侧载的 Android APK。不需要正式签名密钥：android/app/build.gradle.kts 在
+# 没配 keystore（无 key.properties / SIGNING_* env）时会自动回落到 debug 签名，
+# 产物仍可正常安装（sideload）。要上架/正式分发才需要配 ANDROID_KEYSTORE_*。
+#
+# 跑在 Linux runner（不像 iOS 的 macOS 按 10 倍计费），按需用 tag 触发即可。
+#
+# 两种触发方式（与 build-ios-ipa 一致）：
+#   - 推 `android-build-*` tag：从任意分支触发（workflow_dispatch 要求文件先在
+#     默认分支上，本 workflow 还在特性分支，所以先用 tag）。
+#   - workflow_dispatch：合进 main 之后可用。
+on:
+  push:
+    tags:
+      - "android-build-*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "要构建的分支或 tag（默认当前分支）"
+        required: false
+        default: ""
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 环境信息
+        run: flutter --version
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      - name: 提取版本号
+        run: |
+          FULL=$(grep '^version:' pubspec.yaml | awk '{print $2}')
+          echo "VERSION=${FULL%%+*}" >> "$GITHUB_ENV"
+          echo "版本：${FULL%%+*}"
+
+      # 单个通用 release APK（不 split-per-abi，装机最省事）。没有 keystore 时
+      # gradle 回落 debug 签名，日志会打印一条大写警告，属预期。
+      - name: 构建 APK（release，无 keystore 回落 debug 签名）
+        run: flutter build apk --release
+
+      - name: 重命名产物
+        run: |
+          SRC=build/app/outputs/flutter-apk/app-release.apk
+          if [ ! -f "$SRC" ]; then
+            echo "::error::没有找到 $SRC，构建可能失败了"
+            exit 1
+          fi
+          cp "$SRC" "Melodic-v${VERSION}.apk"
+          ls -lh "Melodic-v${VERSION}.apk"
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Melodic-apk
+          path: Melodic-v*.apk
+          if-no-files-found: error
