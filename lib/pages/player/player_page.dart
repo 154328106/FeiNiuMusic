@@ -1317,9 +1317,10 @@ class _ArtworkShadowContainer extends StatelessWidget {
           ],
         );
       case PlayerCoverStyle.spectrum:
-        // 封面缩到 76%，空出来的外环留给频谱条。
+        // 封面缩到 56%，左右大片空间留给「同心弧括号」—— 一层层弧线随音乐
+        // 向两侧外扩（仿用户截图）。
         return _SpectrumRing(
-          child: Center(child: Transform.scale(scale: 0.76, child: _plainCover())),
+          child: Center(child: Transform.scale(scale: 0.56, child: _plainCover())),
         );
       case PlayerCoverStyle.circle:
         // 圆形封面外加一圈细轨道环 + 一个缓慢绕行的小圆点（仿截图那种
@@ -1438,6 +1439,7 @@ class _SpectrumRingState extends State<_SpectrumRing>
   );
   double _gain = 0;
   double _phase = 0;
+  double _dotAngle = -math.pi / 2; // 绕行小圆点的当前角度（仿截图）
   Duration _last = Duration.zero;
 
   /// 模拟的鼓点速度。真要跟歌变的话得先做节拍检测，这里取一个大多数流行乐
@@ -1482,6 +1484,8 @@ class _SpectrumRingState extends State<_SpectrumRing>
     _gain += (playing ? 1.0 - _gain : -_gain) *
         (1 - math.exp(-dt * (playing ? 3.5 : 1.8)));
     _phase += dt;
+    // 小圆点匀速绕行（约 12s 一圈），不随播放停，纯装饰。
+    _dotAngle += dt * (2 * math.pi / 12);
 
     // 走节拍时钟。上一版只有正弦叠加、没有任何节拍结构，所以整环只会匀速
     // 起伏 —— 那就是「太柔」的由来。冲击由 _fireBeat 直接打进 _levels，
@@ -1555,6 +1559,8 @@ class _SpectrumRingState extends State<_SpectrumRing>
               child: CustomPaint(
                 painter: _SpectrumPainter(
                   levels: _levels,
+                  gain: _gain,
+                  dotAngle: _dotAngle,
                   color: color,
                   repaint: _driver,
                 ),
@@ -1571,47 +1577,89 @@ class _SpectrumRingState extends State<_SpectrumRing>
 class _SpectrumPainter extends CustomPainter {
   _SpectrumPainter({
     required this.levels,
+    required this.gain,
+    required this.dotAngle,
     required this.color,
     required Listenable repaint,
   }) : super(repaint: repaint);
 
   final List<double> levels;
+
+  /// 起停惯性增益（0~1）：暂停时整体缓缓收拢，不瞬间塌。
+  final double gain;
+
+  /// 绕行小圆点的角度（弧度）。
+  final double dotAngle;
   final Color color;
 
-  /// 每侧括号弧的半张角（弧度）。约 58°，两侧各一段弧「」把圆封面括住，
-  /// 条带随音乐向外扩张；上下留空，不再是整环。
-  static const double _bracketHalfSpan = 1.02;
+  /// 每侧三条同心弧。里到外：由短到长、由细到粗、由虚到实（用户要的渐变）。
+  static const int _arcsPerSide = 3;
 
   @override
   void paint(Canvas canvas, Size size) {
     final c = Offset(size.width / 2, size.height / 2);
     final r = size.shortestSide / 2;
-    // 封面缩到 0.76，条带从它外沿再往外长。括号式上下没有条，往外伸得更长些。
-    final inner = r * 0.79;
-    final maxLen = r * 0.205;
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = math.max(1.8, r * 0.02);
-    final n = levels.length;
-    final half = n ~/ 2;
-    for (var i = 0; i < n; i++) {
-      final v = levels[i].clamp(0.0, 1.0);
-      final len = maxLen * v;
-      // 太短的不画：贴着封面的一圈小点反而脏。
-      if (len < 1.0) continue;
-      // 前半分到右括号（基准角 0，指向 +x），后半分到左括号（基准角 π）。
-      // 每侧条带在 [-_bracketHalfSpan, +_bracketHalfSpan] 内从上到下铺开。
-      final right = i < half;
-      final idx = right ? i : i - half;
-      final cnt = right ? half : (n - half);
-      final t = cnt <= 1 ? 0.5 : idx / (cnt - 1);
-      final base = right ? 0.0 : math.pi;
-      final a = base + (t - 0.5) * 2 * _bracketHalfSpan;
-      final dir = Offset(math.cos(a), math.sin(a));
-      paint.color = color.withValues(alpha: 0.18 + 0.78 * v);
-      canvas.drawLine(c + dir * inner, c + dir * (inner + len), paint);
+
+    // 把 72 根模拟电平聚合成三段（低/中/高频），分别驱动内/中/外弧。
+    final bands = <double>[
+      _bandAvg(0.0, 1 / 3),
+      _bandAvg(1 / 3, 2 / 3),
+      _bandAvg(2 / 3, 1.0),
+    ];
+
+    // 三条弧的基准半径（封面缩到 0.56，外沿约 0.56r，从这里往外铺）。
+    const radii = <double>[0.66, 0.80, 0.94];
+    for (var side = 0; side < 2; side++) {
+      final base = side == 0 ? 0.0 : math.pi; // 右 / 左
+      for (var k = 0; k < _arcsPerSide; k++) {
+        final activity = (gain * (0.30 + 0.70 * bands[k])).clamp(0.0, 1.0);
+        // 里到外：基础张角 0.42→0.86 rad（小到大），再被音乐放大。
+        final baseHalf = 0.42 + 0.22 * k;
+        final half = baseHalf * (0.45 + 0.55 * activity);
+        // 里到外：线宽 由细到粗。
+        final width = math.max(1.4, r * (0.012 + 0.006 * k));
+        // 里到外：更实；同一条再随音乐变亮。
+        final alpha = (0.14 + 0.10 * k + 0.55 * activity).clamp(0.0, 0.95);
+        final paint = Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeWidth = width
+          ..color = color.withValues(alpha: alpha);
+        final radius = r * radii[k];
+        canvas.drawArc(
+          Rect.fromCircle(center: c, radius: radius),
+          base - half,
+          2 * half,
+          false,
+          paint,
+        );
+      }
     }
+
+    // 绕行小圆点（带柔光），落在最外弧所在半径上，仿截图。
+    final dotRingR = r * radii.last;
+    final p = c + Offset(math.cos(dotAngle), math.sin(dotAngle)) * dotRingR;
+    final dotR = math.max(2.5, r * 0.026);
+    canvas.drawCircle(
+      p,
+      dotR * 2.2,
+      Paint()
+        ..color = color.withValues(alpha: 0.20)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+    );
+    canvas.drawCircle(p, dotR, Paint()..color = color.withValues(alpha: 0.9));
+  }
+
+  /// 取 [lo, hi) 区间（按比例）内模拟电平的均值。
+  double _bandAvg(double lo, double hi) {
+    final n = levels.length;
+    final a = (lo * n).floor().clamp(0, n - 1);
+    final b = (hi * n).ceil().clamp(1, n);
+    var sum = 0.0;
+    for (var i = a; i < b; i++) {
+      sum += levels[i];
+    }
+    return b > a ? (sum / (b - a)).clamp(0.0, 1.0) : 0.0;
   }
 
   // 重绘由 repaint（AnimationController）驱动，这里恒 false 即可。
