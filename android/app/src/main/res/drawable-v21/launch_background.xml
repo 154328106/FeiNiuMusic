@@ -1,11 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 开屏背景（API 21+）：白/黑（跟随系统，values-night 自动覆盖）+ 居中彩色 Logo，覆盖 Flutter 引擎就绪前的加载期。
-     引擎首帧绘制后系统自动移除，无白屏、无额外延时。 -->
+<!-- 开屏背景：只留纯色（白/黑随系统，values-night 覆盖），不放 logo —— 与 iOS 一致。
+     Android 12+ 系统 Splash 仍会短暂显示 launcher 图标，那是系统强制行为、关不掉。 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/launch_splash_bg" />
-    <item>
-        <bitmap
-            android:gravity="center"
-            android:src="@drawable/launch_logo" />
-    </item>
 </layer-list>
