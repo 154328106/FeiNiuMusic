@@ -432,12 +432,6 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
               ],
             ),
           ],
-          const SizedBox(height: 20),
-          Text(
-            '密钥只保存在本机，不会上传，也不会写进日志。多个密钥会依次尝试，'
-            '并记住最近可用的那个。',
-            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-          ),
         ],
       ),
     );

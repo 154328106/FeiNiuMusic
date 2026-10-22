@@ -594,6 +594,12 @@ class _SongEditPageState extends State<SongEditPage> {
             (await SongMatchService.instance.resolveAlbum(albumText))?.guid;
       }
 
+      // 年份/音轨/碟号空着时别发 null —— 服务端对 null 整数判「invalid
+      // arguments」整单失败，只在有有效数字时才带上这些键。
+      final year = int.tryParse(_yearController.text.trim());
+      final trackNo = int.tryParse(_trackNoController.text.trim());
+      final discNo = int.tryParse(_discNoController.text.trim());
+
       final body = <String, dynamic>{
         'guid': widget.song.id,
         'title': _titleController.text.trim(),
@@ -601,11 +607,10 @@ class _SongEditPageState extends State<SongEditPage> {
         if (albumGuid != null && albumGuid.isNotEmpty) 'albumGUID': albumGuid,
         'artistGUIDs': _artists.map((a) => a.guid).toList(),
         'genreGUIDs': _genres.map((g) => g.guid).toList(),
-        'year': int.tryParse(_yearController.text.trim()),
-        'trackNo': int.tryParse(_trackNoController.text.trim()),
-        'discNo': int.tryParse(_discNoController.text.trim()),
-        if (coverId != null && coverId.isNotEmpty)
-          'coverId': coverId,
+        'year': ?year,
+        'trackNo': ?trackNo,
+        'discNo': ?discNo,
+        if (coverId != null && coverId.isNotEmpty) 'coverId': coverId,
         if (coverId != null && coverId.isNotEmpty)
           'coverGUID': FeiNiuApiClient.deriveCoverGuid(coverId),
       };
