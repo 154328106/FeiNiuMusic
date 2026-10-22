@@ -207,10 +207,11 @@ class LxSourceManager {
     if (enabled.isEmpty) return '没有启用的脚本。';
     final info = _musicInfo(platform, songId);
 
-    // 并行测所有支持该平台的脚本：一个卡住不拖累其它，整体最多等一个超时。
+    // 串行逐个测：flutter_js 原生引擎被并发驱动会互相干扰甚至闪退（和「一个
+    // 一个测都能取到、全开一起测只命中一个或全崩」的现象一致），一次只问一个。
+    // getMusicUrl 本身也有全局串行闸兜底，这里显式顺序跑让耗时可控、结果稳定。
     final lines = List<String>.filled(enabled.length, '');
     var tested = 0;
-    final futures = <Future<void>>[];
     for (var i = 0; i < enabled.length; i++) {
       final meta = enabled[i];
       if (!meta.sources.contains(platform)) {
@@ -223,28 +224,26 @@ class LxSourceManager {
         continue;
       }
       tested++;
-      futures.add(() async {
-        final sw = Stopwatch()..start();
-        try {
-          final url = await runtime.getMusicUrl(
-            source: platform,
-            info: info,
-            quality: quality,
-          );
-          sw.stop();
-          if (url != null && url.isNotEmpty) {
-            final head = url.length > 72 ? '${url.substring(0, 72)}…' : url;
-            lines[i] = '• ${meta.name}：✅ ${sw.elapsedMilliseconds}ms\n  $head';
-          } else {
-            lines[i] =
-                '• ${meta.name}：⚠️ 没取到（该源无此曲 / 后端无货，${sw.elapsedMilliseconds}ms）';
-          }
-        } catch (e) {
-          lines[i] = '• ${meta.name}：❌ 异常 $e';
+      final sw = Stopwatch()..start();
+      try {
+        final url = await runtime.getMusicUrl(
+          source: platform,
+          info: info,
+          quality: quality,
+          timeout: const Duration(seconds: 8),
+        );
+        sw.stop();
+        if (url != null && url.isNotEmpty) {
+          final head = url.length > 72 ? '${url.substring(0, 72)}…' : url;
+          lines[i] = '• ${meta.name}：✅ ${sw.elapsedMilliseconds}ms\n  $head';
+        } else {
+          lines[i] =
+              '• ${meta.name}：⚠️ 没取到（该源无此曲 / 后端无货，${sw.elapsedMilliseconds}ms）';
         }
-      }());
+      } catch (e) {
+        lines[i] = '• ${meta.name}：❌ 异常 $e';
+      }
     }
-    await Future.wait(futures);
 
     final buf = StringBuffer('平台 $platform · id $songId\n')
       ..writeln(lines.where((l) => l.isNotEmpty).join('\n'));

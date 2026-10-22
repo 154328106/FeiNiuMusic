@@ -18,6 +18,11 @@ import 'package:flutter_js/flutter_js.dart';
 class LxScriptRuntime {
   LxScriptRuntime();
 
+  /// 全局串行闸：所有实例的取址排到同一条链上，保证任一时刻只有一个脚本在
+  /// 驱动原生 JS 引擎。flutter_js 的引擎（尤其 Android QuickJS）被多个实例并发
+  /// evaluate / 泵微任务时会互相干扰（只命中一个、或全取不到）甚至原生崩溃。
+  static Future<void> _engineGate = Future<void>.value();
+
   final JavascriptRuntime _rt = getJavascriptRuntime();
   final Dio _dio = Dio(
     BaseOptions(
@@ -57,7 +62,34 @@ class LxScriptRuntime {
   }
 
   /// 调脚本取某首歌的可播放直链。[info] 是传给脚本的歌曲信息（songmid/hash 等）。
+  ///
+  /// 全局串行：排到 [_engineGate] 尾部，前一个取址彻底结束后再碰引擎。这样
+  /// 「全开一起测」也变成逐个跑，杜绝并发导致的互相干扰 / 闪退（现象：单独测
+  /// 每个都行，一起测只命中一个或全军覆没）。
   Future<String?> getMusicUrl({
+    required String source,
+    required Map<String, dynamic> info,
+    required String quality,
+    Duration? timeout,
+  }) {
+    if (_disposed) return Future<String?>.value(null);
+    final prev = _engineGate;
+    final gate = Completer<void>();
+    _engineGate = gate.future;
+    return prev.then((_) {
+      if (_disposed) return null;
+      return _getMusicUrlLocked(
+        source: source,
+        info: info,
+        quality: quality,
+        timeout: timeout,
+      );
+    }).whenComplete(() {
+      if (!gate.isCompleted) gate.complete();
+    });
+  }
+
+  Future<String?> _getMusicUrlLocked({
     required String source,
     required Map<String, dynamic> info,
     required String quality,
@@ -93,6 +125,11 @@ class LxScriptRuntime {
       return null;
     } finally {
       _invokeWaiters.remove(reqId);
+      // 本实例已无等待就立刻停泵，别让它和下一个脚本的泵 / evaluate 交叠。
+      if (_invokeWaiters.isEmpty) {
+        _pump?.cancel();
+        _pump = null;
+      }
     }
   }
 
