@@ -59,7 +59,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _CollapsibleSection(
                 title: '功能设置',
                 icon: Icons.widgets_outlined,
-                collapsedSubtitle: '音量 · 通知 · 歌词 · 元数据 · 缓存 · 转码 · DLNA',
+                collapsedSubtitle: '音量 · 通知 · 权限 · 元数据 · 启动 · 缓存 · DLNA',
                 accent: scheme.secondary,
                 children: [
                   // 仅通过 FNID 连接时才显示：候选链路管理只对 FNID 探测有意义，
@@ -99,16 +99,6 @@ class _SettingsPageState extends State<SettingsPage> {
                       subtitle: '查看通知、音频与后台播放权限',
                       route: AppRoutes.permissionSettings,
                     ),
-                  // 歌词设置（状态栏歌词/车载蓝牙/灵动岛）依赖 Android 系统级
-                  // 通知与媒体会话，桌面端无对应能力，隐藏入口。
-                  if (Platform.isAndroid)
-                    _navSub(
-                      context,
-                      icon: Icons.lyrics_outlined,
-                      title: '歌词设置',
-                      subtitle: '控制歌词的呈现方式',
-                      route: AppRoutes.lyricsSettings,
-                    ),
                   // 元数据管理（数据源搜索匹配）依赖服务端增强（FnMusicEnhance），
                   // 后端可达即可用（含 Windows 桌面端）。
                   _navSub(
@@ -131,13 +121,6 @@ class _SettingsPageState extends State<SettingsPage> {
                     title: '缓存设置',
                     subtitle: '管理音频缓存与存储空间',
                     route: AppRoutes.cacheSettings,
-                  ),
-                  _navSub(
-                    context,
-                    icon: Icons.transform_outlined,
-                    title: '转码设置',
-                    subtitle: '大文件/无损文件服务器转码播放',
-                    route: AppRoutes.transcodeSettings,
                   ),
                   _navSub(
                     context,
@@ -187,6 +170,46 @@ class _SettingsPageState extends State<SettingsPage> {
                   ],
                 ),
               if (Platform.isMacOS) const SizedBox(height: 16),
+              // 转码设置、歌词设置从「功能设置」里拎出来，放在音源配置下面、数据备份上面。
+              AppSettingSection(
+                children: [
+                  AppSettingTile(
+                    title: '转码设置',
+                    subtitle: '大文件/无损文件服务器转码播放',
+                    leading: Icon(
+                      Icons.transform_outlined,
+                      size: 22,
+                      color: scheme.primary,
+                    ),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => Navigator.pushNamed(
+                      context,
+                      AppRoutes.transcodeSettings,
+                    ),
+                  ),
+                ],
+              ),
+              // 歌词设置依赖 Android 系统级通知与媒体会话，桌面端无对应能力。
+              if (Platform.isAndroid) ...[
+                const SizedBox(height: 16),
+                AppSettingSection(
+                  children: [
+                    AppSettingTile(
+                      title: '歌词设置',
+                      subtitle: '控制歌词的呈现方式',
+                      leading: Icon(
+                        Icons.lyrics_outlined,
+                        size: 22,
+                        color: scheme.primary,
+                      ),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () =>
+                          Navigator.pushNamed(context, AppRoutes.lyricsSettings),
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 16),
               // 数据备份、调试模式各自单独一行（原来合在「应用」一组里）。
               AppSettingSection(
                 children: [

@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../app/router/app_page_route.dart';
-import '../../app/services/qq/qq_api_client.dart';
-import '../../app/services/unblock/kugou_public_sources.dart';
 import '../../app/services/unblock/unblock_source.dart';
 import '../../components/index.dart';
 import 'lx_source_page.dart';
@@ -34,8 +32,6 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
   /// 密钥/接口地址默认遮住。它们平时没有再看一眼的必要，露着只是徒增
   /// 截图和旁人瞄一眼的风险。
   bool _revealSecrets = false;
-  bool _probing = false;
-  String? _probeReport;
   String? _result;
   bool _resultOk = false;
 
@@ -204,120 +200,6 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
     setState(() => _qualityController.text = result);
   }
 
-  /// 探测用的曲目。故意挑时长差别大的几首 —— 时长是这里唯一拿得到的
-  /// 身份证据，几首都对得上才说明它是按 id 映射，而不是按歌名瞎猜。
-  static const List<String> _probeKeywords = [
-    '少年 梦然',
-    '晴天 周杰伦',
-    '起风了 买辣椒也用券',
-    '孤勇者 陈奕迅',
-    '突然的自我 伍佰',
-  ];
-
-  /// 临时诊断：这两家公益源认不认 QQ（洛雪源代号 `tx`），以及**给的是不是
-  /// 同一首歌**。
-  ///
-  /// 第一版只探一首，结果 haitangw 用 QQ 的 songmid 回了个**酷我**的 flac
-  /// —— 说明它做的是跨平台匹配，不是按 QQ 的 id 取 QQ 的资源。那就有串到
-  /// 同名翻唱的风险，光看「拿到地址了」根本不算数。
-  ///
-  /// 所以改成多首一起跑，每首比对 QQ 报的时长和文件大小反推的时长：
-  /// 按 id 映射的话首首都该吻合，按歌名猜的话会散。
-  ///
-  /// 扣扣音乐眼下不在源列表里（取址接口会给打不开的 purl 且不带状态码，
-  /// 见 music_source_registry 的注释），平时触发不到这条链，只能靠这个按钮
-  /// 把结论问出来。有定论后这段就该删掉。
-  Future<void> _probeQQPublicSources() async {
-    setState(() {
-      _probing = true;
-      _probeReport = null;
-    });
-    final buf = StringBuffer();
-    try {
-      KugouPublicSources.resetProbes();
-      for (final keyword in _probeKeywords) {
-        final songs = await QQApiClient.instance.searchSongs(keyword, limit: 5);
-        if (songs.isEmpty) {
-          buf.writeln('$keyword → QQ 搜不到');
-          buf.writeln('');
-          continue;
-        }
-        final target = songs.firstWhere(
-          (s) => s.payPlay,
-          orElse: () => songs.first,
-        );
-        final qqSec = target.durationMs ~/ 1000;
-        buf.writeln('${target.name} - ${target.artists}');
-        buf.writeln(
-          '  mid ${target.mid} · QQ ${_mmss(qqSec)}'
-          '${target.payPlay ? ' · 会员曲' : ''}',
-        );
-        final results = await KugouPublicSources.probeAll(target.mid, 'tx');
-        for (final entry in results.entries) {
-          final url = entry.value.url;
-          if (url == null) {
-            buf.writeln('  ${entry.key}：没给地址');
-          } else {
-            final host = Uri.tryParse(url)?.host ?? '?';
-            final bytes = await KugouPublicSources.contentLength(url);
-            buf.writeln(
-              '  ${entry.key}：$host ${_sizeDesc(bytes)}'
-              ' → ${_bitrateVerdict(bytes, qqSec)}',
-            );
-          }
-          // 原始返回跟着这首歌走，且只在确认是本次请求的响应时才贴 ——
-          // 上一版是全局只留第一条，被 App 后台的解析抢了坑，贴出来的样本
-          // 根本不是探测自己发的那次，我据此下过一个错结论。
-          final raw = entry.value.raw;
-          if (raw != null) buf.writeln('    ↳ $raw');
-        }
-        buf.writeln('');
-      }
-    } catch (e) {
-      buf.writeln('探测出错：$e');
-    }
-    if (!mounted) return;
-    setState(() {
-      _probing = false;
-      _probeReport = buf.toString().trim();
-    });
-  }
-
-  static String _mmss(int seconds) {
-    if (seconds <= 0) return '未知';
-    return '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
-  }
-
-  static String _sizeDesc(int? bytes) {
-    if (bytes == null || bytes <= 0) return '大小未知';
-    return '${(bytes / 1024 / 1024).toStringAsFixed(1)}MB';
-  }
-
-  /// 报**隐含码率**，不再报「估算时长」。
-  ///
-  /// 上一版按 900kbps 反推时长再和 QQ 比，结果 5 首里 4 首判「对不上」——
-  /// 是尺子错了：那几首是 24bit Hi-Res flac（1650~1880kbps），按 900 算
-  /// 自然差出一倍。真正的判据是这个比值本身：用文件大小除以 **QQ 报的
-  /// 时长**，几首都落在同一个合理的 flac 区间，就说明拿到的确实是那首歌
-  /// （配错歌的话这个比值会散得到处都是）。
-  static String _bitrateVerdict(int? bytes, int qqSec) {
-    if (bytes == null || bytes <= 0 || qqSec <= 0) return '无法比对';
-    final kbps = (bytes * 8 / qqSec / 1000).round();
-    final String tag;
-    if (kbps >= 1300) {
-      tag = 'Hi-Res flac';
-    } else if (kbps >= 700) {
-      tag = '标准 flac';
-    } else if (kbps >= 250) {
-      tag = '320k 级';
-    } else if (kbps >= 90) {
-      tag = '128k 级';
-    } else {
-      tag = '偏小，可疑';
-    }
-    return '$kbps kbps（$tag）';
-  }
-
   Future<void> _save() async {
     await _service.save(_currentConfig());
     if (!mounted) return;
@@ -484,6 +366,7 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                   color: scheme.primary,
                 ),
                 title: '脚本',
+                subtitle: 'Js 脚本文件配置',
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Navigator.of(
                   context,
@@ -547,42 +430,6 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                   ),
                 ),
               ],
-            ),
-          ],
-          const SizedBox(height: 16),
-          AppSettingSection(
-            title: '诊断',
-            children: [
-              AppSettingTile(
-                title: '探测公益音源',
-                subtitle: _probing
-                    ? '正在探测…（5 首，约十几秒）'
-                    : '拿 5 首 QQ 歌逐个问公益源，看各家给什么',
-                trailing: _probing
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.chevron_right_rounded),
-                onTap: _probing ? null : _probeQQPublicSources,
-              ),
-            ],
-          ),
-          if (_probeReport != null) ...[
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              // 可选中：这段是要发给我看的，不能只让用户干瞪眼。
-              child: SelectableText(
-                _probeReport!,
-                style: const TextStyle(fontSize: 12, height: 1.5),
-              ),
             ),
           ],
           const SizedBox(height: 20),
