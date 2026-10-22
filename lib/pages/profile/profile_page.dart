@@ -478,28 +478,23 @@ class _StatsCard extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 16, 12, 16),
           child: Row(
             children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: accent.withValues(alpha: 0.18),
-                ),
-                alignment: Alignment.center,
-                clipBehavior: Clip.antiAlias,
+              // 和「音乐来源」里酷狗/飞牛图标同款：40×40 圆角方块、无外圈，
+              // 这样位置和文字跟上面几行对齐。
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
                 child: Image.asset(
                   'assets/icon/TG.png',
-                  width: 30,
-                  height: 30,
-                  fit: BoxFit.contain,
+                  width: 40,
+                  height: 40,
+                  fit: BoxFit.cover,
                   errorBuilder: (_, _, _) => Icon(
                     Icons.bar_chart_rounded,
                     color: accent,
-                    size: 26,
+                    size: 30,
                   ),
                 ),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
