@@ -1020,6 +1020,16 @@ class PlayerService with WidgetsBindingObserver {
     SongEntity song, {
     bool waitForLocal = false,
   }) async {
+    // 已下载到本地：所有源一律优先播本地文件（离线、零流量、无需解析）。
+    // 必须和 _sourceForSong 顶部一致——否则下载的 FLAC/DSF 等（走 media_kit）会
+    // 跳过本地文件直接去网络取址，飞行模式/离线下报「无可用播放地址」。
+    // iOS 把无损路由到 media_kit（just_audio 的 AVFoundation FLAC 支持有限），
+    // 正是只在 iOS 复现的原因。
+    final localFile = DownloadService.instance.localFileFor(song.id);
+    if (localFile != null) {
+      return mk.Media(localFile.path);
+    }
+
     // 网易云：临时直链 + 网易云 CDN 的 Referer，不碰飞牛的缓存/CUE 逻辑。
     if (song.isNetease) {
       final neteaseId = song.neteaseId;
