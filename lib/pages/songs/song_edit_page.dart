@@ -615,6 +615,8 @@ class _SongEditPageState extends State<SongEditPage> {
           'coverGUID': FeiNiuApiClient.deriveCoverGuid(coverId),
       };
 
+      // 排查「invalid arguments」：把实际提交的 body 打出来，对照服务端回复定位坏字段。
+      debugPrint('[SongEdit] save body=${jsonEncode(body)}');
       await _api.updateTrackMetadata(body);
 
       // 歌词修改过且可编辑（增强开启 + 连接）则随保存统一写入（未修改跳过）。

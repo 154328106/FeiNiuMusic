@@ -554,6 +554,8 @@ class FeiNiuApiClient {
   /// 失败（业务 code != 0）时抛异常，携带服务器返回的 msg。
   Future<void> updateTrackMetadata(Map<String, dynamic> body) async {
     final data = await _post('/track/metadata', data: body);
+    // 排查「invalid arguments」：打印服务端原始回复，对照提交的 body 定位坏字段。
+    debugPrint('[SongEdit] /track/metadata resp=$data');
     final parsed = FeiNiuResponse.fromJson(data, null);
     if (!parsed.isSuccess) {
       throw Exception(parsed.msg.isNotEmpty ? parsed.msg : '保存失败');
