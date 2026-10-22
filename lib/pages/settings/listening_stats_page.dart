@@ -318,29 +318,33 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
   }
 
   Widget _buildOverview(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return AppSettingSection(
       title: '概览',
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 14),
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 16),
           child: Row(
             children: [
               _OverviewMetric(
                 icon: Icons.schedule_rounded,
                 value: _formatDuration(_totalStats.listenMs),
                 label: '累计收听',
+                accent: scheme.primary,
               ),
               _OverviewDivider(),
               _OverviewMetric(
                 icon: Icons.play_circle_outline_rounded,
                 value: '${_totalStats.playCount}',
                 label: '播放次数',
+                accent: scheme.tertiary,
               ),
               _OverviewDivider(),
               _OverviewMetric(
                 icon: Icons.calendar_month_rounded,
                 value: '$_activeDaysThisMonth',
                 label: '本月活跃(天)',
+                accent: scheme.secondary,
               ),
             ],
           ),
@@ -512,11 +516,13 @@ class _OverviewMetric extends StatelessWidget {
   final IconData icon;
   final String value;
   final String label;
+  final Color accent;
 
   const _OverviewMetric({
     required this.icon,
     required this.value,
     required this.label,
+    required this.accent,
   });
 
   @override
@@ -525,17 +531,27 @@ class _OverviewMetric extends StatelessWidget {
     return Expanded(
       child: Column(
         children: [
-          Icon(icon, color: scheme.primary, size: 22),
-          const SizedBox(height: 8),
+          // 图标装进一枚主题色圆片：比裸图标更有份量，三项各一色更活泼。
+          Container(
+            width: 40,
+            height: 40,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.14),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: accent, size: 21),
+          ),
+          const SizedBox(height: 10),
           FittedBox(
             fit: BoxFit.scaleDown,
             child: Text(
               value,
               maxLines: 1,
               style: TextStyle(
-                fontSize: 18,
+                fontSize: 19,
                 fontWeight: FontWeight.w800,
-                color: scheme.onSurface,
+                color: accent,
               ),
             ),
           ),
@@ -760,10 +776,22 @@ class _RankedArtwork extends StatelessWidget {
 
   const _RankedArtwork({required this.rank, required this.child});
 
+  /// 前三名用金/银/铜，之后用中性底色。
+  static const Color _gold = Color(0xFFF2B01E);
+  static const Color _silver = Color(0xFF9AA4B2);
+  static const Color _bronze = Color(0xFFC77B3B);
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final topThree = rank <= 3;
+    final Color? medal = switch (rank) {
+      1 => _gold,
+      2 => _silver,
+      3 => _bronze,
+      _ => null,
+    };
+    final bg = medal ?? scheme.surfaceContainerHighest;
+    final fg = medal != null ? Colors.white : scheme.onSurfaceVariant;
     return SizedBox(
       width: 44,
       height: 44,
@@ -779,16 +807,24 @@ class _RankedArtwork extends StatelessWidget {
               height: 18,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: topThree ? scheme.primary : scheme.surfaceContainerHighest,
+                color: bg,
                 shape: BoxShape.circle,
                 border: Border.all(color: scheme.surface, width: 1.5),
+                boxShadow: medal != null
+                    ? [
+                        BoxShadow(
+                          color: medal.withValues(alpha: 0.5),
+                          blurRadius: 4,
+                        ),
+                      ]
+                    : null,
               ),
               child: Text(
                 '$rank',
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
-                  color: topThree ? scheme.onPrimary : scheme.onSurfaceVariant,
+                  color: fg,
                 ),
               ),
             ),
