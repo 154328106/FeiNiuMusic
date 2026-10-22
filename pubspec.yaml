@@ -119,6 +119,12 @@ flutter:
     - assets/icon/app_icon.png
     - assets/icon/stats.png
     - assets/icon/TG.png
+    - assets/icon/set_features.png
+    - assets/icon/set_source.png
+    - assets/icon/set_transcode.png
+    - assets/icon/set_lyrics.png
+    - assets/icon/set_backup.png
+    - assets/icon/set_debug.png
     - assets/icon/theme.png
     - assets/icon/account.png
     - assets/icon/onboard_appearance.png

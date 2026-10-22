@@ -91,6 +91,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _CollapsibleSection(
                 title: '功能设置',
                 icon: Icons.widgets_outlined,
+                asset: 'assets/icon/set_features.png',
                 collapsedSubtitle: '音量 · 通知 · 权限 · 元数据 · 启动 · 缓存 · DLNA',
                 accent: scheme.secondary,
                 children: [
@@ -170,7 +171,11 @@ class _SettingsPageState extends State<SettingsPage> {
                   AppSettingTile(
                     title: '音源配置',
                     subtitle: '音源开关 · 密钥配置 · LX 脚本',
-                    leading: _iconChip(context, Icons.library_music_outlined),
+                    leading: _iconChip(
+                      context,
+                      Icons.library_music_outlined,
+                      asset: 'assets/icon/set_source.png',
+                    ),
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () =>
                         Navigator.pushNamed(context, AppRoutes.unblockSource),
@@ -204,7 +209,11 @@ class _SettingsPageState extends State<SettingsPage> {
                   AppSettingTile(
                     title: '转码设置',
                     subtitle: '大文件/无损文件服务器转码播放',
-                    leading: _iconChip(context, Icons.transform_outlined),
+                    leading: _iconChip(
+                      context,
+                      Icons.transform_outlined,
+                      asset: 'assets/icon/set_transcode.png',
+                    ),
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () => Navigator.pushNamed(
                       context,
@@ -221,7 +230,11 @@ class _SettingsPageState extends State<SettingsPage> {
                     AppSettingTile(
                       title: '歌词设置',
                       subtitle: '控制歌词的呈现方式',
-                      leading: _iconChip(context, Icons.lyrics_outlined),
+                      leading: _iconChip(
+                        context,
+                        Icons.lyrics_outlined,
+                        asset: 'assets/icon/set_lyrics.png',
+                      ),
                       trailing: const Icon(Icons.chevron_right_rounded),
                       onTap: () =>
                           Navigator.pushNamed(context, AppRoutes.lyricsSettings),
@@ -236,7 +249,11 @@ class _SettingsPageState extends State<SettingsPage> {
                   AppSettingTile(
                     title: '数据备份',
                     subtitle: '备份账号、听歌统计与设置到本地或 WebDAV',
-                    leading: _iconChip(context, Icons.backup_outlined),
+                    leading: _iconChip(
+                      context,
+                      Icons.backup_outlined,
+                      asset: 'assets/icon/set_backup.png',
+                    ),
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () =>
                         Navigator.pushNamed(context, AppRoutes.backupRestore),
@@ -249,7 +266,11 @@ class _SettingsPageState extends State<SettingsPage> {
                   AppSettingTile(
                     title: '调试模式',
                     subtitle: '调试日志的开关、清空与导出',
-                    leading: _iconChip(context, Icons.bug_report_outlined),
+                    leading: _iconChip(
+                      context,
+                      Icons.bug_report_outlined,
+                      asset: 'assets/icon/set_debug.png',
+                    ),
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () =>
                         Navigator.pushNamed(context, AppRoutes.versionInfo),
