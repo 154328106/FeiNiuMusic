@@ -222,10 +222,11 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
         AppPageScaffold.scrollableBottomPadding(context, showMiniPlayer: false);
     return AppPageScaffold(
       extendBodyBehindAppBar: true,
-      appBar: const AppTopBar(
+      appBar: AppTopBar(
         title: '听歌统计',
         backgroundColor: Colors.transparent,
         elevation: 0,
+        actions: [_DatePill(label: _todayLabel())],
       ),
       showMiniPlayer: false,
       body: RefreshIndicator(
@@ -243,7 +244,7 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
               _buildReportEntry(context),
               const SizedBox(height: 16),
             ],
-            _buildOverview(context),
+            _buildHero(context),
             const SizedBox(height: 16),
             _buildTrend(context),
             const SizedBox(height: 16),
@@ -317,39 +318,139 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
     );
   }
 
-  Widget _buildOverview(BuildContext context) {
+  String _todayLabel() {
+    final now = DateTime.now();
+    const wd = ['一', '二', '三', '四', '五', '六', '日'];
+    return '${now.month}月${now.day}日 · 周${wd[now.weekday - 1]}';
+  }
+
+  /// 累计收听拆成「大数字 + 单位」：有小时按小时为主，否则按分钟。
+  (String, String) _heroListen() {
+    final ms = _totalStats.listenMs;
+    if (ms <= 0) return ('0', '分钟');
+    final totalMinutes = (ms / 60000).floor();
+    final hours = totalMinutes ~/ 60;
+    final minutes = totalMinutes % 60;
+    if (hours > 0) return ('$hours', minutes > 0 ? '小时 $minutes 分' : '小时');
+    return ('$minutes', '分钟');
+  }
+
+  /// 概览英雄卡：主题色渐变 + 黑胶 + 大数字，另两项做成卡内药丸。
+  Widget _buildHero(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return AppSettingSection(
-      title: '概览',
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 16),
-          child: Row(
-            children: [
-              _OverviewMetric(
-                icon: Icons.schedule_rounded,
-                value: _formatDuration(_totalStats.listenMs),
-                label: '累计收听',
-                accent: scheme.primary,
-              ),
-              _OverviewDivider(),
-              _OverviewMetric(
-                icon: Icons.play_circle_outline_rounded,
-                value: '${_totalStats.playCount}',
-                label: '播放次数',
-                accent: scheme.tertiary,
-              ),
-              _OverviewDivider(),
-              _OverviewMetric(
-                icon: Icons.calendar_month_rounded,
-                value: '$_activeDaysThisMonth',
-                label: '本月活跃(天)',
-                accent: scheme.secondary,
-              ),
+    final accent = scheme.primary;
+    final onAccent = scheme.onPrimary;
+    final (value, unit) = _heroListen();
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              accent,
+              Color.lerp(accent, Colors.white, 0.26) ?? accent,
             ],
           ),
+          boxShadow: [
+            BoxShadow(
+              color: accent.withValues(alpha: 0.35),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
         ),
-      ],
+        child: Stack(
+          children: [
+            // 黑胶唱片：靠右、上下出血，被圆角裁出一半，当背景装饰。
+            Positioned(
+              right: -36,
+              top: -18,
+              bottom: -18,
+              child: Opacity(
+                opacity: 0.92,
+                child: CustomPaint(
+                  painter: _VinylPainter(labelColor: accent),
+                  size: const Size(210, 210),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '累计收听',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: onAccent.withValues(alpha: 0.9),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Text(
+                        value,
+                        style: TextStyle(
+                          fontSize: 60,
+                          height: 1.0,
+                          fontWeight: FontWeight.w900,
+                          color: onAccent,
+                          letterSpacing: -1,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          unit,
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: onAccent,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      _heroPill('${_totalStats.playCount} 次播放', accent, onAccent),
+                      const SizedBox(width: 10),
+                      _heroPill('本月活跃 $_activeDaysThisMonth 天', accent, onAccent),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 英雄卡内的小药丸：白底、主色字。
+  Widget _heroPill(String text, Color accent, Color onAccent) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: onAccent.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(30),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 12.5,
+          fontWeight: FontWeight.w700,
+          color: accent,
+        ),
+      ),
     );
   }
 
@@ -512,72 +613,74 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
 
 // ---- small presentational widgets ----
 
-class _OverviewMetric extends StatelessWidget {
-  final IconData icon;
-  final String value;
+/// 顶栏右侧的日期药丸。
+class _DatePill extends StatelessWidget {
   final String label;
-  final Color accent;
-
-  const _OverviewMetric({
-    required this.icon,
-    required this.value,
-    required this.label,
-    required this.accent,
-  });
+  const _DatePill({required this.label});
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Expanded(
-      child: Column(
-        children: [
-          // 图标装进一枚主题色圆片：比裸图标更有份量，三项各一色更活泼。
-          Container(
-            width: 40,
-            height: 40,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: accent.withValues(alpha: 0.14),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: accent, size: 21),
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.only(right: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest.withValues(alpha: 0.9),
+          borderRadius: BorderRadius.circular(30),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            color: scheme.onSurface,
           ),
-          const SizedBox(height: 10),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              value,
-              maxLines: 1,
-              style: TextStyle(
-                fontSize: 19,
-                fontWeight: FontWeight.w800,
-                color: accent,
-              ),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 11,
-              color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 }
 
-class _OverviewDivider extends StatelessWidget {
+/// 黑胶唱片装饰：深色盘面 + 若干同心纹路 + 主题色浅色标 + 中心孔。
+class _VinylPainter extends CustomPainter {
+  final Color labelColor;
+  const _VinylPainter({required this.labelColor});
+
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      height: 40,
-      color: Theme.of(context).dividerColor.withValues(alpha: 0.25),
-    );
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final r = size.shortestSide / 2;
+
+    final disc = Paint()..color = const Color(0xFF201A18);
+    canvas.drawCircle(center, r, disc);
+
+    final groove = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = Colors.white.withValues(alpha: 0.06);
+    for (var i = 1; i <= 6; i++) {
+      canvas.drawCircle(center, r * (0.94 - i * 0.085), groove);
+    }
+
+    // 盘标：主题色的浅色调，和 hero 呼应。
+    final label = Paint()
+      ..color = Color.lerp(labelColor, Colors.white, 0.72) ?? labelColor;
+    canvas.drawCircle(center, r * 0.38, label);
+
+    final ring = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..color = labelColor.withValues(alpha: 0.5);
+    canvas.drawCircle(center, r * 0.38, ring);
+
+    // 中心孔
+    canvas.drawCircle(center, r * 0.05, disc);
   }
+
+  @override
+  bool shouldRepaint(covariant _VinylPainter old) =>
+      old.labelColor != labelColor;
 }
 
 class _SegmentedToggle extends StatelessWidget {
