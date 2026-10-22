@@ -352,8 +352,7 @@ class _LxEngine {
   };
   function makeLx(scriptId){
     var handlers = {};
-    globalThis.__lxScripts[scriptId] = { handlers: handlers };
-    return {
+    var obj = {
       EVENT_NAMES: EVENT_NAMES,
       env: 'mobile',
       version: '2.0.0',
@@ -378,9 +377,15 @@ class _LxEngine {
         crypto: {}
       }
     };
+    globalThis.__lxScripts[scriptId] = { handlers: handlers, lx: obj };
+    return obj;
   }
   globalThis.__lxDefineScript = function(scriptId, body){
     var lx = makeLx(scriptId);
+    // 既以参数传入，又设为全局：很多脚本从 globalThis.lx 解构取 request/on/
+    // EVENT_NAMES 等。加载顺序执行、取址有串行闸，任一刻全局 lx 只属于当前脚本，
+    // 隔离仍靠各自的 handlers，不会退回「只最后一个能用」。
+    globalThis.lx = lx;
     try { body(lx); }
     catch(e){ try { sendMessage('lx_log', JSON.stringify({ msg: 'load err ' + scriptId + ': ' + e })); } catch(_){} }
   };
@@ -395,6 +400,8 @@ class _LxEngine {
     var s = globalThis.__lxScripts[scriptId];
     var h = (s && s.handlers) ? s.handlers[EVENT_NAMES.request] : null;
     if (!h) { sendMessage('lx_result', JSON.stringify({ reqId: reqId, err: 'no request handler' })); return; }
+    // 处理器可能惰性引用 globalThis.lx，取址串行，调用前把全局指回本脚本。
+    if (s.lx) globalThis.lx = s.lx;
     try {
       Promise.resolve(h(req)).then(function(res){
         var url = (res && res.url) ? res.url : (typeof res === 'string' ? res : '');
