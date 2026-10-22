@@ -475,11 +475,14 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
             ],
           ),
           AppSettingSection(
-            title: 'LX 脚本音源',
             children: [
               AppSettingTile(
-                title: '管理脚本音源',
-                subtitle: '导入洛雪(LX)格式的 .js 音源脚本，按平台补充取址',
+                leading: Icon(
+                  Icons.code_rounded,
+                  size: 22,
+                  color: scheme.primary,
+                ),
+                title: '脚本',
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Navigator.of(
                   context,

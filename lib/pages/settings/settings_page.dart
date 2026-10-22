@@ -2,12 +2,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-import '../../app/router/app_page_route.dart';
 import '../../app/router/app_router.dart';
 import '../../app/state/settings_state.dart';
 import '../../components/index.dart';
 import '../player/widgets/player_background.dart';
-import 'lx_source_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -151,27 +149,20 @@ class _SettingsPageState extends State<SettingsPage> {
                 ],
               ),
               const SizedBox(height: 16),
-              // 「第三方音源」从功能里拎出来单独一行。点开露出它的开关/配置入口
-              // （音源配置、LX 脚本音源），同样是点一下收起来的折叠样式。
-              _CollapsibleSection(
-                title: '音源',
-                icon: Icons.library_music_outlined,
-                collapsedSubtitle: '音源开关 · 密钥配置 · LX 脚本',
-                accent: scheme.secondary,
+              // 「音源」单独一栏，点一下直接进音源配置页（开关/配置/LX/诊断都在里面）。
+              AppSettingSection(
                 children: [
-                  _navSub(
-                    context,
-                    icon: Icons.tune_rounded,
-                    title: '音源配置',
-                    subtitle: '开关、密钥、音质与连通性测试',
-                    route: AppRoutes.unblockSource,
-                  ),
-                  _navSubPush(
-                    context,
-                    icon: Icons.code_rounded,
-                    title: 'LX 脚本音源',
-                    subtitle: '导入洛雪(LX)格式 .js 脚本，按平台补充取址',
-                    builder: (_) => const LxSourcePage(),
+                  AppSettingTile(
+                    title: '音源',
+                    subtitle: '音源开关 · 密钥配置 · LX 脚本',
+                    leading: Icon(
+                      Icons.library_music_outlined,
+                      size: 22,
+                      color: scheme.primary,
+                    ),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () =>
+                        Navigator.pushNamed(context, AppRoutes.unblockSource),
                   ),
                 ],
               ),
@@ -257,27 +248,6 @@ Widget _navSub(
       leading: Icon(icon, size: 20, color: scheme.primary),
       trailing: const Icon(Icons.chevron_right_rounded),
       onTap: () => Navigator.pushNamed(context, route),
-    ),
-  );
-}
-
-/// 折叠项：直接 push 一个页面（无命名路由时用，如 LX 脚本页）。
-Widget _navSubPush(
-  BuildContext context, {
-  required IconData icon,
-  required String title,
-  required String subtitle,
-  required WidgetBuilder builder,
-}) {
-  final scheme = Theme.of(context).colorScheme;
-  return Padding(
-    padding: const EdgeInsets.only(left: 16),
-    child: AppSettingTile(
-      title: title,
-      subtitle: subtitle,
-      leading: Icon(icon, size: 20, color: scheme.primary),
-      trailing: const Icon(Icons.chevron_right_rounded),
-      onTap: () => Navigator.of(context).push(buildAppPageRoute(builder)),
     ),
   );
 }
