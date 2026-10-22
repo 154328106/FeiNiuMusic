@@ -454,14 +454,35 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
     );
   }
 
+  /// 卡内标题 + 右侧切换条同一行（标题放进卡里，和预览一致）。
+  Widget _cardHeader(BuildContext context, String title, Widget toggle) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 10, 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          toggle,
+        ],
+      ),
+    );
+  }
+
   Widget _buildTrend(BuildContext context) {
     final bars = _buildTrendBars();
     return AppSettingSection(
-      title: '听歌趋势',
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-          child: _SegmentedToggle(
+        _cardHeader(
+          context,
+          '听歌趋势',
+          _SegmentedToggle(
             options: const ['最近7天', '本月'],
             selectedIndex: _trendMode == _TrendMode.week ? 0 : 1,
             onChanged: (i) => setState(
@@ -470,7 +491,7 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 14),
+          padding: const EdgeInsets.fromLTRB(12, 2, 12, 14),
           child: _TrendBarChart(
             bars: bars,
             tooltip: (ms) => _formatDuration(ms),
@@ -482,11 +503,11 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
 
   Widget _buildLeaderboard(BuildContext context) {
     return AppSettingSection(
-      title: '排行榜',
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-          child: _SegmentedToggle(
+        _cardHeader(
+          context,
+          '排行榜',
+          _SegmentedToggle(
             options: const ['歌曲', '歌手', '专辑'],
             selectedIndex: _leaderTab.index,
             onChanged: (i) =>
@@ -704,29 +725,28 @@ class _SegmentedToggle extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
+        // 紧凑：按内容宽度排，放进标题行右侧（不再铺满整行）。
+        mainAxisSize: MainAxisSize.min,
         children: List.generate(options.length, (i) {
           final selected = i == selectedIndex;
-          return Expanded(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => onChanged(i),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.symmetric(vertical: 7),
-                decoration: BoxDecoration(
-                  color: selected ? scheme.primary : Colors.transparent,
-                  borderRadius: BorderRadius.circular(9),
-                ),
-                child: Text(
-                  options[i],
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: selected
-                        ? scheme.onPrimary
-                        : scheme.onSurfaceVariant,
-                  ),
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => onChanged(i),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 6),
+              decoration: BoxDecoration(
+                // 选中：深色中性药丸（和预览一致），而不是主题色。
+                color: selected ? scheme.onSurface : Colors.transparent,
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Text(
+                options[i],
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: selected ? scheme.surface : scheme.onSurfaceVariant,
                 ),
               ),
             ),
