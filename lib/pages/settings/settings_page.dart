@@ -54,6 +54,37 @@ class _SettingsPageState extends State<SettingsPage> {
               // 「账号管理」只留在「我的」页面顶部那张账号卡片上；「外观」整个单元
               // 搬到了「我的」页（见 ThemeAppearanceSection），这里不再重复。
               //
+              // 「主题外观」从「我的」页搬到设置页最上方（功能设置之上）。
+              _CollapsibleSection(
+                title: '主题外观',
+                icon: Icons.palette_outlined,
+                collapsedSubtitle: '应用外观 · 播放器外观 · 播放器控制',
+                accent: scheme.secondary,
+                children: [
+                  _navSub(
+                    context,
+                    icon: Icons.color_lens_outlined,
+                    title: '应用外观',
+                    subtitle: '主题与背景设置',
+                    route: AppRoutes.appAppearanceSettings,
+                  ),
+                  _navSub(
+                    context,
+                    icon: Icons.play_circle_outline_rounded,
+                    title: '播放器外观',
+                    subtitle: '流光与播放主题',
+                    route: AppRoutes.playerAppearanceSettings,
+                  ),
+                  _navSub(
+                    context,
+                    icon: Icons.tune_rounded,
+                    title: '播放器控制',
+                    subtitle: '管理底部操作栏与按钮顺序',
+                    route: AppRoutes.playerControlsSettings,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
               // 「功能」里一长串入口平时只偶尔动，全摊开占满整屏。照「主题外观」
               // 做成可折叠：平时一行，点开才露出来。
               _CollapsibleSection(

@@ -51,17 +51,10 @@ class ProfilePage extends StatelessWidget {
               const ProfileAccountCard(),
               const SizedBox(height: 12),
               const _MusicSourceSection(),
-              const SizedBox(height: 12),
-              const _ThemeAppearanceSection(),
-              const SizedBox(height: 20),
-              // 「资源库」（专辑/歌手/风格）与「最近播放」已从这里移除：
-              // 首页的快捷入口和功能卡片里都有，放两份只是重复。
-              // 「账号管理」也去掉了：上面那张 ProfileAccountCard 点进去就是
-              // 同一个 AppRoutes.accounts，两个入口紧挨着更像是漏删。
-              // 「听歌统计」原来独占一个「更多」分组 —— 一个大面板只装一行，
-              // 空得明显，和上面两个深色分组叠在一起就是三坨一样的块。改成
-              // 首页那种渐变卡：有颜色、有分量，也不用再为一项开一个分组。
-              const _StatsCard(),
+              const SizedBox(height: 16),
+              // 「主题外观」已搬到设置页最上方。这里原来的位置改放「听歌统计」，
+              // 带一个和「音乐来源」同款、同字号的「| 听歌统计」分组标题。
+              const _StatsSection(),
             ],
           ),
           bottomNavIndex: useBottomNavigation ? 3 : null,
@@ -70,151 +63,6 @@ class ProfilePage extends StatelessWidget {
               : null,
         );
       },
-    );
-  }
-
-  /// [assetIcon] 给了就用图片，[icon] 退为加载失败时的兜底。
-  Widget _navTile(
-    BuildContext context, {
-    required IconData icon,
-    required String title,
-    String? subtitle,
-    required String route,
-    String? assetIcon,
-  }) {
-    final scheme = Theme.of(context).colorScheme;
-    return AppSettingTile(
-      title: title,
-      subtitle: subtitle,
-      leading: assetIcon != null
-          // 32×32 + 圆角 8：和「音乐来源」那排保持一致。原来 38 明显大一圈，
-          // 两块挨着看很别扭。
-          ? ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.asset(
-                assetIcon,
-                width: 32,
-                height: 32,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) =>
-                    Icon(icon, size: 20, color: scheme.primary),
-              ),
-            )
-          : Container(
-        width: 38,
-        height: 38,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: scheme.primary.withValues(alpha: 0.10),
-          borderRadius: BorderRadius.circular(11),
-        ),
-        child: Icon(icon, size: 20, color: scheme.primary),
-      ),
-      trailing: const Icon(Icons.chevron_right_rounded),
-      onTap: () => Navigator.pushNamed(context, route),
-    );
-  }
-}
-
-/// 「主题外观」——一个格子，点开露出三项，再点收起。
-///
-/// 这三项原本埋在「设置 → 外观 / 功能」里，是最常调的东西，翻两层才够到。
-/// 搬到「我的」页并做成折叠：平时只占一行，不跟音乐来源抢版面。
-class _ThemeAppearanceSection extends StatefulWidget {
-  const _ThemeAppearanceSection();
-
-  @override
-  State<_ThemeAppearanceSection> createState() =>
-      _ThemeAppearanceSectionState();
-}
-
-class _ThemeAppearanceSectionState extends State<_ThemeAppearanceSection> {
-  bool _expanded = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return AppSettingSection(
-      title: '主题外观',
-      accent: Theme.of(context).colorScheme.secondary,
-      children: [
-        AppSettingTile(
-          title: '主题外观',
-          subtitle: _expanded ? '收起' : '应用外观 · 播放器外观 · 播放器控制',
-          leading: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.asset(
-              'assets/icon/theme.png',
-              width: 32,
-              height: 32,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) =>
-                  Icon(Icons.palette_rounded, size: 22, color: scheme.primary),
-            ),
-          ),
-          // 箭头跟着状态转，一眼能看出是「能展开的」而不是「点进去的」。
-          trailing: AnimatedRotation(
-            turns: _expanded ? 0.25 : 0,
-            duration: const Duration(milliseconds: 180),
-            child: const Icon(Icons.chevron_right_rounded),
-          ),
-          onTap: () => setState(() => _expanded = !_expanded),
-        ),
-        // 展开的三项。用 AnimatedSize 让展开/收起是滑出来的，不是硬跳。
-        AnimatedSize(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
-          alignment: Alignment.topCenter,
-          child: _expanded
-              ? Column(
-                  children: [
-                    _subTile(
-                      context,
-                      icon: Icons.color_lens_outlined,
-                      title: '应用外观',
-                      subtitle: '主题与背景设置',
-                      route: AppRoutes.appAppearanceSettings,
-                    ),
-                    _subTile(
-                      context,
-                      icon: Icons.play_circle_outline_rounded,
-                      title: '播放器外观',
-                      subtitle: '流光与播放主题',
-                      route: AppRoutes.playerAppearanceSettings,
-                    ),
-                    _subTile(
-                      context,
-                      icon: Icons.tune_rounded,
-                      title: '播放器控制',
-                      subtitle: '管理底部操作栏与按钮顺序',
-                      route: AppRoutes.playerControlsSettings,
-                    ),
-                  ],
-                )
-              : const SizedBox(width: double.infinity),
-        ),
-      ],
-    );
-  }
-
-  /// 展开项：左侧留出一段缩进，视觉上从属于上面那行。
-  Widget _subTile(
-    BuildContext context, {
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required String route,
-  }) {
-    final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(left: 16),
-      child: AppSettingTile(
-        title: title,
-        subtitle: subtitle,
-        leading: Icon(icon, size: 20, color: scheme.primary),
-        trailing: const Icon(Icons.chevron_right_rounded),
-        onTap: () => Navigator.pushNamed(context, route),
-      ),
     );
   }
 }
@@ -563,6 +411,45 @@ class _SourceBar extends StatelessWidget {
 ///
 /// 视觉语言对齐首页的功能卡（渐变底 + 圆形图标底座），让「我的」这一页
 /// 不至于从上到下全是同一种深色面板。
+/// 「听歌统计」分组：和「音乐来源」同款、同字号的「| 听歌统计」标题 + 渐变卡。
+class _StatsSection extends StatelessWidget {
+  const _StatsSection();
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = Theme.of(context).colorScheme.tertiary;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(0, 0, 0, 8),
+          child: Row(
+            children: [
+              Container(
+                width: 4,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: accent,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 7),
+              Text(
+                '听歌统计',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: accent.withValues(alpha: 0.95),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const _StatsCard(),
+      ],
+    );
+  }
+}
+
 class _StatsCard extends StatelessWidget {
   const _StatsCard();
 
@@ -618,18 +505,19 @@ class _StatsCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // 标题已由上面的「| 听歌统计」分组头承担，卡内只留概述。
                     Text(
-                      '听歌统计',
+                      '本地播放数据概览',
                       style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
                         letterSpacing: -0.2,
                         color: scheme.onSurface,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '本地播放数据概览',
+                      '累计时长、趋势与排行榜',
                       style: TextStyle(
                         fontSize: 12,
                         color: scheme.onSurfaceVariant.withValues(alpha: 0.85),
