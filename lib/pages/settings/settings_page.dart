@@ -154,7 +154,7 @@ class _SettingsPageState extends State<SettingsPage> {
               // 「第三方音源」从功能里拎出来单独一行。点开露出它的开关/配置入口
               // （音源配置、LX 脚本音源），同样是点一下收起来的折叠样式。
               _CollapsibleSection(
-                title: '第三方音源',
+                title: '音源',
                 icon: Icons.library_music_outlined,
                 collapsedSubtitle: '音源开关 · 密钥配置 · LX 脚本',
                 accent: scheme.secondary,
@@ -196,19 +196,34 @@ class _SettingsPageState extends State<SettingsPage> {
                   ],
                 ),
               if (Platform.isMacOS) const SizedBox(height: 16),
+              // 数据备份、调试模式各自单独一行（原来合在「应用」一组里）。
               AppSettingSection(
-                title: '应用',
                 children: [
                   AppSettingTile(
                     title: '数据备份',
                     subtitle: '备份账号、听歌统计与设置到本地或 WebDAV',
+                    leading: Icon(
+                      Icons.backup_outlined,
+                      size: 22,
+                      color: scheme.primary,
+                    ),
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () =>
                         Navigator.pushNamed(context, AppRoutes.backupRestore),
                   ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              AppSettingSection(
+                children: [
                   AppSettingTile(
                     title: '调试模式',
                     subtitle: '调试日志的开关、清空与导出',
+                    leading: Icon(
+                      Icons.bug_report_outlined,
+                      size: 22,
+                      color: scheme.primary,
+                    ),
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () =>
                         Navigator.pushNamed(context, AppRoutes.versionInfo),

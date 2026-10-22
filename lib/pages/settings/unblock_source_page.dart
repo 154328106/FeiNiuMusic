@@ -27,6 +27,10 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
   bool _enabled = true;
   bool _testing = false;
 
+  // 「开关」「配置」两组做成可折叠，默认收起（点一下展开），和设置页一致。
+  bool _switchesOpen = false;
+  bool _configOpen = false;
+
   /// 密钥/接口地址默认遮住。它们平时没有再看一眼的必要，露着只是徒增
   /// 截图和旁人瞄一眼的风险。
   bool _revealSecrets = false;
@@ -343,6 +347,42 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
     });
   }
 
+  /// 可折叠分组：照「设置 → 功能 / 主题外观」那套，一行头 + 旋转箭头，
+  /// 底下 AnimatedSize 滑出/收回。
+  Widget _collapsible({
+    required String title,
+    required IconData icon,
+    required String collapsedSubtitle,
+    required bool expanded,
+    required VoidCallback onToggle,
+    required List<Widget> children,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return AppSettingSection(
+      children: [
+        AppSettingTile(
+          title: title,
+          subtitle: expanded ? '收起' : collapsedSubtitle,
+          leading: Icon(icon, size: 22, color: scheme.primary),
+          trailing: AnimatedRotation(
+            turns: expanded ? 0.25 : 0,
+            duration: const Duration(milliseconds: 180),
+            child: const Icon(Icons.chevron_right_rounded),
+          ),
+          onTap: onToggle,
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          alignment: Alignment.topCenter,
+          child: expanded
+              ? Column(children: children)
+              : const SizedBox(width: double.infinity),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -351,8 +391,12 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
-          AppSettingSection(
+          _collapsible(
             title: '开关',
+            icon: Icons.power_settings_new_rounded,
+            collapsedSubtitle: _enabled ? '已启用第三方音源' : '已关闭',
+            expanded: _switchesOpen,
+            onToggle: () => setState(() => _switchesOpen = !_switchesOpen),
             children: [
               AppSettingSwitchTile(
                 title: '启用第三方音源',
@@ -376,8 +420,12 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
             ],
           ),
           const SizedBox(height: 16),
-          AppSettingSection(
+          _collapsible(
             title: '配置',
+            icon: Icons.tune_rounded,
+            collapsedSubtitle: '音质 ${_qualityLabel()} · 密钥、接口地址',
+            expanded: _configOpen,
+            onToggle: () => setState(() => _configOpen = !_configOpen),
             children: [
               AppSettingTile(
                 title: '音质',
