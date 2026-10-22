@@ -118,6 +118,7 @@ flutter:
   assets:
     - assets/icon/app_icon.png
     - assets/icon/stats.png
+    - assets/icon/TG.png
     - assets/icon/theme.png
     - assets/icon/account.png
     - assets/icon/onboard_appearance.png

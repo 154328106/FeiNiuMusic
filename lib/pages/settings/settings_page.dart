@@ -58,6 +58,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _CollapsibleSection(
                 title: '主题外观',
                 icon: Icons.palette_outlined,
+                asset: 'assets/icon/theme.png',
                 collapsedSubtitle: '应用外观 · 播放器外观 · 播放器控制',
                 accent: scheme.secondary,
                 children: [
@@ -169,11 +170,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   AppSettingTile(
                     title: '音源配置',
                     subtitle: '音源开关 · 密钥配置 · LX 脚本',
-                    leading: Icon(
-                      Icons.library_music_outlined,
-                      size: 22,
-                      color: scheme.primary,
-                    ),
+                    leading: _iconChip(context, Icons.library_music_outlined),
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () =>
                         Navigator.pushNamed(context, AppRoutes.unblockSource),
@@ -207,11 +204,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   AppSettingTile(
                     title: '转码设置',
                     subtitle: '大文件/无损文件服务器转码播放',
-                    leading: Icon(
-                      Icons.transform_outlined,
-                      size: 22,
-                      color: scheme.primary,
-                    ),
+                    leading: _iconChip(context, Icons.transform_outlined),
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () => Navigator.pushNamed(
                       context,
@@ -228,11 +221,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     AppSettingTile(
                       title: '歌词设置',
                       subtitle: '控制歌词的呈现方式',
-                      leading: Icon(
-                        Icons.lyrics_outlined,
-                        size: 22,
-                        color: scheme.primary,
-                      ),
+                      leading: _iconChip(context, Icons.lyrics_outlined),
                       trailing: const Icon(Icons.chevron_right_rounded),
                       onTap: () =>
                           Navigator.pushNamed(context, AppRoutes.lyricsSettings),
@@ -247,11 +236,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   AppSettingTile(
                     title: '数据备份',
                     subtitle: '备份账号、听歌统计与设置到本地或 WebDAV',
-                    leading: Icon(
-                      Icons.backup_outlined,
-                      size: 22,
-                      color: scheme.primary,
-                    ),
+                    leading: _iconChip(context, Icons.backup_outlined),
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () =>
                         Navigator.pushNamed(context, AppRoutes.backupRestore),
@@ -264,11 +249,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   AppSettingTile(
                     title: '调试模式',
                     subtitle: '调试日志的开关、清空与导出',
-                    leading: Icon(
-                      Icons.bug_report_outlined,
-                      size: 22,
-                      color: scheme.primary,
-                    ),
+                    leading: _iconChip(context, Icons.bug_report_outlined),
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () =>
                         Navigator.pushNamed(context, AppRoutes.versionInfo),
@@ -284,6 +265,36 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 }
+
+/// 设置行左侧的图标片：圆角方块 + 主色底，统一成「主题外观」那种缩略图风格。
+/// 给了 [asset] 用图片（主题外观的 theme.png），否则主色图标垫底。
+Widget _iconChip(BuildContext context, IconData icon, {String? asset}) {
+  final c = Theme.of(context).colorScheme.primary;
+  if (asset != null) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(9),
+      child: Image.asset(
+        asset,
+        width: 34,
+        height: 34,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => _iconSquare(icon, c),
+      ),
+    );
+  }
+  return _iconSquare(icon, c);
+}
+
+Widget _iconSquare(IconData icon, Color c) => Container(
+  width: 34,
+  height: 34,
+  alignment: Alignment.center,
+  decoration: BoxDecoration(
+    color: c.withValues(alpha: 0.12),
+    borderRadius: BorderRadius.circular(9),
+  ),
+  child: Icon(icon, size: 20, color: c),
+);
 
 /// 折叠项：带命名路由的子入口（左侧缩进，视觉上从属于上面的分组头）。
 Widget _navSub(
@@ -317,10 +328,14 @@ class _CollapsibleSection extends StatefulWidget {
     required this.collapsedSubtitle,
     required this.children,
     this.accent,
+    this.asset,
   });
 
   final String title;
   final IconData icon;
+
+  /// 分组头左侧用图片（如主题外观的 theme.png）；不给则用 [icon]。
+  final String? asset;
 
   /// 收起时分组头的副标题（展开时显示「收起」）。
   final String collapsedSubtitle;
@@ -336,7 +351,6 @@ class _CollapsibleSectionState extends State<_CollapsibleSection> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return AppSettingSection(
       title: widget.title,
       accent: widget.accent,
@@ -344,7 +358,7 @@ class _CollapsibleSectionState extends State<_CollapsibleSection> {
         AppSettingTile(
           title: widget.title,
           subtitle: _expanded ? '收起' : widget.collapsedSubtitle,
-          leading: Icon(widget.icon, size: 22, color: scheme.primary),
+          leading: _iconChip(context, widget.icon, asset: widget.asset),
           // 箭头跟着状态转，一眼能看出是「能展开的」而不是「点进去的」。
           trailing: AnimatedRotation(
             turns: _expanded ? 0.25 : 0,

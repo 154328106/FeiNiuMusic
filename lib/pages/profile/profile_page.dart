@@ -488,7 +488,7 @@ class _StatsCard extends StatelessWidget {
                 alignment: Alignment.center,
                 clipBehavior: Clip.antiAlias,
                 child: Image.asset(
-                  'assets/icon/stats.png',
+                  'assets/icon/TG.png',
                   width: 30,
                   height: 30,
                   fit: BoxFit.contain,
@@ -505,19 +505,18 @@ class _StatsCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // 标题已由上面的「| 听歌统计」分组头承担，卡内只留概述。
                     Text(
-                      '本地播放数据概览',
+                      '听歌统计',
                       style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
                         letterSpacing: -0.2,
                         color: scheme.onSurface,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '累计时长、趋势与排行榜',
+                      '本地播放数据概览',
                       style: TextStyle(
                         fontSize: 12,
                         color: scheme.onSurfaceVariant.withValues(alpha: 0.85),

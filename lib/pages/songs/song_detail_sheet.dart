@@ -400,24 +400,27 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
               },
             ),
             _buildDownloadTile(song),
-            AppListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: '编辑歌曲信息',
-              onTap: () async {
-                final nav = Navigator.of(context);
-                nav.pop(); // 关闭详情 sheet
-                final updated = await nav.push<SongEntity>(
-                  buildAppPageRoute(
-                    (_) => SongEditPage(song: widget.song),
-                  ),
-                );
-                if (updated != null) {
-                  // 激活回调刷新列表 + 更新当前播放/队列
-                  widget.onUpdated?.call(updated);
-                  await PlayerService.instance.updateSongMetadata(updated);
-                }
-              },
-            ),
+            // 编辑元数据走飞牛 /track/metadata，只认飞牛曲库内的歌。在线源
+            // （网易/QQ/酷狗）的歌传过去会被判 invalid arguments，直接不显示。
+            if (song.source == SongSource.feiniu)
+              AppListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: '编辑歌曲信息',
+                onTap: () async {
+                  final nav = Navigator.of(context);
+                  nav.pop(); // 关闭详情 sheet
+                  final updated = await nav.push<SongEntity>(
+                    buildAppPageRoute(
+                      (_) => SongEditPage(song: widget.song),
+                    ),
+                  );
+                  if (updated != null) {
+                    // 激活回调刷新列表 + 更新当前播放/队列
+                    widget.onUpdated?.call(updated);
+                    await PlayerService.instance.updateSongMetadata(updated);
+                  }
+                },
+              ),
             if (widget.extraActions != null)
               ...widget.extraActions!,
             if (widget.onOpenPlayerAppearanceSettings != null)
