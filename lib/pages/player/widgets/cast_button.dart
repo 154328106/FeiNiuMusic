@@ -17,7 +17,13 @@ import '../../../components/feedback/app_toast.dart';
 ///
 /// - 未投屏：`Icons.cast`，点开设备列表底部面板；
 /// - 投屏中：`Icons.cast_connected`（主色高亮），点开面板可切换设备或断开。
-/// 仅 Android 平台显示（media_cast_dlna 不支持 iOS）。
+///
+/// 仅 Android 平台显示。media_cast_dlna 0.3.1 虽在 pubspec 声明了 iOS、也带了
+/// ios/ 源码，但那是**空壳**：MediaCastDlnaPluginImpl.swift 里 startDiscovery /
+/// getDiscoveredDevices 等每个方法都 `return NSError "Not implemented"`。所以
+/// iOS 上投屏按钮即便显示也搜不到设备、投不了，不如直接隐藏（免得给个死按钮）。
+/// 要支持 iOS 投屏得换插件/写原生，且 SSDP 组播在 iOS 还要 multicast 授权
+/// （需 Apple 审批），不是小改。
 class CastButton extends StatelessWidget {
   final Signal<SongEntity?> songSignal;
 

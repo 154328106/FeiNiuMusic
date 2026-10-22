@@ -57,7 +57,7 @@ class _SettingsPageState extends State<SettingsPage> {
               // 「功能」里一长串入口平时只偶尔动，全摊开占满整屏。照「主题外观」
               // 做成可折叠：平时一行，点开才露出来。
               _CollapsibleSection(
-                title: '功能',
+                title: '功能设置',
                 icon: Icons.widgets_outlined,
                 collapsedSubtitle: '音量 · 通知 · 歌词 · 元数据 · 缓存 · 转码 · DLNA',
                 accent: scheme.secondary,
@@ -153,7 +153,7 @@ class _SettingsPageState extends State<SettingsPage> {
               AppSettingSection(
                 children: [
                   AppSettingTile(
-                    title: '音源',
+                    title: '音源配置',
                     subtitle: '音源开关 · 密钥配置 · LX 脚本',
                     leading: Icon(
                       Icons.library_music_outlined,

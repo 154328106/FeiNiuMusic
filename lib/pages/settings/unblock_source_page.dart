@@ -474,6 +474,7 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
               ],
             ],
           ),
+          const SizedBox(height: 16),
           AppSettingSection(
             children: [
               AppSettingTile(
@@ -496,6 +497,12 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
               Expanded(
                 child: FilledButton.tonal(
                   onPressed: _testing ? null : _save,
+                  // 圆角和下面的分组卡统一，别用默认的胶囊（太圆）。
+                  style: FilledButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
                   child: const Text('保存'),
                 ),
               ),
@@ -503,13 +510,18 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
               Expanded(
                 child: FilledButton(
                   onPressed: _testing ? null : _test,
+                  style: FilledButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
                   child: _testing
                       ? const SizedBox(
                           width: 18,
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('保存并测试'),
+                      : const Text('测试'),
                 ),
               ),
             ],
