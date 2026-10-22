@@ -5,23 +5,62 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_js/flutter_js.dart';
 
-/// 单个 LX（洛雪）脚本音源的运行时。
+/// 单个 LX（洛雪）脚本音源的句柄。
 ///
-/// 在应用内 JS 引擎（iOS=JavaScriptCore / Android=QuickJS，由 flutter_js 适配）
-/// 里注入洛雪约定的 `globalThis.lx` 宿主对象，加载用户脚本，暴露：
-/// - [sources]：脚本声明支持的平台代号（wy/tx/kg/kw/mg…）与音质；
-/// - [getMusicUrl]：按 `{source, songId, quality}` 调脚本注册的 request 处理器取直链。
+/// **所有脚本共用一个 JS 运行时**（见 [_LxEngine]），本类只是按 scriptId 的轻量
+/// 包装，转调共享引擎。
 ///
-/// 桥接：JS 的异步 HTTP（`lx.request`）与取址处理器（返回 Promise）都走
-/// 「sendMessage 出来 → Dart 干活 → evaluate 把结果灌回 JS」这一套，靠
-/// reqId 配对，避免依赖具体引擎的 Promise 返回值语义。
+/// 为什么必须共享一个引擎：flutter_js 0.8.7 在 iOS（JavaScriptCore）上的
+/// `sendMessage` 原生桥 `_sendMessageDartFunc` / `sendMessageBridgeFunction` 是
+/// **static** 的，每 new 一个 JSCore 运行时都会把它覆盖成最后那个实例——于是所有
+/// 运行时的 `sendMessage` 都被路由到最后创建的那个实例的通道表。多实例时，除最后
+/// 一个脚本外，其它脚本的 HTTP / 取址结果回调全发错了实例 → 等待者永不完成 → 超时。
+/// 现象正是「单源能取到、多源只命中一个或全军覆没」。串行化救不了（那是路由错，不是
+/// 并发）。改成单引擎后，全程只有一个实例，路由不再错位；Android 的 QuickJS 本就
+/// 按实例路由，单引擎同样正确且更省资源。
 class LxScriptRuntime {
-  LxScriptRuntime();
+  LxScriptRuntime() : _scriptId = 'lx${++_idSeq}';
 
-  /// 全局串行闸：所有实例的取址排到同一条链上，保证任一时刻只有一个脚本在
-  /// 驱动原生 JS 引擎。flutter_js 的引擎（尤其 Android QuickJS）被多个实例并发
-  /// evaluate / 泵微任务时会互相干扰（只命中一个、或全取不到）甚至原生崩溃。
-  static Future<void> _engineGate = Future<void>.value();
+  static int _idSeq = 0;
+  final String _scriptId;
+
+  /// 脚本名（从 @name 注释尽力解析，仅展示用）。
+  String name = '';
+
+  /// 脚本 send(inited) 声明的支持平台代号（如 wy/tx/kg/kw/mg）。
+  List<String> get sources => _LxEngine.instance.sourcesOf(_scriptId);
+
+  /// 加载脚本文本并等待其 `send(EVENT_NAMES.inited)`。返回是否成功 inited。
+  Future<bool> load(String scriptText, {Duration? timeout}) {
+    name = _LxEngine.parseName(scriptText) ?? name;
+    return _LxEngine.instance.loadScript(_scriptId, scriptText, timeout: timeout);
+  }
+
+  /// 调脚本取某首歌的可播放直链。[info] 是传给脚本的歌曲信息（songmid/hash 等）。
+  Future<String?> getMusicUrl({
+    required String source,
+    required Map<String, dynamic> info,
+    required String quality,
+    Duration? timeout,
+  }) => _LxEngine.instance.getUrl(
+    _scriptId,
+    source: source,
+    info: info,
+    quality: quality,
+    timeout: timeout,
+  );
+
+  void dispose() => _LxEngine.instance.unloadScript(_scriptId);
+}
+
+/// 全应用唯一的 LX JS 引擎。持有唯一的 [JavascriptRuntime]，所有脚本在同一个
+/// JS 上下文里按 scriptId 分隔（`globalThis.__lxScripts[scriptId]`）。
+///
+/// 取址全局串行（[_gate]）：JS 引擎单线程驱动，一次只跑一个取址，避免 evaluate /
+/// 微任务泵交叠。HTTP 回调与取址结果用全局自增 id 配对，和 scriptId 无关。
+class _LxEngine {
+  _LxEngine._();
+  static final _LxEngine instance = _LxEngine._();
 
   final JavascriptRuntime _rt = getJavascriptRuntime();
   final Dio _dio = Dio(
@@ -33,52 +72,74 @@ class LxScriptRuntime {
     ),
   );
 
+  bool _booted = false;
   int _reqSeq = 0;
-  final Map<int, Completer<String?>> _invokeWaiters = {};
-  final Completer<void> _initedWaiter = Completer<void>();
   Timer? _pump;
-  bool _disposed = false;
 
-  /// 脚本 send(inited) 声明的支持平台代号（如 wy/tx/kg/kw/mg）。
-  List<String> sources = const [];
+  /// 取址串行闸。
+  Future<void> _gate = Future<void>.value();
 
-  /// 脚本名（从 @name 注释尽力解析，仅展示用）。
-  String name = '';
+  final Map<int, Completer<String?>> _invokeWaiters = {};
+  final Map<String, Completer<void>> _initedWaiters = {};
+  final Map<String, List<String>> _sources = {};
 
-  /// 加载脚本文本并等待其 `send(EVENT_NAMES.inited)`。返回是否成功 inited。
-  Future<bool> load(String scriptText, {Duration? timeout}) async {
+  List<String> sourcesOf(String scriptId) => _sources[scriptId] ?? const [];
+
+  void _boot() {
+    if (_booted) return;
+    _booted = true;
+    _registerChannels();
+    _rt.evaluate(_hostShim);
+  }
+
+  Future<bool> loadScript(
+    String scriptId,
+    String scriptText, {
+    Duration? timeout,
+  }) async {
     try {
-      name = _parseName(scriptText) ?? name;
-      _registerChannels();
-      _rt.evaluate(_hostShim);
-      _rt.evaluate(scriptText);
+      _boot();
+      final inited = Completer<void>();
+      _initedWaiters[scriptId] = inited;
+      // 用户脚本引用裸 `lx`——包进一层函数、以参数 lx 遮蔽，就能给每个脚本各自的
+      // 宿主对象、各自的 handlers。脚本原文直接内联（和洛雪注入方式一致），末尾补
+      // 换行以终结可能的行尾注释。
+      final wrapped =
+          'globalThis.__lxDefineScript(${jsonEncode(scriptId)}, function(lx){\n'
+          '$scriptText\n});';
+      _rt.evaluate(wrapped);
       _startPump();
-      await _initedWaiter.future.timeout(timeout ?? const Duration(seconds: 8));
+      await inited.future.timeout(timeout ?? const Duration(seconds: 8));
       return true;
     } catch (e) {
-      debugPrint('[LX] 脚本加载失败：$e');
+      debugPrint('[LX] 脚本加载失败（$scriptId）：$e');
+      _initedWaiters.remove(scriptId);
       return false;
     }
   }
 
-  /// 调脚本取某首歌的可播放直链。[info] 是传给脚本的歌曲信息（songmid/hash 等）。
-  ///
-  /// 全局串行：排到 [_engineGate] 尾部，前一个取址彻底结束后再碰引擎。这样
-  /// 「全开一起测」也变成逐个跑，杜绝并发导致的互相干扰 / 闪退（现象：单独测
-  /// 每个都行，一起测只命中一个或全军覆没）。
-  Future<String?> getMusicUrl({
+  void unloadScript(String scriptId) {
+    _initedWaiters.remove(scriptId);
+    _sources.remove(scriptId);
+    try {
+      _rt.evaluate('globalThis.__lxUnload(${jsonEncode(scriptId)});');
+    } catch (_) {}
+  }
+
+  /// 取某脚本的直链。排到 [_gate] 尾部，前一个取址彻底结束后再碰引擎。
+  Future<String?> getUrl(
+    String scriptId, {
     required String source,
     required Map<String, dynamic> info,
     required String quality,
     Duration? timeout,
   }) {
-    if (_disposed) return Future<String?>.value(null);
-    final prev = _engineGate;
+    final prev = _gate;
     final gate = Completer<void>();
-    _engineGate = gate.future;
+    _gate = gate.future;
     return prev.then((_) {
-      if (_disposed) return null;
-      return _getMusicUrlLocked(
+      return _getUrlLocked(
+        scriptId,
         source: source,
         info: info,
         quality: quality,
@@ -89,33 +150,30 @@ class LxScriptRuntime {
     });
   }
 
-  Future<String?> _getMusicUrlLocked({
+  Future<String?> _getUrlLocked(
+    String scriptId, {
     required String source,
     required Map<String, dynamic> info,
     required String quality,
     Duration? timeout,
   }) async {
-    if (_disposed) return null;
     final reqId = ++_reqSeq;
     final completer = Completer<String?>();
     _invokeWaiters[reqId] = completer;
-    // 关键：重启微任务泵。加载完成后 _pump 会自行取消（见 _startPump），
-    // 而 QuickJS（Android）的 Promise 链全靠它驱动——不重启，HTTP 回调后的
-    // .then 永不执行，整条取址 Promise 卡死到超时。iOS 的 JSCore 有原生事件
-    // 循环不受影响，所以当初只在 Android 上表现为「Future not completed」。
     _startPump();
     // 洛雪(LX)约定：musicUrl 请求的 info 是 { type: 音质, musicInfo: {歌曲对象} }，
-    // 脚本按 info.musicInfo / info.type 取（见 ikun 等脚本的 on(request) 实现）。
-    // 之前把歌曲字段平铺在 info 里，脚本读 info.musicInfo 取到 undefined → 请求发空
-    // id → 后端一律「无货」。
+    // 脚本按 info.musicInfo / info.type 取。平铺会让脚本读 info.musicInfo 取到
+    // undefined → 发空 id → 后端一律「无货」。
     final payload = jsonEncode({
       'action': 'musicUrl',
       'source': source,
       'info': {'type': quality, 'musicInfo': info},
     });
     try {
-      debugPrint('[LX] invoke reqId=$reqId source=$source');
-      _rt.evaluate('globalThis.__lxInvoke($reqId, $payload);');
+      debugPrint('[LX] invoke $scriptId reqId=$reqId source=$source');
+      _rt.evaluate(
+        'globalThis.__lxInvoke(${jsonEncode(scriptId)}, $reqId, $payload);',
+      );
       _drain();
       return await completer.future.timeout(
         timeout ?? const Duration(seconds: 10),
@@ -125,35 +183,21 @@ class LxScriptRuntime {
       return null;
     } finally {
       _invokeWaiters.remove(reqId);
-      // 本实例已无等待就立刻停泵，别让它和下一个脚本的泵 / evaluate 交叠。
-      if (_invokeWaiters.isEmpty) {
+      if (_invokeWaiters.isEmpty && _initedWaiters.isEmpty) {
         _pump?.cancel();
         _pump = null;
       }
     }
   }
 
-  void dispose() {
-    _disposed = true;
-    _pump?.cancel();
-    try {
-      _rt.dispose();
-    } catch (_) {}
-    for (final c in _invokeWaiters.values) {
-      if (!c.isCompleted) c.complete(null);
-    }
-    _invokeWaiters.clear();
-  }
-
   // ---- 内部 ----
 
-  /// 周期性泵 QuickJS 的 Promise/microtask 任务队列（JSCore 由系统泵，调用
-  /// 它无害）。只在有未完成的取址等待或刚加载时需要。
+  /// 周期性泵 QuickJS 的 Promise/microtask 任务队列（JSCore 由系统泵，调用它
+  /// 无害）。有未完成的取址或加载时才需要。
   void _startPump() {
     _pump ??= Timer.periodic(const Duration(milliseconds: 20), (_) {
-      if (_disposed) return;
       _drain();
-      if (_invokeWaiters.isEmpty && _initedWaiter.isCompleted) {
+      if (_invokeWaiters.isEmpty && _initedWaiters.isEmpty) {
         _pump?.cancel();
         _pump = null;
       }
@@ -178,7 +222,7 @@ class LxScriptRuntime {
       _doHttp(id, url, options);
       return null;
     });
-    // 取址处理器的结果（Promise resolve/reject 后脚本发回来）。
+    // 取址处理器的结果（Promise resolve/reject 后脚本发回来）。全局 reqId 配对。
     _rt.onMessage('lx_result', (dynamic args) {
       final map = _asMap(args);
       final id = map['reqId'];
@@ -192,16 +236,20 @@ class LxScriptRuntime {
       }
       return null;
     });
-    // 脚本声明支持的源。
+    // 脚本声明支持的源（带 scriptId）。
     _rt.onMessage('lx_inited', (dynamic args) {
       final map = _asMap(args);
+      final scriptId = (map['scriptId'] ?? '').toString();
       final list = map['sources'];
+      List<String> srcs = const [];
       if (list is Map) {
-        sources = list.keys.map((e) => e.toString()).toList();
+        srcs = list.keys.map((e) => e.toString()).toList();
       } else if (list is List) {
-        sources = list.map((e) => e.toString()).toList();
+        srcs = list.map((e) => e.toString()).toList();
       }
-      if (!_initedWaiter.isCompleted) _initedWaiter.complete();
+      if (scriptId.isNotEmpty) _sources[scriptId] = srcs;
+      final w = _initedWaiters.remove(scriptId);
+      if (w != null && !w.isCompleted) w.complete();
       return null;
     });
     _rt.onMessage('lx_log', (dynamic args) {
@@ -215,7 +263,6 @@ class LxScriptRuntime {
     String url,
     Map<String, dynamic> options,
   ) async {
-    if (_disposed) return;
     try {
       final method = (options['method'] ?? 'GET').toString().toUpperCase();
       final headers = <String, dynamic>{};
@@ -262,7 +309,6 @@ class LxScriptRuntime {
   }
 
   void _resolveHttp(dynamic id, String? err, Object? result) {
-    if (_disposed) return;
     final errJson = err == null ? 'null' : jsonEncode(err);
     final resJson = result == null ? 'null' : jsonEncode(result);
     try {
@@ -285,57 +331,69 @@ class LxScriptRuntime {
     return const {};
   }
 
-  static String? _parseName(String script) {
+  static String? parseName(String script) {
     final m = RegExp(r'@name\s+([^\r\n*]+)').firstMatch(script);
     return m?.group(1)?.trim();
   }
 
-  /// 注入到 JS 的洛雪宿主垫片。只实现 url 类脚本必需的面：
-  /// request / on / send / EVENT_NAMES / env / version，外加一个轻量 utils。
+  /// 注入到 JS 的洛雪宿主垫片（单引擎只注一次）。每个脚本经 `__lxDefineScript`
+  /// 拿到各自的 `lx`（handlers 独立），存入 `globalThis.__lxScripts[scriptId]`。
+  /// HTTP 回调用全局自增 id、取址用全局 reqId 配对，跨脚本不串。
   static const String _hostShim = r'''
 (function(){
   if (globalThis.__lxShimReady) return;
   globalThis.__lxShimReady = true;
+  globalThis.__lxScripts = {};
   globalThis.__lxHttpCbs = {};
   globalThis.__lxHttpSeq = 0;
   var EVENT_NAMES = {
     request: 'request', inited: 'inited', updateAlert: 'updateAlert',
     updateMusicUrl: 'updateMusicUrl'
   };
-  var handlers = {};
-  globalThis.lx = {
-    EVENT_NAMES: EVENT_NAMES,
-    env: 'mobile',
-    version: '2.0.0',
-    on: function(name, fn){ handlers[name] = fn; },
-    send: function(name, data){
-      if (name === EVENT_NAMES.inited) {
-        var sources = (data && data.sources) || {};
-        try { sendMessage('lx_inited', JSON.stringify({ sources: sources })); } catch(e){}
-      }
-    },
-    request: function(url, options, callback){
-      var id = ++globalThis.__lxHttpSeq;
-      globalThis.__lxHttpCbs[id] = callback || function(){};
-      try { sendMessage('lx_http', JSON.stringify({ id: id, url: url, options: options || {} })); }
-      catch(e){ var cb = globalThis.__lxHttpCbs[id]; delete globalThis.__lxHttpCbs[id]; cb(e, null); }
-    },
-    utils: {
-      buffer: {
-        from: function(v, enc){ return { __raw: v, enc: enc || 'utf8' }; },
-        bufToString: function(b, enc){ return (b && b.__raw != null) ? String(b.__raw) : String(b); }
+  function makeLx(scriptId){
+    var handlers = {};
+    globalThis.__lxScripts[scriptId] = { handlers: handlers };
+    return {
+      EVENT_NAMES: EVENT_NAMES,
+      env: 'mobile',
+      version: '2.0.0',
+      on: function(name, fn){ handlers[name] = fn; },
+      send: function(name, data){
+        if (name === EVENT_NAMES.inited) {
+          var sources = (data && data.sources) || {};
+          try { sendMessage('lx_inited', JSON.stringify({ scriptId: scriptId, sources: sources })); } catch(e){}
+        }
       },
-      crypto: {}
-    }
+      request: function(url, options, callback){
+        var id = ++globalThis.__lxHttpSeq;
+        globalThis.__lxHttpCbs[id] = callback || function(){};
+        try { sendMessage('lx_http', JSON.stringify({ id: id, url: url, options: options || {} })); }
+        catch(e){ var cb = globalThis.__lxHttpCbs[id]; delete globalThis.__lxHttpCbs[id]; cb(e, null); }
+      },
+      utils: {
+        buffer: {
+          from: function(v, enc){ return { __raw: v, enc: enc || 'utf8' }; },
+          bufToString: function(b, enc){ return (b && b.__raw != null) ? String(b.__raw) : String(b); }
+        },
+        crypto: {}
+      }
+    };
+  }
+  globalThis.__lxDefineScript = function(scriptId, body){
+    var lx = makeLx(scriptId);
+    try { body(lx); }
+    catch(e){ try { sendMessage('lx_log', JSON.stringify({ msg: 'load err ' + scriptId + ': ' + e })); } catch(_){} }
   };
+  globalThis.__lxUnload = function(scriptId){ try { delete globalThis.__lxScripts[scriptId]; } catch(e){} };
   globalThis.__lxHttpResolve = function(id, err, resp){
     var cb = globalThis.__lxHttpCbs[id];
     if (!cb) return;
     delete globalThis.__lxHttpCbs[id];
     try { cb(err, resp); } catch(e){}
   };
-  globalThis.__lxInvoke = function(reqId, req){
-    var h = handlers[EVENT_NAMES.request];
+  globalThis.__lxInvoke = function(scriptId, reqId, req){
+    var s = globalThis.__lxScripts[scriptId];
+    var h = (s && s.handlers) ? s.handlers[EVENT_NAMES.request] : null;
     if (!h) { sendMessage('lx_result', JSON.stringify({ reqId: reqId, err: 'no request handler' })); return; }
     try {
       Promise.resolve(h(req)).then(function(res){
