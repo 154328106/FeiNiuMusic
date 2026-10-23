@@ -137,6 +137,31 @@ class LxSourceManager {
     }
   }
 
+  /// 从订阅链接导入：下载脚本文本再走 [import]。ikun 等音源发的就是这种带
+  /// key 的 .js 地址（`https://.../script/lxmusic?key=...`）。
+  Future<LxSource?> importFromUrl(String url, {String? displayName}) async {
+    final text = await _fetchUrl(url.trim());
+    if (text == null || text.trim().isEmpty) return null;
+    return import(text, displayName: displayName);
+  }
+
+  Future<String?> _fetchUrl(String url) async {
+    HttpClient? client;
+    try {
+      client = HttpClient();
+      final req = await client.getUrl(Uri.parse(url));
+      req.headers.set('User-Agent', 'lx-music-mobile/2.0');
+      final resp = await req.close();
+      if (resp.statusCode != 200) return null;
+      return await resp.transform(utf8.decoder).join();
+    } catch (e) {
+      debugPrint('[LX] 下载脚本失败：$e');
+      return null;
+    } finally {
+      client?.close();
+    }
+  }
+
   Future<void> remove(String id) async {
     _runtimes.remove(id)?.dispose();
     _metas.removeWhere((m) => m.id == id);

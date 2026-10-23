@@ -99,7 +99,7 @@ class _LxSourcePageState extends State<LxSourcePage> {
       final path = result?.files.single.path;
       if (path == null) return;
       final text = await File(path).readAsString();
-      await _doImport(text);
+      await _doImport(() => _mgr.import(text));
     } catch (e) {
       if (mounted) AppToast.show(context, '读取文件失败：$e', type: ToastType.error);
     }
@@ -134,14 +134,48 @@ class _LxSourcePageState extends State<LxSourcePage> {
       ),
     );
     if (ok == true && controller.text.trim().isNotEmpty) {
-      await _doImport(controller.text);
+      await _doImport(() => _mgr.import(controller.text));
     }
   }
 
-  Future<void> _doImport(String text) async {
+  Future<void> _importFromUrl() async {
+    final controller = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('从链接导入'),
+        content: TextField(
+          controller: controller,
+          minLines: 2,
+          maxLines: 4,
+          autocorrect: false,
+          keyboardType: TextInputType.url,
+          decoration: const InputDecoration(
+            hintText: '粘贴音源订阅链接，例如\nhttps://c.wwwweb.top/script/lxmusic?key=...',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('导入'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && controller.text.trim().isNotEmpty) {
+      await _doImport(() => _mgr.importFromUrl(controller.text));
+    }
+  }
+
+  Future<void> _doImport(Future<LxSource?> Function() loader) async {
     setState(() => _busy = true);
     try {
-      final meta = await _mgr.import(text);
+      final meta = await loader();
       if (!mounted) return;
       if (meta == null) {
         AppToast.show(
@@ -204,10 +238,12 @@ class _LxSourcePageState extends State<LxSourcePage> {
             enabled: !_busy,
             icon: const Icon(Icons.add_rounded),
             onSelected: (v) {
+              if (v == 'url') _importFromUrl();
               if (v == 'file') _importFromFile();
               if (v == 'text') _importFromText();
             },
             itemBuilder: (_) => const [
+              PopupMenuItem(value: 'url', child: Text('从链接导入')),
               PopupMenuItem(value: 'file', child: Text('从文件导入 .js')),
               PopupMenuItem(value: 'text', child: Text('粘贴文本导入')),
             ],
