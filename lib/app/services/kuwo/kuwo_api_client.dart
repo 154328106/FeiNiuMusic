@@ -45,9 +45,46 @@ class KuwoApiClient {
     ),
   );
 
+  // 服务器真正下发过的 kw_token。自造的 token 服务器不认，必须先访问一次
+  // 首页拿到 Set-Cookie 里的真 token。
+  String? _realToken;
+  Future<void>? _tokenInflight;
+
+  Future<void> _ensureToken() {
+    if (_realToken != null) return Future.value();
+    return _tokenInflight ??= () async {
+      try {
+        final res = await _dio.get<dynamic>(
+          'https://www.kuwo.cn/',
+          options: Options(
+            headers: {
+              'User-Agent':
+                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                  '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            },
+          ),
+        );
+        final cookies = res.headers.map['set-cookie'] ?? const [];
+        for (final c in cookies) {
+          final m = RegExp(r'kw_token=([^;]+)').firstMatch(c);
+          if (m != null) {
+            _realToken = m.group(1);
+            break;
+          }
+        }
+      } catch (e) {
+        debugPrint('[Kuwo] 取 kw_token 失败：$e');
+      } finally {
+        _tokenInflight = null;
+      }
+    }();
+  }
+
+  String get _effToken => _realToken ?? _token;
+
   Map<String, String> get _wwwHeaders => {
-    'csrf': _token,
-    'Cookie': 'kw_token=$_token',
+    'csrf': _effToken,
+    'Cookie': 'kw_token=$_effToken',
     'Referer': 'https://www.kuwo.cn/',
     'User-Agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -73,6 +110,7 @@ class KuwoApiClient {
     String path,
     Map<String, dynamic> params,
   ) async {
+    await _ensureToken();
     final res = await _dio.get<dynamic>(
       'https://www.kuwo.cn$path',
       queryParameters: {...params, 'httpsStatus': 1, 'reqId': _reqId()},
@@ -82,6 +120,9 @@ class KuwoApiClient {
     if (json is Map && json['code'] == 200 && json['data'] is Map) {
       return (json['data'] as Map).cast<String, dynamic>();
     }
+    final head = res.data is String ? (res.data as String) : jsonEncode(res.data);
+    debugPrint('[Kuwo] www $path status=${res.statusCode} '
+        'body=${head.length > 200 ? head.substring(0, 200) : head}');
     return null;
   }
 
@@ -111,32 +152,9 @@ class KuwoApiClient {
 
   /// 榜单（首页用）。bangId 93=飙升榜、16=热歌榜、158=新歌榜。
   ///
-  /// www 常被风控挡掉，主走老的 kbangserver（免 csrf、长期可用）。
+  /// 走 www（带完整封面）；www 不通返回空，上层回落带封面的搜索。
+  /// 不用 kbangserver —— 它虽免 csrf，但返回里**没有封面字段**，首页会一片灰。
   Future<List<KuwoSong>> rank({int bangId = 93, int limit = 30}) async {
-    // 1) kbangserver（纯文本 JSON，无需 csrf）。
-    try {
-      final res = await _dio.get<dynamic>(
-        'http://kbangserver.kuwo.cn/ksong.s',
-        queryParameters: {
-          'from': 'pc',
-          'fmt': 'json',
-          'type': 'bang',
-          'data': 'content',
-          'id': bangId,
-          'pn': 0,
-          'rn': limit,
-          'show_copyright_off': 0,
-          'isbang': 1,
-        },
-      );
-      final json = _decode(res.data);
-      final list = (json is Map ? json['musiclist'] : null);
-      final parsed = _parseList(list);
-      if (parsed.isNotEmpty) return parsed;
-    } catch (e) {
-      debugPrint('[Kuwo] kbang 榜单异常：$e');
-    }
-    // 2) www 兜底（能通就通）。
     try {
       final data = await _www('/api/www/bang/bang/musicList', {
         'bangId': bangId,
@@ -145,7 +163,7 @@ class KuwoApiClient {
       });
       return _parseList(data?['musicList']);
     } catch (e) {
-      debugPrint('[Kuwo] www 榜单异常：$e');
+      debugPrint('[Kuwo] 榜单异常：$e');
       return const [];
     }
   }
