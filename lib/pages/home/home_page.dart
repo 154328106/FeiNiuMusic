@@ -894,7 +894,7 @@ class _HomePageState extends State<HomePage>
           icon: Icons.leaderboard_rounded,
           label: '排行榜',
           accent: const Color(0xFFEC4899),
-          onTap: () => _openSourceSongList('热歌榜', source.topSongs),
+          onTap: () => _openSourcePlaylists('排行榜', source.toplists),
         ),
         HomeShortcutItem(
           icon: Icons.queue_music_rounded,

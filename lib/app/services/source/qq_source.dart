@@ -144,6 +144,21 @@ class QQSource implements MusicSource {
     }
   }
 
+  /// QQ 各大排行榜（固定 topid；点进去看该榜的歌）。
+  Future<List<SourcePlaylist>> toplists() async {
+    const charts = [
+      (62, '飙升榜'),
+      (26, '热歌榜'),
+      (27, '新歌榜'),
+      (4, '流行指数榜'),
+      (52, '腾讯音乐人原创榜'),
+    ];
+    return [
+      for (final (topid, name) in charts)
+        SourcePlaylist(id: 'top:$topid', name: name, coverId: null),
+    ];
+  }
+
   @override
   Future<SourceHero?> hero() => refreshHero();
 
@@ -239,12 +254,19 @@ class QQSource implements MusicSource {
 
   @override
   Future<List<SongEntity>> playlistSongs(String playlistId) async {
-    final raw = playlistId.startsWith('$id:')
-        ? playlistId.substring(id.length + 1)
-        : playlistId;
-    final tid = int.tryParse(raw);
-    if (tid == null) return const [];
     try {
+      // 排行榜条目：id 形如 top:<topid>，走 topListSongs。
+      if (playlistId.startsWith('top:')) {
+        final topid = int.tryParse(playlistId.substring(4));
+        if (topid == null) return const [];
+        final songs = await _api.topListSongs(topid, limit: 50);
+        return [for (final s in songs) QQPlaybackService.toSongEntity(s)];
+      }
+      final raw = playlistId.startsWith('$id:')
+          ? playlistId.substring(id.length + 1)
+          : playlistId;
+      final tid = int.tryParse(raw);
+      if (tid == null) return const [];
       final songs = await _api.playlistSongs(tid);
       return [for (final s in songs) QQPlaybackService.toSongEntity(s)];
     } on QQApiException catch (e) {

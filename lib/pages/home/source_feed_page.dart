@@ -188,7 +188,10 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
     if (_songs.isEmpty) {
       return Center(
         child: Text(
-          '${widget.title}暂无内容',
+          // 收藏为空多半是没登录/该源要登录才有收藏，给登录提示而不是干巴巴。
+          widget.kind == HomeFeed.favorites
+              ? '登录账号，即可获取内容'
+              : '${widget.title}暂无内容',
           style: TextStyle(color: scheme.onSurfaceVariant),
         ),
       );
