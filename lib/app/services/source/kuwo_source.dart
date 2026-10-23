@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../state/song_source.dart';
 import '../../state/song_state.dart';
 import '../kuwo/kuwo_api_client.dart';
+import '../kuwo/kuwo_models.dart';
 import '../kuwo/kuwo_playback_service.dart';
 import '../played_song_cache.dart';
 import 'music_source.dart';
@@ -50,21 +51,9 @@ class KuwoSource implements MusicSource {
     return _rankInflight ??= () async {
       try {
         // 优先真·飙升榜（www，带完整封面）；www 被风控挡住就回落热门歌手搜索
-        // （r.s，也带封面、每天轮换一位）。kbangserver 榜单没封面，不用。
+        // （r.s，带封面）。为避免首页全是一个人，一次搜多位歌手混合打乱。
         var songs = await _api.rank(bangId: 93, limit: 30);
-        if (songs.isEmpty) {
-          const seeds = [
-            '周杰伦',
-            '林俊杰',
-            '邓紫棋',
-            '薛之谦',
-            '陈奕迅',
-            '毛不易',
-            '李荣浩',
-          ];
-          final seed = seeds[DateTime.now().day % seeds.length];
-          songs = await _api.search(seed, limit: 30);
-        }
+        if (songs.isEmpty) songs = await _hotMix();
         final mapped = [for (final s in songs) KuwoPlaybackService.toSongEntity(s)];
         if (mapped.isNotEmpty) _rankCache = mapped;
         return mapped;
@@ -75,6 +64,28 @@ class KuwoSource implements MusicSource {
         _rankInflight = null;
       }
     }();
+  }
+
+  /// 热门混合：一次搜多位热门歌手（每天轮换窗口），合并去重打乱，充当首页流。
+  Future<List<KuwoSong>> _hotMix() async {
+    const pool = [
+      '周杰伦', '林俊杰', '邓紫棋', '薛之谦', '陈奕迅', '毛不易',
+      '李荣浩', '张学友', '王菲', '李健', '赵雷', '陈粒',
+    ];
+    final day = DateTime.now().day;
+    final picks = [for (var i = 0; i < 5; i++) pool[(day + i) % pool.length]];
+    final results = await Future.wait([
+      for (final a in picks) _api.search(a, limit: 10),
+    ]);
+    final merged = <KuwoSong>[];
+    final seen = <String>{};
+    for (final list in results) {
+      for (final s in list) {
+        if (seen.add(s.rid)) merged.add(s);
+      }
+    }
+    merged.shuffle();
+    return merged.take(30).toList();
   }
 
   @override
