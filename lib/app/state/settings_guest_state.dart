@@ -13,7 +13,8 @@ class AppGuestSettings {
 
   static const String _prefsKey = 'app.guest_mode';
 
-  static final ValueNotifier<bool> enabled = ValueNotifier<bool>(false);
+  // 默认开：自用版装上直接进，不先弹飞牛登录页（想连飞牛仍可从账号管理进）。
+  static final ValueNotifier<bool> enabled = ValueNotifier<bool>(true);
 
   static Future<void>? _loading;
 
@@ -22,7 +23,7 @@ class AppGuestSettings {
   static Future<void> _doLoad() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      enabled.value = prefs.getBool(_prefsKey) ?? false;
+      enabled.value = prefs.getBool(_prefsKey) ?? true;
     } catch (_) {
       // 读不出来就按「没开」走，不影响启动。
     }

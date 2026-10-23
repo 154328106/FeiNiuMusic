@@ -145,6 +145,7 @@ flutter:
     - assets/source/netease.png
     - assets/source/qq.png
     - assets/source/kugou.png
+    - assets/source/kuwo.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

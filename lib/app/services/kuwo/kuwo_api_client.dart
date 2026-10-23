@@ -156,8 +156,18 @@ class KuwoApiClient {
       final res = await _dio.get<dynamic>(
         'https://m.kuwo.cn/newh5/singles/songinfoandlrc',
         queryParameters: {'musicId': rid, 'httpsStatus': 1},
+        options: Options(
+          headers: {
+            'Referer': 'https://m.kuwo.cn/',
+            'User-Agent':
+                'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) '
+                'AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
+          },
+        ),
       );
       final json = _decode(res.data);
+      debugPrint('[Kuwo] 歌词 rid=$rid status=${res.statusCode} '
+          'hasData=${json is Map && json['data'] is Map}');
       final lrclist = (json is Map && json['data'] is Map)
           ? (json['data'] as Map)['lrclist']
           : null;
