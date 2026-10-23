@@ -14,7 +14,9 @@ import '../../app/services/player_service.dart';
 import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';
 import '../../app/services/source/kugou_source.dart';
+import '../../app/services/source/kuwo_source.dart';
 import '../../app/services/source/netease_source.dart';
+import '../../app/services/source/qq_source.dart';
 import '../../app/state/settings_state.dart';
 import '../../app/state/song_state.dart';
 import '../../app/tv/tv_layout.dart';
@@ -875,6 +877,46 @@ class _HomePageState extends State<HomePage>
           ),
         ),
         // 「搜索」格换成「本地」（搜索在底部导航栏另有入口）。
+        _localShortcut(),
+      ];
+    }
+    if (_source.id == 'qq') {
+      final source = QQSource.instance;
+      return [
+        HomeShortcutItem(
+          icon: Icons.wb_sunny_rounded,
+          label: '每日推荐',
+          accent: const Color(0xFFF97316),
+          onTap: () => _openSourceSongList('每日推荐', source.dailyRecommend),
+        ),
+        HomeShortcutItem(
+          icon: Icons.leaderboard_rounded,
+          label: '排行榜',
+          accent: const Color(0xFFEC4899),
+          onTap: () => _openSourceSongList('热歌榜', source.topSongs),
+        ),
+        HomeShortcutItem(
+          icon: Icons.queue_music_rounded,
+          label: '歌单',
+          accent: const Color(0xFF3B82F6),
+          onTap: () => _openSourcePlaylists(
+            '${source.label}歌单',
+            () => source.playlists(limit: 30),
+          ),
+        ),
+        _localShortcut(),
+      ];
+    }
+    if (_source.id == 'kuwo') {
+      final source = KuwoSource.instance;
+      return [
+        // 「搜索」格换成「歌手」：点进去是热门歌手列表，再点就是该歌手的歌。
+        HomeShortcutItem(
+          icon: Icons.people_rounded,
+          label: '歌手',
+          accent: const Color(0xFF14B8A6),
+          onTap: () => _openSourcePlaylists('热门歌手', source.artists),
+        ),
         _localShortcut(),
       ];
     }

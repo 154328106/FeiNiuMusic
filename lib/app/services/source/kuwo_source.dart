@@ -125,8 +125,37 @@ class KuwoSource implements MusicSource {
   @override
   Future<List<SourcePlaylist>> playlists({int limit = 10}) async => const [];
 
+  /// 热门歌手（首页「歌手」入口用）。酷我没有免签名的热门歌手榜，用一组常见
+  /// 歌手充当；点进去是该歌手的歌（r.s 搜索，带封面）。
+  static const List<String> _hotArtists = [
+    '周杰伦', '林俊杰', '邓紫棋', '薛之谦', '陈奕迅', '毛不易',
+    '李荣浩', '张学友', '王菲', '李健', '赵雷', '陈粒',
+    '周深', '张杰', '汪苏泷', '许嵩', '李宇春', '华晨宇',
+    '邓丽君', '刘德华',
+  ];
+
+  Future<List<SourcePlaylist>> artists({int limit = 30}) async {
+    return [
+      for (final a in _hotArtists)
+        SourcePlaylist(id: 'kwa:$a', name: a, coverId: null),
+    ];
+  }
+
   @override
-  Future<List<SongEntity>> playlistSongs(String playlistId) async => const [];
+  Future<List<SongEntity>> playlistSongs(String playlistId) async {
+    // 歌手条目：id 形如 kwa:<歌手名>，点进去搜该歌手的歌。
+    if (playlistId.startsWith('kwa:')) {
+      final name = playlistId.substring(4);
+      try {
+        final songs = await _api.search(name, limit: 50);
+        return [for (final s in songs) KuwoPlaybackService.toSongEntity(s)];
+      } catch (e) {
+        debugPrint('[KuwoSource] artist songs error: $e');
+        return const [];
+      }
+    }
+    return const [];
+  }
 
   @override
   Future<List<SongEntity>> prepareQueue(List<SongEntity> songs) =>

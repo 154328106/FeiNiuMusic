@@ -129,6 +129,21 @@ class QQSource implements MusicSource {
     return entities;
   }
 
+  /// 每日推荐（首页快捷入口用）。
+  Future<List<SongEntity>> dailyRecommend() => _recommendedSongs();
+
+  /// 热歌榜（QQ topid 26）。首页「排行榜」入口用。
+  Future<List<SongEntity>> topSongs() async {
+    try {
+      final songs = await _api.topListSongs(26, limit: 50);
+      return [for (final s in songs) QQPlaybackService.toSongEntity(s)];
+    } on QQApiException catch (e) {
+      lastError = '排行榜读取失败：${e.message}';
+      debugPrint('[QQSource] topSongs error: ${e.message}');
+      return const [];
+    }
+  }
+
   @override
   Future<SourceHero?> hero() => refreshHero();
 
