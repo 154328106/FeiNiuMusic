@@ -46,9 +46,22 @@ class KuwoSong {
   }
 
   static String? _pic(Map<String, dynamic> j) {
-    for (final k in const ['pic', 'albumpic', 'web_albumpic_short', 'pic120']) {
+    for (final k in const [
+      'pic',
+      'albumpic',
+      'web_albumpic_short',
+      'hts_MVPIC',
+      'pic120',
+    ]) {
       final v = j[k];
-      if (v is String && v.startsWith('http')) return upsize(v);
+      if (v is String && v.isNotEmpty) {
+        if (v.startsWith('http')) return upsize(v);
+        // kbangserver 等给的是相对路径（"120/xx/xx/xxx.jpg"），拼成完整大图。
+        final rel = v
+            .replaceFirst(RegExp(r'^/'), '')
+            .replaceFirst(RegExp(r'^\d+/'), '500/');
+        return 'https://img1.kuwo.cn/star/albumcover/$rel';
+      }
     }
     return null;
   }

@@ -49,10 +49,9 @@ class KuwoSource implements MusicSource {
     if (_rankCache != null) return Future.value(_rankCache);
     return _rankInflight ??= () async {
       try {
-        // 优先用「热歌」搜索：r.s 带封面；kbangserver 的飙升榜虽是真榜但不带
-        // 封面字段（首页会一片灰）。搜不到再退回 kbangserver 保证不空。
-        var songs = await _api.search('热歌', limit: 30);
-        if (songs.isEmpty) songs = await _api.rank(bangId: 93, limit: 30);
+        // 飙升榜（真榜，封面走 _pic 的相对路径拼接）；空了用「热门」搜索兜底。
+        var songs = await _api.rank(bangId: 93, limit: 30);
+        if (songs.isEmpty) songs = await _api.search('热门', limit: 30);
         final mapped = [for (final s in songs) KuwoPlaybackService.toSongEntity(s)];
         if (mapped.isNotEmpty) _rankCache = mapped;
         return mapped;

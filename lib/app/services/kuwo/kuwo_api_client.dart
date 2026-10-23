@@ -131,6 +131,9 @@ class KuwoApiClient {
       );
       final json = _decode(res.data);
       final list = (json is Map ? json['musiclist'] : null);
+      if (list is List && list.isNotEmpty && list.first is Map) {
+        debugPrint('[Kuwo] kbang 首条字段=${(list.first as Map).keys.toList()}');
+      }
       final parsed = _parseList(list);
       if (parsed.isNotEmpty) return parsed;
     } catch (e) {
@@ -159,6 +162,8 @@ class KuwoApiClient {
         options: Options(
           headers: {
             'Referer': 'https://m.kuwo.cn/',
+            'Cookie': 'kw_token=$_token',
+            'csrf': _token,
             'User-Agent':
                 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) '
                 'AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
@@ -166,8 +171,11 @@ class KuwoApiClient {
         ),
       );
       final json = _decode(res.data);
+      final head = res.data is String
+          ? (res.data as String)
+          : jsonEncode(res.data);
       debugPrint('[Kuwo] 歌词 rid=$rid status=${res.statusCode} '
-          'hasData=${json is Map && json['data'] is Map}');
+          'body=${head.length > 180 ? head.substring(0, 180) : head}');
       final lrclist = (json is Map && json['data'] is Map)
           ? (json['data'] as Map)['lrclist']
           : null;
