@@ -135,7 +135,8 @@ class _HomePageState extends State<HomePage>
   /// 每 [_latestShuffleInterval] 从池子里重新抽一批 —— 只拉 4 首的话
   /// 首页永远是同样那几首。换得太勤反而晃眼，两分钟一次。
   List<SongEntity> _latestPool = const [];
-  static const int _latestVisible = 5;
+  // 露 8 首：原来 5 首在侧边栏（抽屉）模式下方留白明显，多铺几首占满。
+  static const int _latestVisible = 8;
   static const int _latestPoolSize = 40;
   static const Duration _latestShuffleInterval = Duration(minutes: 2);
   Timer? _latestShuffleTimer;
