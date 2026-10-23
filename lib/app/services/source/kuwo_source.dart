@@ -134,26 +134,39 @@ class KuwoSource implements MusicSource {
     '邓丽君', '刘德华',
   ];
 
-  Future<List<SourcePlaylist>> artists({int limit = 30}) async {
-    // 封面取该歌手歌里第一个有封面的（搜前几首挑，避免第一首恰好没图→一片灰）。
-    Future<String?> firstCover(String name) async {
-      try {
-        final s = await _api.search(name, limit: 5);
-        for (final song in s) {
-          if (song.coverUrl != null && song.coverUrl!.isNotEmpty) {
-            return song.coverUrl;
-          }
-        }
-      } catch (_) {}
-      return null;
-    }
+  // 歌手名 → 已拿到的封面。只存非空：找到的不会再丢，没找到的下次重进再补。
+  static final Map<String, String> _artistCoverCache = {};
 
-    final covers = await Future.wait([
-      for (final a in _hotArtists) firstCover(a),
-    ]);
+  Future<String?> _firstCover(String name) async {
+    try {
+      final s = await _api.search(name, limit: 5);
+      for (final song in s) {
+        if (song.coverUrl != null && song.coverUrl!.isNotEmpty) {
+          return song.coverUrl;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<List<SourcePlaylist>> artists({int limit = 30}) async {
+    final missing = [
+      for (final a in _hotArtists)
+        if (!_artistCoverCache.containsKey(a)) a,
+    ];
+    // 限并发：每批 4 个。一次并发 20 个会把 kuwo r.s 打到丢请求，表现为封面
+    // 时有时无、重进就变。配合上面的缓存，封面只会越补越全。
+    for (var i = 0; i < missing.length; i += 4) {
+      final batch = missing.skip(i).take(4).toList();
+      final covers = await Future.wait([for (final a in batch) _firstCover(a)]);
+      for (var j = 0; j < batch.length; j++) {
+        final c = covers[j];
+        if (c != null && c.isNotEmpty) _artistCoverCache[batch[j]] = c;
+      }
+    }
     return [
-      for (var i = 0; i < _hotArtists.length; i++)
-        SourcePlaylist(id: 'kwa:${_hotArtists[i]}', name: _hotArtists[i], coverId: covers[i]),
+      for (final a in _hotArtists)
+        SourcePlaylist(id: 'kwa:$a', name: a, coverId: _artistCoverCache[a]),
     ];
   }
 
