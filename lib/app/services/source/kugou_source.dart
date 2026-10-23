@@ -235,7 +235,8 @@ class KugouSource implements MusicSource {
     final entities = [
       for (final s in songs) KugouPlaybackService.toSongEntity(s),
     ];
-    _favoriteCache = entities;
+    // 只缓存非空：空结果多半是时序/瞬时失败，缓存住会「登录了收藏还是空」。
+    if (entities.isNotEmpty) _favoriteCache = entities;
     debugPrint('[KugouSource] 收藏 ${entities.length} 首（${liked.name}）');
     return entities;
   }

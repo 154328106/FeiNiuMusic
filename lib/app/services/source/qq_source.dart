@@ -144,7 +144,7 @@ class QQSource implements MusicSource {
     }
   }
 
-  /// QQ 各大排行榜（固定 topid；点进去看该榜的歌）。
+  /// QQ 各大排行榜（固定 topid；点进去看该榜的歌）。封面取各榜第一首歌的封面。
   Future<List<SourcePlaylist>> toplists() async {
     const charts = [
       (62, '飙升榜'),
@@ -153,9 +153,25 @@ class QQSource implements MusicSource {
       (4, '流行指数榜'),
       (52, '腾讯音乐人原创榜'),
     ];
+    Future<String?> firstCover(int topid) async {
+      try {
+        final s = await _api.topListSongs(topid, limit: 1);
+        return s.isNotEmpty ? s.first.coverUrl : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final covers = await Future.wait([
+      for (final (topid, _) in charts) firstCover(topid),
+    ]);
     return [
-      for (final (topid, name) in charts)
-        SourcePlaylist(id: 'top:$topid', name: name, coverId: null),
+      for (var i = 0; i < charts.length; i++)
+        SourcePlaylist(
+          id: 'top:${charts[i].$1}',
+          name: charts[i].$2,
+          coverId: covers[i],
+        ),
     ];
   }
 

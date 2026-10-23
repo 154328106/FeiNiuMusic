@@ -135,9 +135,22 @@ class KuwoSource implements MusicSource {
   ];
 
   Future<List<SourcePlaylist>> artists({int limit = 30}) async {
+    // 封面取该歌手第一首歌的封面（并行，一次性）。
+    Future<String?> firstCover(String name) async {
+      try {
+        final s = await _api.search(name, limit: 1);
+        return s.isNotEmpty ? s.first.coverUrl : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final covers = await Future.wait([
+      for (final a in _hotArtists) firstCover(a),
+    ]);
     return [
-      for (final a in _hotArtists)
-        SourcePlaylist(id: 'kwa:$a', name: a, coverId: null),
+      for (var i = 0; i < _hotArtists.length; i++)
+        SourcePlaylist(id: 'kwa:${_hotArtists[i]}', name: _hotArtists[i], coverId: covers[i]),
     ];
   }
 
