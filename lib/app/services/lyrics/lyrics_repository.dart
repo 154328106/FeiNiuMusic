@@ -8,6 +8,7 @@ import '../../state/song_state.dart';
 import '../feiniu/api_client.dart';
 import '../netease/netease_api_client.dart';
 import '../kugou/kugou_api_client.dart';
+import '../kuwo/kuwo_api_client.dart';
 import '../qq/qq_api_client.dart';
 
 class LyricsRepository {
@@ -29,6 +30,8 @@ class LyricsRepository {
           ? await _qqLrc(song)
           : song.isKugou
           ? await _kugouLrc(song)
+          : song.isKuwo
+          ? await _kuwoLrc(song)
           : await FeiNiuApiClient.instance.getLyricText(song.id);
       if (lyricText != null && lyricText.trim().isNotEmpty) {
         await _writeToCache(song.id, lyricText);
@@ -49,6 +52,13 @@ class LyricsRepository {
       hash,
       durationMs: song.durationMs ?? 0,
     );
+  }
+
+  /// 酷我歌词。m.kuwo.cn 给逐行时间，拼成标准 LRC。
+  Future<String?> _kuwoLrc(SongEntity song) async {
+    final rid = song.kuwoRid;
+    if (rid == null) return null;
+    return KuwoApiClient.instance.lyric(rid);
   }
 
   /// QQ 音乐歌词。接口直接给明文 LRC（nobase64=1），不用再解码。

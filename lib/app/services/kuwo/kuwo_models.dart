@@ -25,10 +25,10 @@ class KuwoSong {
 
   /// 从酷我 www 接口的一条记录解析（搜索 data.list / 榜单 data.musicList 同构）。
   static KuwoSong? fromJson(Map<String, dynamic> j) {
-    final rid = (j['rid'] ?? j['musicrid'] ?? '').toString().replaceAll(
-      RegExp(r'^MUSIC_'),
-      '',
-    );
+    final rid =
+        (j['rid'] ?? j['musicrid'] ?? j['MUSICRID'] ?? j['id'] ?? '')
+            .toString()
+            .replaceAll(RegExp(r'^MUSIC_'), '');
     if (rid.isEmpty || rid == 'null') return null;
     final durSec = j['duration'] is int
         ? j['duration'] as int
@@ -48,8 +48,13 @@ class KuwoSong {
   static String? _pic(Map<String, dynamic> j) {
     for (final k in const ['pic', 'albumpic', 'web_albumpic_short', 'pic120']) {
       final v = j[k];
-      if (v is String && v.startsWith('http')) return v;
+      if (v is String && v.startsWith('http')) return upsize(v);
     }
     return null;
   }
+
+  /// 把酷我封面升到大图：路径里 `/albumcover/<尺寸>/` 的尺寸段换成 500，
+  /// 否则接口默认给 120 的缩略图，放大后很糊。
+  static String upsize(String url) =>
+      url.replaceFirst(RegExp(r'/albumcover/\d+/'), '/albumcover/500/');
 }

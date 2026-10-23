@@ -49,7 +49,9 @@ class KuwoSource implements MusicSource {
     if (_rankCache != null) return Future.value(_rankCache);
     return _rankInflight ??= () async {
       try {
-        final songs = await _api.rank(bangId: 93, limit: 30);
+        var songs = await _api.rank(bangId: 93, limit: 30);
+        // 榜单接口都不通时，用「热歌」搜索兜底，保证首页不空。
+        if (songs.isEmpty) songs = await _api.search('热歌', limit: 30);
         final mapped = [for (final s in songs) KuwoPlaybackService.toSongEntity(s)];
         if (mapped.isNotEmpty) _rankCache = mapped;
         return mapped;

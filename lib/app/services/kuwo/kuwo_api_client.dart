@@ -110,7 +110,33 @@ class KuwoApiClient {
   }
 
   /// 榜单（首页用）。bangId 93=飙升榜、16=热歌榜、158=新歌榜。
+  ///
+  /// www 常被风控挡掉，主走老的 kbangserver（免 csrf、长期可用）。
   Future<List<KuwoSong>> rank({int bangId = 93, int limit = 30}) async {
+    // 1) kbangserver（纯文本 JSON，无需 csrf）。
+    try {
+      final res = await _dio.get<dynamic>(
+        'http://kbangserver.kuwo.cn/ksong.s',
+        queryParameters: {
+          'from': 'pc',
+          'fmt': 'json',
+          'type': 'bang',
+          'data': 'content',
+          'id': bangId,
+          'pn': 0,
+          'rn': limit,
+          'show_copyright_off': 0,
+          'isbang': 1,
+        },
+      );
+      final json = _decode(res.data);
+      final list = (json is Map ? json['musiclist'] : null);
+      final parsed = _parseList(list);
+      if (parsed.isNotEmpty) return parsed;
+    } catch (e) {
+      debugPrint('[Kuwo] kbang 榜单异常：$e');
+    }
+    // 2) www 兜底（能通就通）。
     try {
       final data = await _www('/api/www/bang/bang/musicList', {
         'bangId': bangId,
@@ -119,8 +145,38 @@ class KuwoApiClient {
       });
       return _parseList(data?['musicList']);
     } catch (e) {
-      debugPrint('[Kuwo] 榜单异常：$e');
+      debugPrint('[Kuwo] www 榜单异常：$e');
       return const [];
+    }
+  }
+
+  /// 歌词（LRC）。m.kuwo.cn 的 songinfoandlrc 给逐行 {time, lineLyric}，拼成标准 LRC。
+  Future<String?> lyric(String rid) async {
+    try {
+      final res = await _dio.get<dynamic>(
+        'https://m.kuwo.cn/newh5/singles/songinfoandlrc',
+        queryParameters: {'musicId': rid, 'httpsStatus': 1},
+      );
+      final json = _decode(res.data);
+      final lrclist = (json is Map && json['data'] is Map)
+          ? (json['data'] as Map)['lrclist']
+          : null;
+      if (lrclist is! List || lrclist.isEmpty) return null;
+      final buf = StringBuffer();
+      for (final line in lrclist) {
+        if (line is! Map) continue;
+        final t = double.tryParse('${line['time'] ?? ''}') ?? -1;
+        final text = (line['lineLyric'] ?? '').toString();
+        if (t < 0) continue;
+        final m = (t ~/ 60).toString().padLeft(2, '0');
+        final s = (t % 60).toStringAsFixed(2).padLeft(5, '0');
+        buf.writeln('[$m:$s]$text');
+      }
+      final lrc = buf.toString().trim();
+      return lrc.isEmpty ? null : lrc;
+    } catch (e) {
+      debugPrint('[Kuwo] 歌词异常：$e');
+      return null;
     }
   }
 
@@ -161,7 +217,10 @@ class KuwoApiClient {
           durationMs: durSec * 1000,
           coverUrl: pic.isEmpty
               ? null
-              : 'https://img1.kuwo.cn/star/albumcover/$pic',
+              // web_albumpic_short 形如 "120/xx/xx/xxx.jpg"，开头那段是尺寸，
+              // 换成 500 取大图（否则 120 缩略图放大很糊）。
+              : 'https://img1.kuwo.cn/star/albumcover/'
+                    '${pic.replaceFirst(RegExp(r'^\d+/'), '500/')}',
           isVip: false,
         ),
       );
