@@ -12,7 +12,8 @@ enum SongSource {
   feiniu,
   netease,
   qq,
-  kugou;
+  kugou,
+  kuwo;
 
   /// 网易云 id 前缀。选 `ne:` 而不是 `netease:` 是为了让缓存文件名短一些。
   static const String neteasePrefix = 'ne:';
@@ -23,12 +24,26 @@ enum SongSource {
   /// 酷狗 id 前缀。酷狗的主键是歌曲文件的 hash。
   static const String kugouPrefix = 'kg:';
 
+  /// 酷我 id 前缀。酷我的主键是数字 rid（字符串存）。
+  static const String kuwoPrefix = 'kw:';
+
   /// 从 `SongEntity.id` 反推来源。无法识别的一律当飞牛，保证老数据行为不变。
   static SongSource fromSongId(String songId) {
     if (songId.startsWith(neteasePrefix)) return SongSource.netease;
     if (songId.startsWith(qqPrefix)) return SongSource.qq;
     if (songId.startsWith(kugouPrefix)) return SongSource.kugou;
+    if (songId.startsWith(kuwoPrefix)) return SongSource.kuwo;
     return SongSource.feiniu;
+  }
+
+  /// 把酷我的 rid 编码成 `SongEntity.id`。
+  static String encodeKuwo(String rid) => '$kuwoPrefix$rid';
+
+  /// 从 `SongEntity.id` 取回酷我 rid；不是酷我歌曲则返回 null。
+  static String? decodeKuwo(String songId) {
+    if (!songId.startsWith(kuwoPrefix)) return null;
+    final rid = songId.substring(kuwoPrefix.length);
+    return rid.isEmpty ? null : rid;
   }
 
   /// 把酷狗的 hash 编码成 `SongEntity.id`。

@@ -24,6 +24,7 @@ import 'feiniu/track_service.dart';
 import 'feiniu/transcode_service.dart';
 import 'netease/netease_playback_service.dart';
 import 'kugou/kugou_playback_service.dart';
+import 'kuwo/kuwo_playback_service.dart';
 import 'qq/qq_playback_service.dart';
 import 'player/just_audio_engine.dart';
 import 'player/media_kit_engine.dart';
@@ -777,7 +778,8 @@ class PlayerService with WidgetsBindingObserver {
     final list = queue.value;
     final song = logicalIndex < list.length ? list[logicalIndex] : null;
     final remoteResolve =
-        song != null && (song.isNetease || song.isQQ || song.isKugou);
+        song != null &&
+        (song.isNetease || song.isQQ || song.isKugou || song.isKuwo);
     // 往前留两首（够「上一首」无缝），整个 run 最多 6 首。
     final maxBefore = remoteResolve ? 2 : k.length;
     final maxRun = remoteResolve ? 6 : k.length;
@@ -1067,6 +1069,18 @@ class PlayerService with WidgetsBindingObserver {
         throw StateError('酷狗音乐无可用播放地址：${song.title}');
       }
       return mk.Media(url, httpHeaders: KugouPlaybackService.streamHeaders());
+    }
+
+    // 酷我：带签名的临时直链，同样绕开飞牛缓存/转码。
+    if (song.isKuwo) {
+      final rid = song.kuwoRid;
+      final url = rid == null
+          ? null
+          : await KuwoPlaybackService.instance.resolveStreamUrl(rid);
+      if (url == null) {
+        throw StateError('酷我音乐无可用播放地址：${song.title}');
+      }
+      return mk.Media(url, httpHeaders: KuwoPlaybackService.streamHeaders());
     }
 
     // CUE 整轨曲目：跳过本地缓存（命中会拿到整轨文件，缺失会让后台把整轨
@@ -3957,6 +3971,20 @@ class PlayerService with WidgetsBindingObserver {
       return Uri.parse(url);
     }
 
+    if (song.isKuwo) {
+      final rid = song.kuwoRid;
+      final url = rid == null
+          ? null
+          : await KuwoPlaybackService.instance.resolveStreamUrl(
+              rid,
+              force: forceRefresh,
+            );
+      if (url == null) {
+        throw StateError('酷我音乐无可用播放地址：${song.title}');
+      }
+      return Uri.parse(url);
+    }
+
     final rawUri = (song.uri ?? '').trim();
     if (!rawUri.startsWith('http')) {
       return Uri.file(rawUri);
@@ -4176,6 +4204,24 @@ class PlayerService with WidgetsBindingObserver {
       return AudioSource.uri(
         Uri.parse(url),
         headers: KugouPlaybackService.streamHeaders(),
+      );
+    }
+
+    // 酷我：同样绕开飞牛的缓存/转码链路。
+    if (song.isKuwo) {
+      final rid = song.kuwoRid;
+      final url = rid == null
+          ? null
+          : await KuwoPlaybackService.instance.resolveStreamUrl(
+              rid,
+              force: forceRefresh,
+            );
+      if (url == null) {
+        throw StateError('酷我音乐无可用播放地址：${song.title}');
+      }
+      return AudioSource.uri(
+        Uri.parse(url),
+        headers: KuwoPlaybackService.streamHeaders(),
       );
     }
 

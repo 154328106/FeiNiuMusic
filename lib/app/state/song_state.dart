@@ -77,6 +77,12 @@ class SongEntity {
   /// 酷狗歌曲的 hash；非酷狗歌曲为 null。
   String? get kugouHash => SongSource.decodeKugou(id);
 
+  /// 是否来自酷我。
+  bool get isKuwo => source == SongSource.kuwo;
+
+  /// 酷我歌曲的 rid；非酷我歌曲为 null。
+  String? get kuwoRid => SongSource.decodeKuwo(id);
+
   /// 来自公网源（网易云 / QQ / 酷狗）：封面是直链、播放地址是带签名的临时
   /// 链接，两条链路都不能按飞牛那套处理。
   bool get isRemoteSource => isNetease || isQQ || isKugou;

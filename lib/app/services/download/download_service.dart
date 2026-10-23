@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import '../db/dao/download_dao.dart';
 import '../feiniu/api_client.dart';
 import '../kugou/kugou_playback_service.dart';
+import '../kuwo/kuwo_playback_service.dart';
 import '../netease/netease_api_client.dart';
 import '../netease/netease_playback_service.dart';
 import '../qq/qq_playback_service.dart';
@@ -119,6 +120,7 @@ class DownloadService {
         return const [DownloadQualityOption('original', '原始音质')];
       case SongSource.kugou:
       case SongSource.qq:
+      case SongSource.kuwo:
         return const [DownloadQualityOption('best', '最佳可得')];
     }
   }
@@ -281,6 +283,12 @@ class DownloadService {
         final url = await KugouPlaybackService.instance.resolveStreamUrl(hash);
         if (url == null) return null;
         return _ResolvedDownload(url, KugouPlaybackService.streamHeaders());
+      case SongSource.kuwo:
+        final rid = SongSource.decodeKuwo(song.id);
+        if (rid == null) return null;
+        final url = await KuwoPlaybackService.instance.resolveStreamUrl(rid);
+        if (url == null) return null;
+        return _ResolvedDownload(url, KuwoPlaybackService.streamHeaders());
       case SongSource.feiniu:
         final api = FeiNiuApiClient.instance;
         if (api.baseUrl.isEmpty) return null;

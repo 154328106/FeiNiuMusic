@@ -110,6 +110,15 @@ class SongActionsService {
           canAddToPlaylist: true,
           canFavorite: true,
         );
+      case SongSource.kuwo:
+        // MVP：未接登录，只搜+播，不做歌单/收藏。
+        return const SongActionCapability(
+          label: '酷我音乐',
+          loggedIn: false,
+          canReadPlaylists: false,
+          canAddToPlaylist: false,
+          canFavorite: false,
+        );
       case SongSource.netease:
         return SongActionCapability(
           label: '网易云音乐',
@@ -201,6 +210,9 @@ class SongActionsService {
                 ),
               )
               .toList();
+
+        case SongSource.kuwo:
+          return const [];
       }
     } catch (e) {
       debugPrint('[SongActions] myPlaylists($source) error: $e');
@@ -226,6 +238,7 @@ class SongActionsService {
           return hashes.contains(hash);
         case SongSource.netease:
         case SongSource.qq:
+        case SongSource.kuwo:
           return false;
       }
     } catch (e) {
@@ -276,6 +289,9 @@ class SongActionsService {
       case SongSource.qq:
         // QQ 收藏走安卓协议要 QIMEI 鉴权，web 协议做不了，直接给明确提示。
         throw UnsupportedError('QQ收藏需在QQ音乐App里操作');
+      case SongSource.kuwo:
+        // 能力里已标 canFavorite:false，到不了这里；留 case 满足穷尽。
+        throw UnsupportedError('酷我暂不支持收藏');
     }
   }
 
@@ -348,6 +364,9 @@ class SongActionsService {
       case SongSource.qq:
         // QQ 加歌单走安卓协议要 QIMEI 鉴权，web 协议做不了，直接给明确提示。
         throw UnsupportedError('QQ加歌单需在QQ音乐App里操作');
+      case SongSource.kuwo:
+        // 能力里已标 canAddToPlaylist:false，到不了这里；留 case 满足穷尽。
+        throw UnsupportedError('酷我暂不支持添加到歌单');
     }
   }
 }
