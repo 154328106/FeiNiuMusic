@@ -135,14 +135,17 @@ class KuwoSource implements MusicSource {
   ];
 
   Future<List<SourcePlaylist>> artists({int limit = 30}) async {
-    // 封面取该歌手第一首歌的封面（并行，一次性）。
+    // 封面取该歌手歌里第一个有封面的（搜前几首挑，避免第一首恰好没图→一片灰）。
     Future<String?> firstCover(String name) async {
       try {
-        final s = await _api.search(name, limit: 1);
-        return s.isNotEmpty ? s.first.coverUrl : null;
-      } catch (_) {
-        return null;
-      }
+        final s = await _api.search(name, limit: 5);
+        for (final song in s) {
+          if (song.coverUrl != null && song.coverUrl!.isNotEmpty) {
+            return song.coverUrl;
+          }
+        }
+      } catch (_) {}
+      return null;
     }
 
     final covers = await Future.wait([

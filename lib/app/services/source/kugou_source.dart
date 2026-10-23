@@ -95,8 +95,13 @@ class KugouSource implements MusicSource {
     final cached = _cloudCache;
     if (cached != null) return cached;
     final lists = await _api.userPlaylists();
-    _cloudCache = lists;
-    return lists;
+    // 去掉酷狗自动建的空「默认收藏」歌单（一直空白，和「我喜欢」不是一个）。
+    final filtered = [
+      for (final p in lists)
+        if (!p.name.contains('默认收藏')) p,
+    ];
+    _cloudCache = filtered;
+    return filtered;
   }
 
   /// 歌单广场。单独 catch —— 它是抓官网 HTML 的，页面改版就解不出来，
