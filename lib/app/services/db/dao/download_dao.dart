@@ -111,4 +111,15 @@ class DownloadDao {
       whereArgs: [id],
     );
   }
+
+  /// 仅更新本地路径（迁移下载目录时用）。
+  Future<void> updatePath(String id, String localPath) async {
+    final db = await DbHelper.instance.database;
+    await db.update(
+      DbConstants.tableDownloads,
+      {'localPath': localPath},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
 }

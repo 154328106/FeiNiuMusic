@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/services/db/dao/download_dao.dart';
 import '../../app/services/download/download_service.dart';
@@ -87,6 +89,11 @@ class _DownloadsPageState extends State<DownloadsPage> {
         title: '本地',
         actions: [
           IconButton(
+            tooltip: '下载目录',
+            icon: const Icon(Icons.folder_open_rounded),
+            onPressed: _showFolder,
+          ),
+          IconButton(
             tooltip: '全部播放',
             icon: const Icon(Icons.play_circle_fill_rounded),
             onPressed: _records.isEmpty ? null : _playAll,
@@ -94,6 +101,55 @@ class _DownloadsPageState extends State<DownloadsPage> {
         ],
       ),
       body: _buildBody(scheme),
+    );
+  }
+
+  /// 「下载目录」：显示完整路径，可复制，尝试用文件管理器打开。
+  Future<void> _showFolder() async {
+    final path = await DownloadService.instance.downloadsDirPath();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('下载目录'),
+        content: SelectableText(
+          path,
+          style: const TextStyle(fontSize: 13, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: path));
+              Navigator.pop(ctx);
+              AppToast.show(context, '路径已复制');
+            },
+            child: const Text('复制路径'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                final ok = await launchUrl(
+                  Uri.directory(path),
+                  mode: LaunchMode.externalApplication,
+                );
+                if (!ok && mounted) {
+                  AppToast.show(context, '打不开，请到文件管理器手动进入该路径');
+                }
+              } catch (_) {
+                if (mounted) {
+                  AppToast.show(context, '打不开，请到文件管理器手动进入该路径');
+                }
+              }
+            },
+            child: const Text('用文件管理器打开'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
     );
   }
 

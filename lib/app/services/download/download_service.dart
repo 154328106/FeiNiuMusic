@@ -69,6 +69,8 @@ class DownloadService {
         _paths
           ..clear()
           ..addAll(map);
+        // 老版本下载在内部私有目录，挪到外部可见目录（后台，不阻塞首帧）。
+        unawaited(_migrateToVisibleDir());
       } catch (e) {
         debugPrint('[Download] 载入下载记录失败：$e');
       } finally {
@@ -125,14 +127,75 @@ class DownloadService {
     }
   }
 
+  /// 下载目录。Android 放到**外部**应用目录（`Android/data/<包名>/files/
+  /// downloads`）——手机文件管理器 / 连电脑都能看到、能管理；且无需任何存储
+  /// 权限。拿不到外部目录才退回内部 Documents。iOS/桌面仍用 Documents
+  /// （iOS 已开 UIFileSharingEnabled，「文件」App 里可见）。
   Future<Directory> _downloadsDir() async {
     final existing = _dir;
     if (existing != null) return existing;
-    final docs = await getApplicationDocumentsDirectory();
-    final dir = Directory(p.join(docs.path, dirName));
-    if (!await dir.exists()) await dir.create(recursive: true);
-    _dir = dir;
-    return dir;
+    Directory base;
+    try {
+      if (Platform.isAndroid) {
+        final ext = await getExternalStorageDirectory();
+        base = Directory(
+          p.join(ext?.path ?? (await getApplicationDocumentsDirectory()).path, dirName),
+        );
+      } else {
+        base = Directory(
+          p.join((await getApplicationDocumentsDirectory()).path, dirName),
+        );
+      }
+    } catch (_) {
+      base = Directory(
+        p.join((await getApplicationDocumentsDirectory()).path, dirName),
+      );
+    }
+    if (!await base.exists()) await base.create(recursive: true);
+    _dir = base;
+    return base;
+  }
+
+  /// 下载目录的绝对路径（给「本地」页展示/跳转用）。
+  Future<String> downloadsDirPath() async => (await _downloadsDir()).path;
+
+  /// 把旧的内部私有目录（Documents/downloads）里的文件迁到新的外部可见目录，
+  /// 并更新库里的路径。幂等：已在新目录的跳过。[ensureLoaded] 后台调一次。
+  Future<void> _migrateToVisibleDir() async {
+    if (!Platform.isAndroid) return;
+    try {
+      final target = await _downloadsDir();
+      final docs = await getApplicationDocumentsDirectory();
+      final oldDir = Directory(p.join(docs.path, dirName));
+      if (oldDir.path == target.path || !await oldDir.exists()) return;
+      var moved = 0;
+      for (final entry in _paths.entries.toList()) {
+        final id = entry.key;
+        final oldPath = entry.value;
+        if (!oldPath.startsWith(oldDir.path)) continue;
+        final src = File(oldPath);
+        if (!await src.exists()) continue;
+        final newPath = p.join(target.path, p.basename(oldPath));
+        try {
+          await src.rename(newPath);
+        } catch (_) {
+          // 跨卷 rename 失败就复制再删。
+          await src.copy(newPath);
+          try {
+            await src.delete();
+          } catch (_) {}
+        }
+        _paths[id] = newPath;
+        await DownloadDao.instance.updatePath(id, newPath);
+        moved++;
+      }
+      if (moved > 0) {
+        debugPrint('[Download] 迁移 $moved 个文件到可见目录');
+        _bumpRevision();
+      }
+    } catch (e) {
+      debugPrint('[Download] 迁移失败：$e');
+    }
   }
 
   /// 下载文件名（无扩展名）：`歌名 - 歌手`，便于在系统「文件」App 里辨认；
