@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../app/router/app_router.dart';
 import '../../app/state/settings_layout_state.dart';
-import '../../components/account/profile_account_card.dart';
 import '../../app/router/app_router.dart' show AppRoutes;
+import '../../app/services/source/feiniu_source.dart';
 import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';
 import '../../app/services/kugou/kugou_api_client.dart';
@@ -47,9 +47,8 @@ class ProfilePage extends StatelessWidget {
           body: ListView(
             padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
             children: [
-              // 当前账号卡片（点击进入账号切换页）
-              const ProfileAccountCard(),
-              const SizedBox(height: 12),
+              // 账号管理卡已去掉：飞牛的登录/管理整合到「音乐来源」的飞牛那栏
+              // （没连写「登录」、连上写「管理」，点进去就是原账号管理页）。
               const _MusicSourceSection(),
               const SizedBox(height: 16),
               // 「主题外观」已搬到设置页最上方。这里原来的位置改放「听歌统计」，
@@ -119,6 +118,7 @@ class _MusicSourceSection extends StatelessWidget {
                 onTap: () =>
                     _onTap(context, MusicSourceRegistry.all[i], registry),
                 onLogin: switch (MusicSourceRegistry.all[i].id) {
+                  'feiniu' => () => _onFeiniu(context),
                   'netease' => () => _onLogin(context, registry),
                   'qq' => () => _onLoginQQ(context, registry),
                   'kugou' => () => _onLoginKugou(context, registry),
@@ -146,6 +146,12 @@ class _MusicSourceSection extends StatelessWidget {
       return;
     }
     await registry.setCurrent(source);
+  }
+
+  /// 飞牛：进账号管理页（原「账号管理」入口整合到这里）。没连是「登录」，
+  /// 连上是「管理」——都进同一个页面添加/切换账号。
+  Future<void> _onFeiniu(BuildContext context) async {
+    await Navigator.pushNamed(context, AppRoutes.accounts);
   }
 
   /// QQ 扫码登录。登录后能听会员曲、拿更高音质。
@@ -302,11 +308,14 @@ class _SourceBar extends StatelessWidget {
     // 覆盖），直接 `source is NetEaseSource ? source.isLoggedIn : ...` 编译不过。
     final src = source;
     final loggedIn = switch (src) {
+      FeiniuSource() => src.isAvailable,
       NetEaseSource() => src.isLoggedIn,
       QQSource() => QQAuth.instance.isLoggedIn.value,
       KugouSource() => KugouAuth.instance.isLoggedIn.value,
       _ => true,
     };
+    // 飞牛那栏登录后写「管理」（进账号管理），其余源写「账号」。
+    final loggedInLabel = src is FeiniuSource ? '管理' : '账号';
     final accent = source.accent;
     return Container(
       height: 72,
@@ -383,7 +392,7 @@ class _SourceBar extends StatelessWidget {
                         visualDensity: VisualDensity.compact,
                         padding: const EdgeInsets.symmetric(horizontal: 10),
                       ),
-                      child: Text(loggedIn ? '账号' : '登录'),
+                      child: Text(loggedIn ? loggedInLabel : '登录'),
                     ),
                   // 勾位固定占宽：不占的话选中那张的按钮会被勾挤走，
                   // 三张卡的「账号 / 登录」就对不齐了。

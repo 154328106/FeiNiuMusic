@@ -531,7 +531,7 @@ class _FavoritePageState extends State<FavoritePage>
                           const SizedBox(height: 160),
                           Center(
                             child: Text(
-                              '还没有收藏歌曲',
+                              '登录账号，即可获取内容',
                               style: TextStyle(color: scheme.onSurfaceVariant),
                             ),
                           ),

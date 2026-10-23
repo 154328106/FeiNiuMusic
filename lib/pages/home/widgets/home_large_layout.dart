@@ -192,7 +192,7 @@ class HomeLargeLayout extends StatelessWidget {
                       const SizedBox(height: 4),
                       Expanded(
                         child: favoriteSongs.isEmpty
-                            ? const _LargeEmpty(text: '暂无收藏')
+                            ? const _LargeEmpty(text: '登录账号，即可获取内容')
                             : _LargeScrollableSongList(
                                 songs: favoriteSongs,
                                 onTap: onTapFavorite,

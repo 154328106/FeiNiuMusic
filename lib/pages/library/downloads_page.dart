@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/services/db/dao/download_dao.dart';
 import '../../app/services/download/download_service.dart';
 import '../../app/services/player_service.dart';
+import '../../app/state/song_source.dart';
 import '../../components/index.dart';
 
 /// 「本地」页：跨源汇总已下载的歌曲，支持播放、全部播放、删除。
@@ -141,7 +142,7 @@ class _DownloadsPageState extends State<DownloadsPage> {
               overflow: TextOverflow.ellipsis,
             ),
             subtitle: Text(
-              '${song.artistDisplayName} · ${record.quality} · '
+              '${song.artistDisplayName} · ${_sourceLabel(record.source)} · '
               '${_formatSize(record.fileSize)}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -157,6 +158,14 @@ class _DownloadsPageState extends State<DownloadsPage> {
       },
     );
   }
+
+  static String _sourceLabel(SongSource source) => switch (source) {
+    SongSource.feiniu => '飞牛',
+    SongSource.netease => '网易',
+    SongSource.qq => 'QQ',
+    SongSource.kugou => '酷狗',
+    SongSource.kuwo => '酷我',
+  };
 
   static String _formatSize(int bytes) {
     if (bytes <= 0) return '—';
