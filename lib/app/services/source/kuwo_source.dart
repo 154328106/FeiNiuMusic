@@ -49,9 +49,20 @@ class KuwoSource implements MusicSource {
     if (_rankCache != null) return Future.value(_rankCache);
     return _rankInflight ??= () async {
       try {
-        // 飙升榜（真榜，封面走 _pic 的相对路径拼接）；空了用「热门」搜索兜底。
-        var songs = await _api.rank(bangId: 93, limit: 30);
-        if (songs.isEmpty) songs = await _api.search('热门', limit: 30);
+        // 酷我没有带封面的榜单接口（kbangserver 榜单没有封面字段，一片灰）。
+        // 改用 r.s 搜索一个热门歌手的歌当首页流——有封面、每天轮换一位。
+        const seeds = [
+          '周杰伦',
+          '林俊杰',
+          '邓紫棋',
+          '薛之谦',
+          '陈奕迅',
+          '毛不易',
+          '李荣浩',
+        ];
+        final seed = seeds[DateTime.now().day % seeds.length];
+        var songs = await _api.search(seed, limit: 30);
+        if (songs.isEmpty) songs = await _api.rank(bangId: 93, limit: 30);
         final mapped = [for (final s in songs) KuwoPlaybackService.toSongEntity(s)];
         if (mapped.isNotEmpty) _rankCache = mapped;
         return mapped;
@@ -72,7 +83,7 @@ class KuwoSource implements MusicSource {
     final songs = await _rank();
     if (songs.isEmpty) return null;
     final shuffled = [...songs]..shuffle();
-    return SourceHero(song: shuffled.first, queue: shuffled, label: '酷我飙升榜');
+    return SourceHero(song: shuffled.first, queue: shuffled, label: '酷我热门');
   }
 
   @override

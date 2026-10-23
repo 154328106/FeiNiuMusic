@@ -131,9 +131,6 @@ class KuwoApiClient {
       );
       final json = _decode(res.data);
       final list = (json is Map ? json['musiclist'] : null);
-      if (list is List && list.isNotEmpty && list.first is Map) {
-        debugPrint('[Kuwo] kbang 首条字段=${(list.first as Map).keys.toList()}');
-      }
       final parsed = _parseList(list);
       if (parsed.isNotEmpty) return parsed;
     } catch (e) {
@@ -153,8 +150,18 @@ class KuwoApiClient {
     }
   }
 
-  /// 歌词（LRC）。m.kuwo.cn 的 songinfoandlrc 给逐行 {time, lineLyric}，拼成标准 LRC。
+  /// 歌词（LRC）。m.kuwo.cn 的 songinfoandlrc 偶发返回 data:null / status 301
+  /// （限流，连大热歌都会），重试一次大多能救。
   Future<String?> lyric(String rid) async {
+    for (var attempt = 0; attempt < 2; attempt++) {
+      final lrc = await _lyricOnce(rid);
+      if (lrc != null) return lrc;
+      await Future.delayed(const Duration(milliseconds: 450));
+    }
+    return null;
+  }
+
+  Future<String?> _lyricOnce(String rid) async {
     try {
       final res = await _dio.get<dynamic>(
         'https://m.kuwo.cn/newh5/singles/songinfoandlrc',
@@ -171,11 +178,6 @@ class KuwoApiClient {
         ),
       );
       final json = _decode(res.data);
-      final head = res.data is String
-          ? (res.data as String)
-          : jsonEncode(res.data);
-      debugPrint('[Kuwo] 歌词 rid=$rid status=${res.statusCode} '
-          'body=${head.length > 180 ? head.substring(0, 180) : head}');
       final lrclist = (json is Map && json['data'] is Map)
           ? (json['data'] as Map)['lrclist']
           : null;
