@@ -621,30 +621,16 @@ class _SwipeableInfo extends StatefulWidget {
 
 class _SwipeableInfoState extends State<_SwipeableInfo>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-  Animation<double>? _animation;
-  double _dragOffsetX = 0;
-  VoidCallback? _animationCompleted;
+  /// 内容的横向位移（px）。拖动时跟手，松手后由 [_controller] 驱动。
+  late final AnimationController _controller = AnimationController.unbounded(
+    vsync: this,
+  );
 
-  @override
-  void initState() {
-    super.initState();
-    _controller =
-        AnimationController(
-          vsync: this,
-          duration: const Duration(milliseconds: 220),
-        )..addStatusListener((status) {
-          if (status == AnimationStatus.completed ||
-              status == AnimationStatus.dismissed) {
-            final cb = _animationCompleted;
-            _animationCompleted = null;
-            _animation = null;
-            if (cb != null) {
-              cb();
-            }
-          }
-        });
-  }
+  /// 当前内容区宽度：甩出去要飞多远、新标题从多远滑进来都按它算。
+  double _width = 300;
+
+  /// 正在「飞出 → 换歌 → 滑入」时为 true，期间不接新的拖动。
+  bool _switching = false;
 
   @override
   void dispose() {
@@ -652,184 +638,100 @@ class _SwipeableInfoState extends State<_SwipeableInfo>
     super.dispose();
   }
 
-  void _runAnimation({
-    required double begin,
-    required double end,
-    Curve curve = Curves.easeOut,
-    Duration duration = const Duration(milliseconds: 200),
-    VoidCallback? onCompleted,
-  }) {
-    _controller.duration = duration;
-    _animation = Tween<double>(
-      begin: begin,
-      end: end,
-    ).animate(CurvedAnimation(parent: _controller, curve: curve));
-    _animationCompleted = onCompleted;
-    _controller.forward(from: 0);
-  }
+  Future<void> _animateTo(double target, Duration duration, Curve curve) =>
+      _controller.animateTo(target, duration: duration, curve: curve);
 
-  void _animateBack() {
-    final begin = _dragOffsetX;
-    _runAnimation(
-      begin: begin,
-      end: 0,
-      curve: Curves.easeOutCubic,
-      duration: const Duration(milliseconds: 260),
-      onCompleted: () {
-        if (mounted) {
-          setState(() {
-            _dragOffsetX = 0;
-          });
-        } else {
-          _dragOffsetX = 0;
-        }
-      },
+  /// 往左甩 = 上一曲，往右甩 = 下一曲（用户定的方向）。
+  ///
+  /// 旧标题顺着手指方向飞出并淡出 → 切歌 → 新标题从另一侧滑入。以前是先
+  /// 弹回原位再突然换字，看起来像卡了一下。
+  Future<void> _switchSong(bool toRight) async {
+    _switching = true;
+    final dir = toRight ? 1.0 : -1.0;
+    await _animateTo(
+      dir * _width,
+      const Duration(milliseconds: 160),
+      Curves.easeIn,
     );
+    if (!mounted) return;
+    if (toRight) {
+      widget.player.next();
+    } else {
+      widget.player.previous();
+    }
+    // 从反方向一段距离外滑进来（不从整宽外：太远会显得慢）。
+    _controller.value = -dir * _width * 0.45;
+    await _animateTo(
+      0,
+      const Duration(milliseconds: 280),
+      Curves.easeOutCubic,
+    );
+    _switching = false;
   }
 
   @override
   Widget build(BuildContext context) {
     final hasSong = widget.song != null;
-    final scheme = Theme.of(context).colorScheme;
-    // 滑动提示：右滑（上一曲）→ 左侧浮现「上一曲」；左滑（下一曲）→
-    // 右侧浮现「下一曲」。提示固定贴条的两端（不随内容位移），滑动时
-    // 在原位淡入，松手/回弹时随内容一起淡出。
-    final hintStyle = TextStyle(
-      fontSize: 12,
-      fontWeight: FontWeight.w700,
-      color: scheme.onSurfaceVariant,
-      letterSpacing: 0.5,
-    );
-    final hintBg = BoxDecoration(
-      color: scheme.primary.withValues(alpha: 0.08),
-      borderRadius: BorderRadius.circular(999),
-    );
-
-    return ClipRect(
-      child: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onTap: widget.onOpenPlayer,
-        onHorizontalDragUpdate: (details) {
-          if (!hasSong) return;
-          setState(() {
-            final delta = details.primaryDelta ?? 0;
-            _dragOffsetX = (_dragOffsetX + delta).clamp(-80.0, 80.0);
-          });
-        },
-        onHorizontalDragEnd: (details) {
-          if (!hasSong) {
-            _animateBack();
-            return;
-          }
-          final offset = _dragOffsetX;
-          const threshold = 60.0;
-          if (offset.abs() >= threshold) {
-            if (offset < 0) {
-              widget.player.next();
-            } else {
-              widget.player.previous();
-            }
-          }
-          _animateBack();
-        },
-        child: AnimatedBuilder(
-          animation: _controller,
-          builder: (context, child) {
-            // 用动画值（回弹期间）否则用拖动值（拖动中），
-            // 让提示随回弹动画一起淡出，而不是动画结束才消失。
-            final currentOffset = _animation?.value ?? _dragOffsetX;
-            final prevOpacity = hasSong && currentOffset > 0
-                ? (currentOffset / 60.0).clamp(0.0, 1.0)
-                : 0.0;
-            final nextOpacity = hasSong && currentOffset < 0
-                ? ((-currentOffset) / 60.0).clamp(0.0, 1.0)
-                : 0.0;
-            return Stack(
-              children: [
-                // 左侧「上一曲」提示：右滑时在原位淡入
-                Positioned(
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
-                  child: IgnorePointer(
-                    child: Opacity(
-                      opacity: prevOpacity,
-                      child: Center(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 5,
-                          ),
-                          decoration: hintBg,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.skip_previous_rounded,
-                                size: 16,
-                                color: scheme.onSurfaceVariant,
-                              ),
-                              const SizedBox(width: 4),
-                              Text('上一曲', style: hintStyle),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                // 右侧「下一曲」提示：左滑时在原位淡入
-                Positioned(
-                  right: 0,
-                  top: 0,
-                  bottom: 0,
-                  child: IgnorePointer(
-                    child: Opacity(
-                      opacity: nextOpacity,
-                      child: Center(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 5,
-                          ),
-                          decoration: hintBg,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text('下一曲', style: hintStyle),
-                              const SizedBox(width: 4),
-                              Icon(
-                                Icons.skip_next_rounded,
-                                size: 16,
-                                color: scheme.onSurfaceVariant,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                // 可滑动内容：随位移移动（带动画回弹）
-                Align(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth.isFinite) _width = constraints.maxWidth;
+        return ClipRect(
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: widget.onOpenPlayer,
+            onHorizontalDragStart: (_) {
+              if (_switching) return;
+              _controller.stop();
+            },
+            onHorizontalDragUpdate: (details) {
+              if (!hasSong || _switching) return;
+              _controller.value = (_controller.value +
+                      (details.primaryDelta ?? 0))
+                  .clamp(-_width, _width);
+            },
+            onHorizontalDragEnd: (details) {
+              if (_switching) return;
+              final offset = _controller.value;
+              final velocity = details.primaryVelocity ?? 0;
+              // 甩：拖够 60px，或者速度够快（同方向）都算。
+              final flung = velocity.abs() > 650;
+              final far = offset.abs() >= 60;
+              if (hasSong && (far || flung)) {
+                final toRight = flung ? velocity > 0 : offset > 0;
+                _switchSong(toRight);
+                return;
+              }
+              _animateTo(
+                0,
+                const Duration(milliseconds: 260),
+                Curves.easeOutCubic,
+              );
+            },
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, child) {
+                final dx = _controller.value;
+                // 越往外越淡，飞到边上基本看不见，换字时不会闪。
+                final opacity = (1 - dx.abs() / _width * 1.1).clamp(0.0, 1.0);
+                return Align(
                   alignment: Alignment.centerLeft,
                   child: Transform.translate(
-                    offset: Offset(currentOffset, 0),
-                    child: child,
+                    offset: Offset(dx, 0),
+                    child: Opacity(opacity: opacity, child: child),
                   ),
-                ),
-              ],
-            );
-          },
-          child: _InfoContent(
-            song: widget.song,
-            player: widget.player,
-            onOpenPlayer: widget.onOpenPlayer,
-            artwork: widget.artwork,
-            artworkGap: widget.artworkGap,
+                );
+              },
+              child: _InfoContent(
+                song: widget.song,
+                player: widget.player,
+                onOpenPlayer: widget.onOpenPlayer,
+                artwork: widget.artwork,
+                artworkGap: widget.artworkGap,
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
