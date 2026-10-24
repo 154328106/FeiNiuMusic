@@ -197,6 +197,38 @@ class _LxSourcePageState extends State<LxSourcePage> {
     }
   }
 
+  Future<void> _renameSource(LxSource s) async {
+    final controller = TextEditingController(text: s.name);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('重命名脚本音源'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: '给这个音源起个名字',
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (name != null && name.trim().isNotEmpty) {
+      await _mgr.renameSource(s.id, name);
+    }
+  }
+
   Future<void> _confirmRemove(LxSource s) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -327,9 +359,16 @@ class _LxSourcePageState extends State<LxSourcePage> {
                             ? '未声明支持的源'
                             : '支持：${s.sources.join(' / ')}',
                       ),
-                      secondary: IconButton(
-                        icon: const Icon(Icons.delete_outline_rounded),
-                        onPressed: () => _confirmRemove(s),
+                      secondary: PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert_rounded),
+                        onSelected: (v) {
+                          if (v == 'rename') _renameSource(s);
+                          if (v == 'delete') _confirmRemove(s);
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(value: 'rename', child: Text('重命名')),
+                          PopupMenuItem(value: 'delete', child: Text('删除')),
+                        ],
                       ),
                     ),
                   ),

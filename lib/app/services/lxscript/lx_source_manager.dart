@@ -173,6 +173,17 @@ class LxSourceManager {
     _bump();
   }
 
+  /// 重命名脚本（只改显示名，不动脚本内容 / 取址逻辑）。
+  Future<void> renameSource(String id, String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    final i = _metas.indexWhere((m) => m.id == id);
+    if (i < 0) return;
+    _metas[i] = _metas[i].copyWith(name: trimmed);
+    await _persist();
+    _bump();
+  }
+
   Future<void> setEnabled(String id, bool enabled) async {
     final i = _metas.indexWhere((m) => m.id == id);
     if (i < 0) return;

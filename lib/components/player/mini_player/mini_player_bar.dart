@@ -156,9 +156,8 @@ class MiniPlayerBar extends StatelessWidget {
                           // 一起位移，而不是只有文字滑动。
                           artwork: Container(
                             decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(
-                                resolvedArtworkRadius,
-                              ),
+                              // 封面已改正圆，阴影形状也跟成圆的。
+                              shape: BoxShape.circle,
                               boxShadow: [
                                 BoxShadow(
                                   color: Colors.black.withValues(
@@ -347,9 +346,11 @@ class MiniPlayerBar extends StatelessWidget {
   }
 }
 
-class MiniPlayerArtwork extends StatelessWidget {
+/// 迷你播放条封面：裁成正圆，播放时持续旋转（像小唱片），暂停就停在当前角度。
+class MiniPlayerArtwork extends StatefulWidget {
   final SongEntity? song;
   final double size;
+  // 保留参数兼容调用方；形状恒为正圆（半径 = size/2），这个值不再决定圆角。
   final double borderRadius;
 
   const MiniPlayerArtwork({
@@ -360,24 +361,71 @@ class MiniPlayerArtwork extends StatelessWidget {
   });
 
   @override
+  State<MiniPlayerArtwork> createState() => _MiniPlayerArtworkState();
+}
+
+class _MiniPlayerArtworkState extends State<MiniPlayerArtwork>
+    with SingleTickerProviderStateMixin {
+  // 一圈 12 秒，和黑胶转速接近，不晃眼。
+  late final AnimationController _spin = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 12),
+  );
+  bool _reduceMotion = false;
+
+  @override
+  void initState() {
+    super.initState();
+    PlayerService.instance.isPlaying.addListener(_syncSpin);
+    _syncSpin();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    _syncSpin();
+  }
+
+  void _syncSpin() {
+    final playing = PlayerService.instance.isPlaying.value;
+    if (playing && !_reduceMotion) {
+      if (!_spin.isAnimating) _spin.repeat();
+    } else {
+      _spin.stop(); // 停在当前角度，不回弹。
+    }
+  }
+
+  @override
+  void dispose() {
+    PlayerService.instance.isPlaying.removeListener(_syncSpin);
+    _spin.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    if (song == null) {
-      return _ArtworkFallback(
-        size: size,
-        borderRadius: borderRadius,
-        color: scheme.surfaceContainerHighest,
-      );
-    }
-    return ArtworkWidget(
-      song: song!,
-      size: size,
-      borderRadius: borderRadius,
-      placeholder: _ArtworkFallback(
-        size: size,
-        borderRadius: borderRadius,
-        color: scheme.surfaceContainerHighest,
-      ),
+    final radius = widget.size / 2; // 正圆
+    final Widget art = widget.song == null
+        ? _ArtworkFallback(
+            size: widget.size,
+            borderRadius: radius,
+            color: scheme.surfaceContainerHighest,
+          )
+        : ArtworkWidget(
+            song: widget.song!,
+            size: widget.size,
+            borderRadius: radius,
+            placeholder: _ArtworkFallback(
+              size: widget.size,
+              borderRadius: radius,
+              color: scheme.surfaceContainerHighest,
+            ),
+          );
+    return RotationTransition(
+      turns: _spin,
+      child: ClipOval(child: art),
     );
   }
 }
