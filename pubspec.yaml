@@ -140,8 +140,6 @@ flutter:
     - assets/preview/player_style_spectrum.png
     - assets/preview/style_preview_cover.jpg
     - assets/preview/genre_bg.png
-    - assets/preview/gradient_preview_player.jpg
-    - assets/preview/gradient_preview_lyrics.jpg
     # 音乐来源图标（「我的 → 音乐来源」用）
     - assets/source/feiniu.png
     - assets/source/netease.png

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
+import '../../app/services/player_service.dart';
+import '../../app/state/settings_state.dart';
 import '../../components/index.dart';
+import '../../components/player/player_style_preview.dart';
 import '../player/widgets/player_background.dart';
 
 class GradientSettingsPage extends StatefulWidget {
@@ -15,9 +18,10 @@ class _GradientSettingsPageState extends State<GradientSettingsPage>
     with SignalsMixin {
   late final _saturation = createSignal(1.2);
   late final _hueShift = createSignal(0.0);
-  // 一次性加载态用 State 字段（setState），避免整页 Watch.builder
+  // 一次性加载态与封面色用 State 字段（setState），避免整页 Watch.builder
   // 在滑块拖动时连带重建预览与脚手架。
   bool _loading = true;
+  Color? _coverColor;
 
   @override
   void initState() {
@@ -27,10 +31,14 @@ class _GradientSettingsPageState extends State<GradientSettingsPage>
 
   Future<void> _load() async {
     await PlayerBackgroundSettings.ensureLoaded();
+    final coverColor = await dominantColorFromAsset(
+      PlayerStylePreview.sampleCoverAsset,
+    );
     if (!mounted) return;
     setState(() {
       _saturation.value = PlayerBackgroundSettings.saturation.value;
       _hueShift.value = PlayerBackgroundSettings.hueShift.value;
+      _coverColor = coverColor;
       _loading = false;
     });
   }
@@ -53,6 +61,7 @@ class _GradientSettingsPageState extends State<GradientSettingsPage>
       );
     }
 
+    final coverColor = _coverColor;
     return AppPageScaffold(
       extendBodyBehindAppBar: true,
       appBar: const AppTopBar(
@@ -64,7 +73,11 @@ class _GradientSettingsPageState extends State<GradientSettingsPage>
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
-          const _GradientPreview(),
+          ValueListenableBuilder<PlayerStylePreset>(
+            valueListenable: PlayerStyleSettings.stylePreset,
+            builder: (context, preset, _) =>
+                _GradientPreview(preset: preset, coverColor: coverColor),
+          ),
           const SizedBox(height: 16),
           // 仅滑块区块订阅 _saturation/_hueShift：拖动时只重建这一小块，
           // 不重建上方动态预览与脚手架（预览内部会因 setSaturation 自动更新）。
@@ -101,30 +114,46 @@ class _GradientSettingsPageState extends State<GradientSettingsPage>
   }
 }
 
-/// 左：播放页，右：歌词页 —— 用的是真机截图（assets/preview/gradient_preview_*），
-/// 一眼看出流光开出来是什么样。
+/// Side-by-side fixed mock following the CURRENT player style: left = the
+/// selected style's player preview, right = the lyrics page — both rendered by
+/// the shared [PlayerStylePreview] over the REAL 流光 background, so it matches
+/// the live effect and reacts to the sliders.
 class _GradientPreview extends StatelessWidget {
-  const _GradientPreview();
+  final PlayerStylePreset preset;
+  final Color? coverColor;
 
-  // 截图裁掉状态栏后是 1290 × 2646。
-  static const _ratio = 1290 / 2646;
+  const _GradientPreview({required this.preset, this.coverColor});
 
   @override
   Widget build(BuildContext context) {
-    return const Row(
+    final size = MediaQuery.sizeOf(context);
+    final ratio = (size.shortestSide / size.longestSide).clamp(0.42, 0.7);
+    return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Expanded(
-          child: _PreviewScreen(
-            label: '播放器',
-            asset: 'assets/preview/gradient_preview_player.jpg',
+          child: AspectRatio(
+            aspectRatio: ratio,
+            child: _PreviewScreen(
+              label: '播放器',
+              coverColor: coverColor,
+              child: PlayerStylePreview(preset: preset, fill: true),
+            ),
           ),
         ),
-        SizedBox(width: 12),
+        const SizedBox(width: 12),
         Expanded(
-          child: _PreviewScreen(
-            label: '歌词页',
-            asset: 'assets/preview/gradient_preview_lyrics.jpg',
+          child: AspectRatio(
+            aspectRatio: ratio,
+            child: _PreviewScreen(
+              label: '歌词页',
+              coverColor: coverColor,
+              child: PlayerStylePreview(
+                preset: preset,
+                fill: true,
+                lyricsOnly: true,
+              ),
+            ),
           ),
         ),
       ],
@@ -134,41 +163,50 @@ class _GradientPreview extends StatelessWidget {
 
 class _PreviewScreen extends StatelessWidget {
   final String label;
-  final String asset;
+  final Widget child;
+  final Color? coverColor;
 
-  const _PreviewScreen({required this.label, required this.asset});
+  const _PreviewScreen({
+    required this.label,
+    required this.child,
+    this.coverColor,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return AspectRatio(
-      aspectRatio: _GradientPreview._ratio,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(18),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.asset(asset, fit: BoxFit.cover),
-            Positioned(
-              left: 10,
-              top: 8,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.28),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  label,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                  ),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(18),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // The actual live background, but locked to the preview's sample cover
+          // color (not the currently playing song) so it reacts to the sliders
+          // and matches the cover shown above.
+          PlayerBackground(
+            songSignal: PlayerService.instance.currentSongSignal,
+            dominantColor: coverColor,
+          ),
+          child,
+          Positioned(
+            left: 10,
+            top: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.28),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

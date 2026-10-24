@@ -584,11 +584,13 @@ class PlayerStylePreview extends StatelessWidget {
     ).colorScheme.onSurfaceVariant.withValues(alpha: 0.6);
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      // 和播放页底部那排一致：收藏 ❤ 在最前，「更多」是线框四宫格。
       children: [
+        Icon(Icons.favorite_border_rounded, size: 11, color: color),
         Icon(Icons.repeat_rounded, size: 11, color: color),
         Icon(Icons.alarm_rounded, size: 11, color: color),
         Icon(Icons.format_list_bulleted_rounded, size: 11, color: color),
-        Icon(Icons.more_horiz_rounded, size: 11, color: color),
+        Icon(Icons.grid_view_outlined, size: 11, color: color),
       ],
     );
   }
