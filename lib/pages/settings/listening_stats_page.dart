@@ -38,6 +38,10 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
   _TrendMode _trendMode = _TrendMode.week;
   _LeaderTab _leaderTab = _LeaderTab.songs;
 
+  /// 排行榜每页固定几首，多的翻页。
+  static const int _perPage = 5;
+  int _leaderPage = 0;
+
   StatsTotals _totalStats = const StatsTotals(listenMs: 0, playCount: 0);
   final Map<String, DayListeningStat> _dayMap = {};
   int _activeDaysThisMonth = 0;
@@ -510,8 +514,10 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
           _SegmentedToggle(
             options: const ['歌曲', '歌手', '专辑'],
             selectedIndex: _leaderTab.index,
-            onChanged: (i) =>
-                setState(() => _leaderTab = _LeaderTab.values[i]),
+            onChanged: (i) => setState(() {
+              _leaderTab = _LeaderTab.values[i];
+              _leaderPage = 0; // 换 Tab 回到第一页。
+            }),
           ),
         ),
         switch (_leaderTab) {
@@ -526,12 +532,15 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
   Widget _buildTopSongs(BuildContext context) {
     if (_topSongs.isEmpty) return const _EmptyHint(text: '暂无播放数据');
     final queue = _topSongs.map((e) => e.song).toList();
+    final start = _leaderPage * _perPage;
+    final pageRows = _topSongs.skip(start).take(_perPage).toList();
     return ValueListenableBuilder<SongEntity?>(
       valueListenable: _player.currentSong,
       builder: (context, current, _) {
         return Column(
-          children: _topSongs.asMap().entries.map((entry) {
-            final i = entry.key;
+          children: [
+          ...pageRows.asMap().entries.map((entry) {
+            final i = start + entry.key; // 全局名次 / 队列下标
             final row = entry.value;
             final song = row.song;
             return MediaListTile(
@@ -567,7 +576,9 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
                 );
               },
             );
-          }).toList(),
+          }),
+          _pager(context, _topSongs.length),
+          ],
         );
       },
     );
@@ -579,9 +590,12 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
     required bool isAlbum,
   }) {
     if (rows.isEmpty) return const _EmptyHint(text: '暂无播放数据');
+    final start = _leaderPage * _perPage;
+    final pageRows = rows.skip(start).take(_perPage).toList();
     return Column(
-      children: rows.asMap().entries.map((entry) {
-        final i = entry.key;
+      children: [
+      ...pageRows.asMap().entries.map((entry) {
+        final i = start + entry.key; // 全局名次
         final row = entry.value;
         return MediaListTile(
           leading: _RankedArtwork(
@@ -627,7 +641,50 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
             );
           },
         );
-      }).toList(),
+      }),
+      _pager(context, rows.length),
+      ],
+    );
+  }
+
+  /// 排行榜翻页条：总数 ≤ 每页则不显示。上一页 / 下一页 + 「页/总页」。
+  Widget _pager(BuildContext context, int total) {
+    if (total <= _perPage) return const SizedBox.shrink();
+    final pages = (total + _perPage - 1) ~/ _perPage;
+    final page = _leaderPage.clamp(0, pages - 1);
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            onPressed: page > 0
+                ? () => setState(() => _leaderPage = page - 1)
+                : null,
+            icon: const Icon(Icons.chevron_left_rounded),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text(
+              '${page + 1} / $pages',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            onPressed: page < pages - 1
+                ? () => setState(() => _leaderPage = page + 1)
+                : null,
+            icon: const Icon(Icons.chevron_right_rounded),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -800,7 +857,7 @@ class _TrendBarChartState extends State<_TrendBarChart> {
     final bars = widget.bars;
     final maxVal = bars.fold<int>(0, (m, b) => b.value > m ? b.value : m);
     final hasData = maxVal > 0;
-    const chartHeight = 120.0;
+    const chartHeight = 84.0;
 
     final todayIndex = bars.indexWhere((b) => b.highlight);
     final focusIndex = _selected ?? (todayIndex >= 0 ? todayIndex : null);
