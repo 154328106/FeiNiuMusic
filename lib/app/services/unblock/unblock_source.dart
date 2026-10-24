@@ -197,6 +197,8 @@ class UnblockSourceService {
     String? keyword,
     int durationMs = 0,
     bool skipPublicSources = false,
+    String? name,
+    String? singer,
   }) async {
     await load();
     final cfg = config.value;
@@ -300,6 +302,8 @@ class UnblockSourceService {
     final lxUrl = await LxSourceManager.instance.resolve(
       platform: platform,
       songId: songId,
+      name: name,
+      singer: singer,
     );
     if (lxUrl != null) {
       debugPrint('[Unblock] LX 脚本命中 $platform/$songId');

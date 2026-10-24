@@ -191,10 +191,12 @@ class LxSourceManager {
     required String platform,
     required String songId,
     String quality = 'flac',
+    String? name,
+    String? singer,
   }) async {
     if (!_loaded) await ensureLoaded();
     if (_runtimes.isEmpty) return null;
-    final info = _musicInfo(platform, songId);
+    final info = _musicInfo(platform, songId, name: name, singer: singer);
     for (final meta in _metas) {
       if (!meta.enabled) continue;
       if (!meta.sources.contains(platform)) continue;
@@ -282,7 +284,12 @@ class LxSourceManager {
   /// 平台用 songmid；多塞几个常见 id 键（mid/id/copyrightId），脚本读哪个都能命中。
   /// 非 kg **不塞 hash**：脚本常用 `musicInfo.hash ?? musicInfo.songmid`，空串 ''
   /// 不是 nullish，会让 ?? 返回空串、songmid 永远取不到。
-  static Map<String, dynamic> _musicInfo(String platform, String songId) {
+  static Map<String, dynamic> _musicInfo(
+    String platform,
+    String songId, {
+    String? name,
+    String? singer,
+  }) {
     final info = <String, dynamic>{
       'songmid': songId,
       'mid': songId,
@@ -291,6 +298,15 @@ class LxSourceManager {
       'songId': songId,
     };
     if (platform == 'kg') info['hash'] = songId;
+    // 有些后端（尤其咪咕）按歌名+歌手搜，没有就报「需要 name+singer」。给上。
+    if (name != null && name.isNotEmpty) {
+      info['name'] = name;
+      info['songName'] = name;
+    }
+    if (singer != null && singer.isNotEmpty) {
+      info['singer'] = singer;
+      info['artist'] = singer;
+    }
     return info;
   }
 

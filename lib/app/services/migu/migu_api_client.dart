@@ -85,6 +85,40 @@ class MiguApiClient {
     }
   }
 
+  /// 榜单：`querycontentbyId.do?columnId=<id>`，返回 `columnInfo.contents[]`，
+  /// 每项 `objectInfo` 是一首歌（字段名和搜索不同，用 fromChartJson 解析）。
+  Future<List<MiguSong>> chart(String columnId, {int limit = 50}) async {
+    try {
+      final res = await _dio.get<dynamic>(
+        'https://pd.musicapp.migu.cn/MIGUM2.0/v1.0/content/querycontentbyId.do',
+        queryParameters: {
+          'columnId': columnId,
+          'needSimple': '00',
+          'pageSize': limit,
+        },
+        options: Options(headers: _headers),
+      );
+      final json = _decode(res.data);
+      if (json is! Map || json['code'] != '000000') return const [];
+      final contents = (json['columnInfo'] is Map)
+          ? (json['columnInfo'] as Map)['contents']
+          : null;
+      if (contents is! List) return const [];
+      final out = <MiguSong>[];
+      for (final c in contents) {
+        final oi = (c is Map) ? c['objectInfo'] : null;
+        if (oi is Map) {
+          final s = MiguSong.fromChartJson(oi.cast<String, dynamic>());
+          if (s != null) out.add(s);
+        }
+      }
+      return out;
+    } catch (e) {
+      debugPrint('[Migu] 榜单异常：$e');
+      return const [];
+    }
+  }
+
   /// 歌词：直接拉搜索结果里带的 .lrc 直链。
   Future<String?> lyric(String lyricUrl) async {
     final u = lyricUrl.trim();

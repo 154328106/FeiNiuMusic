@@ -118,6 +118,28 @@ class MiguSource implements MusicSource {
   @override
   Future<List<SourcePlaylist>> playlists({int limit = 10}) async => const [];
 
+  /// 咪咕排行榜（首页「排行榜」入口）。columnId 实测可用的三个尖叫榜。
+  static const List<({String id, String name})> _charts = [
+    (id: '27186466', name: '尖叫热歌榜'),
+    (id: '27553319', name: '尖叫新歌榜'),
+    (id: '27553408', name: '尖叫原创榜'),
+  ];
+
+  /// 榜单封面取各榜第一首歌的封面。
+  Future<List<SourcePlaylist>> toplists({int limit = 10}) async {
+    final covers = await Future.wait([
+      for (final c in _charts) _api.chart(c.id, limit: 1),
+    ]);
+    return [
+      for (var i = 0; i < _charts.length; i++)
+        SourcePlaylist(
+          id: 'mgt:${_charts[i].id}',
+          name: _charts[i].name,
+          coverId: covers[i].isNotEmpty ? covers[i].first.coverUrl : null,
+        ),
+    ];
+  }
+
   /// 热门歌手（首页「歌手」入口）。点进去是该歌手的歌（搜索，带封面）。
   static const List<String> _hotArtists = [
     '周杰伦', '林俊杰', '邓紫棋', '薛之谦', '陈奕迅', '毛不易',
@@ -171,6 +193,17 @@ class MiguSource implements MusicSource {
         return [for (final s in songs) MiguPlaybackService.toSongEntity(s)];
       } catch (e) {
         debugPrint('[MiguSource] artist songs error: $e');
+        return const [];
+      }
+    }
+    // 榜单条目：id 形如 mgt:<columnId>。
+    if (playlistId.startsWith('mgt:')) {
+      final columnId = playlistId.substring(4);
+      try {
+        final songs = await _api.chart(columnId, limit: 100);
+        return [for (final s in songs) MiguPlaybackService.toSongEntity(s)];
+      } catch (e) {
+        debugPrint('[MiguSource] chart songs error: $e');
         return const [];
       }
     }

@@ -67,8 +67,11 @@ class _LxEngine {
     BaseOptions(
       // 脚本自己判断状态码；重定向默认跟随，脚本可用 options 关掉。
       validateStatus: (_) => true,
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(seconds: 20),
+      // 连接超时砍到 5s：聚合脚本里常有死域名（如 api.xinghai.com），15s 连接
+      // 超时会让一首歌卡半分钟、表现成「换一首就播不了」。活站握手都在 1s 内，
+      // 5s 足够；死站 5s 快速失败、让链条尽快走到能用的后端。
+      connectTimeout: const Duration(seconds: 5),
+      receiveTimeout: const Duration(seconds: 10),
     ),
   );
 

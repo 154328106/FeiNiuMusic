@@ -59,6 +59,36 @@ class MiguSong {
     );
   }
 
+  /// 从咪咕榜单 `querycontentbyId.do` 的一条记录解析
+  /// （`columnInfo.contents[].objectInfo`）。字段名和搜索不同：`songName`
+  /// / `singer`(字符串) / `album`(字符串) / `albumImgs`(同 imgItems 三档) /
+  /// `lrcUrl`。
+  static MiguSong? fromChartJson(Map<String, dynamic> j) {
+    final copyrightId = (j['copyrightId'] ?? '').toString().trim();
+    final contentId = (j['contentId'] ?? '').toString().trim();
+    if (copyrightId.isEmpty || copyrightId == 'null') return null;
+    final name = (j['songName'] ?? j['name'] ?? '').toString().trim();
+    if (name.isEmpty) return null;
+    final singer = (j['singer'] ?? '')
+        .toString()
+        .replaceAll(RegExp(r'[、，]'), ' / ')
+        .trim();
+    return MiguSong(
+      copyrightId: copyrightId,
+      contentId: contentId,
+      name: name,
+      artists: singer,
+      album: (j['album'] ?? '').toString().trim(),
+      durationMs: 0,
+      coverUrl: _cover(j['albumImgs']),
+      isVip: _vip(j['newRateFormats']),
+      lyricUrl: () {
+        final u = (j['lrcUrl'] ?? '').toString().trim();
+        return u.startsWith('http') ? u : null;
+      }(),
+    );
+  }
+
   /// singers 可能是单对象 `{id,name}`，也可能是数组；都归一成 `/` 分隔。
   static String _names(dynamic singers) {
     if (singers is List) {

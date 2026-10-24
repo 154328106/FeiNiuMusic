@@ -926,6 +926,12 @@ class _HomePageState extends State<HomePage>
       final source = MiguSource.instance;
       return [
         HomeShortcutItem(
+          icon: Icons.leaderboard_rounded,
+          label: '排行榜',
+          accent: const Color(0xFFEC4899),
+          onTap: () => _openSourcePlaylists('排行榜', source.toplists),
+        ),
+        HomeShortcutItem(
           icon: Icons.people_rounded,
           label: '歌手',
           accent: const Color(0xFF14B8A6),

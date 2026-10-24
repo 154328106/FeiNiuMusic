@@ -1,13 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../state/song_source.dart';
 import '../../state/song_state.dart';
 import '../unblock/unblock_source.dart';
-import 'migu_auth.dart';
 import 'migu_models.dart';
 
 class _Resolved {
@@ -23,33 +21,28 @@ class _Meta {
     required this.keyword,
     required this.durationMs,
     required this.contentId,
+    required this.name,
+    required this.singer,
   });
   final String keyword;
   final int durationMs;
   final String contentId;
+  final String name;
+  final String singer;
 }
 
 /// 咪咕播放地址解析与模型转换。
 ///
-/// 取址优先级：
-/// 1. 咪咕自家直连 `listenSong.do`（**登录后**才给 VIP 直链，未登录返回
-///    「暂不提供试听地址」，此时跳过）；
-/// 2. 解灰链 `resolve(mg)` —— 走聚合 / LX 的 mg 后端（回避、星海…），
-///    免登录也能出地址，是免登录时的主力。
+/// 取址走解灰链 `resolve(mg)` —— 聚合 / LX 的 mg 后端（回避、星海、listen-url、
+/// zddyr…），免登录也能出地址。带上 name/singer，按歌名搜的后端也能命中。
+///
+/// 咪咕自家直连 `listenSong.do` 即便登录也只回「暂不提供试听地址」（要完整 SSO
+/// 交换 + 签名，不划算），已弃用；登录态只用于显示 / 后续歌单收藏，不参与取址。
 class MiguPlaybackService {
   MiguPlaybackService._();
   static final MiguPlaybackService instance = MiguPlaybackService._();
 
   static const Duration urlTtl = Duration(minutes: 45);
-
-  final Dio _dio = Dio(
-    BaseOptions(
-      connectTimeout: const Duration(seconds: 8),
-      receiveTimeout: const Duration(seconds: 10),
-      responseType: ResponseType.plain,
-      validateStatus: (_) => true,
-    ),
-  );
 
   final Map<String, _Resolved> _cache = {};
   final Set<String> _unresolvable = {};
@@ -106,20 +99,18 @@ class MiguPlaybackService {
 
   Future<String?> _resolveOnce(String copyrightId) async {
     final meta = _meta[copyrightId];
-    final quality = UnblockSourceService.instance.config.value.quality;
     String? url;
     try {
-      // 1. 登录了才试咪咕自家直连（未登录必返回「暂不提供试听地址」）。
-      if (MiguAuth.instance.isLoggedIn.value && meta != null &&
-          meta.contentId.isNotEmpty) {
-        url = await _viaMiguDirect(copyrightId, meta.contentId, quality);
-      }
-      // 2. 解灰链（聚合 / LX 的 mg 后端）：免登录主力。
-      url ??= await UnblockSourceService.instance.resolve(
+      // 咪咕播放走解灰链（聚合 / LX 的 mg 后端）。自家直连 listenSong.do 即便
+      // 登录也只回「暂不提供试听地址」（要完整 SSO 交换 + 签名，不划算），已弃用。
+      // 带上 name/singer：有些 mg 后端按歌名+歌手搜，否则报「需要 name+singer」。
+      url = await UnblockSourceService.instance.resolve(
         platform: 'mg',
         songId: copyrightId,
         keyword: meta?.keyword,
         durationMs: meta?.durationMs ?? 0,
+        name: meta?.name,
+        singer: meta?.singer,
       );
     } catch (e) {
       debugPrint('[Migu] 取址异常 $copyrightId：$e');
@@ -135,77 +126,6 @@ class MiguPlaybackService {
         : url;
     _cache[copyrightId] = _Resolved(secure, DateTime.now());
     return secure;
-  }
-
-  /// 咪咕自家直连：`listenSong.do`，要 contentId + copyrightId + channel，
-  /// 登录 cookie 带上才给 VIP 直链。未登录 / 无权限返回 code 200000「暂不提供
-  /// 试听地址」，此时给 null 让上层回落聚合。
-  Future<String?> _viaMiguDirect(
-    String copyrightId,
-    String contentId,
-    String quality,
-  ) async {
-    try {
-      final res = await _dio.get<dynamic>(
-        'https://app.c.nf.migu.cn/MIGUM2.0/v1.0/content/sub/listenSong.do',
-        queryParameters: {
-          'toneFlag': _toneFlag(quality),
-          'netType': '01',
-          'channel': '0146921',
-          'ua': 'Android_migu',
-          'version': '5.0.1',
-          'copyrightId': copyrightId,
-          'contentId': contentId,
-          'resourceType': '2',
-          'lowerQualityContentId': contentId,
-        },
-        options: Options(
-          // 关自动跟随：302 时要自己读 Location，别把整首下进内存。
-          followRedirects: false,
-          validateStatus: (c) => c != null && c < 400,
-          headers: {
-            'User-Agent': 'okhttp/3.12.1',
-            'channel': '0146921',
-            if (MiguAuth.instance.cookieHeader.isNotEmpty)
-              'Cookie': MiguAuth.instance.cookieHeader,
-          },
-        ),
-      );
-      // 多数情况下 listenSong.do 直接 302 到真实地址（followRedirects 默认开，
-      // 这里关不掉就读 body 的 url 字段）；也可能回 JSON 带 url。
-      final loc = res.headers.value('location');
-      if (loc != null && loc.startsWith('http')) return loc;
-      final data = res.data is String ? res.data as String : '${res.data}';
-      if (data.trim().startsWith('http')) return data.trim();
-      try {
-        final json = jsonDecode(data);
-        if (json is Map) {
-          final url = json['url'] ??
-              (json['data'] is Map ? (json['data'] as Map)['url'] : null) ??
-              json['playUrl'];
-          if (url is String && url.startsWith('http')) return url;
-          debugPrint('[Migu] 直连 code=${json['code']} info=${json['info']}');
-        }
-      } catch (_) {}
-      return null;
-    } on DioException {
-      return null;
-    }
-  }
-
-  static String _toneFlag(String quality) {
-    switch (quality.trim().toLowerCase()) {
-      case 'flac':
-      case 'lossless':
-        return 'SQ';
-      case 'flac24bit':
-      case 'hires':
-        return 'ZQ';
-      case '320k':
-        return 'HQ';
-      default:
-        return 'PQ';
-    }
   }
 
   Future<List<SongEntity>> prepareQueue(List<SongEntity> songs) async {
@@ -240,11 +160,14 @@ class MiguPlaybackService {
 
   void _remember(SongEntity song, String copyrightId) {
     if (_meta.containsKey(copyrightId)) return;
+    final singer = song.artistDisplayName;
     _meta[copyrightId] = _Meta(
-      keyword: '${song.title} ${song.artistDisplayName}'.trim(),
+      keyword: '${song.title} $singer'.trim(),
       durationMs: song.durationMs ?? 0,
       // contentId 存在实体的 audioSpec 上（见 toSongEntity）。
       contentId: song.audioSpec ?? '',
+      name: song.title,
+      singer: singer,
     );
   }
 
