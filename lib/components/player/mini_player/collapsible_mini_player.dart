@@ -163,10 +163,10 @@ class _CollapsibleMiniPlayerState extends State<CollapsibleMiniPlayer> {
     final leftV = math.pow(v, 1.5).toDouble();
     final left = lerpDouble(widget.insetH, right - ball, leftV)!;
     // 左大右小：左端保持主高度（随 v 从条高过渡到球径），往右走的那头
-    // 在中段收细到左端的约 45%，两头（v=0 / v=1）等高 —— 收完正好合成
-    // 一个圆球。（反过来「左细右粗」不对，原版是左边原大小、往右变小。）
+    // 在中段收细（约为左端的 60%；45% 太尖），两头（v=0 / v=1）等高 ——
+    // 收完正好合成一个圆球。（反过来「左细右粗」不对，原版是左边原大小、往右变小。）
     final hLeft = lerpDouble(pillH, ball, v)!;
-    final taper = 1 - 0.55 * math.sin(math.pi * v);
+    final taper = 1 - 0.4 * math.sin(math.pi * v);
     final hRight = hLeft * taper;
     final rRight = lerpDouble(
       widget.barRadius,
