@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../components/common/content_frame.dart';
 import '../theme/app_glass_theme.dart';
 import 'settings_background_state.dart';
 import 'settings_glass_state.dart';
@@ -99,39 +100,21 @@ class SurfaceStyle {
       Object.hash(color, opacity, thickness, frame, frameColor, frameOpacity);
 }
 
-/// 统一外观设置。
+/// 「边框与底色」：所有能加框的单元（首页最新歌曲、歌曲列表、播放条、导航栏）
+/// 共用**一套**样式，一个开关、一组色板和滑块。
 ///
-/// - 全局样式：各区域默认跟随它。
-/// - 底部栏（播放条 + 底部导航）：两条永远用同一套样式。它「自己的」样式直接
-///   存在原来那几个导航栏设置里（底色/深浅/描边/描边色/描边深浅），只新增了
-///   「厚度」—— 老用户的设置原样就是底部栏的值，升级后外观不变。
+/// 「加框」开关同时管列表的加框方式：关 = 列表不加框、两条底栏不描边；
+/// 开 = 列表按「整块描边 / 逐行卡片」出框、底栏描边。两边永远一致。
 class AppSurfaceSettings {
   AppSurfaceSettings._();
 
-  static const _prefsGlobal = 'surface_style_global';
-  static const _prefsBottomFollow = 'surface_bottom_follow_global';
-  static const _prefsBottomThickness = 'surface_bottom_thickness';
-  static const _prefsContentFollow = 'surface_content_follow_global';
+  static const _prefsStyle = 'surface_style_unified';
+  // 旧版（导航栏单独一组设置时代）存的厚度，迁移时读一次。
+  static const _prefsOldThickness = 'surface_bottom_thickness';
 
-  static final ValueNotifier<SurfaceStyle> global = ValueNotifier(
-    const SurfaceStyle(),
+  static final ValueNotifier<SurfaceStyle> style = ValueNotifier(
+    const SurfaceStyle(frame: false),
   );
-
-  /// 底部栏是否跟随全局。默认 false：保留老用户在导航栏上调过的样式。
-  static final ValueNotifier<bool> bottomBarFollowGlobal = ValueNotifier(false);
-
-  /// 底部栏自己的厚度（其余字段在 AppBackgroundSettings.navBar* 里）。
-  static final ValueNotifier<double> bottomBarThickness = ValueNotifier(0.5);
-
-  /// 列表与卡片（列表外框、逐行卡片、首页四宫格/快捷卡）是否跟随全局。
-  /// 默认 false：不跟随时完全是原来「内容框」那组设置的样子。加框方式
-  /// （不加框 / 整块描边 / 逐行卡片）始终归「内容框」管，跟随只换颜色、
-  /// 深浅、描边和投影。
-  static final ValueNotifier<bool> contentFollowGlobal = ValueNotifier(false);
-
-  /// 跟随全局时返回全局样式，否则 null（调用方走原来的内容框设置）。
-  static SurfaceStyle? get contentStyle =>
-      contentFollowGlobal.value ? global.value : null;
 
   static Future<void>? _loading;
   static Future<void> ensureLoaded() => _loading ??= _load();
@@ -140,94 +123,62 @@ class AppSurfaceSettings {
     await AppBackgroundSettings.ensureLoaded();
     try {
       final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_prefsGlobal);
+      final raw = prefs.getString(_prefsStyle);
+      final listFramed =
+          AppBackgroundSettings.contentFrameStyle.value !=
+          AppContentFrameStyle.none;
       if (raw != null && raw.isNotEmpty) {
         final j = jsonDecode(raw);
-        if (j is Map) global.value = SurfaceStyle.fromJson(j.cast());
+        if (j is Map) style.value = SurfaceStyle.fromJson(j.cast());
+      } else {
+        // 第一次：从原来的导航栏设置迁移过来，老用户调过的颜色不丢。
+        // 描边颜色导航没设就拿原「内容框」的。
+        style.value = SurfaceStyle(
+          color: AppBackgroundSettings.navBarColor.value,
+          opacity: AppBackgroundSettings.navBarOpacity.value,
+          thickness: (prefs.getDouble(_prefsOldThickness) ?? 0.5).clamp(
+            0.0,
+            1.0,
+          ),
+          frame: listFramed,
+          frameColor:
+              AppBackgroundSettings.navBarFrameColor.value ??
+              AppBackgroundSettings.contentFrameColor.value,
+          frameOpacity: AppBackgroundSettings.navBarFrameOpacity.value,
+        );
       }
-      bottomBarFollowGlobal.value = prefs.getBool(_prefsBottomFollow) ?? false;
-      bottomBarThickness.value = (prefs.getDouble(_prefsBottomThickness) ?? 0.5)
-          .clamp(0.0, 1.0);
-      contentFollowGlobal.value = prefs.getBool(_prefsContentFollow) ?? false;
+      // 「加框」以列表的加框方式为准，两边对齐。
+      if (style.value.frame != listFramed) {
+        style.value = style.value.copyWith(frame: listFramed);
+      }
     } catch (_) {
       // 读坏了就用默认值，别卡启动。
     }
   }
 
-  /// 底部栏自己的样式（来自原导航栏设置 + 厚度）。
-  static SurfaceStyle get bottomBarOwn => SurfaceStyle(
-    color: AppBackgroundSettings.navBarColor.value,
-    opacity: AppBackgroundSettings.navBarOpacity.value,
-    thickness: bottomBarThickness.value,
-    frame: AppBackgroundSettings.navBarFrameEnabled.value,
-    frameColor: AppBackgroundSettings.navBarFrameColor.value,
-    frameOpacity: AppBackgroundSettings.navBarFrameOpacity.value,
-  );
+  /// 底部栏（播放条 + 导航）用的样式。
+  static SurfaceStyle get bottomBar => style.value;
 
-  /// 底部栏实际生效的样式。
-  static SurfaceStyle get bottomBar =>
-      bottomBarFollowGlobal.value ? global.value : bottomBarOwn;
+  /// 列表与卡片用的样式。
+  static SurfaceStyle get contentStyle => style.value;
 
-  /// 底部栏样式相关的所有可监听项（导航条 / 播放条重建用）。
-  static final Listenable bottomBarListenable = Listenable.merge([
-    global,
-    bottomBarFollowGlobal,
-    bottomBarThickness,
-    AppBackgroundSettings.navBarColor,
-    AppBackgroundSettings.navBarOpacity,
-    AppBackgroundSettings.navBarFrameEnabled,
-    AppBackgroundSettings.navBarFrameColor,
-    AppBackgroundSettings.navBarFrameOpacity,
-  ]);
+  static Listenable get bottomBarListenable => style;
 
-  static Future<void> setGlobal(SurfaceStyle s) async {
-    global.value = s;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_prefsGlobal, jsonEncode(s.toJson()));
-    } catch (_) {}
+  /// 框的样式：不加框 / 整块描边 / 逐行卡片。同时决定底栏描不描边。
+  static Future<void> setFrameStyle(AppContentFrameStyle s) async {
+    await AppBackgroundSettings.setContentFrameStyle(s);
+    final framed = s != AppContentFrameStyle.none;
+    if (framed != style.value.frame) {
+      await setStyle(style.value.copyWith(frame: framed));
+    }
   }
 
-  static Future<void> setContentFollowGlobal(bool v) async {
-    contentFollowGlobal.value = v;
+  static Future<void> setStyle(SurfaceStyle s) async {
+    style.value = s;
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_prefsContentFollow, v);
+      await prefs.setString(_prefsStyle, jsonEncode(s.toJson()));
     } catch (_) {}
-  }
-
-  static Future<void> setBottomBarFollowGlobal(bool v) async {
-    bottomBarFollowGlobal.value = v;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_prefsBottomFollow, v);
-    } catch (_) {}
-  }
-
-  /// 写底部栏自己的样式：各字段落到原导航栏设置里，厚度单独存。
-  static Future<void> setBottomBarOwn(SurfaceStyle s) async {
-    final old = bottomBarOwn;
-    if (s.color != old.color)
-      await AppBackgroundSettings.setNavBarColor(s.color);
-    if (s.opacity != old.opacity) {
-      await AppBackgroundSettings.setNavBarOpacity(s.opacity);
-    }
-    if (s.frame != old.frame) {
-      await AppBackgroundSettings.setNavBarFrameEnabled(s.frame);
-    }
-    if (s.frameColor != old.frameColor) {
-      await AppBackgroundSettings.setNavBarFrameColor(s.frameColor);
-    }
-    if (s.frameOpacity != old.frameOpacity) {
-      await AppBackgroundSettings.setNavBarFrameOpacity(s.frameOpacity);
-    }
-    if (s.thickness != old.thickness) {
-      bottomBarThickness.value = s.thickness;
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setDouble(_prefsBottomThickness, s.thickness);
-      } catch (_) {}
-    }
   }
 }
 

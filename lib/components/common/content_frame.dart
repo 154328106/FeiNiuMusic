@@ -33,76 +33,38 @@ enum AppContentFrameStyle {
       );
 }
 
-/// 「列表与卡片」跟随全局时的描边色；全局关了描边返回 null。
+/// 描边色：统一走「边框与底色」那套样式；没开加框返回 null。
 ///
-/// [accent] 是卡片自己的色相（没自定义描边色时用），alpha 0.3 × 全局描边深浅
+/// [accent] 是卡片自己的色相（没自定义描边色时用），alpha 0.3 × 默认描边深浅
 /// 0.5 ≈ 原来内容框默认的 0.15。
-Color? _globalFrameColor(
-  BuildContext context,
-  SurfaceStyle s, {
+Color? _unitFrameColor(
+  BuildContext context, {
   Color? accent,
   double scale = 1.0,
 }) {
   final c = SurfacePaint.frameColor(
     context,
-    s,
+    AppSurfaceSettings.contentStyle,
     fallback: accent?.withValues(alpha: 0.3),
   );
   return c?.withValues(alpha: (c.a * scale).clamp(0.0, 1.0));
 }
 
-/// 逐行卡片 / 独立卡片的底色：跟随全局时走 [SurfacePaint.fill]，否则原来的值。
-Color _cardFill(BuildContext context) {
-  final s = AppSurfaceSettings.contentStyle;
-  if (s != null) return SurfacePaint.fill(context, s);
-  final theme = Theme.of(context);
-  return theme.brightness == Brightness.dark
-      ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45)
-      : Colors.white.withValues(alpha: 0.75);
-}
+/// 逐行卡片 / 独立卡片的底色。
+Color _cardFill(BuildContext context) =>
+    SurfacePaint.fill(context, AppSurfaceSettings.contentStyle);
 
-/// 卡片投影：跟随全局时按「厚度」缩小一档（列表一大片，用底栏那么重会糊）。
-List<BoxShadow> _cardShadow(
-  BuildContext context, {
-  required double darkAlpha,
-  required double blur,
-  required double dy,
-}) {
-  final s = AppSurfaceSettings.contentStyle;
-  if (s != null) return SurfacePaint.shadow(context, s, scale: 0.5);
-  final isDark = Theme.of(context).brightness == Brightness.dark;
-  return [
-    BoxShadow(
-      color: Colors.black.withValues(alpha: isDark ? darkAlpha : 0.05),
-      blurRadius: blur,
-      offset: Offset(0, dy),
-    ),
-  ];
-}
+/// 卡片投影：按「厚度」走，比底栏轻一半（列表一大片，用底栏那么重会糊）。
+List<BoxShadow> _cardShadow(BuildContext context) =>
+    SurfacePaint.shadow(context, AppSurfaceSettings.contentStyle, scale: 0.5);
 
-/// 描边实际用色：优先自定义颜色，否则跟随主题的 outlineVariant；
-/// 两种情况都再乘上用户设定的不透明度。跟随全局时改用全局描边。
-Color _frameBorderColor(BuildContext context, {double scale = 1.0}) {
-  final g = AppSurfaceSettings.contentStyle;
-  if (g != null) {
-    return _globalFrameColor(context, g, scale: scale) ?? Colors.transparent;
-  }
-  final scheme = Theme.of(context).colorScheme;
-  final custom = AppBackgroundSettings.contentFrameColor.value;
-  final opacity = (AppBackgroundSettings.contentFrameOpacity.value * scale)
-      .clamp(0.0, 1.0);
-  return (custom ?? scheme.outlineVariant).withValues(alpha: opacity);
-}
+Color _frameBorderColor(BuildContext context, {double scale = 1.0}) =>
+    _unitFrameColor(context, scale: scale) ?? Colors.transparent;
 
-/// 颜色/透明度这两个设置也要触发重建，否则改完要重进页面才生效。
+/// 样式一改就重建，否则改完要重进页面才生效。
 Widget _watchFrameSettings(BuildContext context, WidgetBuilder builder) {
   return ListenableBuilder(
-    listenable: Listenable.merge([
-      AppBackgroundSettings.contentFrameColor,
-      AppBackgroundSettings.contentFrameOpacity,
-      AppSurfaceSettings.contentFollowGlobal,
-      AppSurfaceSettings.global,
-    ]),
+    listenable: AppSurfaceSettings.style,
     builder: (context, _) => builder(context),
   );
 }
@@ -110,8 +72,7 @@ Widget _watchFrameSettings(BuildContext context, WidgetBuilder builder) {
 /// 首页那些**独立单元**（四宫格、快捷入口卡、漫游卡）共用的描边。
 ///
 /// 这些卡原本各自写死 `Border.all(accent…)`，和列表那套可调的框各走各的 ——
-/// 用户把框的透明度调低之后，列表的线淡了、这些卡的线还在，看着就不像一套
-/// 东西。统一走这里：画不画、什么颜色、多透明，全听「内容框」那组设置。
+/// 统一走这里：画不画、什么颜色、多透明，全听「边框与底色」。
 ///
 /// [accent] 是这张卡自己的色相，没自定义颜色时用它，保持原来的观感。
 /// 返回 null 表示当前是「不加框」——调用方别画。
@@ -122,16 +83,8 @@ BoxBorder? appUnitBorder(
 }) {
   final style = AppBackgroundSettings.contentFrameStyle.value;
   if (style == AppContentFrameStyle.none) return null;
-  final g = AppSurfaceSettings.contentStyle;
-  if (g != null) {
-    final c = _globalFrameColor(context, g, accent: accent, scale: scale);
-    return c == null ? null : Border.all(color: c);
-  }
-  final custom = AppBackgroundSettings.contentFrameColor.value;
-  final base = custom ?? accent ?? Theme.of(context).colorScheme.outlineVariant;
-  final opacity = (AppBackgroundSettings.contentFrameOpacity.value * scale)
-      .clamp(0.0, 1.0);
-  return Border.all(color: base.withValues(alpha: opacity));
+  final c = _unitFrameColor(context, accent: accent, scale: scale);
+  return c == null ? null : Border.all(color: c);
 }
 
 /// 同 [appUnitBorder]，但只给颜色 —— 有些组件（如 GlassPanel）只收
@@ -146,16 +99,8 @@ Color appUnitBorderColor(
 }) {
   final style = AppBackgroundSettings.contentFrameStyle.value;
   if (style == AppContentFrameStyle.none) return Colors.transparent;
-  final g = AppSurfaceSettings.contentStyle;
-  if (g != null) {
-    return _globalFrameColor(context, g, accent: accent, scale: scale) ??
-        Colors.transparent;
-  }
-  final custom = AppBackgroundSettings.contentFrameColor.value;
-  final base = custom ?? accent ?? Theme.of(context).colorScheme.outlineVariant;
-  final opacity = (AppBackgroundSettings.contentFrameOpacity.value * scale)
-      .clamp(0.0, 1.0);
-  return base.withValues(alpha: opacity);
+  return _unitFrameColor(context, accent: accent, scale: scale) ??
+      Colors.transparent;
 }
 
 /// 让用了 [appUnitBorder] 的单元跟着框设置一起重建。
@@ -171,10 +116,7 @@ class AppUnitFrameBuilder extends StatelessWidget {
     return ListenableBuilder(
       listenable: Listenable.merge([
         AppBackgroundSettings.contentFrameStyle,
-        AppBackgroundSettings.contentFrameColor,
-        AppBackgroundSettings.contentFrameOpacity,
-        AppSurfaceSettings.contentFollowGlobal,
-        AppSurfaceSettings.global,
+        AppSurfaceSettings.style,
       ]),
       builder: (context, _) => builder(context),
     );
@@ -221,12 +163,7 @@ class AppContentFrame extends StatelessWidget {
                 color: _frameBorderColor(context, scale: isCards ? 0.75 : 1.0),
                 width: isCards ? 1 : 1.2,
               ),
-              boxShadow: _cardShadow(
-                context,
-                darkAlpha: 0.20,
-                blur: 12,
-                dy: 4,
-              ),
+              boxShadow: _cardShadow(context),
             ),
             // 描边是圆角的，内容也要跟着裁，否则行的点击高亮会顶出圆角。
             child: ClipRRect(
@@ -302,12 +239,7 @@ class AppContentRow extends StatelessWidget {
                       color: _frameBorderColor(context, scale: 0.75),
                       width: 1,
                     ),
-                    boxShadow: _cardShadow(
-                      context,
-                      darkAlpha: 0.18,
-                      blur: 8,
-                      dy: 2,
-                    ),
+                    boxShadow: _cardShadow(context),
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(13),

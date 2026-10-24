@@ -571,156 +571,6 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                   );
                 },
               ),
-              // 液体玻璃：与「高斯模糊」互斥。开启时各界面使用液体玻璃材质
-              // （iOS 26 风格 shader 毛玻璃/高光/折射）并自动关闭高斯模糊；
-              // 关闭后回退为下方「高斯模糊/模糊强度」控制的 BackdropFilter 方案。
-              // TV 模式恒不生效（见 AppGlassSettings.effectiveEnabled）。
-              ValueListenableBuilder<bool>(
-                valueListenable: AppGlassSettings.liquidGlassEnabled,
-                builder: (context, glassEnabled, _) {
-                  return AppSettingSwitchTile(
-                    title: '液体玻璃',
-                    subtitle: glassEnabled
-                        ? '导航栏、面板、控件等使用液体玻璃材质，可调节下方模糊强度与厚度'
-                        : '关闭后回退为原有的高斯模糊/实色面板',
-                    value: glassEnabled,
-                    onChanged: (value) {
-                      AppGlassSettings.setLiquidGlassEnabled(value);
-                    },
-                  );
-                },
-              ),
-              // 玻璃参数：仅液体玻璃开启时显示，调节即时生效。
-              ValueListenableBuilder<bool>(
-                valueListenable: AppGlassSettings.liquidGlassEnabled,
-                builder: (context, glassEnabled, _) {
-                  if (!glassEnabled) return const SizedBox.shrink();
-                  return Column(
-                    children: [
-                      const SizedBox(height: 8),
-                      ValueListenableBuilder<double>(
-                        valueListenable: AppGlassSettings.glassBlurStrength,
-                        builder: (context, value, _) {
-                          return AppSettingSlider(
-                            title: '玻璃模糊强度',
-                            description: '0 = 无模糊，16 = 最强模糊',
-                            value: value,
-                            min: 0,
-                            max: 16,
-                            divisions: 16,
-                            valueText: value == 0
-                                ? '关闭'
-                                : value.toStringAsFixed(0),
-                            onChanged: (next) {
-                              AppGlassSettings.setGlassBlur(next);
-                            },
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 4),
-                      ValueListenableBuilder<double>(
-                        valueListenable: AppGlassSettings.glassThickness,
-                        builder: (context, value, _) {
-                          return AppSettingSlider(
-                            title: '玻璃厚度',
-                            description: '影响折射强度与边缘高光',
-                            value: value,
-                            min: 0,
-                            max: 30,
-                            divisions: 30,
-                            valueText: value.toStringAsFixed(0),
-                            onChanged: (next) {
-                              AppGlassSettings.setGlassThickness(next);
-                            },
-                          );
-                        },
-                      ),
-                      ValueListenableBuilder<bool>(
-                        valueListenable: AppGlassSettings.glassLens,
-                        builder: (context, lens, _) {
-                          return AppSettingSwitchTile(
-                            title: '透镜模式（底部栏）',
-                            subtitle: lens
-                                ? '底板几乎全透、不模糊，后面的内容会被玻璃弯折；上面两项暂不生效'
-                                : '开启后播放条和导航栏像透镜一样折射背后的内容',
-                            value: lens,
-                            onChanged: AppGlassSettings.setGlassLens,
-                          );
-                        },
-                      ),
-                    ],
-                  );
-                },
-              ),
-              const SizedBox(height: 8),
-              // 列表加框样式三选一。用 CheckboxTile 做单选，与设置页其它
-              // 选择项保持一致的观感。
-              ValueListenableBuilder<AppContentFrameStyle>(
-                valueListenable: AppBackgroundSettings.contentFrameStyle,
-                builder: (context, current, _) {
-                  return Column(
-                    children: [
-                      for (final style in AppContentFrameStyle.values)
-                        AppSettingCheckboxTile(
-                          title: style.label,
-                          subtitle: style.description,
-                          value: current == style,
-                          onChanged: (checked) {
-                            // 单选：再点已选项不取消，避免出现一个都没选的状态。
-                            if (!checked) return;
-                            AppBackgroundSettings.setContentFrameStyle(style);
-                          },
-                        ),
-                      // 不加框时颜色/透明度没有意义，收起来。
-                      if (current != AppContentFrameStyle.none) ...[
-                        ValueListenableBuilder<Color?>(
-                          valueListenable:
-                              AppBackgroundSettings.contentFrameColor,
-                          builder: (context, frameColor, _) {
-                            final fallback = Theme.of(
-                              context,
-                            ).colorScheme.outlineVariant;
-                            return _ColorSettingTile(
-                              title: '描边颜色',
-                              subtitle: frameColor == null
-                                  ? '跟随主题，点击自定义'
-                                  : '自定义颜色，长按恢复跟随主题',
-                              color: frameColor ?? fallback,
-                              onPick: () => _showColorPickerDialog(
-                                context,
-                                initial: frameColor ?? fallback,
-                                onSelected:
-                                    AppBackgroundSettings.setContentFrameColor,
-                              ),
-                              onReset: frameColor == null
-                                  ? null
-                                  : () =>
-                                        AppBackgroundSettings.setContentFrameColor(
-                                          null,
-                                        ),
-                            );
-                          },
-                        ),
-                        ValueListenableBuilder<double>(
-                          valueListenable:
-                              AppBackgroundSettings.contentFrameOpacity,
-                          builder: (context, opacity, _) {
-                            return AppSettingSlider(
-                              title: '描边透明度',
-                              value: opacity,
-                              min: 0.05,
-                              max: 1.0,
-                              valueText: '${(opacity * 100).round()}%',
-                              onChanged:
-                                  AppBackgroundSettings.setContentFrameOpacity,
-                            );
-                          },
-                        ),
-                      ],
-                    ],
-                  );
-                },
-              ),
               ValueListenableBuilder<bool>(
                 valueListenable:
                     AppBackgroundSettings.miniPlayerOnlyWhilePlaying,
@@ -793,42 +643,87 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
             ],
           ),
           const SizedBox(height: 16),
-          // 统一样式：各区域同一套参数（底色 / 深浅 / 厚度 / 描边），可跟随全局。
+          // 玻璃效果：导航栏和播放条用同一个开关、同一组参数。
           AppSettingSection(
-            title: '统一样式 · 全局',
+            title: '玻璃效果（导航栏 + 播放条）',
             children: [
-              ValueListenableBuilder<SurfaceStyle>(
-                valueListenable: AppSurfaceSettings.global,
-                builder: (context, style, _) => _SurfaceStyleEditor(
-                  style: style,
-                  onChanged: AppSurfaceSettings.setGlobal,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          AppSettingSection(
-            title: '统一样式 · 底部栏（播放条 + 导航）',
-            children: [
+              // 液体玻璃：与「高斯模糊」互斥。开启时各界面使用液体玻璃材质
+              // （iOS 26 风格 shader 毛玻璃/高光/折射）并自动关闭高斯模糊；
+              // 关闭后回退为下方「高斯模糊/模糊强度」控制的 BackdropFilter 方案。
+              // TV 模式恒不生效（见 AppGlassSettings.effectiveEnabled）。
               ValueListenableBuilder<bool>(
-                valueListenable: AppSurfaceSettings.bottomBarFollowGlobal,
-                builder: (context, follow, _) {
+                valueListenable: AppGlassSettings.liquidGlassEnabled,
+                builder: (context, glassEnabled, _) {
+                  return AppSettingSwitchTile(
+                    title: '液体玻璃',
+                    subtitle: glassEnabled
+                        ? '导航栏和播放条用液体玻璃，下面调模糊、厚度'
+                        : '关闭后导航栏和播放条用上面的高斯模糊或实色',
+                    value: glassEnabled,
+                    onChanged: (value) {
+                      AppGlassSettings.setLiquidGlassEnabled(value);
+                    },
+                  );
+                },
+              ),
+              // 玻璃参数：仅液体玻璃开启时显示，调节即时生效。
+              ValueListenableBuilder<bool>(
+                valueListenable: AppGlassSettings.liquidGlassEnabled,
+                builder: (context, glassEnabled, _) {
+                  if (!glassEnabled) return const SizedBox.shrink();
                   return Column(
                     children: [
-                      AppSettingSwitchTile(
-                        title: '跟随全局样式',
-                        subtitle: follow ? '和上面的全局样式一致' : '单独设置，播放条和导航用同一套',
-                        value: follow,
-                        onChanged: AppSurfaceSettings.setBottomBarFollowGlobal,
+                      const SizedBox(height: 8),
+                      ValueListenableBuilder<double>(
+                        valueListenable: AppGlassSettings.glassBlurStrength,
+                        builder: (context, value, _) {
+                          return AppSettingSlider(
+                            title: '玻璃模糊强度',
+                            description: '0 = 无模糊，16 = 最强模糊',
+                            value: value,
+                            min: 0,
+                            max: 16,
+                            divisions: 16,
+                            valueText: value == 0
+                                ? '关闭'
+                                : value.toStringAsFixed(0),
+                            onChanged: (next) {
+                              AppGlassSettings.setGlassBlur(next);
+                            },
+                          );
+                        },
                       ),
-                      if (!follow)
-                        ListenableBuilder(
-                          listenable: AppSurfaceSettings.bottomBarListenable,
-                          builder: (context, _) => _SurfaceStyleEditor(
-                            style: AppSurfaceSettings.bottomBarOwn,
-                            onChanged: AppSurfaceSettings.setBottomBarOwn,
-                          ),
-                        ),
+                      const SizedBox(height: 4),
+                      ValueListenableBuilder<double>(
+                        valueListenable: AppGlassSettings.glassThickness,
+                        builder: (context, value, _) {
+                          return AppSettingSlider(
+                            title: '玻璃厚度',
+                            description: '影响折射强度与边缘高光',
+                            value: value,
+                            min: 0,
+                            max: 30,
+                            divisions: 30,
+                            valueText: value.toStringAsFixed(0),
+                            onChanged: (next) {
+                              AppGlassSettings.setGlassThickness(next);
+                            },
+                          );
+                        },
+                      ),
+                      ValueListenableBuilder<bool>(
+                        valueListenable: AppGlassSettings.glassLens,
+                        builder: (context, lens, _) {
+                          return AppSettingSwitchTile(
+                            title: '透镜模式',
+                            subtitle: lens
+                                ? '几乎全透明，后面的内容会被玻璃弯折；上面两项暂不生效'
+                                : '开启后像透镜一样折射后面的内容',
+                            value: lens,
+                            onChanged: AppGlassSettings.setGlassLens,
+                          );
+                        },
+                      ),
                     ],
                   );
                 },
@@ -836,18 +731,16 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
             ],
           ),
           const SizedBox(height: 16),
+          // 边框与底色：所有能加框的单元共用一套（首页最新歌曲、歌曲列表、
+          // 播放条、导航栏）。见 AppSurfaceSettings。
           AppSettingSection(
-            title: '统一样式 · 列表与卡片',
+            title: '边框设置',
             children: [
-              ValueListenableBuilder<bool>(
-                valueListenable: AppSurfaceSettings.contentFollowGlobal,
-                builder: (context, follow, _) => AppSettingSwitchTile(
-                  title: '跟随全局样式',
-                  subtitle: follow
-                      ? '列表外框、逐行卡片、首页卡片的底色/描边/投影用全局样式；加框方式仍在上面「内容框」里选'
-                      : '用上面「内容框」的颜色和深浅（原来的样子）',
-                  value: follow,
-                  onChanged: AppSurfaceSettings.setContentFollowGlobal,
+              ValueListenableBuilder<SurfaceStyle>(
+                valueListenable: AppSurfaceSettings.style,
+                builder: (context, style, _) => _SurfaceStyleEditor(
+                  style: style,
+                  onChanged: AppSurfaceSettings.setStyle,
                 ),
               ),
             ],
@@ -858,8 +751,8 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
   }
 }
 
-/// 一组「表面样式」的编辑项：底色、深浅、厚度、描边、描边颜色、描边深浅。
-/// 全局和各区域共用这一个编辑器，参数含义处处一致。
+/// 「边框设置」：从上到下 框的样式 → 框的颜色 → 框里面的底色 → 深浅 → 厚度。
+/// 首页最新歌曲、歌曲列表、播放条、导航栏共用这一套。
 class _SurfaceStyleEditor extends StatelessWidget {
   const _SurfaceStyleEditor({required this.style, required this.onChanged});
 
@@ -877,50 +770,40 @@ class _SurfaceStyleEditor extends StatelessWidget {
         : Colors.black.withValues(alpha: 0.28);
     return Column(
       children: [
-        _ColorSettingTile(
-          title: '底色',
-          subtitle: style.color == null ? '跟随主题，点击自定义' : '自定义颜色，长按恢复跟随主题',
-          color: style.color ?? fillFallback,
-          onPick: () => _showColorPickerDialog(
-            context,
-            initial: style.color ?? fillFallback,
-            onSelected: (c) => onChanged(
-              c == null
-                  ? style.copyWith(clearColor: true)
-                  : style.copyWith(color: c),
+        // 1. 框的样式：三选一，不加框时底栏也不描边。
+        ValueListenableBuilder<AppContentFrameStyle>(
+          valueListenable: AppBackgroundSettings.contentFrameStyle,
+          builder: (context, current, _) => Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '框的样式',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: SegmentedButton<AppContentFrameStyle>(
+                    showSelectedIcon: false,
+                    segments: [
+                      for (final s in AppContentFrameStyle.values)
+                        ButtonSegment(value: s, label: Text(s.label)),
+                    ],
+                    selected: {current},
+                    onSelectionChanged: (sel) =>
+                        AppSurfaceSettings.setFrameStyle(sel.first),
+                  ),
+                ),
+              ],
             ),
           ),
-          onReset: style.color == null
-              ? null
-              : () => onChanged(style.copyWith(clearColor: true)),
         ),
-        AppSettingSlider(
-          title: '深浅',
-          description: '底色的不透明度，越高越实',
-          value: style.opacity,
-          min: 0.05,
-          max: 1.0,
-          valueText: '${(style.opacity * 100).round()}%',
-          onChanged: (v) => onChanged(style.copyWith(opacity: v)),
-        ),
-        AppSettingSlider(
-          title: '厚度',
-          description: '投影深浅，越高越有立体感；0 = 不要投影',
-          value: style.thickness,
-          min: 0,
-          max: 1.0,
-          valueText: '${(style.thickness * 100).round()}%',
-          onChanged: (v) => onChanged(style.copyWith(thickness: v)),
-        ),
-        AppSettingSwitchTile(
-          title: '描边',
-          subtitle: style.frame ? '画一圈描边，和背景分得开' : '不画描边，只靠底色和投影',
-          value: style.frame,
-          onChanged: (v) => onChanged(style.copyWith(frame: v)),
-        ),
-        if (style.frame) ...[
+        // 2. 框的颜色（不加框时没意义，收起）。
+        if (style.frame)
           _ColorSettingTile(
-            title: '描边颜色',
+            title: '框的颜色',
             subtitle: style.frameColor == null ? '默认发丝色，点击自定义' : '自定义颜色，长按恢复默认',
             color: style.frameColor ?? frameFallback,
             onPick: () => _showColorPickerDialog(
@@ -936,16 +819,45 @@ class _SurfaceStyleEditor extends StatelessWidget {
                 ? null
                 : () => onChanged(style.copyWith(clearFrameColor: true)),
           ),
-          AppSettingSlider(
-            title: '描边深浅',
-            description: '描边的浓淡，越高越明显',
-            value: style.frameOpacity,
-            min: 0.05,
-            max: 1.0,
-            valueText: '${(style.frameOpacity * 100).round()}%',
-            onChanged: (v) => onChanged(style.copyWith(frameOpacity: v)),
+        // 3. 框里面的底色。
+        _ColorSettingTile(
+          title: '框里面的底色',
+          subtitle: style.color == null ? '跟随主题，点击自定义' : '自定义颜色，长按恢复跟随主题',
+          color: style.color ?? fillFallback,
+          onPick: () => _showColorPickerDialog(
+            context,
+            initial: style.color ?? fillFallback,
+            onSelected: (c) => onChanged(
+              c == null
+                  ? style.copyWith(clearColor: true)
+                  : style.copyWith(color: c),
+            ),
           ),
-        ],
+          onReset: style.color == null
+              ? null
+              : () => onChanged(style.copyWith(clearColor: true)),
+        ),
+        // 4. 深浅：框和底色一起变浓 / 变淡，一个滑块管两样。
+        AppSettingSlider(
+          title: '深浅',
+          description: '框和底色一起变浓或变淡',
+          value: style.opacity,
+          min: 0.05,
+          max: 1.0,
+          valueText: '${(style.opacity * 100).round()}%',
+          onChanged: (v) =>
+              onChanged(style.copyWith(opacity: v, frameOpacity: v)),
+        ),
+        // 5. 厚度：投影。
+        AppSettingSlider(
+          title: '厚度',
+          description: '投影深浅，越高越立体；0 = 不要投影',
+          value: style.thickness,
+          min: 0,
+          max: 1.0,
+          valueText: '${(style.thickness * 100).round()}%',
+          onChanged: (v) => onChanged(style.copyWith(thickness: v)),
+        ),
       ],
     );
   }
