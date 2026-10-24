@@ -857,7 +857,7 @@ class _TrendBarChartState extends State<_TrendBarChart> {
     final bars = widget.bars;
     final maxVal = bars.fold<int>(0, (m, b) => b.value > m ? b.value : m);
     final hasData = maxVal > 0;
-    const chartHeight = 84.0;
+    const chartHeight = 56.0;
 
     final todayIndex = bars.indexWhere((b) => b.highlight);
     final focusIndex = _selected ?? (todayIndex >= 0 ? todayIndex : null);

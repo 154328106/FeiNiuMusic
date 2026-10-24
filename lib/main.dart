@@ -85,6 +85,10 @@ Future<void> main() async {
       manualTabletMode: AppLayoutSettings.tabletMode.value,
     ),
   );
+  // 边到边：Android 15(API 35)强制边到边且忽略 systemNavigationBarColor，
+  // 不显式开的话底部手势条区域会露出窗口默认背景，深色模式下表现成「最下面
+  // 一条白」。开 edgeToEdge 让内容铺到底，配合导航栏透明(见 app.dart)即可。
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   // 必须先恢复认证信息（token / 服务器地址）再初始化播放相关服务：
   // MediaNotificationService.init() 会实例化 PlayerService，其启动恢复流程
   // （含「进入应用自动播放」）依赖 FeiNiuApiClient.baseUrl 已就绪，

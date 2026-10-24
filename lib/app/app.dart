@@ -197,7 +197,10 @@ class FeiNiuMusicApp extends StatelessWidget {
                           builder: (context, child) {
                             final theme = Theme.of(context);
                             final isDark = theme.brightness == Brightness.dark;
-                            final navColor = theme.colorScheme.surface;
+                            // 边到边下导航栏设透明：Android 15 会忽略它给的颜色、
+                            // 强制透明；给透明 + 全局 edgeToEdge（见 main.dart），
+                            // 内容/窗口背景直接铺到底，深色模式不再露白条。只保留
+                            // 图标亮度，让手势条上的图标在深浅底上都看得清。
                             final overlay = SystemUiOverlayStyle(
                               statusBarColor: Colors.transparent,
                               statusBarIconBrightness: isDark
@@ -206,11 +209,11 @@ class FeiNiuMusicApp extends StatelessWidget {
                               statusBarBrightness: isDark
                                   ? Brightness.dark
                                   : Brightness.light,
-                              systemNavigationBarColor: navColor,
+                              systemNavigationBarColor: Colors.transparent,
                               systemNavigationBarIconBrightness: isDark
                                   ? Brightness.light
                                   : Brightness.dark,
-                              systemNavigationBarDividerColor: navColor,
+                              systemNavigationBarDividerColor: Colors.transparent,
                             );
                             Widget content =
                                 AnnotatedRegion<SystemUiOverlayStyle>(

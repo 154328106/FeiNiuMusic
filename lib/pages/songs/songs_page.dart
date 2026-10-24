@@ -79,6 +79,16 @@ class _SongsPageState extends State<SongsPage>
     scheduleDeferredInit();
     _listController.addListener(_handleScroll);
     PlayerService.instance.currentSong.addListener(_handlePlayerSongChanged);
+    // 监听源切换 / 内容变更（登录登出）：首次打开时歌曲页可能在源就绪前就
+    // 加载过一次（空），之后切源 / 登录都得跟着重拉，否则就是「选了源首页有歌、
+    // 歌曲页空白，非得推后台再进才有」。
+    MusicSourceRegistry.instance.current.addListener(_onSourceChanged);
+    MusicSourceRegistry.instance.revision.addListener(_onSourceChanged);
+  }
+
+  void _onSourceChanged() {
+    if (!mounted) return;
+    _loadSongs();
   }
 
   @override
@@ -98,6 +108,8 @@ class _SongsPageState extends State<SongsPage>
   @override
   void dispose() {
     PlayerService.instance.currentSong.removeListener(_handlePlayerSongChanged);
+    MusicSourceRegistry.instance.current.removeListener(_onSourceChanged);
+    MusicSourceRegistry.instance.revision.removeListener(_onSourceChanged);
     _listController.removeListener(_handleScroll);
     _listController.dispose();
     super.dispose();
