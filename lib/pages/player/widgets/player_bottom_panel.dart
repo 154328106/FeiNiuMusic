@@ -599,24 +599,8 @@ class BottomActions extends StatelessWidget {
                   if (PlayerBottomActionSettings.showMore.value) {
                     actions.add(
                       IconButton(
-                        // 「更多」重画：竖着的三点 + 小圆角描边框。
-                        icon: Container(
-                          width: 26,
-                          height: 26,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(7),
-                            border: Border.all(
-                              color: iconColor.withValues(alpha: 0.55),
-                              width: 1.4,
-                            ),
-                          ),
-                          alignment: Alignment.center,
-                          child: Icon(
-                            Icons.more_vert_rounded,
-                            size: 18,
-                            color: iconColor,
-                          ),
-                        ),
+                        // 「更多」换成四宫格图标，和旁边一样大、不加框不整大。
+                        icon: Icon(Icons.grid_view_rounded, color: iconColor),
                         onPressed: () => _showSongDetailSheet(context),
                       ),
                     );
