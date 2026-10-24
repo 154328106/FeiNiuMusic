@@ -835,6 +835,23 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
               ),
             ],
           ),
+          const SizedBox(height: 16),
+          AppSettingSection(
+            title: '统一样式 · 列表与卡片',
+            children: [
+              ValueListenableBuilder<bool>(
+                valueListenable: AppSurfaceSettings.contentFollowGlobal,
+                builder: (context, follow, _) => AppSettingSwitchTile(
+                  title: '跟随全局样式',
+                  subtitle: follow
+                      ? '列表外框、逐行卡片、首页卡片的底色/描边/投影用全局样式；加框方式仍在上面「内容框」里选'
+                      : '用上面「内容框」的颜色和深浅（原来的样子）',
+                  value: follow,
+                  onChanged: AppSurfaceSettings.setContentFollowGlobal,
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );

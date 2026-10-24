@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/state/settings_background_state.dart';
+import '../../app/state/settings_surface_state.dart';
 
 /// 列表区块的「加框」方式。
 enum AppContentFrameStyle {
@@ -32,9 +33,60 @@ enum AppContentFrameStyle {
       );
 }
 
+/// 「列表与卡片」跟随全局时的描边色；全局关了描边返回 null。
+///
+/// [accent] 是卡片自己的色相（没自定义描边色时用），alpha 0.3 × 全局描边深浅
+/// 0.5 ≈ 原来内容框默认的 0.15。
+Color? _globalFrameColor(
+  BuildContext context,
+  SurfaceStyle s, {
+  Color? accent,
+  double scale = 1.0,
+}) {
+  final c = SurfacePaint.frameColor(
+    context,
+    s,
+    fallback: accent?.withValues(alpha: 0.3),
+  );
+  return c?.withValues(alpha: (c.a * scale).clamp(0.0, 1.0));
+}
+
+/// 逐行卡片 / 独立卡片的底色：跟随全局时走 [SurfacePaint.fill]，否则原来的值。
+Color _cardFill(BuildContext context) {
+  final s = AppSurfaceSettings.contentStyle;
+  if (s != null) return SurfacePaint.fill(context, s);
+  final theme = Theme.of(context);
+  return theme.brightness == Brightness.dark
+      ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45)
+      : Colors.white.withValues(alpha: 0.75);
+}
+
+/// 卡片投影：跟随全局时按「厚度」缩小一档（列表一大片，用底栏那么重会糊）。
+List<BoxShadow> _cardShadow(
+  BuildContext context, {
+  required double darkAlpha,
+  required double blur,
+  required double dy,
+}) {
+  final s = AppSurfaceSettings.contentStyle;
+  if (s != null) return SurfacePaint.shadow(context, s, scale: 0.5);
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  return [
+    BoxShadow(
+      color: Colors.black.withValues(alpha: isDark ? darkAlpha : 0.05),
+      blurRadius: blur,
+      offset: Offset(0, dy),
+    ),
+  ];
+}
+
 /// 描边实际用色：优先自定义颜色，否则跟随主题的 outlineVariant；
-/// 两种情况都再乘上用户设定的不透明度。
+/// 两种情况都再乘上用户设定的不透明度。跟随全局时改用全局描边。
 Color _frameBorderColor(BuildContext context, {double scale = 1.0}) {
+  final g = AppSurfaceSettings.contentStyle;
+  if (g != null) {
+    return _globalFrameColor(context, g, scale: scale) ?? Colors.transparent;
+  }
   final scheme = Theme.of(context).colorScheme;
   final custom = AppBackgroundSettings.contentFrameColor.value;
   final opacity = (AppBackgroundSettings.contentFrameOpacity.value * scale)
@@ -48,6 +100,8 @@ Widget _watchFrameSettings(BuildContext context, WidgetBuilder builder) {
     listenable: Listenable.merge([
       AppBackgroundSettings.contentFrameColor,
       AppBackgroundSettings.contentFrameOpacity,
+      AppSurfaceSettings.contentFollowGlobal,
+      AppSurfaceSettings.global,
     ]),
     builder: (context, _) => builder(context),
   );
@@ -68,6 +122,11 @@ BoxBorder? appUnitBorder(
 }) {
   final style = AppBackgroundSettings.contentFrameStyle.value;
   if (style == AppContentFrameStyle.none) return null;
+  final g = AppSurfaceSettings.contentStyle;
+  if (g != null) {
+    final c = _globalFrameColor(context, g, accent: accent, scale: scale);
+    return c == null ? null : Border.all(color: c);
+  }
   final custom = AppBackgroundSettings.contentFrameColor.value;
   final base = custom ?? accent ?? Theme.of(context).colorScheme.outlineVariant;
   final opacity = (AppBackgroundSettings.contentFrameOpacity.value * scale)
@@ -87,6 +146,11 @@ Color appUnitBorderColor(
 }) {
   final style = AppBackgroundSettings.contentFrameStyle.value;
   if (style == AppContentFrameStyle.none) return Colors.transparent;
+  final g = AppSurfaceSettings.contentStyle;
+  if (g != null) {
+    return _globalFrameColor(context, g, accent: accent, scale: scale) ??
+        Colors.transparent;
+  }
   final custom = AppBackgroundSettings.contentFrameColor.value;
   final base = custom ?? accent ?? Theme.of(context).colorScheme.outlineVariant;
   final opacity = (AppBackgroundSettings.contentFrameOpacity.value * scale)
@@ -109,6 +173,8 @@ class AppUnitFrameBuilder extends StatelessWidget {
         AppBackgroundSettings.contentFrameStyle,
         AppBackgroundSettings.contentFrameColor,
         AppBackgroundSettings.contentFrameOpacity,
+        AppSurfaceSettings.contentFollowGlobal,
+        AppSurfaceSettings.global,
       ]),
       builder: (context, _) => builder(context),
     );
@@ -144,32 +210,23 @@ class AppContentFrame extends StatelessWidget {
         if (style == AppContentFrameStyle.none) return child!;
         if (style == AppContentFrameStyle.cards && wrapsRows) return child!;
         return _watchFrameSettings(context, (context) {
-          final theme = Theme.of(context);
-          final isDark = theme.brightness == Brightness.dark;
           // 「逐行卡片」下，独立区块（漫游卡、快捷入口）也要有卡片外观 ——
           // 它们不是列表行，走不到 AppContentRow，只靠这里出框。
           final isCards = style == AppContentFrameStyle.cards;
           return Container(
             decoration: BoxDecoration(
-              color: isCards
-                  ? (isDark
-                        ? theme.colorScheme.surfaceContainerHighest.withValues(
-                            alpha: 0.45,
-                          )
-                        : Colors.white.withValues(alpha: 0.75))
-                  : null,
+              color: isCards ? _cardFill(context) : null,
               borderRadius: BorderRadius.circular(borderRadius),
               border: Border.all(
                 color: _frameBorderColor(context, scale: isCards ? 0.75 : 1.0),
                 width: isCards ? 1 : 1.2,
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: isDark ? 0.20 : 0.05),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
+              boxShadow: _cardShadow(
+                context,
+                darkAlpha: 0.20,
+                blur: 12,
+                dy: 4,
+              ),
             ),
             // 描边是圆角的，内容也要跟着裁，否则行的点击高亮会顶出圆角。
             child: ClipRRect(
@@ -214,9 +271,6 @@ class AppContentRow extends StatelessWidget {
       builder: (context, style, child) {
         if (style == AppContentFrameStyle.none) return child!;
         return _watchFrameSettings(context, (context) {
-          final theme = Theme.of(context);
-          final scheme = theme.colorScheme;
-          final isDark = theme.brightness == Brightness.dark;
           switch (style) {
             case AppContentFrameStyle.none:
               return child!;
@@ -242,23 +296,18 @@ class AppContentRow extends StatelessWidget {
                 padding: EdgeInsets.only(bottom: isLast ? 0 : 8),
                 child: Container(
                   decoration: BoxDecoration(
-                    color: isDark
-                        ? scheme.surfaceContainerHighest.withValues(alpha: 0.45)
-                        : Colors.white.withValues(alpha: 0.75),
+                    color: _cardFill(context),
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
                       color: _frameBorderColor(context, scale: 0.75),
                       width: 1,
                     ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(
-                          alpha: isDark ? 0.18 : 0.05,
-                        ),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
+                    boxShadow: _cardShadow(
+                      context,
+                      darkAlpha: 0.18,
+                      blur: 8,
+                      dy: 2,
+                    ),
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(13),

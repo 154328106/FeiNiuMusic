@@ -225,7 +225,9 @@ class MiniPlayerBar extends StatelessWidget {
           // 24% 会成一片白雾。现在底下垫了和底栏同款的底板，白雾问题由底板
           // 兜住，着色就该跟底栏对齐；否则底栏是块亮底板、播放栏是块近乎全透
           // 的玻璃，摆一起就是两样东西（用户原话：感觉不搭配、播放的也是黑的）。
-          settings: appGlassSurfaceSettings(),
+          settings: appGlassSurfaceSettings(
+            glassColor: style.color?.withValues(alpha: style.opacity * 0.5),
+          ),
           // 独立渲染层 + 与全局主题一致的 standard 质量（0.30.2 Skia 路径下
           // premium 需要 blend group 多通道，且滚动时整条全宽面板逐帧重采样，
           // 是滚动黑屏闪烁/掉帧的主要来源；Windows 端本就静态封顶 standard，

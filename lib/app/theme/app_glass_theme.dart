@@ -85,9 +85,12 @@ GlassThemeData appGlassTheme(Color seed) {
 /// 需要显式传参的地方一律改用这个函数，并记得挂 [appGlassTunables] 重建。
 LiquidGlassSettings appGlassSurfaceSettings({Color? glassColor}) {
   final base = AppGlassSettings.glassLens.value
-      // 透镜模式：模糊会把折射抹平，必须归零；厚度/折射率拉高让弯曲看得出来。
+      // 透镜模式：模糊压到极小，厚度/折射率拉高让弯曲看得出来。
+      // 模糊**不能是 0**：包里 AdaptiveGlass 遇到 effectiveBlur == 0 直接走
+      // _FrostedFallback（无 shader），折射/高光整个没了，表现为全透明一块。
+      // 厚度 = 折射斜面宽度（px），45 > 半个条高 28，整条都是透镜。
       ? kAppGlassSurfaceSettings.copyWith(
-          blur: 0,
+          blur: 0.5,
           thickness: 45,
           refractiveIndex: 1.9,
           chromaticAberration: 0.5,

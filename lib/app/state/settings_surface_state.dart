@@ -111,6 +111,7 @@ class AppSurfaceSettings {
   static const _prefsGlobal = 'surface_style_global';
   static const _prefsBottomFollow = 'surface_bottom_follow_global';
   static const _prefsBottomThickness = 'surface_bottom_thickness';
+  static const _prefsContentFollow = 'surface_content_follow_global';
 
   static final ValueNotifier<SurfaceStyle> global = ValueNotifier(
     const SurfaceStyle(),
@@ -121,6 +122,16 @@ class AppSurfaceSettings {
 
   /// 底部栏自己的厚度（其余字段在 AppBackgroundSettings.navBar* 里）。
   static final ValueNotifier<double> bottomBarThickness = ValueNotifier(0.5);
+
+  /// 列表与卡片（列表外框、逐行卡片、首页四宫格/快捷卡）是否跟随全局。
+  /// 默认 false：不跟随时完全是原来「内容框」那组设置的样子。加框方式
+  /// （不加框 / 整块描边 / 逐行卡片）始终归「内容框」管，跟随只换颜色、
+  /// 深浅、描边和投影。
+  static final ValueNotifier<bool> contentFollowGlobal = ValueNotifier(false);
+
+  /// 跟随全局时返回全局样式，否则 null（调用方走原来的内容框设置）。
+  static SurfaceStyle? get contentStyle =>
+      contentFollowGlobal.value ? global.value : null;
 
   static Future<void>? _loading;
   static Future<void> ensureLoaded() => _loading ??= _load();
@@ -137,6 +148,7 @@ class AppSurfaceSettings {
       bottomBarFollowGlobal.value = prefs.getBool(_prefsBottomFollow) ?? false;
       bottomBarThickness.value = (prefs.getDouble(_prefsBottomThickness) ?? 0.5)
           .clamp(0.0, 1.0);
+      contentFollowGlobal.value = prefs.getBool(_prefsContentFollow) ?? false;
     } catch (_) {
       // 读坏了就用默认值，别卡启动。
     }
@@ -173,6 +185,14 @@ class AppSurfaceSettings {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_prefsGlobal, jsonEncode(s.toJson()));
+    } catch (_) {}
+  }
+
+  static Future<void> setContentFollowGlobal(bool v) async {
+    contentFollowGlobal.value = v;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefsContentFollow, v);
     } catch (_) {}
   }
 
@@ -236,7 +256,10 @@ class SurfacePaint {
   /// 玻璃模式下垫在玻璃后面的底板（深浅跟着 opacity 走）。
   static Color glassPlate(BuildContext context, SurfaceStyle s) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final base = appGlassPlateColor(isDark);
+    final def = appGlassPlateColor(isDark);
+    // 自定义了底色就用它垫底板（透明度沿用默认底板那一档）：以前底板写死
+    // 白/黑，只有导航的玻璃着色吃底色，播放条改色看不出变化。
+    final base = s.color?.withValues(alpha: def.a) ?? def;
     // 透镜模式：底板只留一丝，不然玻璃折射的是底板而不是后面的内容。
     final lens = AppGlassSettings.glassLens.value ? 0.12 : 1.0;
     return base.withValues(
@@ -266,17 +289,26 @@ class SurfacePaint {
   static double frameWidth(SurfaceStyle s) => s.frameColor == null ? 1.2 : 1.6;
 
   /// 投影：深浅跟着「厚度」和底色深浅走。厚度 0.5 = 原来的默认投影。
-  static List<BoxShadow> shadow(BuildContext context, SurfaceStyle s) {
+  ///
+  /// [scale] 整体缩小投影：列表行、卡片是一大片，用底栏那么重的投影会糊成一团。
+  static List<BoxShadow> shadow(
+    BuildContext context,
+    SurfaceStyle s, {
+    double scale = 1.0,
+  }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final k = s.thickness * 2; // 0 ~ 2
     if (k <= 0) return const [];
     return [
       BoxShadow(
         color: Colors.black.withValues(
-          alpha: ((isDark ? 0.40 : 0.20) * s.opacity * k).clamp(0.0, 1.0),
+          alpha: ((isDark ? 0.40 : 0.20) * s.opacity * k * scale).clamp(
+            0.0,
+            1.0,
+          ),
         ),
-        blurRadius: 10 + 10 * k,
-        offset: Offset(0, 2 + 4 * k),
+        blurRadius: (10 + 10 * k) * scale,
+        offset: Offset(0, (2 + 4 * k) * scale),
       ),
     ];
   }
