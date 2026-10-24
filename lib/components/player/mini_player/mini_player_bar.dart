@@ -234,7 +234,7 @@ class MiniPlayerBar extends StatelessWidget {
           // 此改动仅影响 macOS 观感——折射略弱）。如偏好更通透的折射可改回
           // premium，但需接受滚动时的重采样开销。
           useOwnLayer: true,
-          quality: appGlassBarQuality,
+          quality: GlassQuality.standard,
           child: const SizedBox.expand(),
         );
 

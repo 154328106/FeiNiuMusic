@@ -6,12 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../components/common/content_frame.dart';
 import '../theme/app_glass_theme.dart';
 import 'settings_background_state.dart';
-import 'settings_glass_state.dart';
 
-/// 一块「表面」（底栏、卡片…）的外观：底色、深浅、厚度、描边。
-///
-/// 统一管理外观的基础：每个区域（底部栏 / 列表卡片 / 首页…）用同一套参数，
-/// 可以各自调，也可以「跟随全局」。
+/// 能加框的单元（最新歌曲、歌曲列表、播放条、导航栏）的外观。
 @immutable
 class SurfaceStyle {
   const SurfaceStyle({
@@ -21,25 +17,29 @@ class SurfaceStyle {
     this.frame = true,
     this.frameColor,
     this.frameOpacity = 0.5,
+    this.frameThickness = 0.28,
   });
 
-  /// 底色。null = 跟随主题。
+  /// 框里面的底色。null = 跟随主题。
   final Color? color;
 
-  /// 底色深浅（不透明度）0.05~1。
+  /// 框内深浅（底色不透明度）0.05~1。
   final double opacity;
 
-  /// 厚度 0~1：普通模式下是投影深浅（0.5 = 原来的默认投影）。
+  /// 框内厚度 0~1：投影深浅（0.5 = 原来的默认投影）。
   final double thickness;
 
-  /// 是否描边。
+  /// 是否加框。
   final bool frame;
 
-  /// 描边颜色。null = 默认发丝色。
+  /// 框的颜色。null = 默认发丝色。
   final Color? frameColor;
 
-  /// 描边深浅，乘在描边颜色自带的透明度上。
+  /// 框的深浅，乘在框颜色自带的透明度上。
   final double frameOpacity;
+
+  /// 框的厚度 0~1 → 描边 0.5~3px（见 [SurfacePaint.frameWidth]）。
+  final double frameThickness;
 
   SurfaceStyle copyWith({
     Color? color,
@@ -50,6 +50,7 @@ class SurfaceStyle {
     Color? frameColor,
     bool clearFrameColor = false,
     double? frameOpacity,
+    double? frameThickness,
   }) {
     return SurfaceStyle(
       color: clearColor ? null : (color ?? this.color),
@@ -58,6 +59,7 @@ class SurfaceStyle {
       frame: frame ?? this.frame,
       frameColor: clearFrameColor ? null : (frameColor ?? this.frameColor),
       frameOpacity: frameOpacity ?? this.frameOpacity,
+      frameThickness: frameThickness ?? this.frameThickness,
     );
   }
 
@@ -68,6 +70,7 @@ class SurfaceStyle {
     'frame': frame,
     'frameColor': frameColor?.toARGB32(),
     'frameOpacity': frameOpacity,
+    'frameThickness': frameThickness,
   };
 
   static SurfaceStyle fromJson(Map<String, dynamic> j) {
@@ -82,6 +85,7 @@ class SurfaceStyle {
       frame: j['frame'] is bool ? j['frame'] as bool : true,
       frameColor: fc is int ? Color(fc) : null,
       frameOpacity: d('frameOpacity', 0.5),
+      frameThickness: d('frameThickness', 0.28),
     );
   }
 
@@ -93,11 +97,19 @@ class SurfaceStyle {
       other.thickness == thickness &&
       other.frame == frame &&
       other.frameColor == frameColor &&
-      other.frameOpacity == frameOpacity;
+      other.frameOpacity == frameOpacity &&
+      other.frameThickness == frameThickness;
 
   @override
-  int get hashCode =>
-      Object.hash(color, opacity, thickness, frame, frameColor, frameOpacity);
+  int get hashCode => Object.hash(
+    color,
+    opacity,
+    thickness,
+    frame,
+    frameColor,
+    frameOpacity,
+    frameThickness,
+  );
 }
 
 /// 「边框与底色」：所有能加框的单元（首页最新歌曲、歌曲列表、播放条、导航栏）
@@ -211,11 +223,7 @@ class SurfacePaint {
     // 自定义了底色就用它垫底板（透明度沿用默认底板那一档）：以前底板写死
     // 白/黑，只有导航的玻璃着色吃底色，播放条改色看不出变化。
     final base = s.color?.withValues(alpha: def.a) ?? def;
-    // 透镜模式：底板只留一丝，不然玻璃折射的是底板而不是后面的内容。
-    final lens = AppGlassSettings.glassLens.value ? 0.12 : 1.0;
-    return base.withValues(
-      alpha: (base.a * s.opacity * lens).clamp(0.0, 1.0),
-    );
+    return base.withValues(alpha: (base.a * s.opacity).clamp(0.0, 1.0));
   }
 
   /// 描边颜色；不描边返回 null。[fallback] = 没自定义时的默认色（玻璃底板有
@@ -236,8 +244,8 @@ class SurfacePaint {
     return base.withValues(alpha: (base.a * s.frameOpacity).clamp(0.0, 1.0));
   }
 
-  /// 描边宽度：自定义颜色时略粗，不然调了颜色也看不出来。
-  static double frameWidth(SurfaceStyle s) => s.frameColor == null ? 1.2 : 1.6;
+  /// 描边宽度（「框的厚度」）：0.5 ~ 3px，默认 0.28 ≈ 原来的 1.2px。
+  static double frameWidth(SurfaceStyle s) => 0.5 + 2.5 * s.frameThickness;
 
   /// 投影：深浅跟着「厚度」和底色深浅走。厚度 0.5 = 原来的默认投影。
   ///

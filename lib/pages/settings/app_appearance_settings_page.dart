@@ -332,7 +332,7 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
             },
           ),
           const SizedBox(height: 16),
-          AppSettingSection(
+          AppCollapsibleSettingSection(
             title: '外观设置',
             children: [
               ValueListenableBuilder<bool>(
@@ -369,7 +369,9 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                   return ValueListenableBuilder<Color?>(
                     valueListenable: AppThemeSettings.themeSeedColor,
                     builder: (context, seedColor, _) {
+                      // 白色顶掉了原来和蓝色太像的靛蓝。
                       final colors = [
+                        const Color(0xFFFFFFFF),
                         const Color(0xFF3B82F6),
                         const Color(0xFF22C55E),
                         const Color(0xFFA855F7),
@@ -377,7 +379,6 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                         const Color(0xFFEF4444),
                         const Color(0xFFEC4899),
                         const Color(0xFF14B8A6),
-                        const Color(0xFF6366F1),
                       ];
                       return Padding(
                         padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -451,6 +452,12 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                                         decoration: BoxDecoration(
                                           color: color,
                                           shape: BoxShape.circle,
+                                          // 白色圆点在浅色背景上看不见，描一圈。
+                                          border: Border.all(
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.outlineVariant,
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -644,7 +651,7 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
           ),
           const SizedBox(height: 16),
           // 玻璃效果：导航栏和播放条用同一个开关、同一组参数。
-          AppSettingSection(
+          AppCollapsibleSettingSection(
             title: '玻璃效果（导航栏 + 播放条）',
             children: [
               // 液体玻璃：与「高斯模糊」互斥。开启时各界面使用液体玻璃材质
@@ -711,19 +718,6 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                           );
                         },
                       ),
-                      ValueListenableBuilder<bool>(
-                        valueListenable: AppGlassSettings.glassLens,
-                        builder: (context, lens, _) {
-                          return AppSettingSwitchTile(
-                            title: '透镜模式',
-                            subtitle: lens
-                                ? '几乎全透明，后面的内容会被玻璃弯折；上面两项暂不生效'
-                                : '开启后像透镜一样折射后面的内容',
-                            value: lens,
-                            onChanged: AppGlassSettings.setGlassLens,
-                          );
-                        },
-                      ),
                     ],
                   );
                 },
@@ -733,7 +727,7 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
           const SizedBox(height: 16),
           // 边框与底色：所有能加框的单元共用一套（首页最新歌曲、歌曲列表、
           // 播放条、导航栏）。见 AppSurfaceSettings。
-          AppSettingSection(
+          AppCollapsibleSettingSection(
             title: '边框设置',
             children: [
               ValueListenableBuilder<SurfaceStyle>(
@@ -751,7 +745,8 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
   }
 }
 
-/// 「边框设置」：从上到下 框的样式 → 框的颜色 → 框里面的底色 → 深浅 → 厚度。
+/// 「边框设置」：框的样式 → 框的颜色 → 框里面的底色 → 四个滑条
+/// （框的深浅 / 框的厚度 / 框内深浅 / 框内厚度）。
 /// 首页最新歌曲、歌曲列表、播放条、导航栏共用这一套。
 class _SurfaceStyleEditor extends StatelessWidget {
   const _SurfaceStyleEditor({required this.style, required this.onChanged});
@@ -770,7 +765,7 @@ class _SurfaceStyleEditor extends StatelessWidget {
         : Colors.black.withValues(alpha: 0.28);
     return Column(
       children: [
-        // 1. 框的样式：三选一，不加框时底栏也不描边。
+        // 框的样式：三选一，不加框时底栏也不描边。
         ValueListenableBuilder<AppContentFrameStyle>(
           valueListenable: AppBackgroundSettings.contentFrameStyle,
           builder: (context, current, _) => Padding(
@@ -800,11 +795,9 @@ class _SurfaceStyleEditor extends StatelessWidget {
             ),
           ),
         ),
-        // 2. 框的颜色（不加框时没意义，收起）。
         if (style.frame)
           _ColorSettingTile(
             title: '框的颜色',
-            subtitle: style.frameColor == null ? '默认发丝色，点击自定义' : '自定义颜色，长按恢复默认',
             color: style.frameColor ?? frameFallback,
             onPick: () => _showColorPickerDialog(
               context,
@@ -819,10 +812,8 @@ class _SurfaceStyleEditor extends StatelessWidget {
                 ? null
                 : () => onChanged(style.copyWith(clearFrameColor: true)),
           ),
-        // 3. 框里面的底色。
         _ColorSettingTile(
           title: '框里面的底色',
-          subtitle: style.color == null ? '跟随主题，点击自定义' : '自定义颜色，长按恢复跟随主题',
           color: style.color ?? fillFallback,
           onPick: () => _showColorPickerDialog(
             context,
@@ -837,28 +828,83 @@ class _SurfaceStyleEditor extends StatelessWidget {
               ? null
               : () => onChanged(style.copyWith(clearColor: true)),
         ),
-        // 4. 深浅：框和底色一起变浓 / 变淡，一个滑块管两样。
-        AppSettingSlider(
-          title: '深浅',
-          description: '框和底色一起变浓或变淡',
+        const SizedBox(height: 4),
+        if (style.frame) ...[
+          _InlineSlider(
+            title: '框的深浅',
+            value: style.frameOpacity,
+            min: 0.05,
+            onChanged: (v) => onChanged(style.copyWith(frameOpacity: v)),
+          ),
+          _InlineSlider(
+            title: '框的厚度',
+            value: style.frameThickness,
+            onChanged: (v) => onChanged(style.copyWith(frameThickness: v)),
+          ),
+        ],
+        _InlineSlider(
+          title: '框内深浅',
           value: style.opacity,
           min: 0.05,
-          max: 1.0,
-          valueText: '${(style.opacity * 100).round()}%',
-          onChanged: (v) =>
-              onChanged(style.copyWith(opacity: v, frameOpacity: v)),
+          onChanged: (v) => onChanged(style.copyWith(opacity: v)),
         ),
-        // 5. 厚度：投影。
-        AppSettingSlider(
-          title: '厚度',
-          description: '投影深浅，越高越立体；0 = 不要投影',
+        _InlineSlider(
+          title: '框内厚度',
           value: style.thickness,
-          min: 0,
-          max: 1.0,
-          valueText: '${(style.thickness * 100).round()}%',
           onChanged: (v) => onChanged(style.copyWith(thickness: v)),
         ),
+        const SizedBox(height: 8),
       ],
+    );
+  }
+}
+
+/// 一行：标题 + 短滑条 + 百分比。不要说明文字，省地方。
+class _InlineSlider extends StatelessWidget {
+  const _InlineSlider({
+    required this.title,
+    required this.value,
+    required this.onChanged,
+    this.min = 0,
+  });
+
+  final String title;
+  final double value;
+  final double min;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: SizedBox(
+        height: 40,
+        child: Row(
+          children: [
+            SizedBox(
+              width: 76,
+              child: Text(title, style: textTheme.bodyLarge),
+            ),
+            Expanded(
+              child: Slider(
+                value: value.clamp(min, 1.0),
+                min: min,
+                max: 1.0,
+                onChanged: onChanged,
+              ),
+            ),
+            SizedBox(
+              width: 40,
+              child: Text(
+                '${(value * 100).round()}%',
+                textAlign: TextAlign.end,
+                style: textTheme.bodySmall,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -879,7 +925,6 @@ Future<void> _showColorPickerDialog(
 /// 「颜色」设置条：右侧一块色卡，点击取色，长按恢复跟随主题。
 class _ColorSettingTile extends StatelessWidget {
   final String title;
-  final String subtitle;
   final Color color;
   final VoidCallback onPick;
 
@@ -888,7 +933,6 @@ class _ColorSettingTile extends StatelessWidget {
 
   const _ColorSettingTile({
     required this.title,
-    required this.subtitle,
     required this.color,
     required this.onPick,
     this.onReset,
@@ -901,7 +945,6 @@ class _ColorSettingTile extends StatelessWidget {
       onLongPress: onReset,
       child: AppSettingTile(
         title: title,
-        subtitle: subtitle,
         onTap: onPick,
         trailing: Container(
           width: 28,

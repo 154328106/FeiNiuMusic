@@ -84,7 +84,12 @@ BoxBorder? appUnitBorder(
   final style = AppBackgroundSettings.contentFrameStyle.value;
   if (style == AppContentFrameStyle.none) return null;
   final c = _unitFrameColor(context, accent: accent, scale: scale);
-  return c == null ? null : Border.all(color: c);
+  return c == null
+      ? null
+      : Border.all(
+          color: c,
+          width: SurfacePaint.frameWidth(AppSurfaceSettings.contentStyle),
+        );
 }
 
 /// 同 [appUnitBorder]，但只给颜色 —— 有些组件（如 GlassPanel）只收
@@ -161,7 +166,7 @@ class AppContentFrame extends StatelessWidget {
               borderRadius: BorderRadius.circular(borderRadius),
               border: Border.all(
                 color: _frameBorderColor(context, scale: isCards ? 0.75 : 1.0),
-                width: isCards ? 1 : 1.2,
+                width: SurfacePaint.frameWidth(AppSurfaceSettings.contentStyle),
               ),
               boxShadow: _cardShadow(context),
             ),
@@ -237,7 +242,9 @@ class AppContentRow extends StatelessWidget {
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
                       color: _frameBorderColor(context, scale: 0.75),
-                      width: 1,
+                      width: SurfacePaint.frameWidth(
+                        AppSurfaceSettings.contentStyle,
+                      ),
                     ),
                     boxShadow: _cardShadow(context),
                   ),

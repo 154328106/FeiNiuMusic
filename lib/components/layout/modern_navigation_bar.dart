@@ -398,7 +398,6 @@ class ModernNavigationBar extends StatelessWidget {
                 verticalPadding: 0,
                 horizontalPadding: 0,
                 indicatorColor: pillColor,
-                quality: appGlassBarQuality,
               ),
             ),
           ),

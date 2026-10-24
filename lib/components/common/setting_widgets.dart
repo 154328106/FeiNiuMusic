@@ -107,6 +107,55 @@ class AppSettingSection extends StatelessWidget {
   }
 }
 
+/// 可折叠的设置分组：标题是分组里的第一行，点一下展开，再点收起。
+/// 默认收着 —— 外观页项目多，全摊开要翻好几屏。
+class AppCollapsibleSettingSection extends StatefulWidget {
+  final String title;
+  final List<Widget> children;
+  final bool initiallyExpanded;
+
+  const AppCollapsibleSettingSection({
+    super.key,
+    required this.title,
+    required this.children,
+    this.initiallyExpanded = false,
+  });
+
+  @override
+  State<AppCollapsibleSettingSection> createState() =>
+      _AppCollapsibleSettingSectionState();
+}
+
+class _AppCollapsibleSettingSectionState
+    extends State<AppCollapsibleSettingSection> {
+  late bool _expanded = widget.initiallyExpanded;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppSettingSection(
+      children: [
+        AppSettingTile(
+          title: widget.title,
+          onTap: () => setState(() => _expanded = !_expanded),
+          trailing: AnimatedRotation(
+            turns: _expanded ? 0.5 : 0,
+            duration: const Duration(milliseconds: 200),
+            child: const Icon(Icons.expand_more_rounded),
+          ),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: _expanded
+              ? Column(children: widget.children)
+              : const SizedBox(width: double.infinity),
+        ),
+      ],
+    );
+  }
+}
+
 class AppSettingTile extends StatelessWidget {
   final String title;
   final String? subtitle;
