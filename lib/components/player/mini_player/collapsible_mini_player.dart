@@ -91,8 +91,9 @@ class _CollapsibleMiniPlayerState extends State<CollapsibleMiniPlayer> {
             final leftV = math.pow(v, 1.5).toDouble();
             final left = lerpDouble(widget.insetH, right - ball, leftV)!;
             final hRight = lerpDouble(pillH, ball, v)!;
-            // 左端只「稍微」变细：中段最细约为右端的 70%。
-            final taper = 1 - 0.3 * math.sin(math.pi * v);
+            // 头大脚小：中段左端最细约为右端的 45%，一眼看得出是锥形
+            // （70% 太含蓄、看着像在等高槽里滑；35% 又太尖）。
+            final taper = 1 - 0.55 * math.sin(math.pi * v);
             final hLeft = hRight * taper;
             final rRight = lerpDouble(widget.barRadius, hRight / 2, v)!
                 .clamp(0.0, hRight / 2);
