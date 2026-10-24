@@ -226,11 +226,7 @@ class FeiNiuMusicApp extends StatelessWidget {
                                 );
                             // 页面一滚就把迷你播放器收成球（见 MiniPlayerCollapse）。
                             // 挂在最外层，各页滚动通知都冒泡到这里。
-                            content = NotificationListener<ScrollNotification>(
-                              onNotification: (n) =>
-                                  MiniPlayerCollapse.instance.handle(n),
-                              child: content,
-                            );
+                            content = MiniPlayerCollapseHost(child: content);
                             // TV 模式：根焦点域（方向键遍历 + 快捷键）。
                             // 手机端 isTv=false，完全绕开，行为不变。
                             if (isTv) {

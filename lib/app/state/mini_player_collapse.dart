@@ -1,9 +1,9 @@
 import 'dart:async';
 
-import 'package:flutter/scheduler.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 
 import '../services/player_service.dart';
+import 'settings_state.dart';
 
 /// 迷你播放器「滚动时收成球、停下回条」的全局状态。
 ///
@@ -11,7 +11,8 @@ import '../services/player_service.dart';
 /// 导航条同时把右边让出来；停下约半秒再展开回条。
 ///
 /// 迷你条（在各页脚手架里）和导航条（在外壳里）不在同一棵子树，所以用一个全局
-/// [progress] 驱动：两边都读它，同一帧取同一个值，伸缩完全同步。
+/// [progress] 驱动：两边都读它，同一帧取同一个值，伸缩完全同步。进度由
+/// [MiniPlayerCollapseHost]（挂在 App 最外层）里的 AnimationController 推进。
 class MiniPlayerCollapse {
   MiniPlayerCollapse._();
   static final MiniPlayerCollapse instance = MiniPlayerCollapse._();
@@ -19,56 +20,57 @@ class MiniPlayerCollapse {
   /// true = 目标是球态。
   final ValueNotifier<bool> collapsed = ValueNotifier(false);
 
-  /// 线性进度 0（条）→ 1（球）。用的地方自己套曲线
-  /// （[curved]），保证中途反向时也连续不跳。
+  /// 线性进度 0（条）→ 1（球）。用的地方自己套曲线（[curved]），中途反向也连续。
   final ValueNotifier<double> progress = ValueNotifier(0);
 
-  /// 套好曲线的进度。
   static double curved(double p) => Curves.easeInOutCubic.transform(p);
 
-  /// 停止滚动多久后展开回条。
   static const Duration _expandDelay = Duration(milliseconds: 450);
-
-  /// 走完一整程（0→1）的时长；中途反向按剩余距离等比缩短。
   static const int _fullMs = 340;
 
   Timer? _expandTimer;
-  Ticker? _ticker;
-  double _from = 0;
-  double _to = 0;
-  Duration _total = Duration.zero;
+  AnimationController? _controller;
 
-  /// 当前挂载着的可收球迷你条数量（CollapsibleMiniPlayer 自己注册/注销）。
-  /// 「仅播放时显示」且暂停、页面不显示迷你条时，它根本不会被建出来 → 计数为 0。
-  int _mountedMinis = 0;
-  void registerMini() => _mountedMinis++;
-  void unregisterMini() {
-    _mountedMinis = (_mountedMinis - 1).clamp(0, 1 << 30);
-    // dispose 期间树是锁的，同步改 notifier 会报 setState-when-locked，帧后再收。
-    if (_mountedMinis == 0) {
-      SchedulerBinding.instance.addPostFrameCallback((_) {
-        if (_mountedMinis == 0) reset();
-      });
-    }
+  void _attach(AnimationController c) {
+    _controller = c;
+    c.addListener(_onTick);
   }
 
-  /// 迷你条此刻真的在 —— 没歌、没挂载就不收，否则导航条会凭空让出一块空位。
-  /// （别用 miniPlayerSuppressedCount：那是平板外壳的计数，手机上页面栈里
-  /// 任意一页不显示迷你条它就 >0，会把收起永久拦住。）
-  bool get _miniVisible =>
-      _mountedMinis > 0 && PlayerService.instance.currentSong.value != null;
+  void _detach(AnimationController c) {
+    c.removeListener(_onTick);
+    if (identical(_controller, c)) _controller = null;
+  }
 
-  /// 把一条滚动通知喂进来（挂在顶层 NotificationListener 里）。
+  void _onTick() {
+    final c = _controller;
+    if (c != null) progress.value = c.value;
+  }
+
+  /// 有歌在放（且没被「仅播放时显示」藏掉）才收，否则导航条会凭空让出空位。
+  bool get _miniVisible {
+    if (PlayerService.instance.currentSong.value == null) return false;
+    if (AppBackgroundSettings.miniPlayerOnlyWhilePlaying.value &&
+        !PlayerService.instance.isPlaying.value) {
+      return false;
+    }
+    return true;
+  }
+
   bool handle(ScrollNotification n) {
     if (n.metrics.axis != Axis.vertical) return false;
-    // 内容撑不满一屏（没得滚）就别收，否则轻轻一碰也缩。
     if (n.metrics.maxScrollExtent <= 0) return false;
 
     final moving = (n is ScrollUpdateNotification &&
             (n.scrollDelta ?? 0).abs() > 0.5) ||
         n is ScrollStartNotification;
     if (moving) {
-      if (!_miniVisible) return false;
+      if (!_miniVisible) {
+        if (n is ScrollStartNotification) {
+          debugPrint('[MiniCollapse] 不收：迷你条不可见 '
+              'song=${PlayerService.instance.currentSong.value != null}');
+        }
+        return false;
+      }
       _set(true);
       _expandTimer?.cancel();
       _expandTimer = Timer(_expandDelay, () => _set(false));
@@ -82,31 +84,63 @@ class MiniPlayerCollapse {
   void _set(bool value) {
     if (collapsed.value == value) return;
     collapsed.value = value;
-    _animateTo(value ? 1 : 0);
+    final c = _controller;
+    debugPrint('[MiniCollapse] ${value ? "收成球" : "展开回条"} '
+        'controller=${c != null} from=${progress.value.toStringAsFixed(2)}');
+    if (c == null) {
+      progress.value = value ? 1 : 0; // 兜底：没有宿主就直接跳到终态。
+      return;
+    }
+    final target = value ? 1.0 : 0.0;
+    final dist = (target - c.value).abs();
+    c.animateTo(
+      target,
+      duration: Duration(milliseconds: (_fullMs * dist).round().clamp(1, _fullMs)),
+      curve: Curves.linear,
+    );
   }
 
-  void _animateTo(double target) {
-    _ticker?.dispose();
-    _ticker = null;
-    _from = progress.value;
-    _to = target;
-    final dist = (_to - _from).abs();
-    if (dist == 0) return;
-    _total = Duration(milliseconds: (_fullMs * dist).round().clamp(1, _fullMs));
-    _ticker = Ticker((elapsed) {
-      final t = (elapsed.inMicroseconds / _total.inMicroseconds).clamp(0.0, 1.0);
-      progress.value = _from + (_to - _from) * t;
-      if (t >= 1) _ticker?.stop();
-    })
-      ..start();
-  }
-
-  /// 开播放页 / 换页等场景直接回到条态（不放动画，别让球态被带过去）。
+  /// 开播放页 / 换页等场景直接回到条态（不放动画）。
   void reset() {
     _expandTimer?.cancel();
-    _ticker?.dispose();
-    _ticker = null;
     collapsed.value = false;
+    _controller?.value = 0;
     progress.value = 0;
+  }
+}
+
+/// 挂在 App 最外层：提供推进收球进度的 AnimationController，并监听所有页面的
+/// 滚动通知（各页滚动都会冒泡到这里）。
+class MiniPlayerCollapseHost extends StatefulWidget {
+  const MiniPlayerCollapseHost({super.key, required this.child});
+  final Widget child;
+
+  @override
+  State<MiniPlayerCollapseHost> createState() => _MiniPlayerCollapseHostState();
+}
+
+class _MiniPlayerCollapseHostState extends State<MiniPlayerCollapseHost>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this);
+
+  @override
+  void initState() {
+    super.initState();
+    MiniPlayerCollapse.instance._attach(_c);
+  }
+
+  @override
+  void dispose() {
+    MiniPlayerCollapse.instance._detach(_c);
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return NotificationListener<ScrollNotification>(
+      onNotification: MiniPlayerCollapse.instance.handle,
+      child: widget.child,
+    );
   }
 }
