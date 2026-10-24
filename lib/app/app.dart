@@ -14,6 +14,7 @@ import 'router/app_router.dart';
 import 'services/app_update_service.dart';
 import 'services/feiniu/account_store.dart';
 import 'services/feiniu/auth_service.dart';
+import 'state/mini_player_collapse.dart';
 import 'state/settings_guest_state.dart';
 import 'state/settings_state.dart';
 import 'theme/app_styles.dart';
@@ -223,6 +224,13 @@ class FeiNiuMusicApp extends StatelessWidget {
                                   value: overlay,
                                   child: child ?? const SizedBox.shrink(),
                                 );
+                            // 页面一滚就把迷你播放器收成球（见 MiniPlayerCollapse）。
+                            // 挂在最外层，各页滚动通知都冒泡到这里。
+                            content = NotificationListener<ScrollNotification>(
+                              onNotification: (n) =>
+                                  MiniPlayerCollapse.instance.handle(n),
+                              child: content,
+                            );
                             // TV 模式：根焦点域（方向键遍历 + 快捷键）。
                             // 手机端 isTv=false，完全绕开，行为不变。
                             if (isTv) {

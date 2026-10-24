@@ -7,6 +7,7 @@ import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import '../../../app/services/lyrics/lyrics_service.dart';
 import '../../../app/services/player_service.dart';
 import '../../../app/router/app_router.dart';
+import '../../../app/state/mini_player_collapse.dart';
 import '../../../app/state/settings_state.dart';
 import '../../../app/state/song_state.dart';
 import '../radar_play_button.dart';
@@ -304,46 +305,53 @@ class MiniPlayerBar extends StatelessWidget {
     );
   }
 
-  Route _playerRoute() {
-    return PageRouteBuilder(
-      settings: const RouteSettings(name: AppRoutes.player),
-      opaque: false,
-      barrierColor: Colors.transparent,
-      pageBuilder: (context, animation, secondaryAnimation) =>
-          const PlayerPage(),
-      transitionDuration: const Duration(milliseconds: 320),
-      reverseTransitionDuration: const Duration(milliseconds: 260),
-      transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        final curved = CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeOutCubic,
-          reverseCurve: Curves.easeInCubic,
-        );
-        final offset = Tween<Offset>(
-          begin: const Offset(0, 1),
-          end: Offset.zero,
-        ).animate(curved);
-        // Slight scale + fade so the player "lifts" into place rather than just
-        // sliding up flatly.
-        final scale = Tween<double>(begin: 0.97, end: 1.0).animate(curved);
-        final fade = CurvedAnimation(
-          parent: animation,
-          curve: const Interval(0.0, 0.5, curve: Curves.easeOut),
-        );
-        return SlideTransition(
-          position: offset,
-          child: FadeTransition(
-            opacity: fade,
-            child: ScaleTransition(
-              scale: scale,
-              alignment: Alignment.bottomCenter,
-              child: child,
-            ),
+  Route _playerRoute() => playerPageRoute();
+}
+
+/// 打开播放页（和迷你条点击同款「升起」转场）。迷你条点击、收起成球后点球都用它。
+void openPlayerPage(BuildContext context) {
+  // 开播放页顺手展开收起态，免得返回后迷你播放器还停在球态。
+  MiniPlayerCollapse.instance.reset();
+  final isTabletLayout = AppLayoutSettings.effectiveTabletMode;
+  Navigator.of(context, rootNavigator: isTabletLayout).push(playerPageRoute());
+}
+
+Route playerPageRoute() {
+  return PageRouteBuilder(
+    settings: const RouteSettings(name: AppRoutes.player),
+    opaque: false,
+    barrierColor: Colors.transparent,
+    pageBuilder: (context, animation, secondaryAnimation) => const PlayerPage(),
+    transitionDuration: const Duration(milliseconds: 320),
+    reverseTransitionDuration: const Duration(milliseconds: 260),
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      final curved = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
+      );
+      final offset = Tween<Offset>(
+        begin: const Offset(0, 1),
+        end: Offset.zero,
+      ).animate(curved);
+      final scale = Tween<double>(begin: 0.97, end: 1.0).animate(curved);
+      final fade = CurvedAnimation(
+        parent: animation,
+        curve: const Interval(0.0, 0.5, curve: Curves.easeOut),
+      );
+      return SlideTransition(
+        position: offset,
+        child: FadeTransition(
+          opacity: fade,
+          child: ScaleTransition(
+            scale: scale,
+            alignment: Alignment.bottomCenter,
+            child: child,
           ),
-        );
-      },
-    );
-  }
+        ),
+      );
+    },
+  );
 }
 
 /// 迷你播放条封面：裁成正圆，播放时持续旋转（像小唱片），暂停就停在当前角度。

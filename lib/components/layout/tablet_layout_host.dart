@@ -11,6 +11,8 @@ import '../focus/tv_focusable.dart';
 import 'base/app_background.dart';
 import '../list/song_multi_select_mixin.dart' show globalMultiSelectActive;
 import '../player/mini_player/mini_player_bar.dart';
+import '../player/mini_player/collapsible_mini_player.dart';
+import '../../app/services/player_service.dart';
 import 'side_menu.dart';
 
 class TabletLayoutHost extends StatefulWidget {
@@ -242,7 +244,14 @@ class _TabletLayoutHostState extends State<TabletLayoutHost>
     final bar = MiniPlayerBar(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
     );
-    if (!AppLayoutSettings.tvMode.value) return bar;
+    if (!AppLayoutSettings.tvMode.value) {
+      // 平板也随滚动收成球。
+      return CollapsibleMiniPlayer(
+        song: PlayerService.instance.currentSong.value,
+        onTap: () => openPlayerPage(context),
+        bar: bar,
+      );
+    }
     return TvFocusable(
       borderRadius: BorderRadius.circular(24),
       onActivate: () => _handlePush(AppRoutes.player),

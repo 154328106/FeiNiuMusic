@@ -5,6 +5,7 @@ import '../../../app/state/settings_state.dart';
 import '../../../app/utils/primary_shell_scope.dart';
 import 'app_background.dart';
 import '../../player/mini_player/mini_player_bar.dart';
+import '../../player/mini_player/collapsible_mini_player.dart';
 import '../modern_navigation_bar.dart';
 
 class AppPageScaffold extends StatefulWidget {
@@ -197,10 +198,14 @@ class AppPageScaffoldState extends State<AppPageScaffold>
         AppBackgroundSettings.miniPlayerOnlyWhilePlaying.value &&
         !PlayerService.instance.isPlaying.value;
     final miniPlayer = widget.showMiniPlayer && !hideWhilePaused
-        ? MiniPlayerBar(
-            padding: hasBottomNav
-                ? const EdgeInsets.fromLTRB(16, 4, 16, 0)
-                : const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        ? CollapsibleMiniPlayer(
+            song: PlayerService.instance.currentSong.value,
+            onTap: () => openPlayerPage(context),
+            bar: MiniPlayerBar(
+              padding: hasBottomNav
+                  ? const EdgeInsets.fromLTRB(16, 4, 16, 0)
+                  : const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            ),
           )
         : null;
 
