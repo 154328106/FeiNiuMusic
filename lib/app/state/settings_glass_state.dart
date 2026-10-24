@@ -20,6 +20,7 @@ class AppGlassSettings {
   static const String _prefsGlassBlur = 'setting_liquid_glass_blur';
   static const String _prefsGlassThickness =
       'setting_liquid_glass_thickness';
+  static const String _prefsGlassLens = 'setting_liquid_glass_lens';
 
   /// 默认开关：仅 Android 13+（API 33+）默认开启，其余平台默认关闭。
   ///
@@ -37,6 +38,11 @@ class AppGlassSettings {
   /// 玻璃厚度（0-30，默认 30 = 与底栏玻璃观感一致的深折射）：影响折射强度
   /// 与边缘高光。
   static final ValueNotifier<double> glassThickness = ValueNotifier(30);
+
+  /// 透镜模式（底部栏）：底板几乎全透、不模糊、加强折射 —— 能看到背后的
+  /// 东西被玻璃「弯」过去。默认关：原来那层白/黑底板是为了让底栏和背景
+  /// 同色特意垫的，不能动老外观。
+  static final ValueNotifier<bool> glassLens = ValueNotifier(false);
 
   /// 生效值：总开关开启 **且** 非 TV 模式。
   ///
@@ -65,6 +71,7 @@ class AppGlassSettings {
         (prefs.getDouble(_prefsGlassBlur) ?? 3).clamp(0.0, 16.0);
     glassThickness.value =
         (prefs.getDouble(_prefsGlassThickness) ?? 30).clamp(0.0, 30.0);
+    glassLens.value = prefs.getBool(_prefsGlassLens) ?? false;
     // 互斥校正：若旧数据两者同时为开（历史版本允许同开），液体玻璃优先——
     // 关闭高斯模糊并持久化，保证重启后仍互斥。
     if (liquidGlassEnabled.value &&
@@ -95,5 +102,11 @@ class AppGlassSettings {
     final next = value.clamp(0.0, 30.0);
     await prefs.setDouble(_prefsGlassThickness, next);
     glassThickness.value = next;
+  }
+
+  static Future<void> setGlassLens(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsGlassLens, value);
+    glassLens.value = value;
   }
 }

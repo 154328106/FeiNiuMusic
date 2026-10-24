@@ -635,6 +635,19 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                           );
                         },
                       ),
+                      ValueListenableBuilder<bool>(
+                        valueListenable: AppGlassSettings.glassLens,
+                        builder: (context, lens, _) {
+                          return AppSettingSwitchTile(
+                            title: '透镜模式（底部栏）',
+                            subtitle: lens
+                                ? '底板几乎全透、不模糊，后面的内容会被玻璃弯折；上面两项暂不生效'
+                                : '开启后播放条和导航栏像透镜一样折射背后的内容',
+                            value: lens,
+                            onChanged: AppGlassSettings.setGlassLens,
+                          );
+                        },
+                      ),
                     ],
                   );
                 },
@@ -681,8 +694,10 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                               ),
                               onReset: frameColor == null
                                   ? null
-                                  : () => AppBackgroundSettings
-                                        .setContentFrameColor(null),
+                                  : () =>
+                                        AppBackgroundSettings.setContentFrameColor(
+                                          null,
+                                        ),
                             );
                           },
                         ),
@@ -712,118 +727,15 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                 builder: (context, only, _) {
                   return AppSettingSwitchTile(
                     title: '仅播放时显示播放条',
-                    subtitle: only
-                        ? '暂停后播放条会收起，需从播放页或列表恢复播放'
-                        : '播放条常驻底部',
+                    subtitle: only ? '暂停后播放条会收起，需从播放页或列表恢复播放' : '播放条常驻底部',
                     value: only,
-                    onChanged: AppBackgroundSettings
-                        .setMiniPlayerOnlyWhilePlaying,
+                    onChanged:
+                        AppBackgroundSettings.setMiniPlayerOnlyWhilePlaying,
                   );
                 },
               ),
-              ValueListenableBuilder<Color?>(
-                valueListenable: AppBackgroundSettings.navBarColor,
-                builder: (context, navColor, _) {
-                  final fallback = Theme.of(context).colorScheme.surface;
-                  return _ColorSettingTile(
-                    title: '导航栏背景色',
-                    subtitle: navColor == null
-                        ? '跟随主题，点击自定义'
-                        : '自定义颜色，长按恢复跟随主题',
-                    color: navColor ?? fallback,
-                    onPick: () => _showColorPickerDialog(
-                      context,
-                      initial: navColor ?? fallback,
-                      onSelected: AppBackgroundSettings.setNavBarColor,
-                    ),
-                    onReset: navColor == null
-                        ? null
-                        : () => AppBackgroundSettings.setNavBarColor(null),
-                  );
-                },
-              ),
-              ValueListenableBuilder<double>(
-                valueListenable: AppBackgroundSettings.navBarOpacity,
-                builder: (context, opacity, _) {
-                  return AppSettingSlider(
-                    title: '导航栏深浅度',
-                    description: '底色的不透明度，越高越实',
-                    value: opacity,
-                    min: 0.05,
-                    max: 1.0,
-                    valueText: '${(opacity * 100).round()}%',
-                    onChanged: AppBackgroundSettings.setNavBarOpacity,
-                  );
-                },
-              ),
-              ValueListenableBuilder<bool>(
-                valueListenable: AppBackgroundSettings.navBarFrameEnabled,
-                builder: (context, framed, _) {
-                  return AppSettingSwitchTile(
-                    title: '导航栏描边',
-                    subtitle: framed
-                        ? '底栏画一圈描边，和背景分得开（液体玻璃下同样生效）'
-                        : '不画描边，底栏只靠底色和投影',
-                    value: framed,
-                    onChanged: AppBackgroundSettings.setNavBarFrameEnabled,
-                  );
-                },
-              ),
-              ValueListenableBuilder<bool>(
-                valueListenable: AppBackgroundSettings.navBarFrameEnabled,
-                builder: (context, framed, _) {
-                  if (!framed) return const SizedBox.shrink();
-                  return ValueListenableBuilder<Color?>(
-                    valueListenable: AppBackgroundSettings.navBarFrameColor,
-                    builder: (context, frameColor, _) {
-                      // 与 modern_navigation_bar 里实色分支的默认描边一致，
-                      // 否则这块色板显示的和底栏实际画出来的对不上。
-                      final fallback = Theme.of(context).brightness ==
-                              Brightness.dark
-                          ? Colors.white.withValues(alpha: 0.32)
-                          : Colors.black.withValues(alpha: 0.28);
-                      return _ColorSettingTile(
-                        title: '导航栏描边颜色',
-                        subtitle: frameColor == null
-                            ? '默认发丝色，点击自定义'
-                            : '自定义颜色，长按恢复默认',
-                        color: frameColor ?? fallback,
-                        onPick: () => _showColorPickerDialog(
-                          context,
-                          initial: frameColor ?? fallback,
-                          onSelected: AppBackgroundSettings.setNavBarFrameColor,
-                        ),
-                        onReset: frameColor == null
-                            ? null
-                            : () =>
-                                  AppBackgroundSettings.setNavBarFrameColor(null),
-                      );
-                    },
-                  );
-                },
-              ),
-              // 描边深浅度：和描边颜色一样，只在开了描边时才显示。
-              ValueListenableBuilder<bool>(
-                valueListenable: AppBackgroundSettings.navBarFrameEnabled,
-                builder: (context, framed, _) {
-                  if (!framed) return const SizedBox.shrink();
-                  return ValueListenableBuilder<double>(
-                    valueListenable: AppBackgroundSettings.navBarFrameOpacity,
-                    builder: (context, frameOpacity, _) {
-                      return AppSettingSlider(
-                        title: '导航栏描边深浅度',
-                        description: '描边的浓淡，越高越明显',
-                        value: frameOpacity,
-                        min: 0.05,
-                        max: 1.0,
-                        valueText: '${(frameOpacity * 100).round()}%',
-                        onChanged:
-                            AppBackgroundSettings.setNavBarFrameOpacity,
-                      );
-                    },
-                  );
-                },
-              ),
+              // 导航栏的底色 / 深浅 / 描边已移到下方「底部栏」分区，和播放条
+              // 共用一套样式（AppSurfaceSettings）。
               ValueListenableBuilder<bool>(
                 valueListenable: AppBackgroundSettings.panelBlurEnabled,
                 builder: (context, blurEnabled, _) {
@@ -880,12 +792,147 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
               ),
             ],
           ),
+          const SizedBox(height: 16),
+          // 统一样式：各区域同一套参数（底色 / 深浅 / 厚度 / 描边），可跟随全局。
+          AppSettingSection(
+            title: '统一样式 · 全局',
+            children: [
+              ValueListenableBuilder<SurfaceStyle>(
+                valueListenable: AppSurfaceSettings.global,
+                builder: (context, style, _) => _SurfaceStyleEditor(
+                  style: style,
+                  onChanged: AppSurfaceSettings.setGlobal,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          AppSettingSection(
+            title: '统一样式 · 底部栏（播放条 + 导航）',
+            children: [
+              ValueListenableBuilder<bool>(
+                valueListenable: AppSurfaceSettings.bottomBarFollowGlobal,
+                builder: (context, follow, _) {
+                  return Column(
+                    children: [
+                      AppSettingSwitchTile(
+                        title: '跟随全局样式',
+                        subtitle: follow ? '和上面的全局样式一致' : '单独设置，播放条和导航用同一套',
+                        value: follow,
+                        onChanged: AppSurfaceSettings.setBottomBarFollowGlobal,
+                      ),
+                      if (!follow)
+                        ListenableBuilder(
+                          listenable: AppSurfaceSettings.bottomBarListenable,
+                          builder: (context, _) => _SurfaceStyleEditor(
+                            style: AppSurfaceSettings.bottomBarOwn,
+                            onChanged: AppSurfaceSettings.setBottomBarOwn,
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
 }
 
+/// 一组「表面样式」的编辑项：底色、深浅、厚度、描边、描边颜色、描边深浅。
+/// 全局和各区域共用这一个编辑器，参数含义处处一致。
+class _SurfaceStyleEditor extends StatelessWidget {
+  const _SurfaceStyleEditor({required this.style, required this.onChanged});
+
+  final SurfaceStyle style;
+  final ValueChanged<SurfaceStyle> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final scheme = Theme.of(context).colorScheme;
+    // 色板显示的默认色和实际画出来的一致（见 SurfacePaint）。
+    final fillFallback = isDark ? scheme.surfaceContainerHighest : Colors.white;
+    final frameFallback = isDark
+        ? Colors.white.withValues(alpha: 0.32)
+        : Colors.black.withValues(alpha: 0.28);
+    return Column(
+      children: [
+        _ColorSettingTile(
+          title: '底色',
+          subtitle: style.color == null ? '跟随主题，点击自定义' : '自定义颜色，长按恢复跟随主题',
+          color: style.color ?? fillFallback,
+          onPick: () => _showColorPickerDialog(
+            context,
+            initial: style.color ?? fillFallback,
+            onSelected: (c) => onChanged(
+              c == null
+                  ? style.copyWith(clearColor: true)
+                  : style.copyWith(color: c),
+            ),
+          ),
+          onReset: style.color == null
+              ? null
+              : () => onChanged(style.copyWith(clearColor: true)),
+        ),
+        AppSettingSlider(
+          title: '深浅',
+          description: '底色的不透明度，越高越实',
+          value: style.opacity,
+          min: 0.05,
+          max: 1.0,
+          valueText: '${(style.opacity * 100).round()}%',
+          onChanged: (v) => onChanged(style.copyWith(opacity: v)),
+        ),
+        AppSettingSlider(
+          title: '厚度',
+          description: '投影深浅，越高越有立体感；0 = 不要投影',
+          value: style.thickness,
+          min: 0,
+          max: 1.0,
+          valueText: '${(style.thickness * 100).round()}%',
+          onChanged: (v) => onChanged(style.copyWith(thickness: v)),
+        ),
+        AppSettingSwitchTile(
+          title: '描边',
+          subtitle: style.frame ? '画一圈描边，和背景分得开' : '不画描边，只靠底色和投影',
+          value: style.frame,
+          onChanged: (v) => onChanged(style.copyWith(frame: v)),
+        ),
+        if (style.frame) ...[
+          _ColorSettingTile(
+            title: '描边颜色',
+            subtitle: style.frameColor == null ? '默认发丝色，点击自定义' : '自定义颜色，长按恢复默认',
+            color: style.frameColor ?? frameFallback,
+            onPick: () => _showColorPickerDialog(
+              context,
+              initial: style.frameColor ?? frameFallback,
+              onSelected: (c) => onChanged(
+                c == null
+                    ? style.copyWith(clearFrameColor: true)
+                    : style.copyWith(frameColor: c),
+              ),
+            ),
+            onReset: style.frameColor == null
+                ? null
+                : () => onChanged(style.copyWith(clearFrameColor: true)),
+          ),
+          AppSettingSlider(
+            title: '描边深浅',
+            description: '描边的浓淡，越高越明显',
+            value: style.frameOpacity,
+            min: 0.05,
+            max: 1.0,
+            valueText: '${(style.frameOpacity * 100).round()}%',
+            onChanged: (v) => onChanged(style.copyWith(frameOpacity: v)),
+          ),
+        ],
+      ],
+    );
+  }
+}
 
 /// 通用取色入口，复用主题色那套调色板对话框。
 Future<void> _showColorPickerDialog(
@@ -895,10 +942,8 @@ Future<void> _showColorPickerDialog(
 }) async {
   await showDialog<void>(
     context: context,
-    builder: (context) => _ThemeColorPickerDialog(
-      initialColor: initial,
-      onSelected: onSelected,
-    ),
+    builder: (context) =>
+        _ThemeColorPickerDialog(initialColor: initial, onSelected: onSelected),
   );
 }
 

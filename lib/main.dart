@@ -169,6 +169,8 @@ Future<void> main() async {
   }());
   await LyricCompanionSettings.ensureLoaded();
   await AppBackgroundSettings.ensureLoaded();
+  // 统一外观（全局 / 底部栏）样式：首帧前加载，底栏和播放条首帧就是对的。
+  await AppSurfaceSettings.ensureLoaded();
   // 液体玻璃设置需在首帧前加载：首帧即尊重持久化的关闭态，避免闪一帧玻璃。
   await AppGlassSettings.ensureLoaded();
   await AppFnConnectionSettings.ensureLoaded();

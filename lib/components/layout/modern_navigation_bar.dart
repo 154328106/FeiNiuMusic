@@ -88,9 +88,9 @@ void navigateToPrimaryDestination(BuildContext context, int index) {
   // 网络请求整体翻倍。
   if (index == 0) {
     // 首页是这个模式下的根页面，弹回栈底即可。
-    Navigator.of(context).popUntil(
-      (route) => route.settings.name == routeName || route.isFirst,
-    );
+    Navigator.of(
+      context,
+    ).popUntil((route) => route.settings.name == routeName || route.isFirst);
     return;
   }
   pushOrReturnTo(Navigator.of(context), routeName);
@@ -143,10 +143,7 @@ class AppNavigationModeBuilder extends StatelessWidget {
 }
 
 class ModernNavigationBar extends StatelessWidget {
-  const ModernNavigationBar({
-    super.key,
-    required this.onTap,
-  });
+  const ModernNavigationBar({super.key, required this.onTap});
 
   /// 底部导航点击回调（导航到对应 tab）。
   final ValueChanged<int> onTap;
@@ -184,152 +181,116 @@ class ModernNavigationBar extends StatelessWidget {
   }
 
   Widget _buildOriginal(BuildContext context, int currentIndex) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     // Follow the same panel blur slider used by cards/setting panels so
     // the bottom bar visually belongs to the same surface family.
     return ListenableBuilder(
-      listenable: Listenable.merge([
-        AppBackgroundSettings.navBarColor,
-        AppBackgroundSettings.navBarOpacity,
-        AppBackgroundSettings.navBarFrameEnabled,
-        AppBackgroundSettings.navBarFrameColor,
-        AppBackgroundSettings.navBarFrameOpacity,
-      ]),
+      // 底部栏样式（播放条和导航共用一套，见 AppSurfaceSettings.bottomBar）。
+      listenable: AppSurfaceSettings.bottomBarListenable,
       builder: (context, _) => ValueListenableBuilder<bool>(
-      valueListenable: AppBackgroundSettings.panelBlurEnabled,
-      builder: (context, blurEnabled, _) {
-        return ValueListenableBuilder<double>(
-          valueListenable: AppBackgroundSettings.panelBlurStrength,
-          builder: (context, _, _) {
-            final blurStrength = blurEnabled
-                ? AppBackgroundSettings.panelBlurStrength.value
-                : 0.0;
-            final isBlurred = blurStrength > 0;
-        // 底色与深浅度可在「应用外观 → 底部导航栏」自定义；
-        // 未自定义时跟随主题表面色。开了模糊时底色本就接近透明（靠
-        // BackdropFilter 出效果），此时深浅度只按比例微调，不然一调就糊死。
-        // 未自定义时跟「逐行卡片」同色（见 content_frame.dart 的 isCards
-        // 分支），让底栏和列表看着是一套，而不是浮在上面的另一块。
-        // 不能用 surface：页面背景本身就是 surface，同色会整个糊进背景。
-        final isDarkTint = Theme.of(context).brightness == Brightness.dark;
-        final navTint =
-            AppBackgroundSettings.navBarColor.value ??
-            (isDarkTint
-                ? scheme.surfaceContainerHighest
-                : Colors.white);
-        final navOpacity = AppBackgroundSettings.navBarOpacity.value;
-        // 开模糊时底色本该很淡（靠 BackdropFilter 出效果），但页面背景是纯色
-        // 时模糊等于没模糊，0.08 的底色会让胶囊彻底消失。给它一个下限。
-        final barColor = isBlurred
-            ? navTint.withValues(alpha: (0.28 * navOpacity).clamp(0.0, 1.0))
-            : navTint.withValues(alpha: navOpacity);
-        // 胶囊本体：一条定高的 Row，圆角/悬浮由外层负责。
-        Widget pill = Material(
-          color: barColor,
-          elevation: 0,
-          child: SizedBox(
-            // 非玻璃分支高度独立于玻璃胶囊（kSolidNavHeight，比玻璃槽位
-            // modernNavHeight=84 矮）。
-            height: kSolidNavHeight,
-            child: Row(
-              children: List.generate(_labels.length, (index) {
-                final selected = currentIndex == index;
-                return Expanded(
-                  child: _NavItem(
-                    icon: _icons[index],
-                    label: _labels[index],
-                    selected: selected,
-                    onTap: () => onTap(index),
+        valueListenable: AppBackgroundSettings.panelBlurEnabled,
+        builder: (context, blurEnabled, _) {
+          return ValueListenableBuilder<double>(
+            valueListenable: AppBackgroundSettings.panelBlurStrength,
+            builder: (context, _, _) {
+              final blurStrength = blurEnabled
+                  ? AppBackgroundSettings.panelBlurStrength.value
+                  : 0.0;
+              final isBlurred = blurStrength > 0;
+              // 底色 / 描边 / 投影统一由 SurfacePaint 按「底部栏」样式算，
+              // 播放条用的是同一套，两条永远一致。
+              final style = AppSurfaceSettings.bottomBar;
+              final barColor = SurfacePaint.fill(
+                context,
+                style,
+                blurred: isBlurred,
+              );
+              // 胶囊本体：一条定高的 Row，圆角/悬浮由外层负责。
+              Widget pill = Material(
+                color: barColor,
+                elevation: 0,
+                child: SizedBox(
+                  // 非玻璃分支高度独立于玻璃胶囊（kSolidNavHeight，比玻璃槽位
+                  // modernNavHeight=84 矮）。
+                  height: kSolidNavHeight,
+                  child: Row(
+                    children: List.generate(_labels.length, (index) {
+                      final selected = currentIndex == index;
+                      return Expanded(
+                        child: _NavItem(
+                          icon: _icons[index],
+                          label: _labels[index],
+                          selected: selected,
+                          onTap: () => onTap(index),
+                        ),
+                      );
+                    }),
+                  ),
+                ),
+              );
+              // 启用高斯模糊时包裹 BackdropFilter。
+              // RepaintBoundary 隔离模糊合成图层：页面切换转场期间底层内容变化时，
+              // 模糊结果被图层缓存复用，避免逐帧全屏重采样造成掉帧。
+              //
+              // 注意模糊要包在圆角裁剪**里面**：包在外面的话采样区域是方的，
+              // 胶囊四角会漏出没被裁掉的模糊块。
+              if (blurStrength > 0) {
+                pill = RepaintBoundary(
+                  child: BackdropFilter(
+                    filter: ui.ImageFilter.blur(
+                      sigmaX: blurStrength,
+                      sigmaY: blurStrength,
+                    ),
+                    child: pill,
                   ),
                 );
-              }),
-            ),
-          ),
-        );
-        // 启用高斯模糊时包裹 BackdropFilter。
-        // RepaintBoundary 隔离模糊合成图层：页面切换转场期间底层内容变化时，
-        // 模糊结果被图层缓存复用，避免逐帧全屏重采样造成掉帧。
-        //
-        // 注意模糊要包在圆角裁剪**里面**：包在外面的话采样区域是方的，
-        // 胶囊四角会漏出没被裁掉的模糊块。
-        if (blurStrength > 0) {
-          pill = RepaintBoundary(
-            child: BackdropFilter(
-              filter: ui.ImageFilter.blur(
-                sigmaX: blurStrength,
-                sigmaY: blurStrength,
-              ),
-              child: pill,
-            ),
-          );
-        }
-        // 悬浮圆角外壳：和玻璃分支一样留出左右边距、加发丝描边与轻投影，
-        // 免得浅色背景下这条整个糊进去看不出边界。
-        final isDark = Theme.of(context).brightness == Brightness.dark;
-        // 描边跟「应用外观 → 底栏描边」走；关掉就整条不画边。
-        final framed = AppBackgroundSettings.navBarFrameEnabled.value;
-        // 自定义色按原样用（用户要什么色就什么色，不再乘透明度，
-        // 否则调了颜色还是看不出来）；没自定义就用默认发丝色。
-        final pillBorder = _navFrameColor(
-          isDark
-              ? Colors.white.withValues(alpha: 0.32)
-              : Colors.black.withValues(alpha: 0.28),
-        );
-        // 描边不跟着深浅度淡。胶囊调透之后，全靠这圈边把形状勾出来。
-        final borderWidth =
-            AppBackgroundSettings.navBarFrameColor.value == null ? 1.2 : 1.6;
-        return SafeArea(
-          top: false,
-          // 迷你条收成球时，右边让出「球径 + 间隙」，球落在同一行右侧。
-          child: ValueListenableBuilder<double>(
-            valueListenable: MiniPlayerCollapse.instance.progress,
-            builder: (context, p, child) => Padding(
-              padding: EdgeInsets.fromLTRB(
-                16,
-                kSolidNavPillTopGap,
-                16 + (kSolidNavHeight + 10) * MiniPlayerCollapse.curved(p),
-                kSolidNavPillTopGap,
-              ),
-              child: child,
-            ),
-            child: DecoratedBox(
-              // 只画投影。透明度跟着深浅度一起降 —— 上一版是定值，胶囊调透之后
-              // 透出来的全是它底下这团黑影，实机反馈「黑压压的像影子」。
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(kNavPillRadius),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(
-                      alpha: ((isDark ? 0.40 : 0.20) * navOpacity)
-                          .clamp(0.0, 1.0),
+              }
+              // 悬浮圆角外壳：留出左右边距、加描边与投影，免得浅色背景下整条
+              // 糊进去看不出边界。描边不跟底色深浅淡：胶囊调透之后全靠这圈边勾形状。
+              final pillBorder = SurfacePaint.frameColor(context, style);
+              final borderWidth = SurfacePaint.frameWidth(style);
+              return SafeArea(
+                top: false,
+                // 迷你条收成球时，右边让出「球径 + 间隙」，球落在同一行右侧。
+                child: ValueListenableBuilder<double>(
+                  valueListenable: MiniPlayerCollapse.instance.progress,
+                  builder: (context, p, child) => Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      16,
+                      kSolidNavPillTopGap,
+                      16 +
+                          (kSolidNavHeight + 10) * MiniPlayerCollapse.curved(p),
+                      kSolidNavPillTopGap,
                     ),
-                    blurRadius: 20,
-                    offset: const Offset(0, 6),
+                    child: child,
                   ),
-                ],
-              ),
-              child: DecoratedBox(
-                // 描边画在**前景**。画在背景会被上面那层胶囊盖住 —— 深浅度
-                // 调高、胶囊变不透明之后，那圈边就整个看不见了。
-                position: DecorationPosition.foreground,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(kNavPillRadius),
-                  border: framed
-                      ? Border.all(color: pillBorder, width: borderWidth)
-                      : null,
+                  child: DecoratedBox(
+                    // 只画投影。深浅跟着「厚度」和底色深浅走（底色调透之后投影也跟着
+                    // 淡，否则透出来的全是一团黑影）。
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(kNavPillRadius),
+                      boxShadow: SurfacePaint.shadow(context, style),
+                    ),
+                    child: DecoratedBox(
+                      // 描边画在**前景**。画在背景会被上面那层胶囊盖住 —— 深浅度
+                      // 调高、胶囊变不透明之后，那圈边就整个看不见了。
+                      position: DecorationPosition.foreground,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(kNavPillRadius),
+                        border: pillBorder == null
+                            ? null
+                            : Border.all(color: pillBorder, width: borderWidth),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(kNavPillRadius),
+                        child: pill,
+                      ),
+                    ),
+                  ),
                 ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(kNavPillRadius),
-                  child: pill,
-                ),
-              ),
-            ),
-          ),
-        );
-          },
-        );
-      },
+              );
+            },
+          );
+        },
       ),
     );
   }
@@ -350,11 +311,7 @@ class ModernNavigationBar extends StatelessWidget {
     // 要切一次页才看得到 —— 用户反馈的「调了跟没调一样」有一半是这个。
     return ListenableBuilder(
       listenable: Listenable.merge([
-        AppBackgroundSettings.navBarColor,
-        AppBackgroundSettings.navBarOpacity,
-        AppBackgroundSettings.navBarFrameEnabled,
-        AppBackgroundSettings.navBarFrameColor,
-        AppBackgroundSettings.navBarFrameOpacity,
+        AppSurfaceSettings.bottomBarListenable,
         appGlassTunables,
       ]),
       builder: (context, _) => _glassPill(context, index),
@@ -369,25 +326,18 @@ class ModernNavigationBar extends StatelessWidget {
     final pillColor = isDark
         ? Colors.white.withValues(alpha: 0.10)
         : Colors.black.withValues(alpha: 0.10);
-    final navTint = AppBackgroundSettings.navBarColor.value;
-    final navOpacity = AppBackgroundSettings.navBarOpacity.value;
     // 玻璃胶囊在浅色壁纸上几乎没有边界，整条底栏"看不见"。垫一层很薄的
-    // 底板（半透明表面色 + 发丝描边 + 轻投影）给它一个轮廓 —— 玻璃效果
-    // 照旧从上面透过来，只是不再糊进背景里。
-    //
-    // 底板色与迷你播放器共用（见 appGlassPlateColor），两者才是一套东西。
-    // 底板透明度跟「导航栏深浅度」联动：以前玻璃分支下这个滑块只在自定义了
-    // 底色时才影响 glassColor，默认状态下拖它毫无反应。
-    final plateBase = appGlassPlateColor(isDark);
-    final plate = plateBase.withValues(
-      alpha: (plateBase.a * navOpacity).clamp(0.0, 1.0),
+    // 底板（半透明表面色 + 描边 + 投影）给它一个轮廓 —— 玻璃效果照旧从上面
+    // 透过来，只是不再糊进背景里。底板 / 描边 / 投影都按「底部栏」样式算，
+    // 和播放条同一套（SurfacePaint）。
+    final style = AppSurfaceSettings.bottomBar;
+    final plate = SurfacePaint.glassPlate(context, style);
+    final plateBorder = SurfacePaint.frameColor(
+      context,
+      style,
+      fallback: appGlassPlateBorderColor(isDark),
     );
-    final framed = AppBackgroundSettings.navBarFrameEnabled.value;
-    // 描边跟实色分支共用同一组设置（应用外观 → 导航栏边框 / 边框颜色），
-    // 不再是玻璃分支自己写死的一条发丝线。
-    final plateBorder = _navFrameColor(appGlassPlateBorderColor(isDark));
-    final borderWidth =
-        AppBackgroundSettings.navBarFrameColor.value == null ? 1.2 : 1.6;
+    final borderWidth = SurfacePaint.frameWidth(style);
     return SafeArea(
       top: false,
       // 迷你条收成球时，右边让出「球径(=胶囊高 56) + 间隙」。
@@ -406,25 +356,16 @@ class ModernNavigationBar extends StatelessWidget {
           decoration: BoxDecoration(
             color: plate,
             borderRadius: BorderRadius.circular(kNavPillRadius),
-            boxShadow: [
-              BoxShadow(
-                // 投影跟深浅度一起淡，否则底板调透之后透出来的全是这团黑影。
-                color: Colors.black.withValues(
-                  alpha: ((isDark ? 0.40 : 0.18) * navOpacity).clamp(0.0, 1.0),
-                ),
-                blurRadius: 18,
-                offset: const Offset(0, 6),
-              ),
-            ],
+            boxShadow: SurfacePaint.shadow(context, style),
           ),
           child: DecoratedBox(
             // 描边画前景：画背景会被上面的底板 + 玻璃整个盖住。
             position: DecorationPosition.foreground,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(kNavPillRadius),
-              border: framed
-                  ? Border.all(color: plateBorder, width: borderWidth)
-                  : null,
+              border: plateBorder == null
+                  ? null
+                  : Border.all(color: plateBorder, width: borderWidth),
             ),
             // 垫一层透明 Material：GlassTabBar 的文字标签挂在 SafeArea 下，
             // 脱离了 Scaffold 的 Material 树。Flutter 对「找不到 Material 祖先」
@@ -435,10 +376,7 @@ class ModernNavigationBar extends StatelessWidget {
               child: GlassTabBar.bottom(
                 tabs: [
                   for (var i = 0; i < _labels.length; i++)
-                    GlassTab(
-                      icon: Icon(_glassIcons[i]),
-                      label: _labels[i],
-                    ),
+                    GlassTab(icon: Icon(_glassIcons[i]), label: _labels[i]),
                 ],
                 selectedIndex: index,
                 onTabSelected: onTap,
@@ -446,7 +384,9 @@ class ModernNavigationBar extends StatelessWidget {
                 // const kAppGlassSurfaceSettings —— 后者会把滑块值盖回默认。
                 // 自定义底色时覆盖玻璃着色（glassColor）。
                 settings: appGlassSurfaceSettings(
-                  glassColor: navTint?.withValues(alpha: navOpacity * 0.5),
+                  glassColor: style.color?.withValues(
+                    alpha: style.opacity * 0.5,
+                  ),
                 ),
                 // 悬浮：胶囊上下各留 kGlassNavPillTopGap 空隙（槽位 56 + 14×2 = 84），
                 // 内容从胶囊四周透出，视觉上像 demo（GlassScaffold 底栏）一样飘浮。
@@ -458,6 +398,7 @@ class ModernNavigationBar extends StatelessWidget {
                 verticalPadding: 0,
                 horizontalPadding: 0,
                 indicatorColor: pillColor,
+                quality: appGlassBarQuality,
               ),
             ),
           ),
@@ -465,15 +406,6 @@ class ModernNavigationBar extends StatelessWidget {
       ),
     );
   }
-}
-
-/// 底栏描边最终颜色：自定义色（没设就是默认发丝色）再乘上「描边深浅度」。
-///
-/// 默认发丝色自带 alpha，所以这里是乘不是覆盖 —— 滑块 100% 就是原来那档。
-Color _navFrameColor(Color fallback) {
-  final base = AppBackgroundSettings.navBarFrameColor.value ?? fallback;
-  final k = AppBackgroundSettings.navBarFrameOpacity.value;
-  return base.withValues(alpha: (base.a * k).clamp(0.0, 1.0));
 }
 
 class _NavItem extends StatelessWidget {

@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
@@ -83,10 +84,19 @@ GlassThemeData appGlassTheme(Color seed) {
 /// 表现就是「模糊和厚度调了跟没调一样」，因为用户盯着看的恰好就是这两块。
 /// 需要显式传参的地方一律改用这个函数，并记得挂 [appGlassTunables] 重建。
 LiquidGlassSettings appGlassSurfaceSettings({Color? glassColor}) {
-  final base = kAppGlassSurfaceSettings.copyWith(
-    blur: AppGlassSettings.glassBlurStrength.value,
-    thickness: AppGlassSettings.glassThickness.value,
-  );
+  final base = AppGlassSettings.glassLens.value
+      // 透镜模式：模糊会把折射抹平，必须归零；厚度/折射率拉高让弯曲看得出来。
+      ? kAppGlassSurfaceSettings.copyWith(
+          blur: 0,
+          thickness: 45,
+          refractiveIndex: 1.9,
+          chromaticAberration: 0.5,
+          glassColor: const Color(0x14FFFFFF),
+        )
+      : kAppGlassSurfaceSettings.copyWith(
+          blur: AppGlassSettings.glassBlurStrength.value,
+          thickness: AppGlassSettings.glassThickness.value,
+        );
   // 不把 null 传进 copyWith：包的 copyWith 对 null 是「保留」还是「清空」
   // 无从验证（本机没有 pub 缓存），传空等于赌它的实现。有值才覆盖。
   return glassColor == null ? base : base.copyWith(glassColor: glassColor);
@@ -97,7 +107,17 @@ LiquidGlassSettings appGlassSurfaceSettings({Color? glassColor}) {
 Listenable get appGlassTunables => Listenable.merge([
   AppGlassSettings.glassBlurStrength,
   AppGlassSettings.glassThickness,
+  AppGlassSettings.glassLens,
 ]);
+
+/// 底部栏玻璃的渲染档：透镜模式在手机上用 premium（真折射 + 高光），
+/// 桌面端 Skia 下 premium 滚动会黑屏闪烁，仍用 standard。
+GlassQuality get appGlassBarQuality =>
+    AppGlassSettings.glassLens.value &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS)
+    ? GlassQuality.premium
+    : GlassQuality.standard;
 
 /// 玻璃底板色：玻璃本身在浅色壁纸上几乎没有边界，垫一层半透明底板给它轮廓。
 ///

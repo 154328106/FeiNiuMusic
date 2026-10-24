@@ -13,7 +13,6 @@ import '../../../app/state/song_state.dart';
 import '../radar_play_button.dart';
 import '../../../app/theme/app_glass_theme.dart';
 import '../../common/artwork_widget.dart';
-import '../../common/content_frame.dart';
 import '../../common/glass_gate.dart';
 import '../../player/lyric_preview.dart';
 import '../../../pages/player/player_page.dart';
@@ -58,16 +57,19 @@ class MiniPlayerBar extends StatelessWidget {
     // 同时挂玻璃滑块（模糊/厚度）：玻璃分支的 settings 是运行时读的，
     // 不挂监听拖完滑块这条播放栏纹丝不动。
     return ListenableBuilder(
-      listenable: appGlassTunables,
+      // 底部栏样式（和导航条共用一套）变了也要重建。
+      listenable: Listenable.merge([
+        appGlassTunables,
+        AppSurfaceSettings.bottomBarListenable,
+      ]),
       builder: (context, _) => ValueListenableBuilder<bool>(
-      valueListenable: AppBackgroundSettings.panelBlurEnabled,
-      builder: (context, blurEnabled, _) {
-        final baseStrength =
-            blurEnabled
-                ? AppBackgroundSettings.panelBlurStrength.value
-                : 0.0;
-        return _buildBar(context, baseStrength);
-      },
+        valueListenable: AppBackgroundSettings.panelBlurEnabled,
+        builder: (context, blurEnabled, _) {
+          final baseStrength = blurEnabled
+              ? AppBackgroundSettings.panelBlurStrength.value
+              : 0.0;
+          return _buildBar(context, baseStrength);
+        },
       ),
     );
   }
@@ -97,33 +99,24 @@ class MiniPlayerBar extends StatelessWidget {
 
         final isDark = theme.brightness == Brightness.dark;
         final isBlurred = blurStrength > 0;
-        final bgColor = isBlurred
-            ? (isDark
-                  ? Colors.black.withValues(alpha: 0.06)
-                  : Colors.white.withValues(alpha: 0.08))
-            : scheme.surface.withValues(alpha: 0.85);
 
-        // 描边跟全局「内容框」设置走，不再写死。
-        //
-        // 原来浅色下固定用 outlineVariant@0.42，比列表卡片的描边重得多，
-        // 看着就是一圈突兀的黑边，而且改全局描边设置对它完全无效。
-        // appUnitBorderColor 在「不加框」时返回透明色（不是 null），
-        // 所以关掉框之后这条也会跟着干净。
-        final border = Border.all(
-          color: appUnitBorderColor(context),
-          width: 0.8,
+        // 底色 / 描边 / 玻璃底板 / 投影：和底部导航条用同一套「底部栏」样式、
+        // 同一套算法（SurfacePaint），两条永远一致。以前播放条自己一套（主题
+        // 表面色 85% + 借列表的描边），调导航深浅它不跟，摆一起就对不上。
+        final style = AppSurfaceSettings.bottomBar;
+        final bgColor = SurfacePaint.fill(context, style, blurred: isBlurred);
+        final frame = SurfacePaint.frameColor(
+          context,
+          style,
+          fallback: isBlurred || AppGlassSettings.effectiveEnabled
+              ? appGlassPlateBorderColor(isDark)
+              : null,
         );
-
-        // 玻璃底板：与底栏同一组值，两块才像一套东西。
-        final glassPlate = appGlassPlateColor(isDark);
-
-        final defaultShadow = [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.10),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-          ),
-        ];
+        final border = frame == null
+            ? null
+            : Border.all(color: frame, width: SurfacePaint.frameWidth(style));
+        final glassPlate = SurfacePaint.glassPlate(context, style);
+        final defaultShadow = SurfacePaint.shadow(context, style);
 
         // 内容层（不含背景）：Material + InkWell + 内部 Row。
         // 玻璃分支直接放进 GlassContainer，由 shader 提供背景；实色分支
@@ -136,75 +129,73 @@ class MiniPlayerBar extends StatelessWidget {
             child: Opacity(
               opacity: contentOpacity.clamp(0.0, 1.0),
               child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 10,
-                vertical: 7,
-              ),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  // When the drawer squeezes this bar, drop the trailing
-                  // queue button and shrink the artwork/play button so the
-                  // Row never overflows (which painted overflow stripes).
-                  final tight = constraints.maxWidth < 91;
-                  final compact = tight || constraints.maxWidth < 145;
-                  final resolvedArtworkSize = tight
-                      ? 36.0
-                      : (compact ? 40.0 : artworkSize);
-                  final resolvedArtworkRadius = compact ? 9.0 : 10.0;
-                  final playSize = compact ? 34.0 : 38.0;
-                  return Row(
-                    children: [
-                      Expanded(
-                        child: MiniPlayerInfo(
-                          song: song,
-                          enableSwipe: enableSwipe,
-                          player: player,
-                          onOpenPlayer: openPlayer,
-                          // 封面一并放入滑动区域：左右滑动切歌时封面随标题/歌词
-                          // 一起位移，而不是只有文字滑动。
-                          artwork: Container(
-                            decoration: BoxDecoration(
-                              // 封面已改正圆，阴影形状也跟成圆的。
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(
-                                    alpha: 0.12,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 7,
+                ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    // When the drawer squeezes this bar, drop the trailing
+                    // queue button and shrink the artwork/play button so the
+                    // Row never overflows (which painted overflow stripes).
+                    final tight = constraints.maxWidth < 91;
+                    final compact = tight || constraints.maxWidth < 145;
+                    final resolvedArtworkSize = tight
+                        ? 36.0
+                        : (compact ? 40.0 : artworkSize);
+                    final resolvedArtworkRadius = compact ? 9.0 : 10.0;
+                    final playSize = compact ? 34.0 : 38.0;
+                    return Row(
+                      children: [
+                        Expanded(
+                          child: MiniPlayerInfo(
+                            song: song,
+                            enableSwipe: enableSwipe,
+                            player: player,
+                            onOpenPlayer: openPlayer,
+                            // 封面一并放入滑动区域：左右滑动切歌时封面随标题/歌词
+                            // 一起位移，而不是只有文字滑动。
+                            artwork: Container(
+                              decoration: BoxDecoration(
+                                // 封面已改正圆，阴影形状也跟成圆的。
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.12),
+                                    blurRadius: 6,
+                                    offset: const Offset(0, 1),
                                   ),
-                                  blurRadius: 6,
-                                  offset: const Offset(0, 1),
-                                ),
-                              ],
+                                ],
+                              ),
+                              child: MiniPlayerArtwork(
+                                song: song,
+                                size: resolvedArtworkSize,
+                                borderRadius: resolvedArtworkRadius,
+                              ),
                             ),
-                            child: MiniPlayerArtwork(
-                              song: song,
-                              size: resolvedArtworkSize,
-                              borderRadius: resolvedArtworkRadius,
-                            ),
+                            artworkGap: tight ? 8 : 11,
                           ),
-                          artworkGap: tight ? 8 : 11,
                         ),
-                      ),
-                      SizedBox(width: tight ? 4 : 6),
-                      MiniPlayerPlayButton(
-                        player: player,
-                        size: playSize,
-                        enabled: hasSong,
-                      ),
-                      if (!compact) ...[
-                        const SizedBox(width: 4),
-                        trailing ??
-                            MiniPlayerQueueButton(
-                              onPressed: hasSong ? openQueue : null,
-                              color: scheme.onSurface,
-                            ),
-                        const SizedBox(width: 2),
+                        SizedBox(width: tight ? 4 : 6),
+                        MiniPlayerPlayButton(
+                          player: player,
+                          size: playSize,
+                          enabled: hasSong,
+                        ),
+                        if (!compact) ...[
+                          const SizedBox(width: 4),
+                          trailing ??
+                              MiniPlayerQueueButton(
+                                onPressed: hasSong ? openQueue : null,
+                                color: scheme.onSurface,
+                              ),
+                          const SizedBox(width: 2),
+                        ],
                       ],
-                    ],
-                  );
-                },
+                    );
+                  },
+                ),
               ),
-            ),
             ),
           ),
         );
@@ -241,7 +232,7 @@ class MiniPlayerBar extends StatelessWidget {
           // 此改动仅影响 macOS 观感——折射略弱）。如偏好更通透的折射可改回
           // premium，但需接受滚动时的重采样开销。
           useOwnLayer: true,
-          quality: GlassQuality.standard,
+          quality: appGlassBarQuality,
           child: const SizedBox.expand(),
         );
 
@@ -745,14 +736,12 @@ class _SwipeableInfoState extends State<_SwipeableInfo>
             // 用动画值（回弹期间）否则用拖动值（拖动中），
             // 让提示随回弹动画一起淡出，而不是动画结束才消失。
             final currentOffset = _animation?.value ?? _dragOffsetX;
-            final prevOpacity =
-                hasSong && currentOffset > 0
-                    ? (currentOffset / 60.0).clamp(0.0, 1.0)
-                    : 0.0;
-            final nextOpacity =
-                hasSong && currentOffset < 0
-                    ? ((-currentOffset) / 60.0).clamp(0.0, 1.0)
-                    : 0.0;
+            final prevOpacity = hasSong && currentOffset > 0
+                ? (currentOffset / 60.0).clamp(0.0, 1.0)
+                : 0.0;
+            final nextOpacity = hasSong && currentOffset < 0
+                ? ((-currentOffset) / 60.0).clamp(0.0, 1.0)
+                : 0.0;
             return Stack(
               children: [
                 // 左侧「上一曲」提示：右滑时在原位淡入
@@ -954,7 +943,10 @@ class _MiniPlayerSubtitleText extends StatelessWidget {
       return (baseFontSize, true);
     }
     final ratio = fitWidth / widthAt(baseFontSize);
-    final shrunk = (baseFontSize * ratio).clamp(baseFontSize * 0.6, baseFontSize);
+    final shrunk = (baseFontSize * ratio).clamp(
+      baseFontSize * 0.6,
+      baseFontSize,
+    );
     // 缩小到下限后仍超宽 → 放不下，回退省略号
     if (widthAt(shrunk) > fitWidth) {
       return (baseFontSize, false);
