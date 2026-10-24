@@ -41,6 +41,7 @@ import '../../pages/search/search_page.dart';
 import '../../pages/search/search_tab.dart';
 import '../../pages/netease/netease_login_page.dart';
 import '../../pages/kugou/kugou_login_page.dart';
+import '../../pages/migu/migu_login_page.dart';
 import '../../pages/qq/qq_login_page.dart';
 import '../../pages/netease/netease_search_page.dart';
 import '../../pages/songs/batch_match_page.dart';
@@ -94,6 +95,7 @@ class AppRoutes {
   static const neteaseLogin = '/netease/login';
   static const qqLogin = '/qq/login';
   static const kugouLogin = '/kugou/login';
+  static const miguLogin = '/migu/login';
   static const unblockSource = '/settings/unblock-source';
 }
 
@@ -152,6 +154,7 @@ class AppRouter {
     AppRoutes.neteaseLogin: (_) => const NetEaseLoginPage(),
     AppRoutes.qqLogin: (_) => const QQLoginPage(),
     AppRoutes.kugouLogin: (_) => const KugouLoginPage(),
+    AppRoutes.miguLogin: (_) => const MiguLoginPage(),
     AppRoutes.unblockSource: (_) => const UnblockSourcePage(),
   };
 }

@@ -25,6 +25,7 @@ import 'feiniu/transcode_service.dart';
 import 'netease/netease_playback_service.dart';
 import 'kugou/kugou_playback_service.dart';
 import 'kuwo/kuwo_playback_service.dart';
+import 'migu/migu_playback_service.dart';
 import 'qq/qq_playback_service.dart';
 import 'player/just_audio_engine.dart';
 import 'player/media_kit_engine.dart';
@@ -779,7 +780,7 @@ class PlayerService with WidgetsBindingObserver {
     final song = logicalIndex < list.length ? list[logicalIndex] : null;
     final remoteResolve =
         song != null &&
-        (song.isNetease || song.isQQ || song.isKugou || song.isKuwo);
+        (song.isNetease || song.isQQ || song.isKugou || song.isKuwo || song.isMigu);
     // 往前留两首（够「上一首」无缝），整个 run 最多 6 首。
     final maxBefore = remoteResolve ? 2 : k.length;
     final maxRun = remoteResolve ? 6 : k.length;
@@ -1081,6 +1082,18 @@ class PlayerService with WidgetsBindingObserver {
         throw StateError('酷我音乐无可用播放地址：${song.title}');
       }
       return mk.Media(url, httpHeaders: KuwoPlaybackService.streamHeaders());
+    }
+
+    // 咪咕：免登录走聚合，登录后试自家 VIP 直链。
+    if (song.isMigu) {
+      final cid = song.miguCopyrightId;
+      final url = cid == null
+          ? null
+          : await MiguPlaybackService.instance.resolveStreamUrl(cid);
+      if (url == null) {
+        throw StateError('咪咕音乐无可用播放地址：${song.title}');
+      }
+      return mk.Media(url, httpHeaders: MiguPlaybackService.streamHeaders());
     }
 
     // CUE 整轨曲目：跳过本地缓存（命中会拿到整轨文件，缺失会让后台把整轨
@@ -3985,6 +3998,20 @@ class PlayerService with WidgetsBindingObserver {
       return Uri.parse(url);
     }
 
+    if (song.isMigu) {
+      final cid = song.miguCopyrightId;
+      final url = cid == null
+          ? null
+          : await MiguPlaybackService.instance.resolveStreamUrl(
+              cid,
+              force: forceRefresh,
+            );
+      if (url == null) {
+        throw StateError('咪咕音乐无可用播放地址：${song.title}');
+      }
+      return Uri.parse(url);
+    }
+
     final rawUri = (song.uri ?? '').trim();
     if (!rawUri.startsWith('http')) {
       return Uri.file(rawUri);
@@ -4222,6 +4249,24 @@ class PlayerService with WidgetsBindingObserver {
       return AudioSource.uri(
         Uri.parse(url),
         headers: KuwoPlaybackService.streamHeaders(),
+      );
+    }
+
+    // 咪咕：同样绕开飞牛的缓存/转码链路。
+    if (song.isMigu) {
+      final cid = song.miguCopyrightId;
+      final url = cid == null
+          ? null
+          : await MiguPlaybackService.instance.resolveStreamUrl(
+              cid,
+              force: forceRefresh,
+            );
+      if (url == null) {
+        throw StateError('咪咕音乐无可用播放地址：${song.title}');
+      }
+      return AudioSource.uri(
+        Uri.parse(url),
+        headers: MiguPlaybackService.streamHeaders(),
       );
     }
 

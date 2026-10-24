@@ -221,6 +221,7 @@ class _DownloadsPageState extends State<DownloadsPage> {
     SongSource.qq => 'QQ',
     SongSource.kugou => '酷狗',
     SongSource.kuwo => '酷我',
+    SongSource.migu => '咪咕',
   };
 
   static String _formatSize(int bytes) {

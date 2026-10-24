@@ -6,6 +6,7 @@ import 'feiniu/favorite_service.dart';
 import 'feiniu/playlist_service.dart';
 import 'kugou/kugou_api_client.dart';
 import 'kugou/kugou_auth.dart';
+import 'migu/migu_auth.dart';
 import 'netease/netease_api_client.dart';
 import 'qq/qq_api_client.dart';
 import 'qq/qq_auth.dart';
@@ -119,6 +120,15 @@ class SongActionsService {
           canAddToPlaylist: false,
           canFavorite: false,
         );
+      case SongSource.migu:
+        // 已接扫码登录（登录后解锁自家直连 VIP 地址），但歌单/收藏暂未做。
+        return SongActionCapability(
+          label: '咪咕音乐',
+          loggedIn: MiguAuth.instance.isLoggedIn.value,
+          canReadPlaylists: false,
+          canAddToPlaylist: false,
+          canFavorite: false,
+        );
       case SongSource.netease:
         return SongActionCapability(
           label: '网易云音乐',
@@ -212,6 +222,7 @@ class SongActionsService {
               .toList();
 
         case SongSource.kuwo:
+        case SongSource.migu:
           return const [];
       }
     } catch (e) {
@@ -239,6 +250,7 @@ class SongActionsService {
         case SongSource.netease:
         case SongSource.qq:
         case SongSource.kuwo:
+        case SongSource.migu:
           return false;
       }
     } catch (e) {
@@ -292,6 +304,8 @@ class SongActionsService {
       case SongSource.kuwo:
         // 能力里已标 canFavorite:false，到不了这里；留 case 满足穷尽。
         throw UnsupportedError('酷我暂不支持收藏');
+      case SongSource.migu:
+        throw UnsupportedError('咪咕暂不支持收藏');
     }
   }
 
@@ -367,6 +381,8 @@ class SongActionsService {
       case SongSource.kuwo:
         // 能力里已标 canAddToPlaylist:false，到不了这里；留 case 满足穷尽。
         throw UnsupportedError('酷我暂不支持添加到歌单');
+      case SongSource.migu:
+        throw UnsupportedError('咪咕暂不支持添加到歌单');
     }
   }
 }

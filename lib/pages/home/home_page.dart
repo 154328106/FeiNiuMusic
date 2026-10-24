@@ -15,6 +15,7 @@ import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';
 import '../../app/services/source/kugou_source.dart';
 import '../../app/services/source/kuwo_source.dart';
+import '../../app/services/source/migu_source.dart';
 import '../../app/services/source/netease_source.dart';
 import '../../app/services/source/qq_source.dart';
 import '../../app/state/settings_state.dart';
@@ -912,6 +913,18 @@ class _HomePageState extends State<HomePage>
       final source = KuwoSource.instance;
       return [
         // 「搜索」格换成「歌手」：点进去是热门歌手列表，再点就是该歌手的歌。
+        HomeShortcutItem(
+          icon: Icons.people_rounded,
+          label: '歌手',
+          accent: const Color(0xFF14B8A6),
+          onTap: () => _openSourcePlaylists('热门歌手', source.artists),
+        ),
+        _localShortcut(),
+      ];
+    }
+    if (_source.id == 'migu') {
+      final source = MiguSource.instance;
+      return [
         HomeShortcutItem(
           icon: Icons.people_rounded,
           label: '歌手',

@@ -13,7 +13,8 @@ enum SongSource {
   netease,
   qq,
   kugou,
-  kuwo;
+  kuwo,
+  migu;
 
   /// 网易云 id 前缀。选 `ne:` 而不是 `netease:` 是为了让缓存文件名短一些。
   static const String neteasePrefix = 'ne:';
@@ -27,12 +28,17 @@ enum SongSource {
   /// 酷我 id 前缀。酷我的主键是数字 rid（字符串存）。
   static const String kuwoPrefix = 'kw:';
 
+  /// 咪咕 id 前缀。咪咕编进 id 的是 copyrightId（版权 id）；contentId 另存
+  /// 在 [SongEntity.audioSpec] 上供自家直连播放用。
+  static const String miguPrefix = 'mg:';
+
   /// 从 `SongEntity.id` 反推来源。无法识别的一律当飞牛，保证老数据行为不变。
   static SongSource fromSongId(String songId) {
     if (songId.startsWith(neteasePrefix)) return SongSource.netease;
     if (songId.startsWith(qqPrefix)) return SongSource.qq;
     if (songId.startsWith(kugouPrefix)) return SongSource.kugou;
     if (songId.startsWith(kuwoPrefix)) return SongSource.kuwo;
+    if (songId.startsWith(miguPrefix)) return SongSource.migu;
     return SongSource.feiniu;
   }
 
@@ -44,6 +50,16 @@ enum SongSource {
     if (!songId.startsWith(kuwoPrefix)) return null;
     final rid = songId.substring(kuwoPrefix.length);
     return rid.isEmpty ? null : rid;
+  }
+
+  /// 把咪咕的 copyrightId 编码成 `SongEntity.id`。
+  static String encodeMigu(String copyrightId) => '$miguPrefix$copyrightId';
+
+  /// 从 `SongEntity.id` 取回咪咕 copyrightId；不是咪咕歌曲则返回 null。
+  static String? decodeMigu(String songId) {
+    if (!songId.startsWith(miguPrefix)) return null;
+    final id = songId.substring(miguPrefix.length);
+    return id.isEmpty ? null : id;
   }
 
   /// 把酷狗的 hash 编码成 `SongEntity.id`。

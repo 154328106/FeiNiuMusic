@@ -7,7 +7,7 @@ import 'music_source.dart';
 import 'netease_source.dart';
 import 'qq_source.dart';
 import 'kugou_source.dart';
-import 'kuwo_source.dart';
+import 'migu_source.dart';
 
 /// 当前音乐数据源。
 ///
@@ -38,7 +38,9 @@ class MusicSourceRegistry {
     // 真出问题就把这一行再删掉，其余代码不受影响。
     QQSource.instance,
     KugouSource.instance,
-    KuwoSource.instance,
+    // 咪咕顶替了原来的酷我位置：搜索/封面直连咪咕更干净、带真封面。酷我代码
+    // （KuwoSource / kuwo_*）保留备用，只是不在源列表里，想切回来加回这行即可。
+    MiguSource.instance,
   ];
 
   final ValueNotifier<MusicSource> current = ValueNotifier(

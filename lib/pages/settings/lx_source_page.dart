@@ -68,6 +68,9 @@ class _LxSourcePageState extends State<LxSourcePage> {
       case SongSource.kuwo:
         platform = 'kw';
         id = SongSource.decodeKuwo(song.id);
+      case SongSource.migu:
+        platform = 'mg';
+        id = SongSource.decodeMigu(song.id);
       case SongSource.feiniu:
         AppToast.show(context, '当前播的是飞牛本地歌，LX 脚本用不上；换一首在线歌再测');
         return;

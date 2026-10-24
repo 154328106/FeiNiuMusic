@@ -9,6 +9,7 @@ import '../feiniu/api_client.dart';
 import '../netease/netease_api_client.dart';
 import '../kugou/kugou_api_client.dart';
 import '../kuwo/kuwo_api_client.dart';
+import '../migu/migu_api_client.dart';
 import '../qq/qq_api_client.dart';
 
 class LyricsRepository {
@@ -32,6 +33,8 @@ class LyricsRepository {
           ? await _kugouLrc(song)
           : song.isKuwo
           ? await _kuwoLrc(song)
+          : song.isMigu
+          ? await _miguLrc(song)
           : await FeiNiuApiClient.instance.getLyricText(song.id);
       if (lyricText != null && lyricText.trim().isNotEmpty) {
         await _writeToCache(song.id, lyricText);
@@ -59,6 +62,13 @@ class LyricsRepository {
     final rid = song.kuwoRid;
     if (rid == null) return null;
     return KuwoApiClient.instance.lyric(rid);
+  }
+
+  /// 咪咕歌词。搜索结果直接带 .lrc 直链，存在实体的 codec 上，拉下来即可。
+  Future<String?> _miguLrc(SongEntity song) async {
+    final url = song.codec;
+    if (url == null || url.isEmpty) return null;
+    return MiguApiClient.instance.lyric(url);
   }
 
   /// QQ 音乐歌词。接口直接给明文 LRC（nobase64=1），不用再解码。

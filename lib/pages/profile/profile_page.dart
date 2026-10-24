@@ -11,9 +11,12 @@ import '../../app/services/kugou/kugou_auth.dart';
 import '../../app/services/kugou/kugou_playback_service.dart';
 import '../../app/services/qq/qq_auth.dart';
 import '../../app/services/qq/qq_playback_service.dart';
+import '../../app/services/migu/migu_auth.dart';
+import '../../app/services/migu/migu_playback_service.dart';
 import '../../app/services/source/netease_source.dart';
 import '../../app/services/source/kugou_source.dart';
 import '../../app/services/source/qq_source.dart';
+import '../../app/services/source/migu_source.dart';
 import '../../components/index.dart';
 
 /// 底部导航第 4 项「我的」入口页。
@@ -122,6 +125,7 @@ class _MusicSourceSection extends StatelessWidget {
                   'netease' => () => _onLogin(context, registry),
                   'qq' => () => _onLoginQQ(context, registry),
                   'kugou' => () => _onLoginKugou(context, registry),
+                  'migu' => () => _onLoginMigu(context, registry),
                   _ => null,
                 },
               ),
@@ -269,6 +273,45 @@ class _MusicSourceSection extends StatelessWidget {
     registry.notifyContentChanged();
   }
 
+  /// 咪咕扫码登录。登录后解锁咪咕自家直连的 VIP 高音质地址。
+  Future<void> _onLoginMigu(
+    BuildContext context,
+    MusicSourceRegistry registry,
+  ) async {
+    if (MiguAuth.instance.isLoggedIn.value) {
+      final logout = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('咪咕音乐账号'),
+          content: Text(
+            '已登录${MiguAuth.instance.nickname.isEmpty ? '' : '：${MiguAuth.instance.nickname}'}。'
+            '退出后仍可用搜索、歌手和播放（走聚合音源），但咪咕自家的 VIP 直链拿不到。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('退出登录'),
+            ),
+          ],
+        ),
+      );
+      if (logout != true) return;
+      await MiguAuth.instance.logout();
+      MiguPlaybackService.instance.clear();
+      MiguSource.instance.reset();
+      registry.notifyContentChanged();
+      return;
+    }
+    await Navigator.pushNamed(context, AppRoutes.miguLogin);
+    MiguPlaybackService.instance.clear();
+    MiguSource.instance.reset();
+    registry.notifyContentChanged();
+  }
+
   /// 右侧「登录 / 账号」按钮：扫码登录，回来后刷新这一行和首页。
   Future<void> _onLogin(
     BuildContext context,
@@ -312,6 +355,7 @@ class _SourceBar extends StatelessWidget {
       NetEaseSource() => src.isLoggedIn,
       QQSource() => QQAuth.instance.isLoggedIn.value,
       KugouSource() => KugouAuth.instance.isLoggedIn.value,
+      MiguSource() => MiguAuth.instance.isLoggedIn.value,
       _ => true,
     };
     // 飞牛那栏登录后写「管理」（进账号管理），其余源写「账号」。

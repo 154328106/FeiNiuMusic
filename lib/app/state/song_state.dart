@@ -83,6 +83,12 @@ class SongEntity {
   /// 酷我歌曲的 rid；非酷我歌曲为 null。
   String? get kuwoRid => SongSource.decodeKuwo(id);
 
+  /// 是否来自咪咕。
+  bool get isMigu => source == SongSource.migu;
+
+  /// 咪咕歌曲的 copyrightId；非咪咕歌曲为 null。
+  String? get miguCopyrightId => SongSource.decodeMigu(id);
+
   /// 来自公网源（网易云 / QQ / 酷狗）：封面是直链、播放地址是带签名的临时
   /// 链接，两条链路都不能按飞牛那套处理。
   bool get isRemoteSource => isNetease || isQQ || isKugou;
