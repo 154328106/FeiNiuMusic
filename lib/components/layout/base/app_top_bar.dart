@@ -62,10 +62,19 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
           letterSpacing: miuix ? -0.2 : null,
         );
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    // 必须同时写导航栏字段：AppBar 的 systemOverlayStyle 会整个覆盖 app.dart
+    // 里设的那份，只写状态栏的话导航栏回落系统默认 —— 深色模式下华为/鸿蒙上
+    // 表现成「最底一条白」。给透明 + 正确图标亮度 + 关掉系统强制对比度遮罩。
     final overlayStyle = SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
       statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarIconBrightness: isDark
+          ? Brightness.light
+          : Brightness.dark,
+      systemNavigationBarDividerColor: Colors.transparent,
+      systemNavigationBarContrastEnforced: false,
     );
     final resolvedActions = <Widget>[...(actions ?? const [])];
     if (isRefreshing == true) {

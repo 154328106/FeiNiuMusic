@@ -214,6 +214,9 @@ class FeiNiuMusicApp extends StatelessWidget {
                                   ? Brightness.light
                                   : Brightness.dark,
                               systemNavigationBarDividerColor: Colors.transparent,
+                              // 关掉系统在透明导航栏后面强加的半透明遮罩，
+                              // 否则边到边下那条还是会蒙一层。
+                              systemNavigationBarContrastEnforced: false,
                             );
                             Widget content =
                                 AnnotatedRegion<SystemUiOverlayStyle>(
