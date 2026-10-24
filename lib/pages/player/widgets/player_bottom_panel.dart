@@ -11,6 +11,8 @@ import '../../../app/router/app_router.dart';
 import '../../../app/services/lyrics/lyrics_service.dart';
 import '../../../components/player/radar_play_button.dart';
 import '../../../app/services/player_service.dart';
+import '../../../app/services/song_actions_service.dart';
+import '../../../app/services/local_favorites_store.dart';
 import '../../../app/state/settings_state.dart';
 import '../../../app/state/song_state.dart';
 import '../../../components/common/artwork_widget.dart';
@@ -605,9 +607,12 @@ class BottomActions extends StatelessWidget {
                   break;
               }
             }
-            if (actions.isEmpty) {
-              return const SizedBox.shrink();
-            }
+            // 收藏 ❤ 常驻放最前，不跟设置开关走 —— 收藏是高频操作，不该再藏进
+            // 「更多」面板。
+            actions.insert(
+              0,
+              PlayerFavoriteButton(player: player, color: iconColor),
+            );
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Row(
@@ -1576,6 +1581,89 @@ class PosterControls extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// 播放页底部动作排里的常驻收藏 ❤。
+///
+/// 之前收藏只藏在「更多」面板里，收藏一首要「进播放页 → 点 ⋮ → 才看到心形」，
+/// 太绕。把心形直接摆到底部那排按钮上，点一下就收藏（本地为主，见
+/// [SongActionsService.setFavorite]）。监听当前歌 + 本地收藏变化实时回显。
+class PlayerFavoriteButton extends StatefulWidget {
+  final PlayerService player;
+  final Color? color;
+  final double iconSize;
+  const PlayerFavoriteButton({
+    super.key,
+    required this.player,
+    this.color,
+    this.iconSize = 28,
+  });
+
+  @override
+  State<PlayerFavoriteButton> createState() => _PlayerFavoriteButtonState();
+}
+
+class _PlayerFavoriteButtonState extends State<PlayerFavoriteButton> {
+  bool _isFavorite = false;
+  String? _loadedId;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.player.currentSong.addListener(_reload);
+    LocalFavoritesStore.instance.revision.addListener(_reload);
+    _reload();
+  }
+
+  @override
+  void dispose() {
+    widget.player.currentSong.removeListener(_reload);
+    LocalFavoritesStore.instance.revision.removeListener(_reload);
+    super.dispose();
+  }
+
+  Future<void> _reload() async {
+    final song = widget.player.currentSong.value;
+    _loadedId = song?.id;
+    if (song == null) {
+      if (mounted) setState(() => _isFavorite = false);
+      return;
+    }
+    final fav = await SongActionsService.instance.isFavorite(song);
+    if (!mounted || widget.player.currentSong.value?.id != _loadedId) return;
+    setState(() => _isFavorite = fav);
+  }
+
+  Future<void> _toggle() async {
+    final song = widget.player.currentSong.value;
+    if (song == null) return;
+    final next = !_isFavorite;
+    setState(() => _isFavorite = next); // 乐观更新，点下去立刻变。
+    try {
+      await SongActionsService.instance.setFavorite(song, next);
+      if (mounted) AppToast.show(context, next ? '已收藏' : '已取消收藏');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isFavorite = !next);
+      AppToast.show(context, SongActionsService.describeError(e),
+          type: ToastType.error);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.color ??
+        Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.85);
+    return IconButton(
+      iconSize: widget.iconSize,
+      color: color,
+      icon: Icon(
+        _isFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+        color: _isFavorite ? Colors.deepOrangeAccent : color,
+      ),
+      onPressed: widget.player.currentSong.value == null ? null : _toggle,
     );
   }
 }
