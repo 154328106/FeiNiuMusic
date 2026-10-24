@@ -353,11 +353,11 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                     ),
                   ),
                   IconButton(
-                    iconSize: 22,
+                    iconSize: 20,
                     visualDensity: VisualDensity.compact,
                     constraints: const BoxConstraints.tightFor(
-                      width: 36,
-                      height: 36,
+                      width: 34,
+                      height: 34,
                     ),
                     icon: Icon(
                       _isFavorite

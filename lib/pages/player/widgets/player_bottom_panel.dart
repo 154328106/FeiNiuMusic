@@ -1598,7 +1598,8 @@ class PlayerFavoriteButton extends StatefulWidget {
     super.key,
     required this.player,
     this.color,
-    this.iconSize = 28,
+    // 默认和底部那排其它按钮(默认 IconButton = 24)一样大，别突出。
+    this.iconSize = 24,
   });
 
   @override
