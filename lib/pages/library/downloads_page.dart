@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:url_launcher/url_launcher.dart';
@@ -104,17 +106,36 @@ class _DownloadsPageState extends State<DownloadsPage> {
     );
   }
 
-  /// 「下载目录」：显示完整路径，可复制，尝试用文件管理器打开。
+  /// 「下载目录」：显示在哪儿找，可复制完整路径。
+  ///
+  /// iOS 的路径是 `/var/mobile/Containers/.../Documents/downloads`，看着像沙盒
+  /// 其实配合 Info.plist 的 UIFileSharingEnabled + LSSupportsOpeningDocumentsInPlace
+  /// 已在「文件」App 里暴露，所以给的是导航指引而不是那串没法点的路径；iOS 也
+  /// 没法用 url_launcher 打开目录，那个按钮只在安卓给。
   Future<void> _showFolder() async {
     final path = await DownloadService.instance.downloadsDirPath();
     if (!mounted) return;
+    final isIOS = Platform.isIOS;
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('下载目录'),
-        content: SelectableText(
-          path,
-          style: const TextStyle(fontSize: 13, height: 1.5),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (isIOS)
+              const Text(
+                '在「文件」App 里打开：\n'
+                '我的 iPhone → 飞牛音乐 → downloads',
+                style: TextStyle(fontSize: 14, height: 1.6),
+              ),
+            if (isIOS) const SizedBox(height: 10),
+            SelectableText(
+              path,
+              style: const TextStyle(fontSize: 12, height: 1.5),
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -125,25 +146,26 @@ class _DownloadsPageState extends State<DownloadsPage> {
             },
             child: const Text('复制路径'),
           ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              try {
-                final ok = await launchUrl(
-                  Uri.directory(path),
-                  mode: LaunchMode.externalApplication,
-                );
-                if (!ok && mounted) {
-                  AppToast.show(context, '打不开，请到文件管理器手动进入该路径');
+          if (!isIOS)
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                try {
+                  final ok = await launchUrl(
+                    Uri.directory(path),
+                    mode: LaunchMode.externalApplication,
+                  );
+                  if (!ok && mounted) {
+                    AppToast.show(context, '打不开，请到文件管理器手动进入该路径');
+                  }
+                } catch (_) {
+                  if (mounted) {
+                    AppToast.show(context, '打不开，请到文件管理器手动进入该路径');
+                  }
                 }
-              } catch (_) {
-                if (mounted) {
-                  AppToast.show(context, '打不开，请到文件管理器手动进入该路径');
-                }
-              }
-            },
-            child: const Text('用文件管理器打开'),
-          ),
+              },
+              child: const Text('用文件管理器打开'),
+            ),
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('关闭'),

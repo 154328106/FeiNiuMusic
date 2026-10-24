@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../state/song_source.dart';
 import '../../state/song_state.dart';
+import '../unblock/free_unblock_sources.dart';
 import '../unblock/unblock_source.dart';
 import 'migu_models.dart';
 
@@ -71,7 +72,14 @@ class MiguPlaybackService {
     _active--;
   }
 
-  Future<String?> resolveStreamUrl(String copyrightId, {bool force = false}) async {
+  /// [song] 给上就先记下它的歌名/歌手 —— 恢复播放 / 直接点播时 _meta 可能是空的，
+  /// 没有歌名，按歌名搜酷狗/酷我的兜底就会被跳过（keyword 空直接 return）。
+  Future<String?> resolveStreamUrl(
+    String copyrightId, {
+    bool force = false,
+    SongEntity? song,
+  }) async {
+    if (song != null) _remember(song, copyrightId);
     if (!force) {
       final cached = _cache[copyrightId];
       if (cached != null && !cached.isExpired) return cached.url;
@@ -97,14 +105,36 @@ class MiguPlaybackService {
     }
   }
 
+  /// 并发取址：第一个返回非空的胜出；都为空 / 都失败则返回 null。
+  Future<String?> _firstNonEmpty(List<Future<String?>> futures) {
+    final c = Completer<String?>();
+    var remaining = futures.length;
+    for (final f in futures) {
+      f.then((v) {
+        if (!c.isCompleted && v != null && v.isNotEmpty) {
+          c.complete(v);
+        } else if (--remaining == 0 && !c.isCompleted) {
+          c.complete(null);
+        }
+      }).catchError((_) {
+        if (--remaining == 0 && !c.isCompleted) c.complete(null);
+      });
+    }
+    return c.future;
+  }
+
   Future<String?> _resolveOnce(String copyrightId) async {
     final meta = _meta[copyrightId];
+    final quality = UnblockSourceService.instance.config.value.quality;
     String? url;
     try {
-      // 咪咕播放走解灰链（聚合 / LX 的 mg 后端）。自家直连 listenSong.do 即便
-      // 登录也只回「暂不提供试听地址」（要完整 SSO 交换 + 签名，不划算），已弃用。
-      // 带上 name/singer：有些 mg 后端按歌名+歌手搜，否则报「需要 name+singer」。
-      url = await UnblockSourceService.instance.resolve(
+      // 咪咕没有自己的直连（listenSong.do 登录也只回「暂不提供」）、自家 mg 聚合
+      // 后端又时常 200 但取不出地址，死站还会拖好几秒。所以这里**并发**两条路，
+      // 谁先拿到用谁：
+      //   A) mg 聚合链（LX / 聆澜）：命中时音质可能更对口；
+      //   B) 直接按歌名搜酷狗/酷我：和 LX 无关，冷启动也快又稳，是主力兜底。
+      // 整体封顶 15s，拿不到就是拿不到，不无限转圈。
+      final aggregate = UnblockSourceService.instance.resolve(
         platform: 'mg',
         songId: copyrightId,
         keyword: meta?.keyword,
@@ -112,6 +142,15 @@ class MiguPlaybackService {
         name: meta?.name,
         singer: meta?.singer,
       );
+      final byName = (meta != null && meta.keyword.isNotEmpty)
+          ? FreeUnblockSources.resolve(
+              keyword: meta.keyword,
+              durationMs: meta.durationMs,
+              quality: quality,
+            )
+          : Future<String?>.value(null);
+      url = await _firstNonEmpty([aggregate, byName])
+          .timeout(const Duration(seconds: 15), onTimeout: () => null);
     } catch (e) {
       debugPrint('[Migu] 取址异常 $copyrightId：$e');
     }

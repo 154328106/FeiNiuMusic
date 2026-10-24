@@ -1089,7 +1089,7 @@ class PlayerService with WidgetsBindingObserver {
       final cid = song.miguCopyrightId;
       final url = cid == null
           ? null
-          : await MiguPlaybackService.instance.resolveStreamUrl(cid);
+          : await MiguPlaybackService.instance.resolveStreamUrl(cid, song: song);
       if (url == null) {
         throw StateError('咪咕音乐无可用播放地址：${song.title}');
       }
@@ -4005,6 +4005,7 @@ class PlayerService with WidgetsBindingObserver {
           : await MiguPlaybackService.instance.resolveStreamUrl(
               cid,
               force: forceRefresh,
+              song: song,
             );
       if (url == null) {
         throw StateError('咪咕音乐无可用播放地址：${song.title}');
@@ -4260,6 +4261,7 @@ class PlayerService with WidgetsBindingObserver {
           : await MiguPlaybackService.instance.resolveStreamUrl(
               cid,
               force: forceRefresh,
+              song: song,
             );
       if (url == null) {
         throw StateError('咪咕音乐无可用播放地址：${song.title}');

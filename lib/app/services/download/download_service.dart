@@ -357,7 +357,7 @@ class DownloadService {
       case SongSource.migu:
         final cid = SongSource.decodeMigu(song.id);
         if (cid == null) return null;
-        final url = await MiguPlaybackService.instance.resolveStreamUrl(cid);
+        final url = await MiguPlaybackService.instance.resolveStreamUrl(cid, song: song);
         if (url == null) return null;
         return _ResolvedDownload(url, MiguPlaybackService.streamHeaders());
       case SongSource.feiniu:

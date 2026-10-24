@@ -133,9 +133,9 @@ class _AppBackgroundState extends State<AppBackground> {
   }) {
     // 顶部流光再明显一点点（用户要求）：顶/中档加强，底部基本不动，保持
     // 「上浓下淡」的过渡，不至于整页泛色。
-    final topStrength = isDark ? 0.34 : 0.27;
-    final midStrength = isDark ? 0.18 : 0.13;
-    final bottomStrength = isDark ? 0.08 : 0.06;
+    final topStrength = isDark ? 0.44 : 0.36;
+    final midStrength = isDark ? 0.22 : 0.17;
+    final bottomStrength = isDark ? 0.09 : 0.07;
     return LinearGradient(
       begin: Alignment.topCenter,
       end: Alignment.bottomCenter,

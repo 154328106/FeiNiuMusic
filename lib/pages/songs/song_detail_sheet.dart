@@ -130,7 +130,7 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
         if (service.isDownloaded(song.id)) {
           return AppListTile(
             leading: const Icon(Icons.download_done_rounded),
-            title: '已下载（点击删除）',
+            title: '歌曲已下载',
             onTap: () => _confirmDeleteDownload(song),
           );
         }
@@ -353,6 +353,12 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                     ),
                   ),
                   IconButton(
+                    iconSize: 22,
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 36,
+                      height: 36,
+                    ),
                     icon: Icon(
                       _isFavorite
                           ? Icons.favorite_rounded
@@ -426,7 +432,7 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
             if (widget.onOpenPlayerAppearanceSettings != null)
               AppListTile(
                 leading: const Icon(Icons.tune_rounded),
-                title: '播放器界面设置',
+                title: '播放器样式',
                 onTap: () {
                   final nav = Navigator.of(context);
                   nav.pop();
