@@ -58,6 +58,18 @@ class _CollapsibleMiniPlayerState extends State<CollapsibleMiniPlayer> {
   /// 播放条实测高度（含外层 padding）。首帧没量到前用估计值。
   double _h = MiniPlayerBar.estimatedHeight;
 
+  @override
+  void initState() {
+    super.initState();
+    MiniPlayerCollapse.instance.registerMini();
+  }
+
+  @override
+  void dispose() {
+    MiniPlayerCollapse.instance.unregisterMini();
+    super.dispose();
+  }
+
   void _onSize(Size s) {
     if ((s.height - _h).abs() > 0.5 && mounted) setState(() => _h = s.height);
   }

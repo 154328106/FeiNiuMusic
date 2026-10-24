@@ -4,7 +4,6 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
 import '../services/player_service.dart';
-import 'settings_state.dart';
 
 /// 迷你播放器「滚动时收成球、停下回条」的全局状态。
 ///
@@ -39,17 +38,25 @@ class MiniPlayerCollapse {
   double _to = 0;
   Duration _total = Duration.zero;
 
-  /// 迷你条此刻是否真的显示着 —— 没歌、被页面压掉、「仅播放时显示」且暂停时
-  /// 都不收，否则导航条会凭空让出一块空位。
-  bool get _miniVisible {
-    if (PlayerService.instance.currentSong.value == null) return false;
-    if (AppLayoutSettings.miniPlayerSuppressedCount.value > 0) return false;
-    if (AppBackgroundSettings.miniPlayerOnlyWhilePlaying.value &&
-        !PlayerService.instance.isPlaying.value) {
-      return false;
+  /// 当前挂载着的可收球迷你条数量（CollapsibleMiniPlayer 自己注册/注销）。
+  /// 「仅播放时显示」且暂停、页面不显示迷你条时，它根本不会被建出来 → 计数为 0。
+  int _mountedMinis = 0;
+  void registerMini() => _mountedMinis++;
+  void unregisterMini() {
+    _mountedMinis = (_mountedMinis - 1).clamp(0, 1 << 30);
+    // dispose 期间树是锁的，同步改 notifier 会报 setState-when-locked，帧后再收。
+    if (_mountedMinis == 0) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (_mountedMinis == 0) reset();
+      });
     }
-    return true;
   }
+
+  /// 迷你条此刻真的在 —— 没歌、没挂载就不收，否则导航条会凭空让出一块空位。
+  /// （别用 miniPlayerSuppressedCount：那是平板外壳的计数，手机上页面栈里
+  /// 任意一页不显示迷你条它就 >0，会把收起永久拦住。）
+  bool get _miniVisible =>
+      _mountedMinis > 0 && PlayerService.instance.currentSong.value != null;
 
   /// 把一条滚动通知喂进来（挂在顶层 NotificationListener 里）。
   bool handle(ScrollNotification n) {
