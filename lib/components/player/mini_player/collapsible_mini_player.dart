@@ -115,12 +115,20 @@ class _CollapsibleMiniPlayerState extends State<CollapsibleMiniPlayer> {
                 child: CompositedTransformFollower(
                   link: _link,
                   showWhenUnlinked: false,
-                  // 高度不给死：条按自然高度布局，_MeasureSize 才量得准。
-                  child: SizedBox(
-                    width: full,
-                    child: ValueListenableBuilder<double>(
-                      valueListenable: MiniPlayerCollapse.instance.progress,
-                      builder: (context, p, _) => _morph(context, full, p, nav),
+                  // 高度必须「不限」：Align 给的是「最多一屏高」的约束，条里有
+                  // 会撑满可用高度的部件，直接被拉成整屏（点哪都开播放页）。
+                  // 原来在页面里是 Positioned 只钉底边 = 高度不限，这里照样还原：
+                  // 只约束宽度、高度放开，条按自然高度长，_MeasureSize 才量得准。
+                  child: UnconstrainedBox(
+                    alignment: Alignment.topLeft,
+                    constrainedAxis: Axis.horizontal,
+                    child: SizedBox(
+                      width: full,
+                      child: ValueListenableBuilder<double>(
+                        valueListenable: MiniPlayerCollapse.instance.progress,
+                        builder: (context, p, _) =>
+                            _morph(context, full, p, nav),
+                      ),
                     ),
                   ),
                 ),
