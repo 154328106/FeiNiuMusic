@@ -71,13 +71,17 @@ class MiniPlayerCollapse {
     if (n.metrics.maxScrollExtent <= 0) return false;
 
     if (n is ScrollStartNotification) {
-      // 只认手指拖出来的滚动；程序滚动（点按钮自动滚到某处）没有 dragDetails。
-      _dragging = n.dragDetails != null;
-      _dragAccum = 0;
-      if (_dragging) _expandTimer?.cancel(); // 按下去就别回条了
+      // 新一次手指拖动：清零累计。程序滚动 / 惯性没有 dragDetails，不清。
+      if (n.dragDetails != null) {
+        _dragAccum = 0;
+        _expandTimer?.cancel(); // 按下去就别回条了
+        debugPrint('[MiniCollapse] 拖动开始 collapsed=${collapsed.value}');
+      }
     } else if (n is ScrollUpdateNotification) {
       final d = (n.scrollDelta ?? 0).abs();
-      if (_dragging) {
+      // 只认这一帧本身是手指拖出来的（dragDetails 非空）；不靠全局「正在拖」开关 ——
+      // 页面里别的竖向滚动区一发 ScrollEnd 就会把开关清掉，拖动永远凑不够阈值。
+      if (n.dragDetails != null) {
         _dragAccum += d;
         // 累计拖过阈值才收 —— 轻点 / 手指抖一下不算。
         if (!collapsed.value && _dragAccum >= _collapseThreshold) {
@@ -92,7 +96,6 @@ class MiniPlayerCollapse {
       // 已经是球：拖动 / 惯性滚动途中都别回条（含手指按住没松）。
       if (collapsed.value && d > 0) _expandTimer?.cancel();
     } else if (n is ScrollEndNotification) {
-      _dragging = false;
       _dragAccum = 0;
       scheduleExpand(); // 松手且惯性停了才倒计时
     }
@@ -101,7 +104,6 @@ class MiniPlayerCollapse {
 
   /// 一次拖动累计滑过多少像素才收成球。
   static const double _collapseThreshold = 16;
-  bool _dragging = false;
   double _dragAccum = 0;
 
   /// 停下后约半秒展开回条。
