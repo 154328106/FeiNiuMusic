@@ -259,6 +259,20 @@ class AppPageScaffoldState extends State<AppPageScaffold>
                 : bottomInset + lift + ballSize / 2,
             padTop: barPadTop,
             padBottom: barPadBottom,
+            // 有底栏才做「一上一下」（收时盖在导航前、放时从导航下钻出）。
+            nav: hasBottomNav
+                ? MiniNavGeometry(
+                    pillHeight: navPillHeight,
+                    bottomGap:
+                        glassNav ? kGlassNavPillTopGap : kSolidNavPillTopGap,
+                    bottomInset: bottomInset,
+                    shrink: ballSize + 10,
+                  )
+                : null,
+            // 外壳里几个标签页同时挂着，只让当前标签的那条显示在高层。
+            shellTabIndex: PrimaryShellMarker.isInside(context)
+                ? widget.bottomNavIndex
+                : null,
             barBuilder: (opacity) => MiniPlayerBar(
               contentOpacity: opacity,
               padding: EdgeInsets.fromLTRB(16, barPadTop, 16, barPadBottom),
