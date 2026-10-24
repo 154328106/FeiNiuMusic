@@ -16,6 +16,7 @@ import '../../app/services/source/music_source_registry.dart';
 import '../../app/services/source/kugou_source.dart';
 import '../../app/services/source/kuwo_source.dart';
 import '../../app/services/source/migu_source.dart';
+import '../../app/services/local_favorites_store.dart';
 import '../../app/services/source/netease_source.dart';
 import '../../app/services/source/qq_source.dart';
 import '../../app/state/settings_state.dart';
@@ -165,6 +166,8 @@ class _HomePageState extends State<HomePage>
     MusicSourceRegistry.instance.current.addListener(_onSourceChanged);
     // 登录 / 登出后源没换但内容变了，也要重拉。
     MusicSourceRegistry.instance.revision.addListener(_onSourceChanged);
+    // 本地收藏变了（点了心形），收藏卡预览跟着刷新。
+    LocalFavoritesStore.instance.revision.addListener(_loadFavorites);
   }
 
   /// 换源后整页重新拉取。清掉播放来源标记，否则卡片按钮会残留上一个源的状态。
@@ -194,6 +197,7 @@ class _HomePageState extends State<HomePage>
     _player.isPlaying.removeListener(_onPlayingChanged);
     MusicSourceRegistry.instance.current.removeListener(_onSourceChanged);
     MusicSourceRegistry.instance.revision.removeListener(_onSourceChanged);
+    LocalFavoritesStore.instance.revision.removeListener(_loadFavorites);
     super.dispose();
   }
 
@@ -488,7 +492,17 @@ class _HomePageState extends State<HomePage>
 
   Future<void> _loadFavorites() async {
     // 首页只展示前几首；点播放时再按队列上限拉完整列表。
-    final songs = await _source.feed(HomeFeed.favorites);
+    // 收藏改本地为主：本地收藏（全部源）+ 当前源云端，去重后取前几首预览。
+    await LocalFavoritesStore.instance.ensureLoaded();
+    final local = LocalFavoritesStore.instance.list();
+    final seen = {for (final s in local) s.id};
+    final merged = <SongEntity>[...local];
+    try {
+      for (final s in await _source.feed(HomeFeed.favorites)) {
+        if (seen.add(s.id)) merged.add(s);
+      }
+    } catch (_) {}
+    final songs = merged.length > 10 ? merged.sublist(0, 10) : merged;
     if (mounted && !_sameSongs(_favoriteSongs.value, songs)) {
       _favoriteSongs.value = songs;
     }
@@ -1136,8 +1150,15 @@ class _HomePageState extends State<HomePage>
   void _openRecentPage() =>
       _openFeedPage(HomeFeed.recentPlayed, '最近播放', AppRoutes.recent);
 
-  void _openFavoritePage() =>
-      _openFeedPage(HomeFeed.favorites, '收藏', AppRoutes.favorites);
+  // 收藏改成「本地为主」：所有源都走统一的本地收藏页（本地全部 + 当前源云端，
+  // 带本地/云端标签），不再分飞牛云端页 / 其它源只读页。
+  void _openFavoritePage() {
+    Navigator.of(context).push(
+      buildAppPageRoute<void>(
+        (_) => const SourceFeedPage(kind: HomeFeed.favorites, title: '本地收藏'),
+      ),
+    );
+  }
 
   /// 直接播放一个列表（收藏/最近播放）。列表为空时退回漫游随机播放。
   ///
@@ -1517,8 +1538,8 @@ class _HomePageState extends State<HomePage>
                   ),
                   HomeQuickAction(
                     icon: Icons.favorite_rounded,
-                    title: '收藏',
-                    subtitle: '我的最爱',
+                    title: '本地收藏',
+                    subtitle: '不登录也能收',
                     accent: const Color(0xFFEC4899),
                     onTap: _openFavoritePage,
                   ),

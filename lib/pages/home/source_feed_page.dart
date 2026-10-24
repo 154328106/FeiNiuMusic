@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/services/local_favorites_store.dart';
 import '../../app/services/player_service.dart';
 import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';
@@ -64,10 +65,28 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
 
   MusicSource get _source => MusicSourceRegistry.instance.current.value;
 
+  /// 本页是不是「收藏」视图（本地为主 + 云端为副）。歌单 / loader 不算。
+  bool get _isFavoritesView =>
+      widget.loader == null &&
+      widget.playlistId == null &&
+      widget.kind == HomeFeed.favorites;
+
   @override
   void initState() {
     super.initState();
     _load();
+    // 收藏视图：本地收藏变了（在别处点了心形）回来要跟着刷新。
+    LocalFavoritesStore.instance.revision.addListener(_onFavChanged);
+  }
+
+  @override
+  void dispose() {
+    LocalFavoritesStore.instance.revision.removeListener(_onFavChanged);
+    super.dispose();
+  }
+
+  void _onFavChanged() {
+    if (_isFavoritesView && mounted) _load();
   }
 
   Future<void> _load() async {
@@ -75,11 +94,13 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
     // 这里要完整列表，不是首页那份预览。
     final loader = widget.loader;
     final playlistId = widget.playlistId;
-    final List<SongEntity> songs;
+    List<SongEntity> songs;
     if (loader != null) {
       songs = await loader();
     } else if (playlistId != null) {
       songs = await _source.playlistSongs(playlistId);
+    } else if (_isFavoritesView) {
+      songs = await _loadFavorites();
     } else {
       songs = await _source.fullFeed(widget.kind!, limit: 500);
     }
@@ -88,6 +109,23 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
       _songs = songs;
       _loading = false;
     });
+  }
+
+  /// 收藏 = 本地收藏（全部源）+ 当前源云端收藏，按 id 去重（本地优先）。
+  Future<List<SongEntity>> _loadFavorites() async {
+    await LocalFavoritesStore.instance.ensureLoaded();
+    final local = LocalFavoritesStore.instance.list();
+    final seen = {for (final s in local) s.id};
+    final merged = <SongEntity>[...local];
+    try {
+      final cloud = await _source.fullFeed(HomeFeed.favorites, limit: 500);
+      for (final s in cloud) {
+        if (seen.add(s.id)) merged.add(s);
+      }
+    } catch (_) {
+      // 云端拿不到（没登录等）就只有本地，正常。
+    }
+    return merged;
   }
 
   /// 起播。网易云队列先筛掉取不到地址的歌，否则会卡在第一首不动。
@@ -183,16 +221,36 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
     );
   }
 
+  /// 「本地 / 云端」小标签：在本地收藏里就是本地，否则是当前源的云端收藏。
+  Widget _originTag(SongEntity song) {
+    final isLocal = LocalFavoritesStore.instance.isFavorite(song.id);
+    final scheme = Theme.of(context).colorScheme;
+    final color = isLocal ? scheme.primary : scheme.onSurfaceVariant;
+    return Container(
+      margin: const EdgeInsets.only(left: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        isLocal ? '本地' : '云端',
+        style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+
   Widget _buildBody(ColorScheme scheme) {
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_songs.isEmpty) {
       return Center(
         child: Text(
-          // 收藏为空多半是没登录/该源要登录才有收藏，给登录提示而不是干巴巴。
-          widget.kind == HomeFeed.favorites
-              ? '登录账号，即可获取内容'
+          // 收藏改成本地为主：没内容就是还没收藏，提示去点心形。
+          _isFavoritesView
+              ? '点 ♡ 收藏你喜欢的歌，这里就能看到'
               : '${widget.title}暂无内容',
           style: TextStyle(color: scheme.onSurfaceVariant),
+          textAlign: TextAlign.center,
         ),
       );
     }
@@ -224,10 +282,17 @@ class _SourceFeedPageState extends State<SourceFeedPage> {
                 if (song.isVip) const VipBadge(),
               ],
             ),
-            subtitle: Text(
-              song.artistDisplayName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            subtitle: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    song.artistDisplayName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (_isFavoritesView) _originTag(song),
+              ],
             ),
             onTap: () => _play(index),
             onLongPress: () => _showSongDetail(song),

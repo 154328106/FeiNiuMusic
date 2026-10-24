@@ -186,13 +186,13 @@ class HomeLargeLayout extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       HomeSectionHeader(
-                        title: '收藏',
+                        title: '本地收藏',
                         onViewAll: onOpenFavorite,
                       ),
                       const SizedBox(height: 4),
                       Expanded(
                         child: favoriteSongs.isEmpty
-                            ? const _LargeEmpty(text: '登录账号，即可获取内容')
+                            ? const _LargeEmpty(text: '点 ♡ 收藏你喜欢的歌')
                             : _LargeScrollableSongList(
                                 songs: favoriteSongs,
                                 onTap: onTapFavorite,

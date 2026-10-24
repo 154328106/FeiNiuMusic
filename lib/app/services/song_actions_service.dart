@@ -6,6 +6,7 @@ import 'feiniu/favorite_service.dart';
 import 'feiniu/playlist_service.dart';
 import 'kugou/kugou_api_client.dart';
 import 'kugou/kugou_auth.dart';
+import 'local_favorites_store.dart';
 import 'migu/migu_auth.dart';
 import 'netease/netease_api_client.dart';
 import 'qq/qq_api_client.dart';
@@ -112,22 +113,22 @@ class SongActionsService {
           canFavorite: true,
         );
       case SongSource.kuwo:
-        // MVP：未接登录，只搜+播，不做歌单/收藏。
+        // 收藏走本地（免登录），所以 canFavorite 开着；歌单仍不做。
         return const SongActionCapability(
           label: '酷我音乐',
           loggedIn: false,
           canReadPlaylists: false,
           canAddToPlaylist: false,
-          canFavorite: false,
+          canFavorite: true,
         );
       case SongSource.migu:
-        // 已接扫码登录（登录后解锁自家直连 VIP 地址），但歌单/收藏暂未做。
+        // 收藏走本地（免登录）。歌单暂未做。
         return SongActionCapability(
           label: '咪咕音乐',
           loggedIn: MiguAuth.instance.isLoggedIn.value,
           canReadPlaylists: false,
           canAddToPlaylist: false,
-          canFavorite: false,
+          canFavorite: true,
         );
       case SongSource.netease:
         return SongActionCapability(
@@ -146,7 +147,7 @@ class SongActionsService {
           // 设备指纹整套鉴权，web cookie 协议顶不上（实机 retCode=1000）。不再硬撑，
           // 关掉写能力、给明确提示，让用户去 QQ App 操作。读歌单/播放/解灰不受影响。
           canAddToPlaylist: false,
-          canFavorite: false,
+          canFavorite: true,
         );
     }
   }
@@ -231,11 +232,11 @@ class SongActionsService {
     }
   }
 
-  /// 查询是否已收藏。
-  ///
-  /// 网易/QQ 目前没有便宜的「单曲是否已收藏」接口，恒返回 false（红心不回显，
-  /// 但点击仍生效）。酷狗靠「我喜欢」歌单里有没有这首 hash 判断。
+  /// 查询是否已收藏。**本地为主**：在本地收藏里就算收藏（任何源、免登录）。
+  /// 其次看账号云端（飞牛 / 登录了的酷狗），用来在登录时回显云端那份。
   Future<bool> isFavorite(SongEntity song) async {
+    await LocalFavoritesStore.instance.ensureLoaded();
+    if (LocalFavoritesStore.instance.isFavorite(song.id)) return true;
     try {
       switch (song.source) {
         case SongSource.feiniu:
@@ -259,53 +260,53 @@ class SongActionsService {
     }
   }
 
-  /// 设置 / 取消收藏。不支持的源抛 [UnsupportedError]，调用方据此给提示。
+  /// 设置 / 取消收藏。**本地为主**：总是写本地收藏（任何源、免登录都成功）；
+  /// **账号为副**：登录且该源支持时，顺手同步到云端，失败只记日志、不影响本地。
   Future<void> setFavorite(SongEntity song, bool value) async {
-    final cap = capabilityOf(song.source);
-    if (!cap.canFavorite) {
-      throw UnsupportedError('${cap.label}暂不支持收藏');
+    await LocalFavoritesStore.instance.ensureLoaded();
+    if (value) {
+      await LocalFavoritesStore.instance.add(song);
+    } else {
+      await LocalFavoritesStore.instance.remove(song.id);
     }
-    if (!cap.loggedIn) {
-      throw StateError('请先登录${cap.label}');
-    }
-    switch (song.source) {
-      case SongSource.feiniu:
-        if (value) {
-          await _fnFavorite.favorite(song.id);
-        } else {
-          await _fnFavorite.unfavorite(song.id);
-        }
-        return;
-      case SongSource.netease:
-        final id = song.neteaseId;
-        if (id == null) throw StateError('这首歌没有网易云 id');
-        final ok = await NetEaseApiClient.instance.like(id, liked: value);
-        if (!ok) throw StateError('网易云收藏接口返回失败');
-        return;
-      case SongSource.kugou:
-        // 酷狗没有独立的收藏接口：收藏 = 往「我喜欢」这个歌单里加歌。
-        // 取消收藏要用 del_song（另一个接口），先不做，如实报出来。
-        if (!value) {
-          throw UnsupportedError('酷狗暂不支持取消收藏，请到酷狗 App 里操作');
-        }
-        final listId = await KugouApiClient.instance.favoritePlaylistId();
-        if (listId == null) {
-          throw StateError('没找到酷狗「我喜欢」歌单');
-        }
-        await KugouApiClient.instance.addSongsToPlaylist(listId, [
-          _kugouRef(song),
-        ]);
-        // 清「我喜欢」缓存，让红心状态下次能立刻回显为已收藏。
-        KugouSource.instance.invalidateFavoriteCache();
-        return;
-      case SongSource.qq:
-        // QQ 收藏走安卓协议要 QIMEI 鉴权，web 协议做不了，直接给明确提示。
-        throw UnsupportedError('QQ收藏需在QQ音乐App里操作');
-      case SongSource.kuwo:
-        // 能力里已标 canFavorite:false，到不了这里；留 case 满足穷尽。
-        throw UnsupportedError('酷我暂不支持收藏');
-      case SongSource.migu:
-        throw UnsupportedError('咪咕暂不支持收藏');
+    await _syncCloudFavorite(song, value);
+  }
+
+  /// 云端为副：best-effort，登录了就顺手同步，不抛错。
+  Future<void> _syncCloudFavorite(SongEntity song, bool value) async {
+    try {
+      switch (song.source) {
+        case SongSource.feiniu:
+          if (value) {
+            await _fnFavorite.favorite(song.id);
+          } else {
+            await _fnFavorite.unfavorite(song.id);
+          }
+        case SongSource.netease:
+          final id = song.neteaseId;
+          if (id != null) {
+            await NetEaseApiClient.instance.like(id, liked: value);
+          }
+        case SongSource.kugou:
+          // 酷狗只有加、没有便捷的取消；取消就只动本地，不碰云端。
+          if (value && KugouAuth.instance.isLoggedIn.value) {
+            final listId = await KugouApiClient.instance.favoritePlaylistId();
+            if (listId != null) {
+              await KugouApiClient.instance.addSongsToPlaylist(listId, [
+                _kugouRef(song),
+              ]);
+              KugouSource.instance.invalidateFavoriteCache();
+            }
+          }
+        case SongSource.qq:
+        case SongSource.kuwo:
+        case SongSource.migu:
+          // 这些源没有可用的 web 收藏接口，只存本地。
+          break;
+      }
+    } catch (e) {
+      // 云端同步失败不影响本地收藏，只记日志。
+      debugPrint('[SongActions] 云端收藏同步失败（已存本地）：$e');
     }
   }
 
