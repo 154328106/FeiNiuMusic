@@ -214,12 +214,35 @@ class _PlayerPageState extends State<PlayerPage>
                             onVerticalDragUpdate: _handleDismissDragUpdate,
                             onVerticalDragEnd: _handleDismissDragEnd,
                             onVerticalDragCancel: _handleDismissDragCancel,
-                            child: isPoster || isTabletLandscape
-                                ? const SizedBox.shrink()
-                                : PlayerHeader(
-                                    songSignal: _player.currentSongSignal,
-                                    stylePreset: stylePreset,
-                                  ),
+                            // 平板横屏那套自带的 header 没有返回入口，下滑手势也
+                            // 包在零尺寸的 SizedBox 上 → 进了播放页出不去。给它
+                            // 补一个左上角「收起」下箭头。Poster 维持原样（它靠
+                            // 底部面板和系统返回）。
+                            child: isTabletLandscape
+                                ? Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Padding(
+                                      // 平板横屏关了顶部 SafeArea，手动补状态栏高度。
+                                      padding: EdgeInsets.only(
+                                        left: 8,
+                                        top: topInset + 4,
+                                      ),
+                                      child: IconButton(
+                                        tooltip: '收起',
+                                        iconSize: 30,
+                                        icon: const Icon(
+                                          Icons.keyboard_arrow_down_rounded,
+                                        ),
+                                        onPressed: _closePlayer,
+                                      ),
+                                    ),
+                                  )
+                                : isPoster
+                                    ? const SizedBox.shrink()
+                                    : PlayerHeader(
+                                        songSignal: _player.currentSongSignal,
+                                        stylePreset: stylePreset,
+                                      ),
                           ),
                           Expanded(
                             child: PageView(
