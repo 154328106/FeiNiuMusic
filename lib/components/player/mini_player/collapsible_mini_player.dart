@@ -103,9 +103,19 @@ class _CollapsibleMiniPlayerState extends State<CollapsibleMiniPlayer> {
               dy = (barCenterFromBottom - target) * v;
             }
 
-            final contentOpacity = (1 - v * 2.2).clamp(0.0, 1.0);
-            final coverOpacity = ((v - 0.55) / 0.45).clamp(0.0, 1.0);
-            final coverInset = 3.0;
+            // 「滑进去」：条左边那张圆封面不淡掉，而是一路滑到右端、边走边长成
+            // 球；外框在它四周同步收窄。歌名按钮早早淡掉，封面一开始就接手。
+            final contentOpacity = (1 - v / 0.35).clamp(0.0, 1.0);
+            final coverOpacity = (v / 0.12).clamp(0.0, 1.0);
+            const coverInset = 3.0;
+            // 起点：条里封面的位置（外层 inset + 条内 padding 10，尺寸 48）。
+            const barArtSize = 48.0;
+            final barArtCx = widget.insetH + 10 + barArtSize / 2;
+            // 终点：球里的封面。
+            final endSize = ball - coverInset * 2;
+            final endCx = right - ball / 2;
+            final coverCx = lerpDouble(barArtCx, endCx, v)!;
+            final coverSize = lerpDouble(barArtSize, endSize, v)!;
 
             return Transform.translate(
               offset: Offset(0, dy),
@@ -143,19 +153,25 @@ class _CollapsibleMiniPlayerState extends State<CollapsibleMiniPlayer> {
                       ),
                     ),
                   ),
-                  // 球里的旋转封面，后半程淡入。
+                  // 滑行中的封面：按终点尺寸画一次、用缩放变大小（每帧改 size
+                  // 会让图片按新尺寸重新解码，滑动中会闪）。
                   if (coverOpacity > 0)
                     Positioned(
-                      left: right - ball + coverInset,
-                      top: cy - ball / 2 + coverInset,
-                      width: ball - coverInset * 2,
-                      height: ball - coverInset * 2,
-                      child: Opacity(
-                        opacity: coverOpacity,
-                        child: MiniPlayerArtwork(
-                          song: widget.song,
-                          size: ball - coverInset * 2,
-                          borderRadius: (ball - coverInset * 2) / 2,
+                      left: coverCx - endSize / 2,
+                      top: cy - endSize / 2,
+                      width: endSize,
+                      height: endSize,
+                      child: IgnorePointer(
+                        child: Opacity(
+                          opacity: coverOpacity,
+                          child: Transform.scale(
+                            scale: coverSize / endSize,
+                            child: MiniPlayerArtwork(
+                              song: widget.song,
+                              size: endSize,
+                              borderRadius: endSize / 2,
+                            ),
+                          ),
                         ),
                       ),
                     ),

@@ -23,11 +23,13 @@ class MiniPlayerCollapse {
   /// 线性进度 0（条）→ 1（球）。用的地方自己套曲线（[curved]），中途反向也连续。
   final ValueNotifier<double> progress = ValueNotifier(0);
 
-  static double curved(double p) => Curves.easeInOutCubic.transform(p);
+  /// 强调型缓动：起步干脆、收尾很慢地「滑」进位，比普通 easeInOut 更像滑进去。
+  static double curved(double p) =>
+      Curves.easeInOutCubicEmphasized.transform(p);
 
   /// 停下（松手且惯性停了）后等多久再展开回条。
-  static const Duration _expandDelay = Duration(milliseconds: 1500);
-  static const int _fullMs = 340;
+  static const Duration _expandDelay = Duration(milliseconds: 450);
+  static const int _fullMs = 420;
 
   Timer? _expandTimer;
   AnimationController? _controller;
@@ -73,18 +75,18 @@ class MiniPlayerCollapse {
     if (n is ScrollStartNotification) {
       // 新一次手指拖动：清零累计。程序滚动 / 惯性没有 dragDetails，不清。
       if (n.dragDetails != null) {
-        _dragAccum = 0;
+        _downAccum = 0;
+        _upAccum = 0;
         _expandTimer?.cancel(); // 按下去就别回条了
-        debugPrint('[MiniCollapse] 拖动开始 collapsed=${collapsed.value}');
       }
     } else if (n is ScrollUpdateNotification) {
-      final d = (n.scrollDelta ?? 0).abs();
-      // 只认这一帧本身是手指拖出来的（dragDetails 非空）；不靠全局「正在拖」开关 ——
-      // 页面里别的竖向滚动区一发 ScrollEnd 就会把开关清掉，拖动永远凑不够阈值。
-      if (n.dragDetails != null) {
-        _dragAccum += d;
-        // 累计拖过阈值才收 —— 轻点 / 手指抖一下不算。
-        if (!collapsed.value && _dragAccum >= _collapseThreshold) {
+      // scrollDelta > 0：内容往上走 = 往下浏览；< 0：往回（往上）滑。
+      final delta = n.scrollDelta ?? 0;
+      if (delta > 0 && n.dragDetails != null) {
+        // 往下浏览（只认手指拖的帧）：累计过阈值收成球。轻点 / 抖动不算。
+        _upAccum = 0;
+        _downAccum += delta;
+        if (!collapsed.value && _downAccum >= _threshold) {
           if (!_miniVisible) {
             debugPrint('[MiniCollapse] 不收：迷你条不可见 '
                 'song=${PlayerService.instance.currentSong.value != null}');
@@ -92,19 +94,29 @@ class MiniPlayerCollapse {
             _set(true);
           }
         }
+      } else if (delta < 0) {
+        // 往回滑（拖或惯性都算）：累计过阈值立刻展开，不用等停下。
+        _downAccum = 0;
+        _upAccum += -delta;
+        if (collapsed.value && _upAccum >= _threshold) {
+          _expandTimer?.cancel();
+          _set(false);
+        }
       }
-      // 已经是球：拖动 / 惯性滚动途中都别回条（含手指按住没松）。
-      if (collapsed.value && d > 0) _expandTimer?.cancel();
+      // 已经是球：往下拖 / 惯性途中都别回条（含手指按住没松）。
+      if (collapsed.value && delta != 0) _expandTimer?.cancel();
     } else if (n is ScrollEndNotification) {
-      _dragAccum = 0;
+      _downAccum = 0;
+      _upAccum = 0;
       scheduleExpand(); // 松手且惯性停了才倒计时
     }
     return false;
   }
 
-  /// 一次拖动累计滑过多少像素才收成球。
-  static const double _collapseThreshold = 16;
-  double _dragAccum = 0;
+  /// 往下 / 往回累计滑过多少像素才触发收起 / 展开。
+  static const double _threshold = 16;
+  double _downAccum = 0;
+  double _upAccum = 0;
 
   /// 停下后约半秒展开回条。
   void scheduleExpand() {
