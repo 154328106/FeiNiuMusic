@@ -29,7 +29,9 @@ class MiniPlayerCollapse {
 
   /// 停下（松手且惯性停了）后等多久再展开回条。
   static const Duration _expandDelay = Duration(milliseconds: 450);
-  static const int _fullMs = 420;
+  /// 走完一整程的时长（中途反向按剩余距离等比缩短）。原版观感偏慢、带梯形
+  /// 伸缩，420ms 显得赶，放到 600ms。
+  static const int _fullMs = 600;
 
   Timer? _expandTimer;
   AnimationController? _controller;
@@ -49,15 +51,11 @@ class MiniPlayerCollapse {
     if (c != null) progress.value = c.value;
   }
 
-  /// 有歌在放（且没被「仅播放时显示」藏掉）才收，否则导航条会凭空让出空位。
-  bool get _miniVisible {
-    if (PlayerService.instance.currentSong.value == null) return false;
-    if (AppBackgroundSettings.miniPlayerOnlyWhilePlaying.value &&
-        !PlayerService.instance.isPlaying.value) {
-      return false;
-    }
-    return true;
-  }
+  /// 迷你条在就收（不要求先放过歌）。唯一例外：开了「仅播放时显示」且正在
+  /// 暂停 —— 那时条本来就藏着，收了导航条会凭空让出空位。
+  bool get _miniVisible =>
+      !(AppBackgroundSettings.miniPlayerOnlyWhilePlaying.value &&
+          !PlayerService.instance.isPlaying.value);
 
   /// 上一条处理过的通知：滚动通知从最内层往外冒泡，嵌套的页面脚手架会依次看到
   /// 同一条，只让最内层（离滚动区最近的那一页）决定一次。
@@ -88,8 +86,7 @@ class MiniPlayerCollapse {
         _downAccum += delta;
         if (!collapsed.value && _downAccum >= _threshold) {
           if (!_miniVisible) {
-            debugPrint('[MiniCollapse] 不收：迷你条不可见 '
-                'song=${PlayerService.instance.currentSong.value != null}');
+            debugPrint('[MiniCollapse] 不收：仅播放时显示且已暂停');
           } else {
             _set(true);
           }

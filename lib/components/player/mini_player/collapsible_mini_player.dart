@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
@@ -80,18 +81,28 @@ class _CollapsibleMiniPlayerState extends State<CollapsibleMiniPlayer> {
                 .clamp(ball, double.infinity);
             final cy = pillTop + pillH / 2;
 
-            // 底板外形：左边从 insetH 收到「右侧只剩一个球」，高度收到球径，圆角变圆。
+            // 底板外形：左端从 insetH 往右收到「只剩一个球」。不是整块等高平移，
+            // 而是像液体一样「梯形伸缩」——右端高度跟着收到球径，左端在动画
+            // 中段明显更细（右端的 35% 左右），两头（v=0 / v=1）恢复等高，
+            // 所以收的时候由粗到细缩进去、还原时从细尖长回粗条。
             final right = full - widget.insetH;
             final left = lerpDouble(widget.insetH, right - ball, v)!;
-            final h = lerpDouble(pillH, ball, v)!;
-            final top = cy - h / 2;
-            final radius = lerpDouble(widget.barRadius, ball / 2, v)!;
-            final rr = RRect.fromLTRBR(
-              left,
-              top,
-              right,
-              top + h,
-              Radius.circular(radius),
+            final hRight = lerpDouble(pillH, ball, v)!;
+            final taper = 1 - 0.65 * math.sin(math.pi * v);
+            final hLeft = hRight * taper;
+            final rRight = lerpDouble(widget.barRadius, hRight / 2, v)!
+                .clamp(0.0, hRight / 2);
+            final rLeft = lerpDouble(widget.barRadius, hLeft / 2, v)!
+                .clamp(0.0, hLeft / 2);
+            final shape = _taperedCapsule(
+              left: left,
+              right: right,
+              cy: cy,
+              hLeft: hLeft,
+              hRight: hRight,
+              rLeft: rLeft,
+              rRight: rRight,
+              circle: v >= 0.999,
             );
 
             // 整体下移：把条心挪到目标球心。
@@ -122,22 +133,13 @@ class _CollapsibleMiniPlayerState extends State<CollapsibleMiniPlayer> {
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  // 自己画投影（条原本的投影会被下面的裁剪切掉）。
-                  Positioned.fromRect(
-                    rect: rr.outerRect,
+                  // 自己画投影，形状跟着梯形走（条原本的投影会被下面的裁剪切掉）。
+                  Positioned.fill(
                     child: IgnorePointer(
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(radius),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(
-                                alpha: isDark ? 0.22 : 0.12,
-                              ),
-                              blurRadius: 14,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
+                      child: CustomPaint(
+                        painter: _ShapeShadowPainter(
+                          shape,
+                          Colors.black.withValues(alpha: isDark ? 0.22 : 0.12),
                         ),
                       ),
                     ),
@@ -145,8 +147,8 @@ class _CollapsibleMiniPlayerState extends State<CollapsibleMiniPlayer> {
                   // 条：按外形裁剪，内容淡出；过半就不再接收点击（交给球）。
                   IgnorePointer(
                     ignoring: v > 0.5,
-                    child: ClipRRect(
-                      clipper: _RRectClipper(rr),
+                    child: ClipPath(
+                      clipper: _PathClipper(shape),
                       child: _MeasureSize(
                         onChange: _onSize,
                         child: widget.barBuilder(contentOpacity),
@@ -197,15 +199,64 @@ class _CollapsibleMiniPlayerState extends State<CollapsibleMiniPlayer> {
   }
 }
 
-class _RRectClipper extends CustomClipper<RRect> {
-  _RRectClipper(this.rr);
-  final RRect rr;
+/// 两端粗细可以不同的胶囊（梯形 + 圆角端头）。左端高 [hLeft]、右端高
+/// [hRight]，上下沿是两端之间的斜线；四个角用二次贝塞尔近似圆角。
+/// [circle] 为 true 时直接返回正圆（球态终点，避免贝塞尔近似出来是方圆）。
+Path _taperedCapsule({
+  required double left,
+  required double right,
+  required double cy,
+  required double hLeft,
+  required double hRight,
+  required double rLeft,
+  required double rRight,
+  bool circle = false,
+}) {
+  if (circle) {
+    final d = right - left;
+    return Path()
+      ..addOval(Rect.fromCircle(center: Offset(left + d / 2, cy), radius: d / 2));
+  }
+  final topL = cy - hLeft / 2, botL = cy + hLeft / 2;
+  final topR = cy - hRight / 2, botR = cy + hRight / 2;
+  return Path()
+    ..moveTo(left, cy)
+    ..lineTo(left, topL + rLeft)
+    ..quadraticBezierTo(left, topL, left + rLeft, topL)
+    ..lineTo(right - rRight, topR)
+    ..quadraticBezierTo(right, topR, right, topR + rRight)
+    ..lineTo(right, botR - rRight)
+    ..quadraticBezierTo(right, botR, right - rRight, botR)
+    ..lineTo(left + rLeft, botL)
+    ..quadraticBezierTo(left, botL, left, botL - rLeft)
+    ..close();
+}
+
+class _PathClipper extends CustomClipper<Path> {
+  _PathClipper(this.path);
+  final Path path;
 
   @override
-  RRect getClip(Size size) => rr;
+  Path getClip(Size size) => path;
 
   @override
-  bool shouldReclip(_RRectClipper old) => old.rr != rr;
+  bool shouldReclip(_PathClipper old) => !identical(old.path, path);
+}
+
+/// 沿外形画投影（形状是梯形 / 圆，BoxShadow 只能画矩形圆角）。
+class _ShapeShadowPainter extends CustomPainter {
+  _ShapeShadowPainter(this.path, this.color);
+  final Path path;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawShadow(path.shift(const Offset(0, 2)), color, 6, false);
+  }
+
+  @override
+  bool shouldRepaint(_ShapeShadowPainter old) =>
+      !identical(old.path, path) || old.color != color;
 }
 
 /// 布局后回报自身尺寸（只在变化时回调）。
