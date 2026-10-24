@@ -599,7 +599,24 @@ class BottomActions extends StatelessWidget {
                   if (PlayerBottomActionSettings.showMore.value) {
                     actions.add(
                       IconButton(
-                        icon: Icon(Icons.more_horiz, color: iconColor),
+                        // 「更多」重画：竖着的三点 + 小圆角描边框。
+                        icon: Container(
+                          width: 26,
+                          height: 26,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(7),
+                            border: Border.all(
+                              color: iconColor.withValues(alpha: 0.55),
+                              width: 1.4,
+                            ),
+                          ),
+                          alignment: Alignment.center,
+                          child: Icon(
+                            Icons.more_vert_rounded,
+                            size: 18,
+                            color: iconColor,
+                          ),
+                        ),
                         onPressed: () => _showSongDetailSheet(context),
                       ),
                     );
@@ -1598,8 +1615,8 @@ class PlayerFavoriteButton extends StatefulWidget {
     super.key,
     required this.player,
     this.color,
-    // 默认和底部那排其它按钮(默认 IconButton = 24)一样大，别突出。
-    this.iconSize = 24,
+    // 心形填充后视觉偏重，比旁边(24)再小一号到 22 才看着一样大。
+    this.iconSize = 22,
   });
 
   @override
