@@ -25,7 +25,8 @@ class MiniPlayerCollapse {
 
   static double curved(double p) => Curves.easeInOutCubic.transform(p);
 
-  static const Duration _expandDelay = Duration(milliseconds: 450);
+  /// 停下（松手且惯性停了）后等多久再展开回条。
+  static const Duration _expandDelay = Duration(milliseconds: 1500);
   static const int _fullMs = 340;
 
   Timer? _expandTimer;
@@ -56,29 +57,58 @@ class MiniPlayerCollapse {
     return true;
   }
 
-  bool handle(ScrollNotification n) {
+  /// 上一条处理过的通知：滚动通知从最内层往外冒泡，嵌套的页面脚手架会依次看到
+  /// 同一条，只让最内层（离滚动区最近的那一页）决定一次。
+  ScrollNotification? _lastSeen;
+
+  /// 由各页 AppPageScaffold 调用。[pageHasMini] = 这一页显示迷你条；首页、
+  /// 设置页等关掉迷你条的页面滚动不收（否则导航条白让一块空位）。
+  bool handle(ScrollNotification n, {required bool pageHasMini}) {
+    if (identical(n, _lastSeen)) return false;
+    _lastSeen = n;
+    if (!pageHasMini) return false;
     if (n.metrics.axis != Axis.vertical) return false;
     if (n.metrics.maxScrollExtent <= 0) return false;
 
-    final moving = (n is ScrollUpdateNotification &&
-            (n.scrollDelta ?? 0).abs() > 0.5) ||
-        n is ScrollStartNotification;
-    if (moving) {
-      if (!_miniVisible) {
-        if (n is ScrollStartNotification) {
-          debugPrint('[MiniCollapse] 不收：迷你条不可见 '
-              'song=${PlayerService.instance.currentSong.value != null}');
+    if (n is ScrollStartNotification) {
+      // 只认手指拖出来的滚动；程序滚动（点按钮自动滚到某处）没有 dragDetails。
+      _dragging = n.dragDetails != null;
+      _dragAccum = 0;
+      if (_dragging) _expandTimer?.cancel(); // 按下去就别回条了
+    } else if (n is ScrollUpdateNotification) {
+      final d = (n.scrollDelta ?? 0).abs();
+      if (_dragging) {
+        _dragAccum += d;
+        // 累计拖过阈值才收 —— 轻点 / 手指抖一下不算。
+        if (!collapsed.value && _dragAccum >= _collapseThreshold) {
+          if (!_miniVisible) {
+            debugPrint('[MiniCollapse] 不收：迷你条不可见 '
+                'song=${PlayerService.instance.currentSong.value != null}');
+          } else {
+            _set(true);
+          }
         }
-        return false;
       }
-      _set(true);
-      _expandTimer?.cancel();
-      _expandTimer = Timer(_expandDelay, () => _set(false));
+      // 已经是球：拖动 / 惯性滚动途中都别回条（含手指按住没松）。
+      if (collapsed.value && d > 0) _expandTimer?.cancel();
     } else if (n is ScrollEndNotification) {
-      _expandTimer?.cancel();
-      _expandTimer = Timer(_expandDelay, () => _set(false));
+      _dragging = false;
+      _dragAccum = 0;
+      scheduleExpand(); // 松手且惯性停了才倒计时
     }
     return false;
+  }
+
+  /// 一次拖动累计滑过多少像素才收成球。
+  static const double _collapseThreshold = 16;
+  bool _dragging = false;
+  double _dragAccum = 0;
+
+  /// 停下后约半秒展开回条。
+  void scheduleExpand() {
+    _expandTimer?.cancel();
+    if (!collapsed.value) return;
+    _expandTimer = Timer(_expandDelay, () => _set(false));
   }
 
   void _set(bool value) {
@@ -109,8 +139,8 @@ class MiniPlayerCollapse {
   }
 }
 
-/// 挂在 App 最外层：提供推进收球进度的 AnimationController，并监听所有页面的
-/// 滚动通知（各页滚动都会冒泡到这里）。
+/// 挂在 App 最外层：提供推进收球进度的 AnimationController。
+/// （滚动监听在各页 AppPageScaffold 里，由页面决定要不要收。）
 class MiniPlayerCollapseHost extends StatefulWidget {
   const MiniPlayerCollapseHost({super.key, required this.child});
   final Widget child;
@@ -137,10 +167,5 @@ class _MiniPlayerCollapseHostState extends State<MiniPlayerCollapseHost>
   }
 
   @override
-  Widget build(BuildContext context) {
-    return NotificationListener<ScrollNotification>(
-      onNotification: MiniPlayerCollapse.instance.handle,
-      child: widget.child,
-    );
-  }
+  Widget build(BuildContext context) => widget.child;
 }

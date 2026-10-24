@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/services/player_service.dart';
+import '../../../app/state/mini_player_collapse.dart';
 import '../../../app/state/settings_state.dart';
 import '../../../app/utils/primary_shell_scope.dart';
 import 'app_background.dart';
@@ -163,13 +164,28 @@ class AppPageScaffoldState extends State<AppPageScaffold>
             );
       });
     }
+    // 页面在滚动途中被关掉就收不到 ScrollEnd，球会一直挂着；补一个回条计时。
+    if (widget.showMiniPlayer) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => MiniPlayerCollapse.instance.scheduleExpand(),
+      );
+    }
     _drawerController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    Widget content = widget.body;
+    // 这一页的滚动决定迷你条要不要收成球：只有显示迷你条的页面才收，首页 /
+    // 设置页等关掉迷你条的页面滚动不收（不然导航条白让出一块空位）。
+    // 返回 false 不拦冒泡（Material Scaffold 的 AppBar 滚动变色还靠它）。
+    Widget content = NotificationListener<ScrollNotification>(
+      onNotification: (n) => MiniPlayerCollapse.instance.handle(
+        n,
+        pageHasMini: widget.showMiniPlayer,
+      ),
+      child: widget.body,
+    );
     if (widget.useSafeArea) {
       content = SafeArea(child: content);
     }
