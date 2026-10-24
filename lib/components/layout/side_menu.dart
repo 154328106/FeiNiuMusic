@@ -242,7 +242,7 @@ class SideMenu extends StatelessWidget {
                               ),
                               const SizedBox(height: 1),
                               Text(
-                                '第三方客户端',
+                                '无言以对',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
