@@ -131,8 +131,10 @@ class _AppBackgroundState extends State<AppBackground> {
     ColorScheme colorScheme, {
     required bool isDark,
   }) {
-    final topStrength = isDark ? 0.24 : 0.18;
-    final midStrength = isDark ? 0.14 : 0.10;
+    // 顶部流光再明显一点点（用户要求）：顶/中档加强，底部基本不动，保持
+    // 「上浓下淡」的过渡，不至于整页泛色。
+    final topStrength = isDark ? 0.34 : 0.27;
+    final midStrength = isDark ? 0.18 : 0.13;
     final bottomStrength = isDark ? 0.08 : 0.06;
     return LinearGradient(
       begin: Alignment.topCenter,
