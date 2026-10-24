@@ -207,9 +207,16 @@ class _CollapsibleMiniPlayerState extends State<CollapsibleMiniPlayer> {
     }
 
     // 「滑进去」：条左边那张圆封面不淡掉，而是一路滑到右端、边走边长成
-    // 球；外框在它四周同步收窄。歌名按钮早早淡掉，封面一开始就接手。
-    final contentOpacity = (1 - v / 0.35).clamp(0.0, 1.0);
-    final coverOpacity = (v / 0.12).clamp(0.0, 1.0);
+    // 球；外框在它四周同步收窄。和条里内容的交接只在起点原地完成（见下）。
+    // 交接窗口：只在 v ∈ [0, _handoff] 里让「条里的封面/文字」和「滑行封面」
+    // 原地互相淡入淡出；滑行封面在 v=_handoff 时就已经停在条里封面的位置。
+    // 之前交接区间比滑行区间宽，展开时条里封面先淡出来、滑行那张还在半路，
+    // 两张同时可见 → 拖影。
+    const handoff = 0.06;
+    final contentOpacity = (1 - v / handoff).clamp(0.0, 1.0);
+    final coverOpacity = (v / handoff).clamp(0.0, 1.0);
+    // 滑行进度：v 在交接窗口内时保持 0（停在原位），之后再走完全程。
+    final slideV = ((v - handoff) / (1 - handoff)).clamp(0.0, 1.0);
     const coverInset = 3.0;
     // 起点：条里封面的位置（外层 inset + 条内 padding 10，尺寸 48）。
     const barArtSize = 48.0;
@@ -217,8 +224,8 @@ class _CollapsibleMiniPlayerState extends State<CollapsibleMiniPlayer> {
     // 终点：球里的封面。
     final endSize = ball - coverInset * 2;
     final endCx = right - ball / 2;
-    final coverCx = lerpDouble(barArtCx, endCx, v)!;
-    final coverSize = lerpDouble(barArtSize, endSize, v)!;
+    final coverCx = lerpDouble(barArtCx, endCx, slideV)!;
+    final coverSize = lerpDouble(barArtSize, endSize, slideV)!;
 
     Widget morph = Transform.translate(
       offset: Offset(0, dy),
