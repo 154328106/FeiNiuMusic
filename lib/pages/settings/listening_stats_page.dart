@@ -495,7 +495,7 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 2, 12, 14),
+          padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
           child: _TrendBarChart(
             bars: bars,
             tooltip: (ms) => _formatDuration(ms),
@@ -653,35 +653,40 @@ class _ListeningStatsPageState extends State<ListeningStatsPage> {
     final pages = (total + _perPage - 1) ~/ _perPage;
     final page = _leaderPage.clamp(0, pages - 1);
     final scheme = Theme.of(context).colorScheme;
+    // 压扁：用定高小按钮，别用默认 48 的 IconButton，省出的高度留给「刚好不超屏」。
+    Widget arrow(IconData icon, VoidCallback? onTap) => SizedBox(
+      width: 34,
+      height: 28,
+      child: IconButton(
+        padding: EdgeInsets.zero,
+        iconSize: 20,
+        onPressed: onTap,
+        icon: Icon(icon),
+      ),
+    );
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 2),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            onPressed: page > 0
-                ? () => setState(() => _leaderPage = page - 1)
-                : null,
-            icon: const Icon(Icons.chevron_left_rounded),
+          arrow(
+            Icons.chevron_left_rounded,
+            page > 0 ? () => setState(() => _leaderPage = page - 1) : null,
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
             child: Text(
               '${page + 1} / $pages',
               style: TextStyle(
-                fontSize: 13,
+                fontSize: 12.5,
                 fontWeight: FontWeight.w600,
                 color: scheme.onSurfaceVariant,
               ),
             ),
           ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            onPressed: page < pages - 1
-                ? () => setState(() => _leaderPage = page + 1)
-                : null,
-            icon: const Icon(Icons.chevron_right_rounded),
+          arrow(
+            Icons.chevron_right_rounded,
+            page < pages - 1 ? () => setState(() => _leaderPage = page + 1) : null,
           ),
         ],
       ),
@@ -857,7 +862,7 @@ class _TrendBarChartState extends State<_TrendBarChart> {
     final bars = widget.bars;
     final maxVal = bars.fold<int>(0, (m, b) => b.value > m ? b.value : m);
     final hasData = maxVal > 0;
-    const chartHeight = 56.0;
+    const chartHeight = 40.0;
 
     final todayIndex = bars.indexWhere((b) => b.highlight);
     final focusIndex = _selected ?? (todayIndex >= 0 ? todayIndex : null);
@@ -867,7 +872,7 @@ class _TrendBarChartState extends State<_TrendBarChart> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.only(bottom: 4),
           child: focus != null
               ? Row(
                   children: [
@@ -927,7 +932,7 @@ class _TrendBarChartState extends State<_TrendBarChart> {
             }),
           ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 2),
         Row(
           children: bars.map((b) {
             return Expanded(
