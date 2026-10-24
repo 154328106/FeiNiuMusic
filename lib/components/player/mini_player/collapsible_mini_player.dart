@@ -1,133 +1,223 @@
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../../../app/state/mini_player_collapse.dart';
 import '../../../app/state/song_state.dart';
 import 'mini_player_bar.dart';
 
-/// 把迷你播放条包成「可随滚动收成球」的样子。
+/// 迷你播放条「随滚动收成球」。
 ///
-/// 展开态 = 原来的播放条 [bar]；收起态 = 右端一个旋转圆封面小球。两态之间按
-/// [MiniPlayerCollapse.collapsed] 丝滑伸缩：条靠右裁剪 + 淡出，球淡入。点球和点
-/// 条一样开播放页。
+/// 不是淡出再冒一个球，而是**条本身连续变形**：外框从左往右收窄、高度收到球径、
+/// 圆角收成正圆，同时整体下移，落到底部导航条同一行的右侧（导航条那边按同一个
+/// [MiniPlayerCollapse.progress] 把右边让出来）。条里的歌名/按钮先淡掉，最后圆里
+/// 淡入旋转封面。点球 = 开播放页。
 class CollapsibleMiniPlayer extends StatefulWidget {
-  final Widget bar;
+  /// 按「内容透明度」构建播放条（收缩时内容淡出、底板保留）。
+  final Widget Function(double contentOpacity) barBuilder;
   final SongEntity? song;
   final VoidCallback onTap;
+
+  /// 球的直径（和导航胶囊同高，两者才「平行」）。
   final double ballSize;
+
+  /// 本组件在屏幕上的 bottom 偏移（Positioned 的 bottom）。
+  final double bottomOffset;
+
+  /// 球心要落到的位置（离屏幕底的距离）；null = 原地收缩不下移。
+  final double? targetCenterFromBottom;
+
+  /// 播放条外层 padding（底板相对本组件的内缩）。
+  final double insetH;
+  final double padTop;
+  final double padBottom;
+
+  /// 播放条底板圆角。
+  final double barRadius;
 
   const CollapsibleMiniPlayer({
     super.key,
-    required this.bar,
+    required this.barBuilder,
     required this.song,
     required this.onTap,
-    this.ballSize = 52,
+    required this.ballSize,
+    required this.bottomOffset,
+    this.targetCenterFromBottom,
+    this.insetH = 16,
+    this.padTop = 4,
+    this.padBottom = 0,
+    this.barRadius = 20,
   });
 
   @override
   State<CollapsibleMiniPlayer> createState() => _CollapsibleMiniPlayerState();
 }
 
-class _CollapsibleMiniPlayerState extends State<CollapsibleMiniPlayer>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 320),
-    value: MiniPlayerCollapse.instance.collapsed.value ? 1 : 0,
-  );
-  late final Animation<double> _t =
-      CurvedAnimation(parent: _c, curve: Curves.easeInOutCubic);
+class _CollapsibleMiniPlayerState extends State<CollapsibleMiniPlayer> {
+  /// 播放条实测高度（含外层 padding）。首帧没量到前用估计值。
+  double _h = MiniPlayerBar.estimatedHeight;
 
-  @override
-  void initState() {
-    super.initState();
-    MiniPlayerCollapse.instance.collapsed.addListener(_sync);
-  }
-
-  @override
-  void dispose() {
-    MiniPlayerCollapse.instance.collapsed.removeListener(_sync);
-    _c.dispose();
-    super.dispose();
-  }
-
-  void _sync() {
-    if (!mounted) return;
-    if (MiniPlayerCollapse.instance.collapsed.value) {
-      _c.forward();
-    } else {
-      _c.reverse();
-    }
+  void _onSize(Size s) {
+    if ((s.height - _h).abs() > 0.5 && mounted) setState(() => _h = s.height);
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return LayoutBuilder(
       builder: (context, box) {
         final full = box.maxWidth;
-        final ball = widget.ballSize;
-        return AnimatedBuilder(
-          animation: _t,
-          builder: (context, _) {
-            final v = _t.value; // 0 条 .. 1 球
-            if (v == 0) return widget.bar; // 完全展开，直接用原条，零开销。
-            final w = lerpDouble(full, ball, v)!;
-            return Align(
-              alignment: Alignment.centerRight,
-              child: SizedBox(
-                width: w,
-                child: ClipRect(
-                  child: Stack(
-                    alignment: Alignment.centerRight,
-                    children: [
-                      // 条：保持完整布局（OverflowBox 给足宽度），靠右裁剪 + 淡出。
-                      if (v < 0.98)
-                        Opacity(
-                          opacity: (1 - v * 1.6).clamp(0.0, 1.0),
-                          child: IgnorePointer(
-                            ignoring: v > 0.5,
-                            child: OverflowBox(
-                              minWidth: full,
-                              maxWidth: full,
-                              alignment: Alignment.centerRight,
-                              child: widget.bar,
-                            ),
-                          ),
-                        ),
-                      // 球：旋转圆封面，淡入，点一下开播放页。
-                      if (v > 0.1)
-                        Opacity(
-                          opacity: ((v - 0.35) / 0.65).clamp(0.0, 1.0),
-                          child: GestureDetector(
-                            onTap: widget.onTap,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.18),
-                                    blurRadius: 8,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
+        return ValueListenableBuilder<double>(
+          valueListenable: MiniPlayerCollapse.instance.progress,
+          builder: (context, p, _) {
+            // v=0 时下面算出来的外形和原条完全重合，所以始终走同一套布局，
+            // 子树不换、条里封面的旋转角度不会被重置。
+            final v = MiniPlayerCollapse.curved(p);
+            final ball = widget.ballSize;
+            final pillTop = widget.padTop;
+            final pillH = (_h - widget.padTop - widget.padBottom)
+                .clamp(ball, double.infinity);
+            final cy = pillTop + pillH / 2;
+
+            // 底板外形：左边从 insetH 收到「右侧只剩一个球」，高度收到球径，圆角变圆。
+            final right = full - widget.insetH;
+            final left = lerpDouble(widget.insetH, right - ball, v)!;
+            final h = lerpDouble(pillH, ball, v)!;
+            final top = cy - h / 2;
+            final radius = lerpDouble(widget.barRadius, ball / 2, v)!;
+            final rr = RRect.fromLTRBR(
+              left,
+              top,
+              right,
+              top + h,
+              Radius.circular(radius),
+            );
+
+            // 整体下移：把条心挪到目标球心。
+            double dy = 0;
+            final target = widget.targetCenterFromBottom;
+            if (target != null) {
+              final barCenterFromBottom =
+                  widget.bottomOffset + widget.padBottom + pillH / 2;
+              dy = (barCenterFromBottom - target) * v;
+            }
+
+            final contentOpacity = (1 - v * 2.2).clamp(0.0, 1.0);
+            final coverOpacity = ((v - 0.55) / 0.45).clamp(0.0, 1.0);
+            final coverInset = 3.0;
+
+            return Transform.translate(
+              offset: Offset(0, dy),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  // 自己画投影（条原本的投影会被下面的裁剪切掉）。
+                  Positioned.fromRect(
+                    rect: rr.outerRect,
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(radius),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(
+                                alpha: isDark ? 0.22 : 0.12,
                               ),
-                              child: MiniPlayerArtwork(
-                                song: widget.song,
-                                size: ball,
-                                borderRadius: ball / 2,
-                              ),
+                              blurRadius: 14,
+                              offset: const Offset(0, 4),
                             ),
-                          ),
+                          ],
                         ),
-                    ],
+                      ),
+                    ),
                   ),
-                ),
+                  // 条：按外形裁剪，内容淡出；过半就不再接收点击（交给球）。
+                  IgnorePointer(
+                    ignoring: v > 0.5,
+                    child: ClipRRect(
+                      clipper: _RRectClipper(rr),
+                      child: _MeasureSize(
+                        onChange: _onSize,
+                        child: widget.barBuilder(contentOpacity),
+                      ),
+                    ),
+                  ),
+                  // 球里的旋转封面，后半程淡入。
+                  if (coverOpacity > 0)
+                    Positioned(
+                      left: right - ball + coverInset,
+                      top: cy - ball / 2 + coverInset,
+                      width: ball - coverInset * 2,
+                      height: ball - coverInset * 2,
+                      child: Opacity(
+                        opacity: coverOpacity,
+                        child: MiniPlayerArtwork(
+                          song: widget.song,
+                          size: ball - coverInset * 2,
+                          borderRadius: (ball - coverInset * 2) / 2,
+                        ),
+                      ),
+                    ),
+                  // 球态的点击区：开播放页。
+                  if (v > 0.5)
+                    Positioned(
+                      left: right - ball,
+                      top: cy - ball / 2,
+                      width: ball,
+                      height: ball,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: widget.onTap,
+                      ),
+                    ),
+                ],
               ),
             );
           },
         );
       },
     );
+  }
+}
+
+class _RRectClipper extends CustomClipper<RRect> {
+  _RRectClipper(this.rr);
+  final RRect rr;
+
+  @override
+  RRect getClip(Size size) => rr;
+
+  @override
+  bool shouldReclip(_RRectClipper old) => old.rr != rr;
+}
+
+/// 布局后回报自身尺寸（只在变化时回调）。
+class _MeasureSize extends SingleChildRenderObjectWidget {
+  const _MeasureSize({required this.onChange, required super.child});
+  final ValueChanged<Size> onChange;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderMeasureSize(onChange);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderMeasureSize ro) {
+    ro.onChange = onChange;
+  }
+}
+
+class _RenderMeasureSize extends RenderProxyBox {
+  _RenderMeasureSize(this.onChange);
+  ValueChanged<Size> onChange;
+  Size? _last;
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    final s = size;
+    if (_last == s) return;
+    _last = s;
+    WidgetsBinding.instance.addPostFrameCallback((_) => onChange(s));
   }
 }

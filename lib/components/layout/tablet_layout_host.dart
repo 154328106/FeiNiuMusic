@@ -245,11 +245,18 @@ class _TabletLayoutHostState extends State<TabletLayoutHost>
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
     );
     if (!AppLayoutSettings.tvMode.value) {
-      // 平板也随滚动收成球。
+      // 平板也随滚动收成球（没有底部导航，原地往右收）。
       return CollapsibleMiniPlayer(
         song: PlayerService.instance.currentSong.value,
         onTap: () => openPlayerPage(context),
-        bar: bar,
+        ballSize: 52,
+        bottomOffset: 0,
+        padTop: 4,
+        padBottom: 4,
+        barBuilder: (opacity) => MiniPlayerBar(
+          contentOpacity: opacity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        ),
       );
     }
     return TvFocusable(

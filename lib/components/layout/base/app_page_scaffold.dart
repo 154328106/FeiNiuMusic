@@ -197,18 +197,6 @@ class AppPageScaffoldState extends State<AppPageScaffold>
     final hideWhilePaused =
         AppBackgroundSettings.miniPlayerOnlyWhilePlaying.value &&
         !PlayerService.instance.isPlaying.value;
-    final miniPlayer = widget.showMiniPlayer && !hideWhilePaused
-        ? CollapsibleMiniPlayer(
-            song: PlayerService.instance.currentSong.value,
-            onTap: () => openPlayerPage(context),
-            bar: MiniPlayerBar(
-              padding: hasBottomNav
-                  ? const EdgeInsets.fromLTRB(16, 4, 16, 0)
-                  : const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            ),
-          )
-        : null;
-
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     // 有底栏时迷你播放器停在胶囊上方，此值即与胶囊顶的间隙（贴近不重叠）。
     const miniPlayerLift = 10.0;
@@ -232,6 +220,35 @@ class AppPageScaffoldState extends State<AppPageScaffold>
     final effectiveMiniPlayerBottom = (widget.keepBottomOverlayFixed
         ? miniPlayerBottom - keyboardInset
         : miniPlayerBottom) + lift;
+
+    // 收成球的落点：有底栏 → 球和导航胶囊同高、球心对齐胶囊中线（同一行、在它
+    // 右边，导航条会按同一进度把右边让出来）；没底栏 → 贴右下角。
+    final glassNav = AppGlassSettings.effectiveEnabled;
+    final navPillHeight = glassNav
+        ? AppPageScaffold.modernNavHeight - kGlassNavPillTopGap * 2
+        : kSolidNavHeight;
+    final navCenterFromBottom = bottomInset +
+        (glassNav ? AppPageScaffold.modernNavHeight : kSolidNavSlotHeight) / 2;
+    final ballSize = hasBottomNav ? navPillHeight : 52.0;
+    final barPadTop = 4.0;
+    final barPadBottom = hasBottomNav ? 0.0 : 4.0;
+    final miniPlayer = widget.showMiniPlayer && !hideWhilePaused
+        ? CollapsibleMiniPlayer(
+            song: PlayerService.instance.currentSong.value,
+            onTap: () => openPlayerPage(context),
+            ballSize: ballSize,
+            bottomOffset: effectiveMiniPlayerBottom,
+            targetCenterFromBottom: hasBottomNav
+                ? navCenterFromBottom
+                : bottomInset + lift + ballSize / 2,
+            padTop: barPadTop,
+            padBottom: barPadBottom,
+            barBuilder: (opacity) => MiniPlayerBar(
+              contentOpacity: opacity,
+              padding: EdgeInsets.fromLTRB(16, barPadTop, 16, barPadBottom),
+            ),
+          )
+        : null;
 
     final drawerWidth = (MediaQuery.sizeOf(context).width * 0.56).clamp(
       200.0,

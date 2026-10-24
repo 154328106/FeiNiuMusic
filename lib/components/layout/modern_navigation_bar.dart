@@ -6,6 +6,7 @@ import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
 import '../../app/utils/route_visibility.dart';
 import '../../app/router/app_router.dart';
+import '../../app/state/mini_player_collapse.dart';
 import '../../app/state/settings_state.dart';
 import '../../app/theme/app_glass_theme.dart';
 import '../common/glass_gate.dart';
@@ -27,6 +28,9 @@ const _primaryNavigationRoutes = <String>[
 /// 位置时减去它、对齐胶囊顶，否则胶囊上方的空隙会被误当成迷你播放器与
 /// 底栏的间隙（观感上离得远）。
 const double kGlassNavPillTopGap = 14;
+
+/// 玻璃底栏胶囊本身的高度（槽位 84 − 上下空隙 14×2）。迷你条收成的球与它同高。
+const double kGlassNavPillHeight = 56;
 
 /// 玻璃胶囊本身的高度。与上方迷你播放条的可见高度对齐：
 /// 那条是封面 48 + 内边距 7×2 = 62。
@@ -277,10 +281,17 @@ class ModernNavigationBar extends StatelessWidget {
             AppBackgroundSettings.navBarFrameColor.value == null ? 1.2 : 1.6;
         return SafeArea(
           top: false,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: kSolidNavPillTopGap,
+          // 迷你条收成球时，右边让出「球径 + 间隙」，球落在同一行右侧。
+          child: ValueListenableBuilder<double>(
+            valueListenable: MiniPlayerCollapse.instance.progress,
+            builder: (context, p, child) => Padding(
+              padding: EdgeInsets.fromLTRB(
+                16,
+                kSolidNavPillTopGap,
+                16 + (kSolidNavHeight + 10) * MiniPlayerCollapse.curved(p),
+                kSolidNavPillTopGap,
+              ),
+              child: child,
             ),
             child: DecoratedBox(
               // 只画投影。透明度跟着深浅度一起降 —— 上一版是定值，胶囊调透之后
@@ -379,10 +390,17 @@ class ModernNavigationBar extends StatelessWidget {
         AppBackgroundSettings.navBarFrameColor.value == null ? 1.2 : 1.6;
     return SafeArea(
       top: false,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: kGlassNavPillTopGap,
+      // 迷你条收成球时，右边让出「球径(=胶囊高 56) + 间隙」。
+      child: ValueListenableBuilder<double>(
+        valueListenable: MiniPlayerCollapse.instance.progress,
+        builder: (context, p, child) => Padding(
+          padding: EdgeInsets.fromLTRB(
+            16,
+            kGlassNavPillTopGap,
+            16 + (kGlassNavPillHeight + 10) * MiniPlayerCollapse.curved(p),
+            kGlassNavPillTopGap,
+          ),
+          child: child,
         ),
         child: DecoratedBox(
           decoration: BoxDecoration(

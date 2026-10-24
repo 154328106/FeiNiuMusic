@@ -32,6 +32,10 @@ class MiniPlayerBar extends StatelessWidget {
   final bool enableSwipe;
   final Widget? trailing;
 
+  /// 只作用于条里的内容（封面/歌名/按钮），不影响底板。收成球的过程中让内容
+  /// 先淡掉、底板继续连续变形（见 CollapsibleMiniPlayer）。
+  final double contentOpacity;
+
   MiniPlayerBar({
     super.key,
     PlayerService? player,
@@ -43,6 +47,7 @@ class MiniPlayerBar extends StatelessWidget {
     this.boxShadow,
     this.enableSwipe = true,
     this.trailing,
+    this.contentOpacity = 1,
   }) : player = player ?? PlayerService.instance;
 
   @override
@@ -128,7 +133,9 @@ class MiniPlayerBar extends StatelessWidget {
           child: InkWell(
             borderRadius: BorderRadius.circular(borderRadius),
             onTap: openPlayer,
-            child: Padding(
+            child: Opacity(
+              opacity: contentOpacity.clamp(0.0, 1.0),
+              child: Padding(
               padding: const EdgeInsets.symmetric(
                 horizontal: 10,
                 vertical: 7,
@@ -197,6 +204,7 @@ class MiniPlayerBar extends StatelessWidget {
                   );
                 },
               ),
+            ),
             ),
           ),
         );
