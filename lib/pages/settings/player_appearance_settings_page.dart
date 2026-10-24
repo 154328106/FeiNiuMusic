@@ -206,6 +206,28 @@ class _PlayerAppearanceSettingsPageState
                   );
                 },
               ),
+              // 旋转封面放在动态流光上面（用户要的顺序）。海报模式是大封面
+              // 全屏布局、方形封面转起来只露四个角，这两种情况都隐藏开关。
+              ListenableBuilder(
+                listenable: Listenable.merge([
+                  PlayerStyleSettings.stylePreset,
+                  PlayerBackgroundSettings.coverStyle,
+                  PlayerBackgroundSettings.rotateCover,
+                ]),
+                builder: (context, _) {
+                  if (PlayerStyleSettings.stylePreset.value ==
+                          PlayerStylePreset.poster ||
+                      !PlayerBackgroundSettings.coverStyle.value.spinnable) {
+                    return const SizedBox.shrink();
+                  }
+                  return AppSettingSwitchTile(
+                    title: '旋转封面',
+                    subtitle: '播放时封面缓慢旋转',
+                    value: PlayerBackgroundSettings.rotateCover.value,
+                    onChanged: PlayerBackgroundSettings.setRotateCover,
+                  );
+                },
+              ),
               ValueListenableBuilder<bool>(
                 valueListenable:
                     PlayerBackgroundSettings.dynamicGradientEnabled,
@@ -283,29 +305,6 @@ class _PlayerAppearanceSettingsPageState
                                   },
                                 ),
                             ],
-                          );
-                        },
-                      ),
-                      ValueListenableBuilder<PlayerCoverStyle>(
-                        valueListenable: PlayerBackgroundSettings.coverStyle,
-                        builder: (context, coverStyle, _) {
-                          // 方形封面转起来只会露出四个角，没有意义，隐藏开关。
-                          if (!coverStyle.spinnable) {
-                            return const SizedBox.shrink();
-                          }
-                          return ValueListenableBuilder<bool>(
-                            valueListenable:
-                                PlayerBackgroundSettings.rotateCover,
-                            builder: (context, enabled, _) {
-                              return AppSettingSwitchTile(
-                                title: '旋转封面',
-                                subtitle: '播放时封面缓慢旋转',
-                                value: enabled,
-                                onChanged: (value) {
-                                  PlayerBackgroundSettings.setRotateCover(value);
-                                },
-                              );
-                            },
                           );
                         },
                       ),

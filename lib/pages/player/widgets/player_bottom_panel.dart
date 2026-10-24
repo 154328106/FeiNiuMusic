@@ -537,6 +537,7 @@ class BottomActions extends StatelessWidget {
             PlayerBottomActionSettings.showSleepTimer,
             PlayerBottomActionSettings.showPlaylist,
             PlayerBottomActionSettings.showMore,
+            PlayerBottomActionSettings.showFavorite,
             PlayerBottomActionSettings.actionOrder,
           ]),
           builder: (context, _) {
@@ -544,6 +545,13 @@ class BottomActions extends StatelessWidget {
             final order = PlayerBottomActionSettings.actionOrder.value;
             for (final key in order) {
               switch (key) {
+                case 'favorite':
+                  if (PlayerBottomActionSettings.showFavorite.value) {
+                    actions.add(
+                      PlayerFavoriteButton(player: player, color: iconColor),
+                    );
+                  }
+                  break;
                 case 'playback_mode':
                   if (PlayerBottomActionSettings.showPlaybackMode.value) {
                     actions.add(
@@ -609,12 +617,6 @@ class BottomActions extends StatelessWidget {
                   break;
               }
             }
-            // 收藏 ❤ 常驻放最前，不跟设置开关走 —— 收藏是高频操作，不该再藏进
-            // 「更多」面板。
-            actions.insert(
-              0,
-              PlayerFavoriteButton(player: player, color: iconColor),
-            );
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Row(

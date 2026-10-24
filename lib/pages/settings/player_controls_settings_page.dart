@@ -24,6 +24,14 @@ class _PlayerControlsSettingsPageState
 
   _BottomActionConfig _actionConfigByKey(String key) {
     switch (key) {
+      case 'favorite':
+        return _BottomActionConfig(
+          key: key,
+          title: '收藏按钮',
+          subtitle: '点一下收藏当前歌曲',
+          notifier: PlayerBottomActionSettings.showFavorite,
+          onChanged: PlayerBottomActionSettings.setShowFavorite,
+        );
       case 'playback_mode':
         return _BottomActionConfig(
           key: key,

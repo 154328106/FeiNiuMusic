@@ -650,10 +650,24 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
             ],
           ),
           const SizedBox(height: 16),
-          // 玻璃效果：导航栏和播放条用同一个开关、同一组参数。
+          // 导航设置：导航栏和播放条的透明度 + 液体玻璃，两条用同一组参数。
           AppCollapsibleSettingSection(
-            title: '玻璃效果（导航栏 + 播放条）',
+            title: '导航设置',
             children: [
+              // 导航栏和播放条的透明度：玻璃模式下是底板的浓淡，普通模式下是
+              // 底色的浓淡。显示「透明度」= 1 - 不透明度，往右越透。
+              ValueListenableBuilder<double>(
+                valueListenable: AppSurfaceSettings.barOpacity,
+                builder: (context, opacity, _) => Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: _InlineSlider(
+                    title: '透明度',
+                    value: 1 - opacity,
+                    max: 0.95,
+                    onChanged: (v) => AppSurfaceSettings.setBarOpacity(1 - v),
+                  ),
+                ),
+              ),
               // 液体玻璃：与「高斯模糊」互斥。开启时各界面使用液体玻璃材质
               // （iOS 26 风格 shader 毛玻璃/高光/折射）并自动关闭高斯模糊；
               // 关闭后回退为下方「高斯模糊/模糊强度」控制的 BackdropFilter 方案。
@@ -662,7 +676,7 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                 valueListenable: AppGlassSettings.liquidGlassEnabled,
                 builder: (context, glassEnabled, _) {
                   return AppSettingSwitchTile(
-                    title: '液体玻璃',
+                    title: '液体玻璃（导航栏 + 播放条）',
                     subtitle: glassEnabled
                         ? '导航栏和播放条用液体玻璃，下面调模糊、厚度'
                         : '关闭后导航栏和播放条用上面的高斯模糊或实色',
@@ -866,11 +880,13 @@ class _InlineSlider extends StatelessWidget {
     required this.value,
     required this.onChanged,
     this.min = 0,
+    this.max = 1.0,
   });
 
   final String title;
   final double value;
   final double min;
+  final double max;
   final ValueChanged<double> onChanged;
 
   @override
@@ -888,9 +904,9 @@ class _InlineSlider extends StatelessWidget {
             ),
             Expanded(
               child: Slider(
-                value: value.clamp(min, 1.0),
+                value: value.clamp(min, max),
                 min: min,
-                max: 1.0,
+                max: max,
                 onChanged: onChanged,
               ),
             ),

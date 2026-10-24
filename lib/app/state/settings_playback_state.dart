@@ -155,9 +155,11 @@ class PlayerBottomActionSettings {
   static const String _prefsShowSleepTimer = 'player_bottom_show_sleep_timer';
   static const String _prefsShowPlaylist = 'player_bottom_show_playlist';
   static const String _prefsShowMore = 'player_bottom_show_more';
+  static const String _prefsShowFavorite = 'player_bottom_show_favorite';
   static const String _prefsActionOrder = 'player_bottom_action_order';
 
   static const List<String> _defaultActionOrder = [
+    'favorite',
     'playback_mode',
     'sleep_timer',
     'playlist',
@@ -168,6 +170,7 @@ class PlayerBottomActionSettings {
   static final ValueNotifier<bool> showSleepTimer = ValueNotifier(true);
   static final ValueNotifier<bool> showPlaylist = ValueNotifier(true);
   static final ValueNotifier<bool> showMore = ValueNotifier(true);
+  static final ValueNotifier<bool> showFavorite = ValueNotifier(true);
   static final ValueNotifier<List<String>> actionOrder = ValueNotifier(
     _defaultActionOrder,
   );
@@ -182,6 +185,7 @@ class PlayerBottomActionSettings {
     showSleepTimer.value = prefs.getBool(_prefsShowSleepTimer) ?? true;
     showPlaylist.value = prefs.getBool(_prefsShowPlaylist) ?? true;
     showMore.value = prefs.getBool(_prefsShowMore) ?? true;
+    showFavorite.value = prefs.getBool(_prefsShowFavorite) ?? true;
     actionOrder.value = _normalizeOrder(prefs.getStringList(_prefsActionOrder));
   }
 
@@ -204,10 +208,22 @@ class PlayerBottomActionSettings {
     }
     for (final key in _defaultActionOrder) {
       if (seen.add(key)) {
-        result.add(key);
+        // 收藏是后加的：老用户存的顺序里没有它，插到最前 —— 之前它就是
+        // 写死在最前面的，升级后位置不变。
+        if (key == 'favorite') {
+          result.insert(0, key);
+        } else {
+          result.add(key);
+        }
       }
     }
     return result;
+  }
+
+  static Future<void> setShowFavorite(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsShowFavorite, enabled);
+    showFavorite.value = enabled;
   }
 
   static Future<void> setShowPlaybackMode(bool enabled) async {

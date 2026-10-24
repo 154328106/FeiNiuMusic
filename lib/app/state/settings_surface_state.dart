@@ -124,9 +124,16 @@ class AppSurfaceSettings {
   // 旧版（导航栏单独一组设置时代）存的厚度，迁移时读一次。
   static const _prefsOldThickness = 'surface_bottom_thickness';
 
+  static const _prefsBarOpacity = 'surface_bar_opacity';
+
   static final ValueNotifier<SurfaceStyle> style = ValueNotifier(
     const SurfaceStyle(frame: false),
   );
+
+  /// 导航栏 + 播放条自己的不透明度（「导航设置 → 透明度」）。玻璃模式下就是
+  /// 垫在玻璃下面那块白/黑底板的浓淡。和「框内深浅」分开：列表卡片想实一点、
+  /// 底栏想透一点，是常见搭配。
+  static final ValueNotifier<double> barOpacity = ValueNotifier(0.85);
 
   static Future<void>? _loading;
   static Future<void> ensureLoaded() => _loading ??= _load();
@@ -163,18 +170,35 @@ class AppSurfaceSettings {
       if (style.value.frame != listFramed) {
         style.value = style.value.copyWith(frame: listFramed);
       }
+      // 第一次没存过：沿用原来的深浅，升级后底栏外观不变。
+      barOpacity.value = (prefs.getDouble(_prefsBarOpacity) ??
+              style.value.opacity)
+          .clamp(0.05, 1.0);
     } catch (_) {
       // 读坏了就用默认值，别卡启动。
     }
   }
 
   /// 底部栏（播放条 + 导航）用的样式。
-  static SurfaceStyle get bottomBar => style.value;
+  /// 颜色、框跟「边框设置」走，深浅用自己的 [barOpacity]。
+  static SurfaceStyle get bottomBar =>
+      style.value.copyWith(opacity: barOpacity.value);
 
   /// 列表与卡片用的样式。
   static SurfaceStyle get contentStyle => style.value;
 
-  static Listenable get bottomBarListenable => style;
+  static final Listenable bottomBarListenable = Listenable.merge([
+    style,
+    barOpacity,
+  ]);
+
+  static Future<void> setBarOpacity(double v) async {
+    barOpacity.value = v;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(_prefsBarOpacity, v);
+    } catch (_) {}
+  }
 
   /// 框的样式：不加框 / 整块描边 / 逐行卡片。同时决定底栏描不描边。
   static Future<void> setFrameStyle(AppContentFrameStyle s) async {
