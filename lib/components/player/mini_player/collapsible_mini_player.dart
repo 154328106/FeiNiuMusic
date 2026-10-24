@@ -83,12 +83,16 @@ class _CollapsibleMiniPlayerState extends State<CollapsibleMiniPlayer> {
 
             // 底板外形：左端从 insetH 往右收到「只剩一个球」。不是整块等高平移，
             // 而是像液体一样「梯形伸缩」——右端高度跟着收到球径，左端在动画
-            // 中段明显更细（右端的 35% 左右），两头（v=0 / v=1）恢复等高，
+            // 中段稍细（见下方 taper），两头（v=0 / v=1）恢复等高，
             // 所以收的时候由粗到细缩进去、还原时从细尖长回粗条。
             final right = full - widget.insetH;
-            final left = lerpDouble(widget.insetH, right - ball, v)!;
+            // 橡皮筋：右端（落点那头）跟着 v 走，左端按 v^1.5 滞后跟上 ——
+            // 收的时候条先被拉长再缩进球；还原时细尖先伸出去、整条再跟上。
+            final leftV = math.pow(v, 1.5).toDouble();
+            final left = lerpDouble(widget.insetH, right - ball, leftV)!;
             final hRight = lerpDouble(pillH, ball, v)!;
-            final taper = 1 - 0.65 * math.sin(math.pi * v);
+            // 左端只「稍微」变细：中段最细约为右端的 70%。
+            final taper = 1 - 0.3 * math.sin(math.pi * v);
             final hLeft = hRight * taper;
             final rRight = lerpDouble(widget.barRadius, hRight / 2, v)!
                 .clamp(0.0, hRight / 2);

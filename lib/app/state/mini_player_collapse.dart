@@ -23,9 +23,13 @@ class MiniPlayerCollapse {
   /// 线性进度 0（条）→ 1（球）。用的地方自己套曲线（[curved]），中途反向也连续。
   final ValueNotifier<double> progress = ValueNotifier(0);
 
-  /// 强调型缓动：起步干脆、收尾很慢地「滑」进位，比普通 easeInOut 更像滑进去。
-  static double curved(double p) =>
-      Curves.easeInOutCubicEmphasized.transform(p);
+  /// [progress] 已经是套过曲线的值（曲线在 AnimationController.animateTo 里
+  /// 按「当前值 → 目标」施加），这里原样返回，保留这个入口免得各处改调用。
+  ///
+  /// 之前在这里对线性进度套 easeInOutCubicEmphasized：两头慢、中间猛，往回放
+  /// 时先顿一下再「咻」地弹出来。改成在 animateTo 里用 easeOutCubic：收和放
+  /// 都是一开始就动、越到后面越慢，而且中途反向也连续不跳。
+  static double curved(double p) => p;
 
   /// 停下（松手且惯性停了）后等多久再展开回条。
   static const Duration _expandDelay = Duration(milliseconds: 450);
@@ -137,7 +141,7 @@ class MiniPlayerCollapse {
     c.animateTo(
       target,
       duration: Duration(milliseconds: (_fullMs * dist).round().clamp(1, _fullMs)),
-      curve: Curves.linear,
+      curve: Curves.easeOutCubic,
     );
   }
 
