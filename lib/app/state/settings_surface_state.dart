@@ -210,6 +210,9 @@ class AppSurfaceSettings {
   }
 
   static Future<void> setStyle(SurfaceStyle s) async {
+    // 调「框内深浅」= 一键同步所有地方：导航栏和播放条的透明度跟着走。
+    // 之后想让底栏单独更透，再去「导航设置 → 透明度」调（那个只管底栏）。
+    if (s.opacity != style.value.opacity) await setBarOpacity(s.opacity);
     style.value = s;
     try {
       final prefs = await SharedPreferences.getInstance();
