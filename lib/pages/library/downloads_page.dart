@@ -124,28 +124,31 @@ class _DownloadsPageState extends State<DownloadsPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // iOS 只给「文件」App 里的走法：装完后文件 App 里出现的文件夹叫
+            // Melodic（不是飞牛音乐），那串 /var/mobile/... 沙盒路径用户用不上，
+            // 不显示也不给复制。
             if (isIOS)
               const Text(
-                '在「文件」App 里打开：\n'
-                '我的 iPhone → 飞牛音乐 → downloads',
+                '文件App → Melodic → downloads',
                 style: TextStyle(fontSize: 14, height: 1.6),
+              )
+            else
+              SelectableText(
+                path,
+                style: const TextStyle(fontSize: 12, height: 1.5),
               ),
-            if (isIOS) const SizedBox(height: 10),
-            SelectableText(
-              path,
-              style: const TextStyle(fontSize: 12, height: 1.5),
-            ),
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: path));
-              Navigator.pop(ctx);
-              AppToast.show(context, '路径已复制');
-            },
-            child: const Text('复制路径'),
-          ),
+          if (!isIOS)
+            TextButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: path));
+                Navigator.pop(ctx);
+                AppToast.show(context, '路径已复制');
+              },
+              child: const Text('复制路径'),
+            ),
           if (!isIOS)
             TextButton(
               onPressed: () async {

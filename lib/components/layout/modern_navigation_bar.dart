@@ -384,9 +384,7 @@ class ModernNavigationBar extends StatelessWidget {
                 // const kAppGlassSurfaceSettings —— 后者会把滑块值盖回默认。
                 // 自定义底色时覆盖玻璃着色（glassColor）。
                 settings: appGlassSurfaceSettings(
-                  glassColor: style.color?.withValues(
-                    alpha: style.opacity * 0.5,
-                  ),
+                  glassColor: SurfacePaint.glassTint(style),
                 ),
                 // 悬浮：胶囊上下各留 kGlassNavPillTopGap 空隙（槽位 56 + 14×2 = 84），
                 // 内容从胶囊四周透出，视觉上像 demo（GlassScaffold 底栏）一样飘浮。

@@ -63,7 +63,11 @@ class MusicSourceRegistry {
     try {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString(_prefsKey);
-      if (saved == null) return;
+      // 新装默认酷狗（用户定的）；老用户选过什么就还是什么。
+      if (saved == null) {
+        current.value = KugouSource.instance;
+        return;
+      }
       current.value = all.firstWhere(
         (s) => s.id == saved,
         orElse: () => FeiniuSource.instance,

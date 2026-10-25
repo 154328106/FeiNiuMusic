@@ -58,6 +58,19 @@ Color _cardFill(BuildContext context) =>
 List<BoxShadow> _cardShadow(BuildContext context) =>
     SurfacePaint.shadow(context, AppSurfaceSettings.contentStyle, scale: 0.5);
 
+/// 独立单元（首页「最近播放 / 本地收藏」这类卡）用的底色和投影：加框时和
+/// 列表卡片一样吃「框里面的底色 / 框内深浅 / 框内厚度」，不加框时返回 null /
+/// 空，调用方照原样画。
+Color? appUnitFill(BuildContext context) =>
+    AppBackgroundSettings.contentFrameStyle.value == AppContentFrameStyle.none
+    ? null
+    : _cardFill(context);
+
+List<BoxShadow> appUnitShadow(BuildContext context) =>
+    AppBackgroundSettings.contentFrameStyle.value == AppContentFrameStyle.none
+    ? const []
+    : _cardShadow(context);
+
 Color _frameBorderColor(BuildContext context, {double scale = 1.0}) =>
     _unitFrameColor(context, scale: scale) ?? Colors.transparent;
 

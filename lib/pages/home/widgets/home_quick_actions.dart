@@ -73,6 +73,12 @@ class _QuickActionCard extends StatelessWidget {
     final onPlay = action.onPlay;
     final isTv = AppLayoutSettings.tvMode.value;
 
+    // 加框时垫上「框里面的底色」再叠强调色，并带上「框内厚度」的投影 ——
+    // 以前只有描边跟着走，调厚度时别的框有立体阴影、这两张没有。
+    final fill = appUnitFill(context);
+    Color tint(double a) => fill == null
+        ? accent.withValues(alpha: a)
+        : Color.alphaBlend(accent.withValues(alpha: a), fill);
     return Container(
       height: isTv ? 104 : 80,
       decoration: BoxDecoration(
@@ -80,14 +86,12 @@ class _QuickActionCard extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            accent.withValues(alpha: 0.20),
-            accent.withValues(alpha: 0.08),
-          ],
+          colors: [tint(0.20), tint(0.08)],
         ),
         borderRadius: BorderRadius.circular(20),
         // 同四宫格：描边统一听「内容框」那组设置。
         border: appUnitBorder(context, accent: accent),
+        boxShadow: appUnitShadow(context),
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),

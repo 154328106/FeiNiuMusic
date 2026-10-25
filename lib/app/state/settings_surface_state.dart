@@ -143,12 +143,38 @@ class AppSurfaceSettings {
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_prefsStyle);
-      final listFramed =
+      bool listFramed() =>
           AppBackgroundSettings.contentFrameStyle.value !=
           AppContentFrameStyle.none;
+      // 旧版导航栏 / 内容框设置一项都没存过 = 新装用户。
+      const oldKeys = [
+        'setting_nav_bar_color',
+        'setting_nav_bar_opacity',
+        'setting_nav_bar_frame_enabled',
+        'setting_nav_bar_frame_color',
+        'setting_nav_bar_frame_opacity',
+        'setting_content_frame_style',
+        _prefsOldThickness,
+      ];
+      final isFreshInstall = !oldKeys.any(prefs.containsKey);
       if (raw != null && raw.isNotEmpty) {
         final j = jsonDecode(raw);
         if (j is Map) style.value = SurfaceStyle.fromJson(j.cast());
+      } else if (isFreshInstall) {
+        // 新装默认（用户定的）：逐行卡片、蓝框、白底。
+        await AppBackgroundSettings.setContentFrameStyle(
+          AppContentFrameStyle.cards,
+        );
+        style.value = const SurfaceStyle(
+          color: Colors.white,
+          opacity: 0.8,
+          thickness: 0.5,
+          frame: true,
+          frameColor: Color(0xFF377BEA),
+          frameOpacity: 0.5,
+          frameThickness: 0.3,
+        );
+        await prefs.setString(_prefsStyle, jsonEncode(style.value.toJson()));
       } else {
         // 第一次：从原来的导航栏设置迁移过来，老用户调过的颜色不丢。
         // 描边颜色导航没设就拿原「内容框」的。
@@ -159,7 +185,7 @@ class AppSurfaceSettings {
             0.0,
             1.0,
           ),
-          frame: listFramed,
+          frame: listFramed(),
           frameColor:
               AppBackgroundSettings.navBarFrameColor.value ??
               AppBackgroundSettings.contentFrameColor.value,
@@ -167,8 +193,8 @@ class AppSurfaceSettings {
         );
       }
       // 「加框」以列表的加框方式为准，两边对齐。
-      if (style.value.frame != listFramed) {
-        style.value = style.value.copyWith(frame: listFramed);
+      if (style.value.frame != listFramed()) {
+        style.value = style.value.copyWith(frame: listFramed());
       }
       // 第一次没存过：沿用原来的深浅，升级后底栏外观不变。
       barOpacity.value = (prefs.getDouble(_prefsBarOpacity) ??
@@ -242,6 +268,13 @@ class SurfacePaint {
         ? tint.withValues(alpha: (0.28 * s.opacity).clamp(0.0, 1.0))
         : tint.withValues(alpha: s.opacity);
   }
+
+  /// 玻璃本身的着色：固定一半浓度，**不跟透明度走**。
+  ///
+  /// 「导航设置 → 透明度」只该让底栏变通透，不该把颜色洗白。以前着色也乘了
+  /// opacity，一调透明，玻璃自己的白雾 / 去饱和就盖过底色，看着像换了颜色。
+  /// 现在透明度只淡化下面那层底板，颜色由这层着色撑住。
+  static Color? glassTint(SurfaceStyle s) => s.color?.withValues(alpha: 0.5);
 
   /// 玻璃模式下垫在玻璃后面的底板（深浅跟着 opacity 走）。
   static Color glassPlate(BuildContext context, SurfaceStyle s) {

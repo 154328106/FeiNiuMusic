@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../services/android_platform_service.dart';
 import 'settings_background_state.dart';
 import 'settings_layout_state.dart';
 
@@ -31,8 +30,8 @@ class AppGlassSettings {
   static final ValueNotifier<bool> liquidGlassEnabled =
       ValueNotifier(defaultLiquidGlassEnabled);
 
-  /// 玻璃模糊强度（0-16，默认 3 = 与底栏玻璃观感一致的浅模糊）。
-  static final ValueNotifier<double> glassBlurStrength = ValueNotifier(3);
+  /// 玻璃模糊强度（0-16，默认 5，用户定的）。
+  static final ValueNotifier<double> glassBlurStrength = ValueNotifier(5);
 
   /// 玻璃厚度（0-30，默认 30 = 与底栏玻璃观感一致的深折射）：影响折射强度
   /// 与边缘高光。
@@ -54,15 +53,15 @@ class AppGlassSettings {
     // 先确保高斯模糊已加载（main.dart 中亦在其后调用，这里是兜底），
     // 互斥校正需要读取 panelBlurEnabled 的最终值。
     await AppBackgroundSettings.ensureLoaded();
-    // 默认开关：仅 Android 13+（API 33+）默认开启，其余平台（含更早
-    // Android 版本）默认关闭。sdkInt() 非 Android 平台返回 0。
-    defaultLiquidGlassEnabled =
-        await AndroidPlatformService.instance.sdkInt() >= 33;
+    // 默认开关（2026-10-26 用户定）：新装一律默认开启。原来只有 Android 13+
+    // 默认开；老 Android 机 shader 跑不动的话，用户自己在「导航设置」里关。
+    // TV 模式照旧排除（见 effectiveEnabled）。
+    defaultLiquidGlassEnabled = true;
     final prefs = await SharedPreferences.getInstance();
     liquidGlassEnabled.value =
         prefs.getBool(_prefsLiquidGlassEnabled) ?? defaultLiquidGlassEnabled;
     glassBlurStrength.value =
-        (prefs.getDouble(_prefsGlassBlur) ?? 3).clamp(0.0, 16.0);
+        (prefs.getDouble(_prefsGlassBlur) ?? 5).clamp(0.0, 16.0);
     glassThickness.value =
         (prefs.getDouble(_prefsGlassThickness) ?? 30).clamp(0.0, 30.0);
     // 互斥校正：若旧数据两者同时为开（历史版本允许同开），液体玻璃优先——
