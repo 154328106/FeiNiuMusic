@@ -93,16 +93,24 @@ class _LxSourcePageState extends State<LxSourcePage> {
     }
   }
 
+  /// 选文件：可以一次多选几个 .js，逐个导入。
   Future<void> _importFromFile() async {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['js'],
+        allowMultiple: true,
       );
-      final path = result?.files.single.path;
-      if (path == null) return;
-      final text = await File(path).readAsString();
-      await _doImport(() => _mgr.import(text));
+      final paths = [
+        for (final f in result?.files ?? const <PlatformFile>[])
+          if (f.path != null) f.path!,
+      ];
+      if (paths.isEmpty) return;
+      await _doImportAll([
+        for (final p in paths)
+          (label: p.split(RegExp(r'[\/]')).last,
+           loader: () async => _mgr.import(await File(p).readAsString())),
+      ]);
     } catch (e) {
       if (mounted) AppToast.show(context, '读取文件失败：$e', type: ToastType.error);
     }
@@ -137,10 +145,13 @@ class _LxSourcePageState extends State<LxSourcePage> {
       ),
     );
     if (ok == true && controller.text.trim().isNotEmpty) {
-      await _doImport(() => _mgr.import(controller.text));
+      await _doImportAll([
+        (label: '粘贴的脚本', loader: () => _mgr.import(controller.text)),
+      ]);
     }
   }
 
+  /// 链接：一行一个（空格、逗号分隔也认），一次导入多个源。
   Future<void> _importFromUrl() async {
     final controller = TextEditingController();
     final ok = await showDialog<bool>(
@@ -149,12 +160,13 @@ class _LxSourcePageState extends State<LxSourcePage> {
         title: const Text('从链接导入'),
         content: TextField(
           controller: controller,
-          minLines: 2,
-          maxLines: 4,
+          minLines: 3,
+          maxLines: 8,
           autocorrect: false,
-          keyboardType: TextInputType.url,
+          keyboardType: TextInputType.multiline,
           decoration: const InputDecoration(
-            hintText: '粘贴音源订阅链接，例如\nhttps://c.wwwweb.top/script/lxmusic?key=...',
+            hintText: '粘贴音源订阅链接，多个就一行一个，例如\n'
+                'https://c.wwwweb.top/script/lxmusic?key=...',
             border: OutlineInputBorder(),
           ),
         ),
@@ -170,28 +182,62 @@ class _LxSourcePageState extends State<LxSourcePage> {
         ],
       ),
     );
-    if (ok == true && controller.text.trim().isNotEmpty) {
-      await _doImport(() => _mgr.importFromUrl(controller.text));
-    }
+    if (ok != true) return;
+    final urls = controller.text
+        .split(RegExp(r'[\s,，]+'))
+        .map((u) => u.trim())
+        .where((u) => u.isNotEmpty)
+        .toSet()
+        .toList();
+    if (urls.isEmpty) return;
+    await _doImportAll([
+      for (final u in urls) (label: u, loader: () => _mgr.importFromUrl(u)),
+    ]);
   }
 
-  Future<void> _doImport(Future<LxSource?> Function() loader) async {
+  /// 逐个导入，最后汇总一条提示。一个失败不影响后面的。
+  Future<void> _doImportAll(
+    List<({String label, Future<LxSource?> Function() loader})> jobs,
+  ) async {
     setState(() => _busy = true);
+    final ok = <LxSource>[];
+    final failed = <String>[];
     try {
-      final meta = await loader();
-      if (!mounted) return;
-      if (meta == null) {
-        AppToast.show(
-          context,
-          '导入失败：脚本未通过加载（格式不符或未声明支持的源）',
-          type: ToastType.error,
-        );
-      } else {
-        AppToast.show(
-          context,
-          '已导入「${meta.name}」，支持：${meta.sources.join('/')}',
-        );
+      for (final job in jobs) {
+        try {
+          final meta = await job.loader();
+          if (meta == null) {
+            failed.add(job.label);
+          } else {
+            ok.add(meta);
+          }
+        } catch (_) {
+          failed.add(job.label);
+        }
       }
+      if (!mounted) return;
+      if (jobs.length == 1) {
+        if (ok.isEmpty) {
+          AppToast.show(
+            context,
+            '导入失败：脚本未通过加载（格式不符或未声明支持的源）',
+            type: ToastType.error,
+          );
+        } else {
+          final m = ok.first;
+          AppToast.show(context, '已导入「${m.name}」，支持：${m.sources.join('/')}');
+        }
+        return;
+      }
+      final names = ok.map((m) => m.name).join('、');
+      AppToast.show(
+        context,
+        failed.isEmpty
+            ? '已导入 ${ok.length} 个：$names'
+            : '导入成功 ${ok.length} 个，失败 ${failed.length} 个'
+                  '${ok.isEmpty ? '' : '（$names）'}',
+        type: ok.isEmpty ? ToastType.error : ToastType.success,
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }

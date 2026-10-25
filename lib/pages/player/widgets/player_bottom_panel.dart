@@ -1719,7 +1719,7 @@ void showPosterSongDetailSheet(BuildContext context, PlayerService player) {
 /// 播放页底栏「更多」的细线四宫格。
 ///
 /// 比 Icons.grid_view_outlined（24 号、2px 线）小一圈、线细一点：
-/// 画在 22 的格子里，四个圆角方块各 7.4，线宽 1.5。
+/// 整组约 15（系统图标约 18），四个圆角方块各 6.2，线宽 1.4。
 class _ThinGridIcon extends StatelessWidget {
   final Color color;
 
@@ -1741,9 +1741,9 @@ class _ThinGridPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    const box = 7.4;
-    const gap = 3.2;
-    const stroke = 1.5;
+    const box = 6.2;
+    const gap = 2.8;
+    const stroke = 1.4;
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
@@ -1757,7 +1757,7 @@ class _ThinGridPainter extends CustomPainter {
         canvas.drawRRect(
           RRect.fromRectAndRadius(
             Rect.fromLTWH(ox + dx, oy + dy, box, box),
-            const Radius.circular(1.8),
+            const Radius.circular(1.5),
           ),
           paint,
         );

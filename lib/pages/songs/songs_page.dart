@@ -88,6 +88,7 @@ class _SongsPageState extends State<SongsPage>
 
   void _onSourceChanged() {
     if (!mounted) return;
+    _emptyRetries = 0;
     _loadSongs();
   }
 
@@ -112,6 +113,7 @@ class _SongsPageState extends State<SongsPage>
     MusicSourceRegistry.instance.revision.removeListener(_onSourceChanged);
     _listController.removeListener(_handleScroll);
     _listController.dispose();
+    _emptyRetryTimer?.cancel();
     super.dispose();
   }
 
@@ -147,7 +149,25 @@ class _SongsPageState extends State<SongsPage>
         ? favorites
         : await _source.fullFeed(HomeFeed.latestSongs, limit: 200);
     debugPrint('[SongsPage] 源=${_source.id} 取到 ${songs.length} 首');
+    // 一首都没有基本是没拿到（新装首启 iOS 还在弹联网授权、源还没就绪），
+    // 不是真的空：抛出去，别把空列表写进缓存，交给 _scheduleEmptyRetry 重拉。
+    if (songs.isEmpty) throw StateError('源 ${_source.id} 暂时没拿到歌');
     return _sortLocally(songs);
+  }
+
+  int _emptyRetries = 0;
+  Timer? _emptyRetryTimer;
+
+  /// 非飞牛源拿空时自动重拉：3s / 6s / 12s，最多三次。以前只拉一次，
+  /// 首启那次失败后歌曲页就一直空着，要换个源才会再拉。
+  void _scheduleEmptyRetry() {
+    if (_isFeiniu || _emptyRetries >= 3 || !mounted) return;
+    _emptyRetryTimer?.cancel();
+    final delay = Duration(seconds: 3 << _emptyRetries);
+    _emptyRetries++;
+    _emptyRetryTimer = Timer(delay, () {
+      if (mounted && _songs.value.isEmpty) _loadSongs();
+    });
   }
 
   /// 本地排序。飞牛的排序是服务端做的，其它源只能在本地排。
@@ -270,6 +290,9 @@ class _SongsPageState extends State<SongsPage>
             _songs.value = data;
             _isLoading.value = false;
             _preloadCovers(data);
+            _emptyRetries = 0;
+          } else if (_songs.value.isEmpty) {
+            _scheduleEmptyRetry();
           }
           _isRefreshing.value = false; // 后台刷新完成（成功或失败都关掉右上角转圈）
         }
@@ -318,6 +341,7 @@ class _SongsPageState extends State<SongsPage>
         if (_songs.value.isEmpty) {
           _isLoading.value = false;
           debugPrint('[SongsPage] no cached data, showing empty state');
+          _scheduleEmptyRetry();
         } else {
           debugPrint('[SongsPage] has stale data on screen, hiding refresher');
         }

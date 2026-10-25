@@ -167,12 +167,12 @@ class AppSurfaceSettings {
         );
         style.value = const SurfaceStyle(
           color: Colors.white,
-          opacity: 0.8,
+          opacity: 0.5,
           thickness: 0.5,
           frame: true,
           frameColor: Color(0xFF377BEA),
-          frameOpacity: 0.5,
-          frameThickness: 0.3,
+          frameOpacity: 0.25,
+          frameThickness: 0.35,
         );
         await prefs.setString(_prefsStyle, jsonEncode(style.value.toJson()));
       } else {
