@@ -169,21 +169,29 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
     final options = service.qualityOptionsFor(source);
     final picked = await showModalBottomSheet<DownloadQualityOption>(
       context: context,
+      // 这是在「歌曲详情」弹窗里再弹的第二个底部弹窗。不走根导航的话会被约束在
+      // 上层弹窗的子树里、在桌面高窗口下锚到窗口下方被截断（档位露不全）。
+      useRootNavigator: true,
+      // 档位多 / 窗口矮时内容可能超高，isScrollControlled + 内部滚动确保能滑到底，
+      // 不再被底边切掉。
+      isScrollControlled: true,
       builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('选择下载音质', style: TextStyle(fontSize: 16)),
-            ),
-            for (final option in options)
-              ListTile(
-                leading: const Icon(Icons.high_quality_rounded),
-                title: Text(option.label),
-                onTap: () => Navigator.pop(ctx, option),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('选择下载音质', style: TextStyle(fontSize: 16)),
               ),
-          ],
+              for (final option in options)
+                ListTile(
+                  leading: const Icon(Icons.high_quality_rounded),
+                  title: Text(option.label),
+                  onTap: () => Navigator.pop(ctx, option),
+                ),
+            ],
+          ),
         ),
       ),
     );

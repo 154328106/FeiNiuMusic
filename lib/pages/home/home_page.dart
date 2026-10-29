@@ -1407,32 +1407,38 @@ class _HomePageState extends State<HomePage>
               onPlayRoam: _togglePlayRoam,
               heroIsPlaying: _heroIsPlaying,
               onRefreshRoam: _refreshRoam,
-              shortcutItems: [
-                HomeShortcutItem(
-                  icon: Icons.queue_music_rounded,
-                  label: '歌单',
-                  accent: const Color(0xFF3B82F6),
-                  onTap: _openPlaylistsPage,
-                ),
-                HomeShortcutItem(
-                  icon: Icons.people_rounded,
-                  label: '歌手',
-                  accent: const Color(0xFF14B8A6),
-                  onTap: _openArtistsPage,
-                ),
-                HomeShortcutItem(
-                  icon: Icons.album_rounded,
-                  label: '专辑',
-                  accent: const Color(0xFFA855F7),
-                  onTap: _openAlbumsPage,
-                ),
-                HomeShortcutItem(
-                  icon: Icons.music_video_rounded,
-                  label: '风格',
-                  accent: const Color(0xFFF97316),
-                  onTap: _openGenresPage,
-                ),
-              ],
+              // 大布局（平板/TV/Windows）原来写死飞牛那套（歌单/歌手/专辑/风格），
+              // 换到 QQ/网易云等源也不变、点进去全落到飞牛接口上（访客模式空白）。
+              // 飞牛仍保留原来这四项（含「风格」，比手机版多一格，大屏放得下）；
+              // 其它源改用与手机版一致的、按源自适应的 _shortcutItems()。
+              shortcutItems: _source.id == 'feiniu'
+                  ? [
+                      HomeShortcutItem(
+                        icon: Icons.queue_music_rounded,
+                        label: '歌单',
+                        accent: const Color(0xFF3B82F6),
+                        onTap: _openPlaylistsPage,
+                      ),
+                      HomeShortcutItem(
+                        icon: Icons.people_rounded,
+                        label: '歌手',
+                        accent: const Color(0xFF14B8A6),
+                        onTap: _openArtistsPage,
+                      ),
+                      HomeShortcutItem(
+                        icon: Icons.album_rounded,
+                        label: '专辑',
+                        accent: const Color(0xFFA855F7),
+                        onTap: _openAlbumsPage,
+                      ),
+                      HomeShortcutItem(
+                        icon: Icons.music_video_rounded,
+                        label: '风格',
+                        accent: const Color(0xFFF97316),
+                        onTap: _openGenresPage,
+                      ),
+                    ]
+                  : _shortcutItems(),
               recentSongs: _recentSongs.value,
               onPlayRecent: () => _playFromList(
                 _recentSongs.value,

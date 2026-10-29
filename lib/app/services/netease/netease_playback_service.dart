@@ -232,6 +232,10 @@ class NetEasePlaybackService {
             songId: '$id',
             keyword: _searchKeyword(byId[id]),
             durationMs: byId[id]?.durationMs ?? 0,
+            // LX 脚本里有些取址分支（如网易云 163 直连）要 name+singer 才给地址，
+            // 没有就报 `song name missing`。队列这儿手里正好有 SongEntity，带上。
+            name: byId[id]?.title,
+            singer: byId[id]?.artistDisplayName,
           ),
       ]);
       for (var i = 0; i < batch.length; i++) {

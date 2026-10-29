@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -436,6 +437,15 @@ class _DynamicGradientBackgroundState extends State<_DynamicGradientBackground>
 
   late AnimationController _controller;
 
+  /// 桌面端（Windows/Linux/macOS）不跑逐帧动画，静态渲染一帧。
+  ///
+  /// 动态流光每帧都在 [_AuroraPainter] 里新建 5 个原生渐变着色器
+  /// （`ui.Gradient.linear/radial`）。移动端窗口小、量可控；桌面大窗口下这种
+  /// 30fps 的原生对象 churn 会把原生内存顶爆，直到整机卡死（实测：关掉流光即恢复）。
+  /// 静态一帧观感几乎一致，但彻底去掉逐帧着色器开销。
+  static final bool _animate =
+      !(Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+
   @override
   AnimationController get visibilityController => _controller;
 
@@ -446,7 +456,9 @@ class _DynamicGradientBackgroundState extends State<_DynamicGradientBackground>
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 22),
-    )..repeat();
+    );
+    // 桌面静态：不 repeat，停在固定一帧。
+    if (_animate) _controller.repeat();
   }
 
   @override
@@ -458,22 +470,27 @@ class _DynamicGradientBackgroundState extends State<_DynamicGradientBackground>
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    CustomPaint paintAt(double t) => CustomPaint(
+      size: Size.infinite,
+      painter: _AuroraPainter(
+        t: t,
+        base: widget.baseColor,
+        saturation: widget.saturation,
+        hueShift: widget.hueShift,
+        isDark: isDark,
+      ),
+    );
+    if (!_animate) {
+      // 桌面：静态一帧，不挂 AnimationController，无逐帧重绘。
+      return RepaintBoundary(child: paintAt(0.0));
+    }
     return RepaintBoundary(
       child: AnimatedBuilder(
         animation: _controller,
         builder: (context, _) {
           final t =
               (_controller.value * _phaseSteps).floorToDouble() / _phaseSteps;
-          return CustomPaint(
-            size: Size.infinite,
-            painter: _AuroraPainter(
-              t: t,
-              base: widget.baseColor,
-              saturation: widget.saturation,
-              hueShift: widget.hueShift,
-              isDark: isDark,
-            ),
-          );
+          return paintAt(t);
         },
       ),
     );

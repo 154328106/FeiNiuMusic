@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../app/router/app_router.dart';
 import '../../app/services/feiniu/account_store.dart';
+import '../../app/services/source/music_source.dart';
+import '../../app/services/source/music_source_registry.dart';
 import '../account/account_header_card.dart';
 import 'base/app_page_scaffold.dart';
 
@@ -85,37 +87,62 @@ class SideMenu extends StatelessWidget {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 10),
-                    _GroupCard(
-                      title: '资源库',
-                      color: cardColor,
-                      accent: scheme.primary,
-                      children: [
-                        _MenuItem(
-                          icon: Icons.album_rounded,
-                          label: '专辑',
-                          onTap: () =>
-                              _navigateAndClose(context, AppRoutes.albums),
-                        ),
-                        _MenuItem(
-                          icon: Icons.people_rounded,
-                          label: '歌手',
-                          onTap: () =>
-                              _navigateAndClose(context, AppRoutes.artists),
-                        ),
-                        _MenuItem(
-                          icon: Icons.music_video_rounded,
-                          label: '风格',
-                          onTap: () =>
-                              _navigateAndClose(context, AppRoutes.genres),
-                        ),
-                        _MenuItem(
-                          icon: Icons.queue_music_rounded,
-                          label: '歌单',
-                          onTap: () =>
-                              _navigateAndClose(context, AppRoutes.playlists),
-                        ),
-                      ],
+                    // 「资源库」（专辑/歌手/风格/歌单）全是飞牛 NAS 曲库概念，
+                    // 路由也写死飞牛。换到 QQ/网易云等源点进去只会打到飞牛接口、
+                    // 访客模式一片空白。非飞牛源下整组隐藏，浏览走首页里按源自适应
+                    // 的快捷区。监听当前源，换源即时增减。
+                    ValueListenableBuilder<MusicSource>(
+                      valueListenable: MusicSourceRegistry.instance.current,
+                      builder: (context, source, _) {
+                        if (source.id != 'feiniu') {
+                          return const SizedBox.shrink();
+                        }
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const SizedBox(height: 10),
+                            _GroupCard(
+                              title: '资源库',
+                              color: cardColor,
+                              accent: scheme.primary,
+                              children: [
+                                _MenuItem(
+                                  icon: Icons.album_rounded,
+                                  label: '专辑',
+                                  onTap: () => _navigateAndClose(
+                                    context,
+                                    AppRoutes.albums,
+                                  ),
+                                ),
+                                _MenuItem(
+                                  icon: Icons.people_rounded,
+                                  label: '歌手',
+                                  onTap: () => _navigateAndClose(
+                                    context,
+                                    AppRoutes.artists,
+                                  ),
+                                ),
+                                _MenuItem(
+                                  icon: Icons.music_video_rounded,
+                                  label: '风格',
+                                  onTap: () => _navigateAndClose(
+                                    context,
+                                    AppRoutes.genres,
+                                  ),
+                                ),
+                                _MenuItem(
+                                  icon: Icons.queue_music_rounded,
+                                  label: '歌单',
+                                  onTap: () => _navigateAndClose(
+                                    context,
+                                    AppRoutes.playlists,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        );
+                      },
                     ),
                     const SizedBox(height: 10),
                     _GroupCard(
