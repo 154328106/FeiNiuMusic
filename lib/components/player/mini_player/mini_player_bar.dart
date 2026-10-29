@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -318,9 +319,13 @@ void openPlayerPage(BuildContext context) {
 }
 
 Route playerPageRoute() {
+  final isDesktop =
+      Platform.isWindows || Platform.isMacOS || Platform.isLinux;
   return PageRouteBuilder(
     settings: const RouteSettings(name: AppRoutes.player),
-    opaque: false,
+    // 桌面不透明：升起转场完成后就不再重绘下面那页，减少合成负担。手机维持
+    // 半透明升起（下层若隐若现的观感）。播放页本身有完整背景，置不透明不影响外观。
+    opaque: isDesktop,
     barrierColor: Colors.transparent,
     pageBuilder: (context, animation, secondaryAnimation) => const PlayerPage(),
     transitionDuration: const Duration(milliseconds: 320),
@@ -335,6 +340,12 @@ Route playerPageRoute() {
         begin: const Offset(0, 1),
         end: Offset.zero,
       ).animate(curved);
+      // 桌面：只做位移。Scale 会对整页重采样、Fade 会对整页 saveLayer，叠在
+      // 静态流光全屏绘制 + 顶部模糊上，大窗口下每帧太重，升起一路卡顿。纯位移
+      // 最轻（只平移图层，不额外合成），桌面上只保留它。
+      if (isDesktop) {
+        return SlideTransition(position: offset, child: child);
+      }
       final scale = Tween<double>(begin: 0.97, end: 1.0).animate(curved);
       final fade = CurvedAnimation(
         parent: animation,
