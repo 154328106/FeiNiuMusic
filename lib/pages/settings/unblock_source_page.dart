@@ -299,6 +299,17 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                       UnblockSourceService.instance.setFreeFallbackEnabled,
                 ),
               ),
+              ValueListenableBuilder<bool>(
+                valueListenable: UnblockSourceService.instance.preferLxEnabled,
+                builder: (context, on, _) => AppSettingSwitchTile(
+                  title: '优先走外置音源',
+                  subtitle: on
+                      ? '先用你导入的 JS 脚本取址，没命中再走内置音源'
+                      : '默认先走内置音源，JS 脚本作为补充（在下方「脚本」里导入）',
+                  value: on,
+                  onChanged: UnblockSourceService.instance.setPreferLxEnabled,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 16),

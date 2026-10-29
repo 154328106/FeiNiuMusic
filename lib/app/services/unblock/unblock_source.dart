@@ -90,6 +90,7 @@ class UnblockSourceService {
 
   static const String _prefsKey = 'unblock.source.config';
   static const String _prefsPreferredKey = 'unblock.source.preferredKeyIndex';
+  static const String _prefsPreferLxKey = 'unblock.source.preferLx';
 
   final ValueNotifier<UnblockSourceConfig> config = ValueNotifier(
     UnblockSourceConfig.empty,
@@ -135,6 +136,11 @@ class UnblockSourceService {
 
   static const String _prefsFreeKey = 'unblock.source.freeFallback';
 
+  /// 优先走外置音源（用户导入的 LX/JS 脚本）。默认关：开了就把脚本提到取址链
+  /// 最前面，官方 ID 源（公益 / GD / zddyr / 聆澜）和关键词兜底全往后排，脚本
+  /// 没命中时再照常走内置那条链。适合自备优质脚本、想先吃脚本的无损/Hi-Res 的人。
+  final ValueNotifier<bool> preferLxEnabled = ValueNotifier(false);
+
   bool get isUsable => config.value.isUsable;
 
   Future<void> load() async {
@@ -144,6 +150,7 @@ class UnblockSourceService {
       final prefs = await SharedPreferences.getInstance();
       _preferredKeyIndex = prefs.getInt(_prefsPreferredKey) ?? 0;
       freeFallbackEnabled.value = prefs.getBool(_prefsFreeKey) ?? true;
+      preferLxEnabled.value = prefs.getBool(_prefsPreferLxKey) ?? false;
       final raw = prefs.getString(_prefsKey);
       if (raw == null || raw.isEmpty) return;
       final decoded = jsonDecode(raw);
@@ -168,6 +175,14 @@ class UnblockSourceService {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_prefsFreeKey, value);
+    } catch (_) {}
+  }
+
+  Future<void> setPreferLxEnabled(bool value) async {
+    preferLxEnabled.value = value;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefsPreferLxKey, value);
     } catch (_) {}
   }
 
@@ -202,6 +217,24 @@ class UnblockSourceService {
   }) async {
     await load();
     final cfg = config.value;
+
+    // 第〇层（可选）：优先走外置音源。开了「优先走外置音源」就先问用户导入的
+    // LX/JS 脚本，命中直接用，官方 ID 源和兜底全让路。没命中则置 lxTried，下面
+    // 那次脚本调用跳过 —— flutter_js 的运行时不经得起同一首歌连驱两遍。
+    var lxTried = false;
+    if (preferLxEnabled.value) {
+      final url = await LxSourceManager.instance.resolve(
+        platform: platform,
+        songId: songId,
+        name: name,
+        singer: singer,
+      );
+      lxTried = true;
+      if (url != null) {
+        debugPrint('[Unblock] LX 脚本（优先）命中 $platform/$songId');
+        return url;
+      }
+    }
 
     final limitedUntil = _rateLimitedUntil;
     final rateLimited =
@@ -299,15 +332,17 @@ class UnblockSourceService {
     // LX（洛雪）脚本音源：用户导入的第三方脚本，按平台代号匹配取址。放在官方
     // ID 源（GD / zddyr / 聆澜）之后、关键词兜底之前 —— 它们按原始 id 取址更准，
     // 脚本作为它们都未命中时的补充；脚本能给到无损/Hi-Res 时也算额外收益。
-    final lxUrl = await LxSourceManager.instance.resolve(
-      platform: platform,
-      songId: songId,
-      name: name,
-      singer: singer,
-    );
-    if (lxUrl != null) {
-      debugPrint('[Unblock] LX 脚本命中 $platform/$songId');
-      return lxUrl;
+    if (!lxTried) {
+      final lxUrl = await LxSourceManager.instance.resolve(
+        platform: platform,
+        songId: songId,
+        name: name,
+        singer: singer,
+      );
+      if (lxUrl != null) {
+        debugPrint('[Unblock] LX 脚本命中 $platform/$songId');
+        return lxUrl;
+      }
     }
 
     // 最后一层：按歌名搜的免费兜底（酷狗 → 酷我）。GD 上面已经试过了。
