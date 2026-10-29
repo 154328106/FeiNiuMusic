@@ -425,6 +425,13 @@ class AccountStore {
     // 注意顺序：必须在本方法里先清缓存再设 currentAccountId——设 currentAccountId
     // 会触发门控重建外壳、新首页立即读 SQLite 缓存，若缓存未清会先渲染旧数据。
     await _clearDataCaches();
+    // 切 currentAccountId 会触发门控重建外壳、新首页立即拉数据。必须先把 baseUrl
+    // 应用到 API 客户端，否则新首页用空 baseUrl 发请求、打成无 host 的相对地址
+    // （/music/api/v1/...）→ 全部 "No host specified" → 登录后首页/我的一片空白，
+    // 要重启才好（重启时启动流程会 setBaseUrl）。这里对齐重启路径，消除竞态。
+    if (entry.serverUrl.isNotEmpty) {
+      await api.setBaseUrl(entry.serverUrl);
+    }
     currentAccountId.value = entry.id;
     // 地址账号登录（无 fnId）时清掉残留的 fn_last_fnid，避免启动预热用
     // 上一个 FNID 账号的标识去探测/回写，把地址账号误改成 FNID 身份。
@@ -479,6 +486,11 @@ class AccountStore {
     // （顺序同上：须在设 currentAccountId 触发外壳重建前清完），
     // 避免新账号首页/列表渲染旧服务器数据。
     await _clearDataCaches();
+    // 同 persistLogin：切 currentAccountId 触发外壳重建前，先把 baseUrl 应用到
+    // API 客户端，否则新首页用空 baseUrl 发请求、无 host → 登录后一片空白。
+    if (updated.serverUrl.isNotEmpty) {
+      await api.setBaseUrl(updated.serverUrl);
+    }
     currentAccountId.value = id;
     // 地址账号（无 fnId）时清残留 fn_last_fnid，避免身份被改写。
     await _syncLastFnIdFor(updated.fnId);
