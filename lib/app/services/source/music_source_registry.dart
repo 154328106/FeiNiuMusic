@@ -98,6 +98,18 @@ class MusicSourceRegistry {
     } catch (_) {}
   }
 
+  /// 飞牛没连上（登出 / 删光账号）时别停在飞牛源上。
+  ///
+  /// 登出会清空 API 的 baseUrl，飞牛源随之不可用；还停在它上面的话，首页每个
+  /// 请求都成了无 host 的相对地址，刷一屏 "No host specified" 还一片空白。
+  /// 「我的」页点飞牛卡那条路早有同样的拦截，登出 / 删号这条路漏了。退回新装
+  /// 默认的酷狗（和 [_load] 的默认一致）；重新登录后在「我的」点飞牛卡即可切回。
+  Future<void> leaveFeiniuIfUnavailable() async {
+    final src = current.value;
+    if (src.id != 'feiniu' || src.isAvailable) return;
+    await setCurrent(KugouSource.instance);
+  }
+
   MusicSource byId(String id) =>
       all.firstWhere((s) => s.id == id, orElse: () => FeiniuSource.instance);
 }

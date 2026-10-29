@@ -4,6 +4,7 @@ import '../../app/services/feiniu/account_entry.dart';
 import '../../app/services/feiniu/account_store.dart';
 import '../../app/services/feiniu/auth_service.dart';
 import '../../app/services/player_service.dart';
+import '../../app/services/source/music_source_registry.dart';
 import '../../components/index.dart';
 import '../login/login_page.dart';
 
@@ -375,6 +376,8 @@ class _AccountSwitchPageState extends State<AccountSwitchPage> {
     );
     if (confirmed != true) return;
     await AccountStore.instance.remove(account.id);
+    // 删光了 / 删完仍未登录：飞牛源已不可用，退回默认源，免得首页刷 No host。
+    await MusicSourceRegistry.instance.leaveFeiniuIfUnavailable();
     if (context.mounted) {
       AppToast.show(context, '账号已删除', type: ToastType.success);
     }
@@ -401,6 +404,9 @@ class _AccountSwitchPageState extends State<AccountSwitchPage> {
       await PlayerService.instance.stopAndClear();
     } catch (_) {}
     await AuthService.instance.logout();
+    // 登出清空了 baseUrl，飞牛源随之不可用；访客模式下外壳不会切回登录页，
+    // 还停在飞牛源上首页就会刷 No host + 空白，退回默认源。
+    await MusicSourceRegistry.instance.leaveFeiniuIfUnavailable();
     // 退出后 isLoggedIn 变化，门控自动把主外壳切回登录页。
     // 若本页挂在外壳的嵌套导航器上（随外壳一并卸载），无需手动 pop；
     // 若本页仍存活，则关闭它以免残留。

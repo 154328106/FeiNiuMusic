@@ -385,6 +385,9 @@ class AccountStore {
         // （顺序：清缓存 → 再设 currentAccountId，避免新外壳读到旧缓存），
         // 重建后的界面直接渲染新账号数据。
         await _clearDataCaches();
+        // 同 switchTo / persistLogin：先把剩余账号的 baseUrl/token 写进 API 客户端，
+        // 再切 currentAccountId 触发外壳重建，否则新首页拿旧连接或空 baseUrl 发请求。
+        await activate(list.first);
         currentAccountId.value = list.first.id;
       }
     }

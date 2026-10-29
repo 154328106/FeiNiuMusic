@@ -86,8 +86,21 @@ class LiveRouteTracker extends NavigatorObserver {
   final List<Route<dynamic>> _routes = [];
 
   /// 栈里是否已经有这个名字的页面。
-  bool contains(String name) =>
-      _routes.any((r) => r.settings.name == name);
+  ///
+  /// 传了 [navigator] 就只认属于它的路由。外壳按账号重建（登录 / 登出 / 删号 /
+  /// 切号）时旧 Navigator 整个卸载，而卸载**不会**回调 didPop/didRemove，旧栈的
+  /// 路由会一直残留在这里。不按所属 Navigator 过滤的话，新外壳里点「我的」会被
+  /// 误判成「已在栈里」→ [pushOrReturnTo] 在新栈里 popUntil 找不到它 → 一路
+  /// 弹到栈空 → 内容区白板，要重启才好。
+  bool contains(String name, {NavigatorState? navigator}) {
+    // 已卸载的路由 navigator 为 null，顺手清掉，免得残留越积越多。
+    _routes.removeWhere((r) => r.navigator == null);
+    return _routes.any(
+      (r) =>
+          r.settings.name == name &&
+          (navigator == null || identical(r.navigator, navigator)),
+    );
+  }
 
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
@@ -126,7 +139,7 @@ final LiveRouteTracker liveRoutes = LiveRouteTracker();
 /// 侧边导航模式下所有主导航目标都是压栈打开的，而同名页面压两次不会让下面
 /// 那份卸载 —— 两个 State 一起活着、各自的定时刷新都在跑，请求量直接翻倍。
 void pushOrReturnTo(NavigatorState navigator, String routeName) {
-  if (liveRoutes.contains(routeName)) {
+  if (liveRoutes.contains(routeName, navigator: navigator)) {
     navigator.popUntil((route) => route.settings.name == routeName);
     return;
   }
