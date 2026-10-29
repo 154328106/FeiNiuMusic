@@ -1741,9 +1741,10 @@ class _ThinGridPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    const box = 6.2;
-    const gap = 2.8;
-    const stroke = 1.4;
+    // 四宫格整体再收一点点（用户反馈：右下角这个「更多」图标偏大）。
+    const box = 5.5;
+    const gap = 2.5;
+    const stroke = 1.3;
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
