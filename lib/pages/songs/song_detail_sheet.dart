@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../../app/navigator_key.dart';
 import '../../app/router/app_page_route.dart';
 import '../../app/services/download/download_service.dart';
 import '../../app/services/feiniu/api_client.dart';
@@ -167,13 +168,16 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
     final service = DownloadService.instance;
     final source = SongSource.fromSongId(song.id);
     final options = service.qualityOptionsFor(source);
+    // 先关掉「歌曲详情」弹窗，再弹音质选择。否则两个底部弹窗叠在一起（详情在
+    // 上、音质在下、还错位），桌面上尤其难看。关掉后本 State 会卸载，所以后续
+    // 用根 Navigator 的 context 弹窗、用全局 toast 报结果。
+    Navigator.of(context).pop();
+    final rootContext = appNavigatorKey.currentContext;
+    if (rootContext == null) return;
     final picked = await showModalBottomSheet<DownloadQualityOption>(
-      context: context,
-      // 这是在「歌曲详情」弹窗里再弹的第二个底部弹窗。不走根导航的话会被约束在
-      // 上层弹窗的子树里、在桌面高窗口下锚到窗口下方被截断（档位露不全）。
-      useRootNavigator: true,
+      context: rootContext,
       // 档位多 / 窗口矮时内容可能超高，isScrollControlled + 内部滚动确保能滑到底，
-      // 不再被底边切掉。
+      // 不被底边切掉。
       isScrollControlled: true,
       builder: (ctx) => SafeArea(
         child: SingleChildScrollView(
@@ -203,17 +207,17 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
     SongEntity song,
     DownloadQualityOption option,
   ) async {
+    // 走全局 toast：下载前已关掉详情弹窗，本 State 多半已卸载，不能再用它的
+    // context。全局 toast 挂在根 Navigator 上，不依赖本页是否还活着。
     try {
       await DownloadService.instance.download(
         song,
         qualityId: option.id,
         qualityLabel: option.label,
       );
-      if (!mounted) return;
-      AppToast.show(context, '已下载到本地');
+      AppToast.showGlobal('已下载到本地');
     } catch (e) {
-      if (!mounted) return;
-      AppToast.show(context, '下载失败：$e', type: ToastType.error);
+      AppToast.showGlobal('下载失败：$e', type: ToastType.error);
     }
   }
 

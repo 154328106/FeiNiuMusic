@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:math';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -128,6 +129,9 @@ class _HomePageState extends State<HomePage>
   late final _roamId = createSignal<String?>(null);
   late final _roamQueue = createSignal<List<SongEntity>>([]);
   late final _favoriteSongs = createSignal<List<SongEntity>>([]);
+  // 本地收藏为空时的兜底：当前源排行榜/热门歌单的歌，填进大布局「本地收藏」那
+  // 一栏，别让它空着（仅桌面/平板大布局用）。收藏一旦有内容就清空、让位给收藏。
+  late final _favoriteFallback = createSignal<List<SongEntity>>([]);
   late final _recentSongs = createSignal<List<SongEntity>>([]);
   late final _recentAlbums = createSignal<List<FeiNiuAlbum>>([]);
   late final _playlists = createSignal<List<FeiNiuPlaylist>>([]);
@@ -505,6 +509,47 @@ class _HomePageState extends State<HomePage>
     final songs = merged.length > 10 ? merged.sublist(0, 10) : merged;
     if (mounted && !_sameSongs(_favoriteSongs.value, songs)) {
       _favoriteSongs.value = songs;
+    }
+    // 收藏空了就去拉当前源排行榜填空位；有收藏就把兜底清掉（仅大布局会用到）。
+    if (songs.isEmpty) {
+      if (AppLayoutSettings.effectiveTabletMode) {
+        unawaited(_loadFavoriteFallback());
+      }
+    } else if (_favoriteFallback.value.isNotEmpty) {
+      _favoriteFallback.value = const [];
+    }
+  }
+
+  /// 当前源「排行榜/热门歌单」第一个的歌，给空收藏栏兜底。
+  ///
+  /// 走各源已有的排行榜（QQ/网易云/咪咕有 toplists），其余源退回第一个歌单；
+  /// 失败就留空（和原来一样显示空状态）。只在大布局（桌面/平板）触发。
+  Future<void> _loadFavoriteFallback() async {
+    try {
+      final src = _source;
+      List<SourcePlaylist> charts;
+      if (src is QQSource) {
+        charts = await src.toplists();
+      } else if (src is NetEaseSource) {
+        charts = await src.toplists();
+      } else if (src is MiguSource) {
+        charts = await src.toplists();
+      } else {
+        charts = await src.playlists(limit: 1);
+      }
+      if (charts.isEmpty) {
+        if (mounted) _favoriteFallback.value = const [];
+        return;
+      }
+      final loadedSource = src.id;
+      final songs = await src.playlistSongs(charts.first.id);
+      // 拉的过程中换了源就丢弃，别把上一个源的榜单塞进来。
+      if (!mounted || _source.id != loadedSource) return;
+      _favoriteFallback.value = songs.length > 10
+          ? songs.sublist(0, 10)
+          : songs;
+    } catch (_) {
+      if (mounted) _favoriteFallback.value = const [];
     }
   }
 
@@ -1334,14 +1379,17 @@ class _HomePageState extends State<HomePage>
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop =
+        Platform.isWindows || Platform.isMacOS || Platform.isLinux;
     return AppNavigationModeBuilder(
       builder: (context, useBottomNavigation) => AppPageScaffold(
         key: _scaffoldKey,
         extendBodyBehindAppBar: true,
-        // 首页顶部本来就有漫游大图在显示当前播放，底下再压一条迷你播放条
-        // 就重复了，还把「最新歌曲」的最后一行挡住。这里单独关掉，其它
-        // 页面照旧。
-        showMiniPlayer: false,
+        // 手机端：首页顶部的漫游大图已经在显示当前播放，底下再压一条迷你
+        // 播放条就重复了，还把「最新歌曲」最后一行挡住，所以关掉（靠大图控制）。
+        // 桌面端：用户要求放歌时首页也要有播放条（大图在侧，底部条才是统一的
+        // 播放控制入口），这里打开，交给桌面外壳统一渲染。
+        showMiniPlayer: isDesktop,
         appBar: AppTopBar(
           title: '首页',
           showBackButton: false,
@@ -1398,6 +1446,12 @@ class _HomePageState extends State<HomePage>
           return const Center(child: CircularProgressIndicator());
         }
         final heroSong = _heroSong;
+        // 本地收藏为空时，「本地收藏」栏改用当前源排行榜兜底（别空着）。
+        final favIsFallback =
+            _favoriteSongs.value.isEmpty && _favoriteFallback.value.isNotEmpty;
+        final favShown = favIsFallback
+            ? _favoriteFallback.value
+            : _favoriteSongs.value;
         // 平板 / TV / Windows：大屏布局
         if (effectiveTabletMode) {
           return RefreshIndicator(
@@ -1460,7 +1514,8 @@ class _HomePageState extends State<HomePage>
               },
               onTapAlbum: _openAlbumDetail,
               recentTracks: _recentTracks.value,
-              favoriteSongs: _favoriteSongs.value,
+              favoriteSongs: favShown,
+              favoriteTitle: favIsFallback ? '热门榜单' : '本地收藏',
               onOpenSongs: _openSongsPage,
               onOpenFavorite: _openFavoritePage,
               onTapTrack: (song) => _playHomeSong(
@@ -1471,7 +1526,7 @@ class _HomePageState extends State<HomePage>
               onLongPressTrack: _showSongDetail,
               onTapFavorite: (song) => _playHomeSong(
                 song,
-                _favoriteSongs.value,
+                favShown,
                 _HomePlaySource.favorites,
               ),
             ),
@@ -1493,7 +1548,11 @@ class _HomePageState extends State<HomePage>
                     AppPageScaffold.scrollableBottomPadding(
                       context,
                       hasBottomNav: useBottomNavigation,
-                      showMiniPlayer: false,
+                      // 桌面开了迷你播放条，底部要留出它的高度，别挡住最后一行。
+                      showMiniPlayer:
+                          Platform.isWindows ||
+                          Platform.isMacOS ||
+                          Platform.isLinux,
                       // 默认的 24 是给「内容底下还要留口气」用的，首页内容
                       // 刚好卡在一屏边缘，这 24 就是还能挪一小段的原因。
                       minPadding: 8,

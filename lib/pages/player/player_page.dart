@@ -198,6 +198,10 @@ class _PlayerPageState extends State<PlayerPage>
                         (AppLayoutSettings.tvMode.value ||
                             mq.orientation == Orientation.landscape) &&
                         mq.size.width >= 900;
+                    final isDesktop =
+                        Platform.isWindows ||
+                        Platform.isMacOS ||
+                        Platform.isLinux;
                     // Poster 关闭顶部/底部 SafeArea 让封面延伸到屏幕边缘
                     // （覆盖状态栏/导航栏），歌词页再手动补回 inset 避免文字
                     // 滑入系统栏下方。
@@ -218,7 +222,12 @@ class _PlayerPageState extends State<PlayerPage>
                             // 包在零尺寸的 SizedBox 上 → 进了播放页出不去。给它
                             // 补一个左上角「收起」下箭头。Poster 维持原样（它靠
                             // 底部面板和系统返回）。
-                            child: isTabletLandscape
+                            // 桌面宽屏同时命中「平板横屏」和「桌面」——左上角的
+                            // 返回键（下方 Positioned，isDesktop 恒显示）已经是
+                            // 退出入口，这里就别再叠一个「收起」下箭头，否则两个
+                            // 返回图标重合。真平板横屏（非桌面）没有那个返回键，
+                            // 仍需要这个下箭头兜底。
+                            child: (isTabletLandscape && !isDesktop)
                                 ? Align(
                                     alignment: Alignment.centerLeft,
                                     child: Padding(
@@ -237,7 +246,7 @@ class _PlayerPageState extends State<PlayerPage>
                                       ),
                                     ),
                                   )
-                                : isPoster
+                                : (isTabletLandscape || isPoster)
                                     ? const SizedBox.shrink()
                                     : PlayerHeader(
                                         songSignal: _player.currentSongSignal,

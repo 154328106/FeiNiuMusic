@@ -48,6 +48,9 @@ class HomeLargeLayout extends StatelessWidget {
   final VoidCallback onOpenFavorite;
   final ValueChanged<SongEntity> onTapFavorite;
 
+  /// 「本地收藏」栏标题。收藏为空、改用排行榜兜底时，由调用方换成「热门榜单」。
+  final String favoriteTitle;
+
   const HomeLargeLayout({
     super.key,
     this.heroSong,
@@ -73,6 +76,7 @@ class HomeLargeLayout extends StatelessWidget {
     required this.favoriteSongs,
     required this.onOpenFavorite,
     required this.onTapFavorite,
+    this.favoriteTitle = '本地收藏',
   });
 
   @override
@@ -186,7 +190,7 @@ class HomeLargeLayout extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       HomeSectionHeader(
-                        title: '本地收藏',
+                        title: favoriteTitle,
                         onViewAll: onOpenFavorite,
                       ),
                       const SizedBox(height: 4),
