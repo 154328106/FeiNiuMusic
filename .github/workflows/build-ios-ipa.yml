@@ -82,3 +82,45 @@ jobs:
           name: Melodic-unsigned-ipa
           path: Melodic-v*-unsigned.ipa
           if-no-files-found: error
+
+  # Windows 绿色版：和 iOS 搭同一趟 ios-build-* tag 出，方便「试一版」时两端
+  # 一起拿。逻辑照 build-release.yml 的 build-windows job，差别只在构建的 ref
+  # 跟上面 iOS job 对齐（tag / workflow_dispatch 指定的分支），别出成默认分支。
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - uses: subosito/flutter-action@v2
+        with:
+          # 与本 workflow 的 iOS job / ci-check 一致，钉死避免 stable 漂移。
+          flutter-version: 3.47.4
+          channel: stable
+          cache: true
+
+      - name: 提取版本号
+        shell: powershell
+        run: |
+          $line = Select-String -Path pubspec.yaml -Pattern '^version:\s*(.+)$' | Select-Object -First 1
+          $full = $line.Matches[0].Groups[1].Value.Trim()
+          $ver = $full.Split('+')[0]
+          echo "VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: 构建并打包 Windows 绿色版
+        shell: powershell
+        run: .\scripts\package_windows.ps1 -Build
+
+      - name: 拷贝 zip 到工作区根目录（避免 upload-artifact 保留目录前缀）
+        shell: powershell
+        run: |
+          Copy-Item -Path build/installer/FeiNiuMusic-v*-Windows.zip -Destination . -Force
+
+      - name: 上传 Windows 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: FeiNiuMusic-v*-Windows.zip
+          if-no-files-found: error
