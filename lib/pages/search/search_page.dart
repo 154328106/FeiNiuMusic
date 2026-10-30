@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -41,6 +42,11 @@ class _SearchPageState extends State<SearchPage> {
   bool _searching = false;
   int _searchToken = 0;
 
+  /// 输入防抖：停手 400ms 再搜。原来每敲一个字（含拼音输入法还没选字时的
+  /// 字母）都立刻发一轮三连搜索，结果一轮接一轮，页面一直在转圈。
+  Timer? _debounce;
+  static const Duration _debounceDelay = Duration(milliseconds: 400);
+
   // 搜索结果
   List<SongEntity> _songs = [];
   List<FeiNiuAlbum> _albums = [];
@@ -48,8 +54,23 @@ class _SearchPageState extends State<SearchPage> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _controller.dispose();
     super.dispose();
+  }
+
+  /// 输入变化：拼音还在组字（composing）时不搜，组完字或停手后再搜。
+  void _onQueryChanged(String value) {
+    setState(() => _query = value);
+    _debounce?.cancel();
+    if (_controller.value.composing.isValid) return;
+    _debounce = Timer(_debounceDelay, _runSearch);
+  }
+
+  /// 立即搜（回车 / 清空）：取消还没到点的防抖。
+  void _searchNow() {
+    _debounce?.cancel();
+    _runSearch();
   }
 
   Future<void> _runSearch() async {
@@ -140,98 +161,99 @@ class _SearchPageState extends State<SearchPage> {
 
     return AppNavigationModeBuilder(
       builder: (context, useBottomNavigation) => AppPageScaffold(
-      extendBodyBehindAppBar: true,
-      resizeToAvoidBottomInset: false,
-      keepBottomOverlayFixed: true,
-      ignoreKeyboardInsets: true,
-      // 搜索已是底部导航目的地之一（首页-歌曲-搜索-我的）。
-      bottomNavIndex: useBottomNavigation ? 2 : null,
-      onBottomNavTap: useBottomNavigation
-          ? (index) => navigateToPrimaryDestination(context, index)
-          : null,
-      // 搜索页为沉浸式搜索体验，屏蔽底部迷你播放器（含平板/TV/Windows 外壳）。
-      showMiniPlayer: false,
-      appBar: AppTopBar(
-        title: '搜索',
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        showBackButton: true,
-      ),
-      body: Padding(
-        padding: const EdgeInsets.only(top: topBarHeight),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              child: TextField(
-                controller: _controller,
-                // 进入搜索页自动聚焦，可直接输入。
-                autofocus: true,
-                onChanged: (value) {
-                  setState(() {
-                    _query = value;
-                  });
-                  _runSearch();
-                },
-                textInputAction: TextInputAction.search,
-                decoration: InputDecoration(
-                  hintText: '搜索',
-                  prefixIcon: const Icon(Icons.search),
-                  suffixIcon: _query.isEmpty
-                      ? null
-                      : IconButton(
-                          icon: const Icon(Icons.clear),
-                          onPressed: () {
-                            setState(() {
-                              _query = '';
-                              _controller.clear();
-                            });
-                            _runSearch();
-                          },
+        extendBodyBehindAppBar: true,
+        resizeToAvoidBottomInset: false,
+        keepBottomOverlayFixed: true,
+        ignoreKeyboardInsets: true,
+        // 搜索已是底部导航目的地之一（首页-歌曲-搜索-我的）。
+        bottomNavIndex: useBottomNavigation ? 2 : null,
+        onBottomNavTap: useBottomNavigation
+            ? (index) => navigateToPrimaryDestination(context, index)
+            : null,
+        // 搜索页为沉浸式搜索体验，屏蔽底部迷你播放器（含平板/TV/Windows 外壳）。
+        showMiniPlayer: false,
+        appBar: AppTopBar(
+          title: '搜索',
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          showBackButton: true,
+        ),
+        body: Padding(
+          padding: const EdgeInsets.only(top: topBarHeight),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
+                ),
+                child: TextField(
+                  controller: _controller,
+                  // 进入搜索页自动聚焦，可直接输入。
+                  autofocus: true,
+                  onChanged: _onQueryChanged,
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    hintText: '搜索',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _query.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.clear),
+                            onPressed: () {
+                              setState(() {
+                                _query = '';
+                                _controller.clear();
+                              });
+                              _searchNow();
+                            },
+                          ),
+                    filled: true,
+                    fillColor: theme.appPanelColor,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    border: const OutlineInputBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(20)),
+                      borderSide: BorderSide.none,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: const BorderRadius.all(Radius.circular(20)),
+                      borderSide: BorderSide(
+                        color: theme.colorScheme.outlineVariant.withValues(
+                          alpha: 0.6,
                         ),
-                  filled: true,
-                  fillColor: theme.appPanelColor,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  border: const OutlineInputBorder(
-                    borderRadius: BorderRadius.all(Radius.circular(20)),
-                    borderSide: BorderSide.none,
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: const BorderRadius.all(Radius.circular(20)),
-                    borderSide: BorderSide(
-                      color: theme.colorScheme.outlineVariant.withValues(
-                        alpha: 0.6,
+                        width: 1,
                       ),
-                      width: 1,
                     ),
                   ),
-                ),
-                onSubmitted: (_) => _runSearch(),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    _buildCategoryChip(SearchCategory.all, '综合'),
-                    _buildCategoryChip(SearchCategory.song, '歌曲'),
-                    _buildCategoryChip(SearchCategory.album, '专辑'),
-                    _buildCategoryChip(SearchCategory.artist, '歌手'),
-                  ],
+                  onSubmitted: (_) => _searchNow(),
                 ),
               ),
-            ),
-            const SizedBox(height: 4),
-            Expanded(child: _buildResults(theme, isDark)),
-          ],
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
+                ),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _buildCategoryChip(SearchCategory.all, '综合'),
+                      _buildCategoryChip(SearchCategory.song, '歌曲'),
+                      _buildCategoryChip(SearchCategory.album, '专辑'),
+                      _buildCategoryChip(SearchCategory.artist, '歌手'),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Expanded(child: _buildResults(theme, isDark)),
+            ],
+          ),
         ),
-      ),
       ),
     );
   }
@@ -282,7 +304,9 @@ class _SearchPageState extends State<SearchPage> {
       );
     }
 
-    if (_searching) {
+    // 第一次搜、还没有任何结果时才整页转圈；之后再搜保留上一轮结果，
+    // 只在顶部挂一条细进度条，不让列表闪成一个圈。
+    if (_searching && !_hasResults()) {
       return const Center(child: CircularProgressIndicator());
     }
 
@@ -299,7 +323,7 @@ class _SearchPageState extends State<SearchPage> {
       );
     }
 
-    return ListView(
+    final list = ListView(
       padding: EdgeInsets.only(
         top: 4,
         bottom: AppPageScaffold.scrollableBottomPadding(
@@ -354,7 +378,10 @@ class _SearchPageState extends State<SearchPage> {
               children: _albums.map((album) {
                 final coverUrl =
                     album.coverId != null && album.coverId!.isNotEmpty
-                    ? _api.coverUrl(album.coverId!, size: FeiNiuApiClient.coverRequestSize)
+                    ? _api.coverUrl(
+                        album.coverId!,
+                        size: FeiNiuApiClient.coverRequestSize,
+                      )
                     : null;
                 return ListTile(
                   leading: coverUrl != null
@@ -401,7 +428,10 @@ class _SearchPageState extends State<SearchPage> {
               children: _artists.map((artist) {
                 final coverUrl =
                     artist.coverId != null && artist.coverId!.isNotEmpty
-                    ? _api.coverUrl(artist.coverId!, size: FeiNiuApiClient.coverRequestSize)
+                    ? _api.coverUrl(
+                        artist.coverId!,
+                        size: FeiNiuApiClient.coverRequestSize,
+                      )
                     : null;
                 return ListTile(
                   leading: CircleAvatar(
@@ -440,6 +470,18 @@ class _SearchPageState extends State<SearchPage> {
               }).toList(),
             ),
           ),
+      ],
+    );
+    if (!_searching) return list;
+    return Stack(
+      children: [
+        list,
+        const Positioned(
+          top: 0,
+          left: 16,
+          right: 16,
+          child: LinearProgressIndicator(minHeight: 2),
+        ),
       ],
     );
   }
