@@ -15,6 +15,7 @@ import '../../app/services/player_service.dart';
 import '../../app/services/source/music_source.dart';
 import '../../app/services/source/music_source_registry.dart';
 import '../../app/services/source/kugou_source.dart';
+import '../../app/services/source/feiniu_source.dart';
 import '../../app/services/source/kuwo_source.dart';
 import '../../app/services/source/migu_source.dart';
 import '../../app/services/local_favorites_store.dart';
@@ -424,10 +425,7 @@ class _HomePageState extends State<HomePage>
       try {
         unawaited(
           precacheImage(
-            CachedNetworkImageProvider(
-              url,
-              headers: isRemote ? null : headers,
-            ),
+            CachedNetworkImageProvider(url, headers: isRemote ? null : headers),
             context,
           ),
         );
@@ -620,9 +618,9 @@ class _HomePageState extends State<HomePage>
     // 抽到和当前一模一样时再试两次，免得「换一批」看着像没动。
     var sample = const <SongEntity>[];
     for (var attempt = 0; attempt < 3; attempt++) {
-      sample = (List<SongEntity>.of(pool)..shuffle(
-        _random,
-      )).take(_latestVisible).toList();
+      sample = (List<SongEntity>.of(
+        pool,
+      )..shuffle(_random)).take(_latestVisible).toList();
       if (!_sameSongs(_recentTracks.value, sample)) break;
     }
     if (!_sameSongs(_recentTracks.value, sample)) _recentTracks.value = sample;
@@ -854,10 +852,8 @@ class _HomePageState extends State<HomePage>
     if (queue.isEmpty) return banner;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () => _openSourceSongList(
-        _heroDisplayLabel,
-        () async => _roamQueue.value,
-      ),
+      onTap: () =>
+          _openSourceSongList(_heroDisplayLabel, () async => _roamQueue.value),
       child: banner,
     );
   }
@@ -1021,7 +1017,25 @@ class _HomePageState extends State<HomePage>
       ];
     }
     if (_source.id != 'netease') {
+      // 飞牛：排行榜 / 歌单 / 歌手 / 本地（2026-10-30 按用户要求）。
+      // 排行榜和在线歌手来自 NAS 上的「音源增强」扩展（洛雪各平台）；
+      // 歌手页改用和酷狗源一样的网格排版。原来的飞牛歌手 / 专辑 / 风格页
+      // 还在路由里（AppRoutes.artists / albums / genres），侧栏资源库照常可进，
+      // 首页要加回来补一个 pushNamed 的 HomeShortcutItem 即可。
+      final source = FeiniuSource.instance;
       return [
+        HomeShortcutItem(
+          icon: Icons.leaderboard_rounded,
+          label: '排行榜',
+          accent: const Color(0xFFEC4899),
+          onTap: () => _openSourcePlaylists(
+            '排行榜',
+            source.toplists,
+            emptyHint: '排行榜来自 NAS 上的「音源增强」扩展，装好并启用后这里会列出各平台榜单。',
+            categoriesLoader: source.toplistCategories,
+            categoryLoader: source.toplistsByPlatform,
+          ),
+        ),
         HomeShortcutItem(
           icon: Icons.queue_music_rounded,
           label: '歌单',
@@ -1032,16 +1046,8 @@ class _HomePageState extends State<HomePage>
           icon: Icons.people_rounded,
           label: '歌手',
           accent: const Color(0xFF14B8A6),
-          onTap: _openArtistsPage,
+          onTap: () => _openSourcePlaylists('歌手', source.artists),
         ),
-        HomeShortcutItem(
-          icon: Icons.album_rounded,
-          label: '专辑',
-          accent: const Color(0xFFA855F7),
-          onTap: _openAlbumsPage,
-        ),
-        // 「风格」格换成「本地」。_openGenresPage 实现保留，风格入口以后要加
-        // 回来只需在这补一个 HomeShortcutItem。
         _localShortcut(),
       ];
     }
@@ -1142,9 +1148,9 @@ class _HomePageState extends State<HomePage>
       return;
     }
     if (_source.id != 'feiniu') {
-      Navigator.of(context).push(
-        buildAppPageRoute<void>((_) => const SourceSearchPage()),
-      );
+      Navigator.of(
+        context,
+      ).push(buildAppPageRoute<void>((_) => const SourceSearchPage()));
       return;
     }
     Navigator.pushNamed(
@@ -1166,18 +1172,6 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  void _openArtistsPage() {
-    Navigator.of(context).pushNamed(AppRoutes.artists);
-  }
-
-  void _openAlbumsPage() {
-    Navigator.of(context).pushNamed(AppRoutes.albums);
-  }
-
-  void _openGenresPage() {
-    Navigator.of(context).pushNamed(AppRoutes.genres);
-  }
-
   /// 飞牛走原有的收藏页 / 最近播放页（分页、多选、删历史都在那里）；
   /// 其它源没有对应能力，给一个通用的只读列表页。
   void _openFeedPage(HomeFeed kind, String title, String feiniuRoute) {
@@ -1186,9 +1180,7 @@ class _HomePageState extends State<HomePage>
       return;
     }
     Navigator.of(context).push(
-      buildAppPageRoute<void>(
-        (_) => SourceFeedPage(kind: kind, title: title),
-      ),
+      buildAppPageRoute<void>((_) => SourceFeedPage(kind: kind, title: title)),
     );
   }
 
@@ -1232,7 +1224,8 @@ class _HomePageState extends State<HomePage>
     // 就是播放/暂停。原来只判 isPlaying，于是暂停之后再点会掉进下面的
     // _playRoam()，表现是「暂停完再按不是继续，而是重开漫游」。
     final playingThis = _player.currentSongSignal.value?.id == hero.id;
-    if (playingThis && (_player.isPlayingSignal.value || _heroShowsNowPlaying)) {
+    if (playingThis &&
+        (_player.isPlayingSignal.value || _heroShowsNowPlaying)) {
       // 这一下如果是「暂停」，当场就开挽留窗口，不去赌 isPlaying 的监听
       // 和 Watch.builder 谁先跑。
       if (_player.isPlayingSignal.value) _startHeroLinger();
@@ -1243,9 +1236,8 @@ class _HomePageState extends State<HomePage>
     final justTried =
         _lastRoamAttemptId == hero.id &&
         _lastRoamAttemptAt != null &&
-        DateTime.now().difference(_lastRoamAttemptAt!) < const Duration(
-          seconds: 20,
-        );
+        DateTime.now().difference(_lastRoamAttemptAt!) <
+            const Duration(seconds: 20);
     if (justTried && !_player.isPlayingSignal.value) {
       unawaited(_refreshRoam());
       return;
@@ -1284,8 +1276,9 @@ class _HomePageState extends State<HomePage>
   /// AlwaysScrollable 是 RefreshIndicator 的前提（内容不满一屏也要能下拉），
   /// 但它在 iOS 上默认带 Bouncing —— 内容明明没占满也能拽起来晃，就是
   /// 「首页还是可以滑动」。父级换成 Clamping：下拉刷新照常，多余的弹性没了。
-  static const ScrollPhysics _homeScrollPhysics =
-      AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics());
+  static const ScrollPhysics _homeScrollPhysics = AlwaysScrollableScrollPhysics(
+    parent: ClampingScrollPhysics(),
+  );
 
   void _playFromList(List<SongEntity> songs, _HomePlaySource source) {
     if (songs.isEmpty) {
@@ -1461,38 +1454,9 @@ class _HomePageState extends State<HomePage>
               onPlayRoam: _togglePlayRoam,
               heroIsPlaying: _heroIsPlaying,
               onRefreshRoam: _refreshRoam,
-              // 大布局（平板/TV/Windows）原来写死飞牛那套（歌单/歌手/专辑/风格），
-              // 换到 QQ/网易云等源也不变、点进去全落到飞牛接口上（访客模式空白）。
-              // 飞牛仍保留原来这四项（含「风格」，比手机版多一格，大屏放得下）；
-              // 其它源改用与手机版一致的、按源自适应的 _shortcutItems()。
-              shortcutItems: _source.id == 'feiniu'
-                  ? [
-                      HomeShortcutItem(
-                        icon: Icons.queue_music_rounded,
-                        label: '歌单',
-                        accent: const Color(0xFF3B82F6),
-                        onTap: _openPlaylistsPage,
-                      ),
-                      HomeShortcutItem(
-                        icon: Icons.people_rounded,
-                        label: '歌手',
-                        accent: const Color(0xFF14B8A6),
-                        onTap: _openArtistsPage,
-                      ),
-                      HomeShortcutItem(
-                        icon: Icons.album_rounded,
-                        label: '专辑',
-                        accent: const Color(0xFFA855F7),
-                        onTap: _openAlbumsPage,
-                      ),
-                      HomeShortcutItem(
-                        icon: Icons.music_video_rounded,
-                        label: '风格',
-                        accent: const Color(0xFFF97316),
-                        onTap: _openGenresPage,
-                      ),
-                    ]
-                  : _shortcutItems(),
+              // 大布局（平板/TV/Windows）与手机版用同一套按源自适应的入口；
+              // 飞牛那套（排行榜/歌单/歌手/本地）见 _shortcutItems()。
+              shortcutItems: _shortcutItems(),
               recentSongs: _recentSongs.value,
               onPlayRecent: () => _playFromList(
                 _recentSongs.value,
@@ -1524,11 +1488,8 @@ class _HomePageState extends State<HomePage>
                 _HomePlaySource.recentTracks,
               ),
               onLongPressTrack: _showSongDetail,
-              onTapFavorite: (song) => _playHomeSong(
-                song,
-                favShown,
-                _HomePlaySource.favorites,
-              ),
+              onTapFavorite: (song) =>
+                  _playHomeSong(song, favShown, _HomePlaySource.favorites),
             ),
           );
         }
@@ -1564,22 +1525,22 @@ class _HomePageState extends State<HomePage>
                 // 自动轮播换歌时做交叉淡入淡出，避免大图硬切。
                 AppContentFrame(
                   child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 420),
-                  child: KeyedSubtree(
-                    key: ValueKey(heroSong.id),
-                    child: _wrapHeroTap(
-                      HomeHeroBanner(
-                        song: heroSong,
-                        label: _heroDisplayLabel,
-                        onPlay: _togglePlayRoam,
-                        isPlaying: _heroIsPlaying,
-                        isCurrentTrack: _heroIsCurrentTrack,
-                        onRefresh: _refreshRoam,
-                        onArtworkTap: _heroArtworkTapped,
+                    duration: const Duration(milliseconds: 420),
+                    child: KeyedSubtree(
+                      key: ValueKey(heroSong.id),
+                      child: _wrapHeroTap(
+                        HomeHeroBanner(
+                          song: heroSong,
+                          label: _heroDisplayLabel,
+                          onPlay: _togglePlayRoam,
+                          isPlaying: _heroIsPlaying,
+                          isCurrentTrack: _heroIsCurrentTrack,
+                          onRefresh: _refreshRoam,
+                          onArtworkTap: _heroArtworkTapped,
+                        ),
                       ),
                     ),
                   ),
-                ),
                 ),
 
               if (heroSong != null) const SizedBox(height: 16),
@@ -1698,105 +1659,105 @@ class _CompactSongList extends StatelessWidget {
           child: AppContentRow(
             isLast: isLast,
             child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(12),
-              onTap: () => onTap(song),
-              onLongPress: onLongPress == null
-                  ? null
-                  : () => onLongPress!(song),
-              child: Padding(
-                // TV 端加大行高与封面，方便遥控器聚焦。
-                padding: EdgeInsets.symmetric(
-                  horizontal: isTv ? 12 : 6,
-                  vertical: isTv ? 8 : 5,
-                ),
-                child: Row(
-                  children: [
-                    ArtworkWidget(
-                      song: song,
-                      size: artworkSize,
-                      borderRadius: 10,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  song.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => onTap(song),
+                onLongPress: onLongPress == null
+                    ? null
+                    : () => onLongPress!(song),
+                child: Padding(
+                  // TV 端加大行高与封面，方便遥控器聚焦。
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isTv ? 12 : 6,
+                    vertical: isTv ? 8 : 5,
+                  ),
+                  child: Row(
+                    children: [
+                      ArtworkWidget(
+                        song: song,
+                        size: artworkSize,
+                        borderRadius: 10,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    song.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
                                 ),
+                                if (song.isVip) const VipBadge(),
+                              ],
+                            ),
+                            const SizedBox(height: 1),
+                            Text(
+                              song.artistDisplayName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: scheme.onSurfaceVariant,
                               ),
-                              if (song.isVip) const VipBadge(),
-                            ],
-                          ),
-                          const SizedBox(height: 1),
-                          Text(
-                            song.artistDisplayName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: scheme.onSurfaceVariant,
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                    // 播放/暂停按钮：正在放这首时显示暂停图标，点它就暂停；
-                    // 放的是别的歌（或没在放）就还是播放图标，点它播这首。
-                    // 整行仍然可点 —— 点行是「播这首」，只有这个按钮带暂停语义。
-                    Watch.builder(
-                      builder: (context) {
-                        final player = PlayerService.instance;
-                        final isThis =
-                            player.currentSongSignal.value?.id == song.id;
-                        final playing =
-                            isThis && player.isPlayingSignal.value;
-                        return GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () {
-                            if (isThis) {
-                              unawaited(player.togglePlayPause());
-                            } else {
-                              onTap(song);
-                            }
-                          },
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 4,
-                              vertical: 8,
+                      // 播放/暂停按钮：正在放这首时显示暂停图标，点它就暂停；
+                      // 放的是别的歌（或没在放）就还是播放图标，点它播这首。
+                      // 整行仍然可点 —— 点行是「播这首」，只有这个按钮带暂停语义。
+                      Watch.builder(
+                        builder: (context) {
+                          final player = PlayerService.instance;
+                          final isThis =
+                              player.currentSongSignal.value?.id == song.id;
+                          final playing =
+                              isThis && player.isPlayingSignal.value;
+                          return GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () {
+                              if (isThis) {
+                                unawaited(player.togglePlayPause());
+                              } else {
+                                onTap(song);
+                              }
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                                vertical: 8,
+                              ),
+                              child: Icon(
+                                playing
+                                    ? Icons.pause_circle_outline_rounded
+                                    : Icons.play_circle_outline_rounded,
+                                size: 28,
+                                color: playing
+                                    ? scheme.primary
+                                    : scheme.onSurfaceVariant.withValues(
+                                        alpha: 0.6,
+                                      ),
+                              ),
                             ),
-                            child: Icon(
-                              playing
-                                  ? Icons.pause_circle_outline_rounded
-                                  : Icons.play_circle_outline_rounded,
-                              size: 28,
-                              color: playing
-                                  ? scheme.primary
-                                  : scheme.onSurfaceVariant.withValues(
-                                      alpha: 0.6,
-                                    ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
+                          );
+                        },
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
           ),
         );
       }),

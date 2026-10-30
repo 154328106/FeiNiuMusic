@@ -137,8 +137,86 @@ class FeiniuSource implements MusicSource {
     }
   }
 
+  /// 排行榜分平台筛选用的名字 → 扩展接口的平台代码。
+  static const Map<String, String> chartPlatforms = {
+    '酷狗': 'kg',
+    '酷我': 'kw',
+    'QQ': 'tx',
+    '网易': 'wy',
+    '咪咕': 'mg',
+  };
+
+  /// 歌手条目的 id 前缀：首页「歌手」复用通用的网格列表页（和酷狗源的歌手页
+  /// 同一个排版），点进去由 [playlistSongs] 按这个前缀改走歌手歌曲接口。
+  static const String _artistPrefix = 'artist:';
+
+  /// 排行榜：洛雪各平台的全部榜单（需 NAS 装「音源增强」扩展）。
+  Future<List<SourcePlaylist>> toplists() => _charts(null);
+
+  /// 排行榜的平台筛选（只有一组「平台」）。
+  Future<Map<String, List<String>>> toplistCategories() async => {
+    '平台': chartPlatforms.keys.toList(),
+  };
+
+  /// 某个平台的榜单。
+  Future<List<SourcePlaylist>> toplistsByPlatform(String name) =>
+      _charts(chartPlatforms[name]);
+
+  Future<List<SourcePlaylist>> _charts(String? source) async {
+    try {
+      final list = await _api.getExtCharts(source: source);
+      return [
+        for (final item in list)
+          if ((item['guid'] ?? '').toString().isNotEmpty)
+            SourcePlaylist(
+              id: item['guid'].toString(),
+              name: (item['name'] ?? '').toString(),
+              coverId: item['coverId']?.toString(),
+              trackCount: (item['trackCount'] as num?)?.toInt() ?? 0,
+            ),
+      ];
+    } catch (e) {
+      debugPrint('[FeiniuSource] charts error: $e');
+      return const [];
+    }
+  }
+
+  /// 歌手列表（含扩展注入的在线歌手），给首页「歌手」的网格页用。
+  Future<List<SourcePlaylist>> artists() async {
+    try {
+      final page = await _api.getArtistList(page: 1, size: 500);
+      return [
+        for (final a in page.list)
+          SourcePlaylist(
+            id: '$_artistPrefix${a.guid}',
+            name: a.name,
+            coverId: a.coverId,
+            trackCount: a.trackCount ?? 0,
+          ),
+      ];
+    } catch (e) {
+      debugPrint('[FeiniuSource] artists error: $e');
+      return const [];
+    }
+  }
+
   @override
   Future<List<SongEntity>> playlistSongs(String playlistId) async {
+    if (playlistId.startsWith(_artistPrefix)) {
+      try {
+        final page = await _api.getArtistTracks(
+          artistGUID: playlistId.substring(_artistPrefix.length),
+          page: 1,
+          size: 500,
+        );
+        return page.list
+            .map((t) => _tracks.trackToSongEntity(t.toJson()))
+            .toList();
+      } catch (e) {
+        debugPrint('[FeiniuSource] artist songs error: $e');
+        return const [];
+      }
+    }
     try {
       final page = await _api.getPlaylistTracks(
         playlistGUID: playlistId,

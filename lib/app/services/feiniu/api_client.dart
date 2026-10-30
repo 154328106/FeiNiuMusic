@@ -55,9 +55,7 @@ class FeiNiuApiClient {
                   // Response，传 DioException 会抛「DioException 不是 Response」
                   // 类型错误 → 未捕获异常崩溃。
                   if (kDebugMode) {
-                    debugPrint(
-                      '[ApiClient] Redirect follow failed: $e\n$st',
-                    );
+                    debugPrint('[ApiClient] Redirect follow failed: $e\n$st');
                   }
                   handler.reject(
                     e is DioException
@@ -222,7 +220,10 @@ class FeiNiuApiClient {
   /// 已设置安全码时自动携带 x-access-code / x-access-source。
   Map<String, String> authHeaders() {
     if (_relayMode) {
-      return {'Cookie': 'music-token=$_token; mode=relay', ...accessCodeHeaders()};
+      return {
+        'Cookie': 'music-token=$_token; mode=relay',
+        ...accessCodeHeaders(),
+      };
     }
     return {'Cookie': 'music-token=$_token', ...accessCodeHeaders()};
   }
@@ -519,7 +520,11 @@ class FeiNiuApiClient {
   /// 构造封面图 URL
   /// CachedNetworkImage 按 URL 缓存，图片不变 URL 不变即命中磁盘缓存。
   /// [updatedAt] 可选，传入服务端更新时间戳将追加 `&t=` 参数实现缓存失效（cache busting）。
-  String coverUrl(String coverId, {int size = coverRequestSize, int? updatedAt}) {
+  String coverUrl(
+    String coverId, {
+    int size = coverRequestSize,
+    int? updatedAt,
+  }) {
     var url = '/static/cover?coverId=$coverId&size=$size';
     if (updatedAt != null && updatedAt > 0) {
       url += '&t=$updatedAt';
@@ -580,7 +585,9 @@ class FeiNiuApiClient {
       ),
     );
     final rawData = response.data;
-    final data = rawData is Map<String, dynamic> ? rawData : <String, dynamic>{};
+    final data = rawData is Map<String, dynamic>
+        ? rawData
+        : <String, dynamic>{};
     final parsed = FeiNiuResponse.fromJson(
       data,
       (d) => (d as Map<String, dynamic>)['coverId'] as String?,
@@ -704,7 +711,8 @@ class FeiNiuApiClient {
     final data = await _get('/album/list-all');
     final body = data['data'];
     final rawList = (body is Map<String, dynamic>) ? body['list'] : null;
-    final list = (rawList as List<dynamic>?)
+    final list =
+        (rawList as List<dynamic>?)
             ?.map((e) => FeiNiuAlbum.fromJson(e as Map<String, dynamic>))
             .toList() ??
         const [];
@@ -759,7 +767,8 @@ class FeiNiuApiClient {
     // _get 返回整个响应体 {code,msg,data}，实际列表在 data.data.list
     final body = data['data'];
     final rawList = (body is Map<String, dynamic>) ? body['list'] : null;
-    final list = (rawList as List<dynamic>?)
+    final list =
+        (rawList as List<dynamic>?)
             ?.map((e) => FeiNiuArtist.fromJson(e as Map<String, dynamic>))
             .toList() ??
         const [];
@@ -787,6 +796,27 @@ class FeiNiuApiClient {
       throw Exception('创建歌手失败：服务端未返回歌手信息');
     }
     return artist;
+  }
+
+  // endregion
+
+  // region 9a. 排行榜（NAS 装了「音源增强」扩展才有）
+
+  /// 洛雪各平台的全部榜单。由 NAS 上的「音源增强」扩展提供（`/_ext/charts`），
+  /// 官方飞牛没有这个接口；[source] 为 kg/kw/tx/wy/mg 时只取该平台。
+  ///
+  /// 每项含 `guid` / `name` / `coverId` / `trackCount`，`guid` 就是普通歌单
+  /// guid，点进去照常走 [getPlaylistTracks]。
+  Future<List<Map<String, dynamic>>> getExtCharts({String? source}) async {
+    final data = await _get(
+      '/_ext/charts',
+      queryParameters: {'source': ?source},
+    );
+    final body = data['data'];
+    final list = body is Map<String, dynamic> ? body['list'] : null;
+    return list is List
+        ? list.whereType<Map<String, dynamic>>().toList()
+        : const [];
   }
 
   // endregion
@@ -1245,7 +1275,10 @@ class FeiNiuApiClient {
   ) async {
     final data = await _post(
       '/playlist/remove-track',
-      data: {'guid': playlistGuid, 'trackGUIDs': [trackGUID]},
+      data: {
+        'guid': playlistGuid,
+        'trackGUIDs': [trackGUID],
+      },
     );
     final response = FeiNiuResponse.fromJson(data, null);
     if (!response.isSuccess) {
