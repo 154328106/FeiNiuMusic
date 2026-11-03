@@ -18,9 +18,16 @@ class _Resolved {
 }
 
 class _Meta {
-  const _Meta({required this.keyword, required this.durationMs});
+  const _Meta({
+    required this.keyword,
+    required this.durationMs,
+    this.name,
+    this.singer,
+  });
   final String keyword;
   final int durationMs;
+  final String? name;
+  final String? singer;
 }
 
 /// 酷我播放地址解析与模型转换（MVP）。
@@ -106,6 +113,8 @@ class KuwoPlaybackService {
         songId: rid,
         keyword: meta?.keyword,
         durationMs: meta?.durationMs ?? 0,
+        name: meta?.name,
+        singer: meta?.singer,
       );
       url ??= await _viaAntiserver(rid);
     } catch (e) {
@@ -179,7 +188,14 @@ class KuwoPlaybackService {
     }
   }
 
-  Future<List<SongEntity>> prepareQueue(List<SongEntity> songs) async {
+  /// 只有一首（刚点的那首）按前台处理；多首（队列其余部分）按后台预取，
+  /// 不抢「优先走外置音源」和 LX 串行闸的前台位置。
+  Future<List<SongEntity>> prepareQueue(List<SongEntity> songs) =>
+      songs.length > 1
+      ? UnblockSourceService.runInBackground(() => _prepareQueue(songs))
+      : _prepareQueue(songs);
+
+  Future<List<SongEntity>> _prepareQueue(List<SongEntity> songs) async {
     final pending = <String>[];
     for (final song in songs) {
       final rid = SongSource.decodeKuwo(song.id);
@@ -214,6 +230,8 @@ class KuwoPlaybackService {
     _meta[rid] = _Meta(
       keyword: '${song.title} ${song.artistDisplayName}'.trim(),
       durationMs: song.durationMs ?? 0,
+      name: song.title,
+      singer: song.artistDisplayName,
     );
   }
 
@@ -229,7 +247,8 @@ class KuwoPlaybackService {
   }
 
   static Map<String, String> streamHeaders() => const {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+    'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
         '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   };
 

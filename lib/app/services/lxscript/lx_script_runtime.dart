@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
@@ -33,7 +34,11 @@ class LxScriptRuntime {
   /// 加载脚本文本并等待其 `send(EVENT_NAMES.inited)`。返回是否成功 inited。
   Future<bool> load(String scriptText, {Duration? timeout}) {
     name = _LxEngine.parseName(scriptText) ?? name;
-    return _LxEngine.instance.loadScript(_scriptId, scriptText, timeout: timeout);
+    return _LxEngine.instance.loadScript(
+      _scriptId,
+      scriptText,
+      timeout: timeout,
+    );
   }
 
   /// 调脚本取某首歌的可播放直链。[info] 是传给脚本的歌曲信息（songmid/hash 等）。
@@ -42,12 +47,14 @@ class LxScriptRuntime {
     required Map<String, dynamic> info,
     required String quality,
     Duration? timeout,
+    bool priority = true,
   }) => _LxEngine.instance.getUrl(
     _scriptId,
     source: source,
     info: info,
     quality: quality,
     timeout: timeout,
+    priority: priority,
   );
 
   void dispose() => _LxEngine.instance.unloadScript(_scriptId);
@@ -56,7 +63,7 @@ class LxScriptRuntime {
 /// 全应用唯一的 LX JS 引擎。持有唯一的 [JavascriptRuntime]，所有脚本在同一个
 /// JS 上下文里按 scriptId 分隔（`globalThis.__lxScripts[scriptId]`）。
 ///
-/// 取址全局串行（[_gate]）：JS 引擎单线程驱动，一次只跑一个取址，避免 evaluate /
+/// 取址全局串行（[_foreground] / [_backgroundTasks] 两级队列）：JS 引擎单线程驱动，一次只跑一个取址，避免 evaluate /
 /// 微任务泵交叠。HTTP 回调与取址结果用全局自增 id 配对，和 scriptId 无关。
 class _LxEngine {
   _LxEngine._();
@@ -79,8 +86,11 @@ class _LxEngine {
   int _reqSeq = 0;
   Timer? _pump;
 
-  /// 取址串行闸。
-  Future<void> _gate = Future<void>.value();
+  /// 取址串行闸：两级队列，前台（正在点的歌、测试脚本）永远排在后台预取前面。
+  /// 引擎仍然一次只跑一个取址。
+  final Queue<_LxTask> _foreground = Queue<_LxTask>();
+  final Queue<_LxTask> _backgroundTasks = Queue<_LxTask>();
+  bool _draining = false;
 
   final Map<int, Completer<String?>> _invokeWaiters = {};
   final Map<String, Completer<void>> _initedWaiters = {};
@@ -129,28 +139,51 @@ class _LxEngine {
     } catch (_) {}
   }
 
-  /// 取某脚本的直链。排到 [_gate] 尾部，前一个取址彻底结束后再碰引擎。
+  /// 取某脚本的直链。按 [priority] 进前台/后台队列，前一个取址彻底结束后再碰引擎。
   Future<String?> getUrl(
     String scriptId, {
     required String source,
     required Map<String, dynamic> info,
     required String quality,
     Duration? timeout,
+    bool priority = true,
   }) {
-    final prev = _gate;
-    final gate = Completer<void>();
-    _gate = gate.future;
-    return prev.then((_) {
-      return _getUrlLocked(
+    final task = _LxTask(
+      () => _getUrlLocked(
         scriptId,
         source: source,
         info: info,
         quality: quality,
         timeout: timeout,
-      );
-    }).whenComplete(() {
-      if (!gate.isCompleted) gate.complete();
-    });
+      ),
+    );
+    (priority ? _foreground : _backgroundTasks).add(task);
+    unawaited(_runQueue());
+    return task.result.future;
+  }
+
+  Future<void> _runQueue() async {
+    if (_draining) return;
+    _draining = true;
+    try {
+      while (_foreground.isNotEmpty || _backgroundTasks.isNotEmpty) {
+        if (_foreground.isEmpty) {
+          // 前台一首歌会依次问多个脚本，两次之间留一点空，别让后台任务插进来
+          await Future<void>.delayed(const Duration(milliseconds: 80));
+          if (_foreground.isEmpty && _backgroundTasks.isEmpty) break;
+        }
+        final task = _foreground.isNotEmpty
+            ? _foreground.removeFirst()
+            : _backgroundTasks.removeFirst();
+        try {
+          task.result.complete(await task.run());
+        } catch (_) {
+          if (!task.result.isCompleted) task.result.complete(null);
+        }
+      }
+    } finally {
+      _draining = false;
+    }
   }
 
   Future<String?> _getUrlLocked(
@@ -418,4 +451,10 @@ class _LxEngine {
   };
 })();
 ''';
+}
+
+class _LxTask {
+  _LxTask(this.run);
+  final Future<String?> Function() run;
+  final Completer<String?> result = Completer<String?>();
 }

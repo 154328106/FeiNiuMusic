@@ -124,7 +124,14 @@ class NetEasePlaybackService {
   ///
   /// 取地址的接口支持批量，所以整队只要一次请求；顺带把结果写进缓存，
   /// 真正播放时不用再问一遍。
-  Future<List<SongEntity>> prepareQueue(List<SongEntity> songs) async {
+  /// 只有一首（刚点的那首）按前台处理；多首（队列其余部分）按后台预取，
+  /// 不抢「优先走外置音源」和 LX 串行闸的前台位置。
+  Future<List<SongEntity>> prepareQueue(List<SongEntity> songs) =>
+      songs.length > 1
+      ? UnblockSourceService.runInBackground(() => _prepareQueue(songs))
+      : _prepareQueue(songs);
+
+  Future<List<SongEntity>> _prepareQueue(List<SongEntity> songs) async {
     final ids = <int>[];
     for (final song in songs) {
       final id = song.neteaseId;

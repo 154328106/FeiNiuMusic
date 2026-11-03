@@ -204,6 +204,7 @@ class LxSourceManager {
     String quality = 'flac',
     String? name,
     String? singer,
+    bool background = false,
   }) async {
     if (!_loaded) await ensureLoaded();
     if (_runtimes.isEmpty) return null;
@@ -220,6 +221,7 @@ class LxSourceManager {
           info: info,
           quality: quality,
           timeout: const Duration(seconds: 6),
+          priority: !background,
         );
         if (url != null && url.isNotEmpty) {
           debugPrint('[LX] ${meta.name} 命中 $platform/$songId');

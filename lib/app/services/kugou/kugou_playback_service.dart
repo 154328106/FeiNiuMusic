@@ -16,6 +16,8 @@ class _SongMeta {
     required this.albumAudioId,
     required this.keyword,
     required this.durationMs,
+    this.name,
+    this.singer,
   });
 
   final String? albumId;
@@ -24,6 +26,8 @@ class _SongMeta {
   /// 「歌名 歌手」，给第三方音源做匹配用。
   final String keyword;
   final int durationMs;
+  final String? name;
+  final String? singer;
 }
 
 class _ResolvedUrl {
@@ -138,6 +142,8 @@ class KugouPlaybackService {
         songId: hash,
         keyword: meta?.keyword,
         durationMs: meta?.durationMs ?? 0,
+        name: meta?.name,
+        singer: meta?.singer,
       );
       if (url == null) {
         // 被限流时的失败不算数：那是「问太快了」，不是「这首没有」。
@@ -163,7 +169,14 @@ class KugouPlaybackService {
   ///
   /// 酷狗这条比 QQ 靠谱：它的取址接口会明确给 status / error_code，拿不到
   /// 就是真拿不到，不会像 QQ 那样发一个打不开的死链回来充数。
-  Future<List<SongEntity>> prepareQueue(List<SongEntity> songs) async {
+  /// 只有一首（刚点的那首）按前台处理；多首（队列其余部分）按后台预取，
+  /// 不抢「优先走外置音源」和 LX 串行闸的前台位置。
+  Future<List<SongEntity>> prepareQueue(List<SongEntity> songs) =>
+      songs.length > 1
+      ? UnblockSourceService.runInBackground(() => _prepareQueue(songs))
+      : _prepareQueue(songs);
+
+  Future<List<SongEntity>> _prepareQueue(List<SongEntity> songs) async {
     final pending = <String>[];
     for (final song in songs) {
       final hash = SongSource.decodeKugou(song.id);
@@ -211,6 +224,8 @@ class KugouPlaybackService {
       albumAudioId: song.audioSpec,
       keyword: '${song.title} ${song.artistDisplayName}'.trim(),
       durationMs: song.durationMs ?? 0,
+      name: song.title,
+      singer: song.artistDisplayName,
     );
   }
 

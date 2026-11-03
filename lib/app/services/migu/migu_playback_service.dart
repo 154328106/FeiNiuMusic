@@ -110,15 +110,17 @@ class MiguPlaybackService {
     final c = Completer<String?>();
     var remaining = futures.length;
     for (final f in futures) {
-      f.then((v) {
-        if (!c.isCompleted && v != null && v.isNotEmpty) {
-          c.complete(v);
-        } else if (--remaining == 0 && !c.isCompleted) {
-          c.complete(null);
-        }
-      }).catchError((_) {
-        if (--remaining == 0 && !c.isCompleted) c.complete(null);
-      });
+      f
+          .then((v) {
+            if (!c.isCompleted && v != null && v.isNotEmpty) {
+              c.complete(v);
+            } else if (--remaining == 0 && !c.isCompleted) {
+              c.complete(null);
+            }
+          })
+          .catchError((_) {
+            if (--remaining == 0 && !c.isCompleted) c.complete(null);
+          });
     }
     return c.future;
   }
@@ -149,8 +151,10 @@ class MiguPlaybackService {
               quality: quality,
             )
           : Future<String?>.value(null);
-      url = await _firstNonEmpty([aggregate, byName])
-          .timeout(const Duration(seconds: 15), onTimeout: () => null);
+      url = await _firstNonEmpty([
+        aggregate,
+        byName,
+      ]).timeout(const Duration(seconds: 15), onTimeout: () => null);
     } catch (e) {
       debugPrint('[Migu] 取址异常 $copyrightId：$e');
     }
@@ -167,7 +171,14 @@ class MiguPlaybackService {
     return secure;
   }
 
-  Future<List<SongEntity>> prepareQueue(List<SongEntity> songs) async {
+  /// 只有一首（刚点的那首）按前台处理；多首（队列其余部分）按后台预取，
+  /// 不抢「优先走外置音源」和 LX 串行闸的前台位置。
+  Future<List<SongEntity>> prepareQueue(List<SongEntity> songs) =>
+      songs.length > 1
+      ? UnblockSourceService.runInBackground(() => _prepareQueue(songs))
+      : _prepareQueue(songs);
+
+  Future<List<SongEntity>> _prepareQueue(List<SongEntity> songs) async {
     final pending = <String>[];
     for (final song in songs) {
       final cid = SongSource.decodeMigu(song.id);
@@ -222,7 +233,8 @@ class MiguPlaybackService {
   }
 
   static Map<String, String> streamHeaders() => const {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+    'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
         '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   };
 

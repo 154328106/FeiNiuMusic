@@ -53,6 +53,9 @@ class QQPlaybackService {
   /// 音源是按歌名搜、再比时长挑版本的，只给一个 mid 它对不上。
   final Map<String, (String, int)> _matchHints = {};
 
+  /// 歌名、歌手：给 LX 脚本用（缺歌名脚本直接失败）。
+  final Map<String, (String, String)> _nameHints = {};
+
   /// 只用来验官方地址能不能打开，超时给短一点：这一步是卡在起播路径上的。
   static final Dio _probeDio = Dio(
     BaseOptions(
@@ -130,6 +133,8 @@ class QQPlaybackService {
         keyword: hint?.$1,
         durationMs: hint?.$2 ?? 0,
         skipPublicSources: true,
+        name: _nameHints[mid]?.$1,
+        singer: _nameHints[mid]?.$2,
       );
       if (url == null) {
         _unresolvable.add(mid);
@@ -151,7 +156,14 @@ class QQPlaybackService {
   /// 为什么必须先筛：取不到地址时构建播放源那步会抛异常，而那发生在引擎
   /// 见到这首歌之前，于是播放器的错误恢复根本不会触发，整个队列卡在第一首
   /// 不动。网易云那边就是这么踩过来的。
-  Future<List<SongEntity>> prepareQueue(List<SongEntity> songs) async {
+  /// 只有一首（刚点的那首）按前台处理；多首（队列其余部分）按后台预取，
+  /// 不抢「优先走外置音源」和 LX 串行闸的前台位置。
+  Future<List<SongEntity>> prepareQueue(List<SongEntity> songs) =>
+      songs.length > 1
+      ? UnblockSourceService.runInBackground(() => _prepareQueue(songs))
+      : _prepareQueue(songs);
+
+  Future<List<SongEntity>> _prepareQueue(List<SongEntity> songs) async {
     final pending = <SongEntity>[];
     for (final song in songs) {
       final mid = SongSource.decodeQQ(song.id);
@@ -161,6 +173,7 @@ class QQPlaybackService {
         '${song.title} ${song.artistDisplayName}'.trim(),
         song.durationMs ?? 0,
       );
+      _nameHints[mid] ??= (song.title, song.artistDisplayName);
       if (_cache[mid]?.isExpired == false) continue;
       if (_unresolvable.contains(mid)) continue;
       pending.add(song);

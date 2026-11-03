@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
@@ -141,6 +142,16 @@ class UnblockSourceService {
   /// 没命中时再照常走内置那条链。适合自备优质脚本、想先吃脚本的无损/Hi-Res 的人。
   final ValueNotifier<bool> preferLxEnabled = ValueNotifier(false);
 
+  static const Object _backgroundZoneKey = #unblockBackground;
+
+  /// 在「后台预取」上下文里跑 [body]：播放队列里除了点的那首，其余歌的取址都算后台。
+  /// 后台取址不吃「优先走外置音源」（照常走内置链，LX 排在后面），在 LX 串行闸里
+  /// 也排在前台请求后面 —— 否则一个几十首的队列会把闸堵死，切源/点歌/测试脚本全卡住。
+  static Future<T> runInBackground<T>(Future<T> Function() body) =>
+      runZoned(body, zoneValues: {_backgroundZoneKey: true});
+
+  static bool get isBackground => Zone.current[_backgroundZoneKey] == true;
+
   bool get isUsable => config.value.isUsable;
 
   Future<void> load() async {
@@ -222,7 +233,8 @@ class UnblockSourceService {
     // LX/JS 脚本，命中直接用，官方 ID 源和兜底全让路。没命中则置 lxTried，下面
     // 那次脚本调用跳过 —— flutter_js 的运行时不经得起同一首歌连驱两遍。
     var lxTried = false;
-    if (preferLxEnabled.value) {
+    final background = isBackground;
+    if (preferLxEnabled.value && !background) {
       final url = await LxSourceManager.instance.resolve(
         platform: platform,
         songId: songId,
@@ -338,6 +350,7 @@ class UnblockSourceService {
         songId: songId,
         name: name,
         singer: singer,
+        background: background,
       );
       if (lxUrl != null) {
         debugPrint('[Unblock] LX 脚本命中 $platform/$songId');
