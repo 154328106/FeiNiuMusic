@@ -368,4 +368,46 @@ class LxSourceManager {
   }
 
   void _bump() => revision.value = revision.value + 1;
+
+  /// 备份：导出所有已导入脚本的文本（id → 脚本），文件丢了的跳过。
+  Future<Map<String, String>> exportScripts() async {
+    await ensureLoaded();
+    final out = <String, String>{};
+    for (final meta in _metas) {
+      try {
+        final file = await _fileFor(meta.id);
+        if (await file.exists()) out[meta.id] = await file.readAsString();
+      } catch (_) {}
+    }
+    return out;
+  }
+
+  /// 还原：把备份里的脚本文本写回 `lx_sources/<id>.js`（索引随偏好一起还原）。
+  Future<int> importScripts(Map<String, String> scripts) async {
+    var count = 0;
+    for (final entry in scripts.entries) {
+      // id 是导入时的微秒时间戳，只认纯数字，防止备份里塞路径
+      if (!RegExp(r'^[0-9]{1,20}$').hasMatch(entry.key)) continue;
+      try {
+        final file = await _fileFor(entry.key);
+        await file.writeAsString(entry.value);
+        count++;
+      } catch (_) {}
+    }
+    return count;
+  }
+
+  /// 备份还原后调用：丢掉内存里的旧状态，按存档重新读一遍（否则下次保存会把还原的数据覆盖回去）。
+  Future<void> reloadFromStorage() async {
+    await ensureLoaded();
+    for (final runtime in _runtimes.values) {
+      runtime.dispose();
+    }
+    _runtimes.clear();
+    _metas.clear();
+    _loaded = false;
+    _loadFuture = null;
+    await ensureLoaded();
+    _bump();
+  }
 }

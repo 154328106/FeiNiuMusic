@@ -105,7 +105,10 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
       AppToast.show(context, '已备份到 $okCount 个目标', type: ToastType.success);
     } else {
       final detail = failed
-          .map((r) => '${r.target.name.isNotEmpty ? '${r.target.name}：' : ''}${r.message ?? '失败'}')
+          .map(
+            (r) =>
+                '${r.target.name.isNotEmpty ? '${r.target.name}：' : ''}${r.message ?? '失败'}',
+          )
           .join('；');
       AppToast.show(
         context,
@@ -158,9 +161,7 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   Future<void> _addTarget() async {
     final result = await Navigator.push<BackupTarget>(
       context,
-      buildAppPageRoute<BackupTarget>(
-        (_) => const BackupTargetEditPage(),
-      ),
+      buildAppPageRoute<BackupTarget>((_) => const BackupTargetEditPage()),
     );
     if (result == null || !mounted) return;
     final next = await _backup.addTarget(result);
@@ -275,9 +276,7 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
     );
   }
 
-  Future<WebDavBackupEntry?> _pickBackupEntry(
-    List<WebDavBackupEntry> entries,
-  ) {
+  Future<WebDavBackupEntry?> _pickBackupEntry(List<WebDavBackupEntry> entries) {
     String fmtTime(DateTime? t) {
       if (t == null) return '未知时间';
       String two(int v) => v.toString().padLeft(2, '0');
@@ -372,8 +371,10 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
 
   @override
   Widget build(BuildContext context) {
-    final bottomPadding =
-        AppPageScaffold.scrollableBottomPadding(context, showMiniPlayer: false);
+    final bottomPadding = AppPageScaffold.scrollableBottomPadding(
+      context,
+      showMiniPlayer: false,
+    );
     return AppPageScaffold(
       extendBodyBehindAppBar: true,
       appBar: const AppTopBar(
@@ -409,6 +410,13 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
                       value: _sections.settings,
                       onChanged: (v) =>
                           _update(_sections.copyWith(settings: v)),
+                    ),
+                    AppSettingSwitchTile(
+                      title: '音源与平台登录',
+                      subtitle:
+                          '网易云/QQ/酷狗/咪咕登录、第三方音源密钥与导入的外置脚本（含登录凭证，请妥善保管备份文件）',
+                      value: _sections.sources,
+                      onChanged: (v) => _update(_sections.copyWith(sources: v)),
                     ),
                   ],
                 ),
@@ -562,8 +570,9 @@ class _BackupTargetEditPageState extends State<BackupTargetEditPage> {
     _endpointCtrl = TextEditingController(text: t?.endpoint ?? '');
     _userCtrl = TextEditingController(text: t?.username ?? '');
     _passCtrl = TextEditingController(text: t?.password ?? '');
-    _pathCtrl =
-        TextEditingController(text: t?.path ?? BackupService.defaultBasePath);
+    _pathCtrl = TextEditingController(
+      text: t?.path ?? BackupService.defaultBasePath,
+    );
   }
 
   @override
@@ -667,8 +676,10 @@ class _BackupTargetEditPageState extends State<BackupTargetEditPage> {
 
   @override
   Widget build(BuildContext context) {
-    final bottomPadding =
-        AppPageScaffold.scrollableBottomPadding(context, showMiniPlayer: false);
+    final bottomPadding = AppPageScaffold.scrollableBottomPadding(
+      context,
+      showMiniPlayer: false,
+    );
     return AppPageScaffold(
       extendBodyBehindAppBar: true,
       appBar: AppTopBar(
@@ -696,9 +707,8 @@ class _BackupTargetEditPageState extends State<BackupTargetEditPage> {
               icon: Icons.link_outlined,
               autofocus: true,
               keyboardType: TextInputType.url,
-              validator: (v) => (v == null || v.trim().isEmpty)
-                  ? '请输入 WebDAV 地址'
-                  : null,
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? '请输入 WebDAV 地址' : null,
             ),
             const SizedBox(height: 16),
             _field(
@@ -732,8 +742,8 @@ class _BackupTargetEditPageState extends State<BackupTargetEditPage> {
               child: Text(
                 '备份文件会自动保存到所选目录下的 ${BackupService.webDavFolder} 文件夹',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
             const SizedBox(height: 24),

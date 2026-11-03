@@ -91,6 +91,13 @@ class NetEaseApiClient {
   /// 是否已登录（有 MUSIC_U 即视为已登录）。
   bool get isLoggedIn => _musicU.isNotEmpty;
 
+  /// 备份还原后调用：丢掉内存里的旧状态，按存档重新读一遍（否则下次保存会把还原的数据覆盖回去）。
+  Future<void> reloadFromStorage() async {
+    _cookies = {};
+    _loaded = false;
+    await load();
+  }
+
   /// 从磁盘恢复登录 Cookie。App 启动时调用一次。
   Future<void> load() async {
     if (_loaded) return;

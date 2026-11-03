@@ -61,6 +61,15 @@ class MiguAuth {
 
   Future<void> ensureLoaded() => _loading ??= _load();
 
+  /// 备份还原后调用：丢掉内存里的旧状态，按存档重新读一遍（否则下次保存会把还原的数据覆盖回去）。
+  Future<void> reloadFromStorage() {
+    _cookies.clear();
+    nickname = '';
+    isLoggedIn.value = false;
+    _loading = null;
+    return ensureLoaded();
+  }
+
   Future<void> _load() async {
     try {
       final prefs = await SharedPreferences.getInstance();

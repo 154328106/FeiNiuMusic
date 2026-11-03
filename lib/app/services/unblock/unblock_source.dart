@@ -154,6 +154,13 @@ class UnblockSourceService {
 
   bool get isUsable => config.value.isUsable;
 
+  /// 备份还原后调用：丢掉内存里的旧状态，按存档重新读一遍（否则下次保存会把还原的数据覆盖回去）。
+  Future<void> reloadFromStorage() async {
+    _loaded = false;
+    config.value = UnblockSourceConfig.empty;
+    await load();
+  }
+
   Future<void> load() async {
     if (_loaded) return;
     _loaded = true;

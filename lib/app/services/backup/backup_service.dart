@@ -14,6 +14,12 @@ import '../db/db_helper.dart';
 import '../stats_service.dart';
 import '../feiniu/account_entry.dart';
 import '../feiniu/account_store.dart';
+import '../kugou/kugou_auth.dart';
+import '../lxscript/lx_source_manager.dart';
+import '../migu/migu_auth.dart';
+import '../netease/netease_api_client.dart';
+import '../qq/qq_auth.dart';
+import '../unblock/unblock_source.dart';
 
 /// 备份包含的数据分块。持久化，用户配置一次即可。
 ///
@@ -21,28 +27,34 @@ import '../feiniu/account_store.dart';
 /// - [stats]：听歌统计（song_stats/listening_days/album_stats/playlist_stats
 ///   聚合 + report_events 原始事件，备份/还原可完整还原听歌报告）
 /// - [settings]：应用偏好（SharedPreferences 通用键）
+/// - [sources]：音源与平台登录（网易云/QQ/酷狗/咪咕登录态、第三方音源配置与密钥、
+///   用户导入的 LX 脚本文件本身）。还原后各服务会立即按存档重新加载。
 class BackupSections {
   final bool accounts;
   final bool stats;
   final bool settings;
+  final bool sources;
 
   const BackupSections({
     this.accounts = true,
     this.stats = true,
     this.settings = true,
+    this.sources = true,
   });
 
   BackupSections copyWith({
     bool? accounts,
     bool? stats,
     bool? settings,
+    bool? sources,
   }) => BackupSections(
     accounts: accounts ?? this.accounts,
     stats: stats ?? this.stats,
     settings: settings ?? this.settings,
+    sources: sources ?? this.sources,
   );
 
-  bool get any => accounts || stats || settings;
+  bool get any => accounts || stats || settings || sources;
 }
 
 class BackupService {
@@ -101,6 +113,7 @@ class BackupService {
         accounts: m['accounts'] as bool? ?? true,
         stats: m['stats'] as bool? ?? true,
         settings: m['settings'] as bool? ?? true,
+        sources: m['sources'] as bool? ?? true,
       );
     } catch (_) {
       return const BackupSections();
@@ -115,6 +128,7 @@ class BackupService {
         'accounts': s.accounts,
         'stats': s.stats,
         'settings': s.settings,
+        'sources': s.sources,
       }),
     );
   }
@@ -137,6 +151,7 @@ class BackupService {
         'accounts': sections.accounts,
         'stats': sections.stats,
         'settings': sections.settings,
+        'sources': sections.sources,
       },
     };
 
@@ -149,6 +164,9 @@ class BackupService {
     }
     if (sections.settings) {
       data['settings'] = await _exportSettings();
+    }
+    if (sections.sources) {
+      data['sources'] = await _exportSources();
     }
 
     return const JsonEncoder.withIndent('  ').convert(data);
@@ -183,10 +201,22 @@ class BackupService {
       await _importStats((data['stats'] as Map).cast<String, dynamic>());
       applied.add('听歌统计');
     }
+    var reload = false;
     if (data['settings'] is Map && (restrict?.settings ?? true)) {
       await _importSettings((data['settings'] as Map).cast<String, dynamic>());
       applied.add('应用设置');
+      reload = true;
     }
+    if (data['sources'] is Map && (restrict?.sources ?? true)) {
+      final scripts = await _importSources(
+        (data['sources'] as Map).cast<String, dynamic>(),
+      );
+      applied.add(scripts > 0 ? '音源与平台登录（含 $scripts 个外置脚本）' : '音源与平台登录');
+      reload = true;
+    }
+    // 旧版备份把登录态混在「应用设置」里；不管走哪条路写回了偏好，都让各服务
+    // 立刻按存档重载，否则它们下次保存会拿内存里的旧状态把刚还原的覆盖掉。
+    if (reload) await _reloadSourceServices();
 
     return applied.isEmpty ? '没有可导入的数据' : '已导入：${applied.join('、')}';
   }
@@ -272,6 +302,84 @@ class BackupService {
         await txn.insert(DbConstants.tableReportEvents, row);
       }
     });
+  }
+
+  // ---- sources（音源与平台登录） ----
+  /// 属于「音源与平台登录」的偏好键前缀。
+  static const List<String> _sourcePrefixes = [
+    'netease.',
+    'qq.auth.',
+    'kugou.auth.',
+    'migu.auth.',
+    'kuwo.',
+    'unblock.source.',
+    'lx_sources_index',
+    'match_sources_',
+  ];
+
+  static bool _isSourceKey(String key) =>
+      _sourcePrefixes.any((prefix) => key.startsWith(prefix));
+
+  Future<Map<String, dynamic>> _exportSources() async {
+    final prefs = await SharedPreferences.getInstance();
+    final out = <String, dynamic>{};
+    for (final key in prefs.getKeys()) {
+      if (!_isSourceKey(key)) continue;
+      final encoded = _encodePref(prefs.get(key));
+      if (encoded != null) out[key] = encoded;
+    }
+    Map<String, String> scripts = const {};
+    try {
+      scripts = await LxSourceManager.instance.exportScripts();
+    } catch (_) {}
+    return {'prefs': out, 'lxScripts': scripts};
+  }
+
+  /// 返回写回的外置脚本个数。
+  Future<int> _importSources(Map<String, dynamic> data) async {
+    var scripts = 0;
+    final raw = data['lxScripts'];
+    if (raw is Map) {
+      scripts = await LxSourceManager.instance.importScripts({
+        for (final e in raw.entries)
+          if (e.value is String) '${e.key}': e.value as String,
+      });
+    }
+    final prefsData = data['prefs'];
+    if (prefsData is Map) {
+      await _importSettings({
+        for (final e in prefsData.entries)
+          if (_isSourceKey('${e.key}')) '${e.key}': e.value,
+      });
+    }
+    return scripts;
+  }
+
+  Future<void> _reloadSourceServices() async {
+    final reloads = <Future<void> Function()>[
+      NetEaseApiClient.instance.reloadFromStorage,
+      QQAuth.instance.reloadFromStorage,
+      KugouAuth.instance.reloadFromStorage,
+      MiguAuth.instance.reloadFromStorage,
+      UnblockSourceService.instance.reloadFromStorage,
+      LxSourceManager.instance.reloadFromStorage,
+    ];
+    for (final reload in reloads) {
+      try {
+        await reload();
+      } catch (e) {
+        debugPrint('[Backup] 还原后重载失败：$e');
+      }
+    }
+  }
+
+  static Map<String, dynamic>? _encodePref(Object? value) {
+    if (value is bool) return {'t': 'b', 'v': value};
+    if (value is int) return {'t': 'i', 'v': value};
+    if (value is double) return {'t': 'd', 'v': value};
+    if (value is String) return {'t': 's', 'v': value};
+    if (value is List<String>) return {'t': 'l', 'v': value};
+    return null;
   }
 
   // ---- settings (generic prefs) ----
@@ -466,12 +574,7 @@ class BackupService {
     } catch (e) {
       throw BackupException('上传失败：$e');
     }
-    await _pruneWebDav(
-      client,
-      dir,
-      dev,
-      keep: await loadKeepCount(),
-    );
+    await _pruneWebDav(client, dir, dev, keep: await loadKeepCount());
     return path;
   }
 
@@ -485,14 +588,10 @@ class BackupService {
     for (final t in targets) {
       try {
         await uploadToTarget(t, sections);
-        results.add(
-          BackupUploadResult(target: t, ok: true),
-        );
+        results.add(BackupUploadResult(target: t, ok: true));
       } catch (e) {
         final msg = e is BackupException ? e.message : e.toString();
-        results.add(
-          BackupUploadResult(target: t, ok: false, message: msg),
-        );
+        results.add(BackupUploadResult(target: t, ok: false, message: msg));
       }
     }
     return results;
@@ -639,8 +738,9 @@ class BackupService {
     final list = await loadTargets();
     final next = [
       ...list.where(
-        (t) => !(t.endpoint.trim() == target.endpoint.trim() &&
-            _normalizeDir(t.path) == _normalizeDir(target.path)),
+        (t) =>
+            !(t.endpoint.trim() == target.endpoint.trim() &&
+                _normalizeDir(t.path) == _normalizeDir(target.path)),
       ),
       target.copyWith(path: _normalizeDir(target.path)),
     ];
