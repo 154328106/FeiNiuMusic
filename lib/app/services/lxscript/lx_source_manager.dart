@@ -243,6 +243,65 @@ class LxSourceManager {
     return null;
   }
 
+  /// 拉链接开头 64KB（跟随跳转），看是不是音频。给「测试」按钮用。
+  @visibleForTesting
+  static Future<({bool ok, String detail})> probeAudio(String url) async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 6)
+      ..userAgent = 'Mozilla/5.0';
+    try {
+      final req = await client.getUrl(Uri.parse(url));
+      req.headers.set(HttpHeaders.rangeHeader, 'bytes=0-65535');
+      final resp = await req.close().timeout(const Duration(seconds: 8));
+      final head = <int>[];
+      await for (final chunk in resp.timeout(const Duration(seconds: 8))) {
+        head.addAll(chunk);
+        if (head.length >= 64) break;
+      }
+      final type = resp.headers.contentType?.mimeType ?? '';
+      bool startsWith(String s, [int at = 0]) =>
+          head.length >= at + s.length &&
+          String.fromCharCodes(head.sublist(at, at + s.length)) == s;
+      final isAudio =
+          resp.statusCode < 400 &&
+          (type.startsWith('audio/') ||
+              startsWith('ID3') ||
+              startsWith('fLaC') ||
+              startsWith('OggS') ||
+              startsWith('ftyp', 4) ||
+              (head.length >= 2 &&
+                  head[0] == 0xFF &&
+                  (head[1] & 0xE0) == 0xE0));
+      if (isAudio) {
+        // Content-Range: bytes 0-65535/12345678 → 整首大小
+        final range = resp.headers.value(HttpHeaders.contentRangeHeader) ?? '';
+        final total = int.tryParse(range.split('/').last) ?? resp.contentLength;
+        final size = total > 0
+            ? '${(total / 1048576).toStringAsFixed(1)}MB'
+            : '大小未知';
+        // 整首不到 1MB 多半是几秒的提示音 / 试听片段
+        return (
+          ok: total <= 0 || total >= 1048576,
+          detail: total > 0 && total < 1048576
+              ? '只有 $size，像是提示音或片段'
+              : '音频 $size',
+        );
+      }
+      final text = String.fromCharCodes(
+        head.where((b) => b >= 0x20 && b < 0x7F),
+      );
+      final snippet = text.length > 40 ? '${text.substring(0, 40)}…' : text;
+      return (
+        ok: false,
+        detail: 'HTTP ${resp.statusCode}${snippet.isEmpty ? '' : '：$snippet'}',
+      );
+    } catch (e) {
+      return (ok: false, detail: '请求失败 ${e.runtimeType}');
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   /// 已知只会返回占位音频的地址前缀。2026-11-05 实测：ikun（c.wwwweb.top）
   /// 的**酷狗**不管什么歌都回同一个 gitcode 上的 7 秒 mp3，「聚合音源-A」
   /// 等脚本照单全收报「命中」，播出来 7 秒就切歌；后台预取还会把整个歌单
@@ -316,7 +375,14 @@ class LxSourceManager {
               '• ${meta.name}：❌ 返回的是占位音频（几秒的固定片段，不是这首歌），${sw.elapsedMilliseconds}ms';
         } else if (url != null && url.isNotEmpty) {
           final head = url.length > 72 ? '${url.substring(0, 72)}…' : url;
-          lines[i] = '• ${meta.name}：✅ ${sw.elapsedMilliseconds}ms\n  $head';
+          // 有的脚本（全豆要的长青 / 念心）只是把 id 拼进固定链接就当「拿到了」，
+          // 不管有没有这首歌都秒回 —— 只看「返回了链接」会误报 ✅。真去拉开头
+          // 一小段，确认是音频才算数。
+          final probe = await probeAudio(url);
+          lines[i] = probe.ok
+              ? '• ${meta.name}：✅ ${sw.elapsedMilliseconds}ms · ${probe.detail}\n  $head'
+              : '• ${meta.name}：❌ 返回了链接但不是音频（${probe.detail}），'
+                    '${sw.elapsedMilliseconds}ms\n  $head';
         } else {
           lines[i] =
               '• ${meta.name}：⚠️ 没取到（该源无此曲 / 后端无货，${sw.elapsedMilliseconds}ms）';
