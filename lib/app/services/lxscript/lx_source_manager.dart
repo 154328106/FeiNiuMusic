@@ -229,6 +229,10 @@ class LxSourceManager {
           priority: !background,
         );
         if (url != null && url.isNotEmpty) {
+          if (isPlaceholder(url, '$platform/$songId')) {
+            debugPrint('[LX] ${meta.name} 给的是占位音频（不是这首歌），丢弃：$platform/$songId');
+            continue;
+          }
           debugPrint('[LX] ${meta.name} 命中 $platform/$songId');
           return url;
         }
@@ -237,6 +241,35 @@ class LxSourceManager {
       }
     }
     return null;
+  }
+
+  /// 已知只会返回占位音频的地址前缀。2026-11-05 实测：ikun（c.wwwweb.top）
+  /// 的**酷狗**不管什么歌都回同一个 gitcode 上的 7 秒 mp3，「聚合音源-A」
+  /// 等脚本照单全收报「命中」，播出来 7 秒就切歌；后台预取还会把整个歌单
+  /// 都填成它。网易那边 ikun 给的是真地址，不受影响。
+  static const List<String> _placeholderPrefixes = [
+    'https://cdn-img.gitcode.com/',
+  ];
+
+  /// 地址（去掉查询串）→ 第一次拿到它的歌。真直链每首歌都不一样，同一个
+  /// 地址被报给两首不同的歌，就是脚本塞的占位音频。
+  final Map<String, String> _urlOwner = {};
+  final Set<String> _placeholders = {};
+
+  @visibleForTesting
+  bool isPlaceholder(String url, String songKey) {
+    if (_placeholderPrefixes.any(url.startsWith)) return true;
+    final base = url.split('?').first;
+    if (_placeholders.contains(base)) return true;
+    final owner = _urlOwner[base];
+    if (owner != null && owner != songKey) {
+      _placeholders.add(base);
+      debugPrint('[LX] 同一个地址给了两首不同的歌（$owner / $songKey），记为占位音频');
+      return true;
+    }
+    if (_urlOwner.length > 3000) _urlOwner.clear();
+    _urlOwner[base] = songKey;
+    return false;
   }
 
   /// 诊断：拿一首真实歌曲（通常是当前播放的）逐个问**所有启用**的脚本，
@@ -278,7 +311,10 @@ class LxSourceManager {
           timeout: const Duration(seconds: 8),
         );
         sw.stop();
-        if (url != null && url.isNotEmpty) {
+        if (url != null && _placeholderPrefixes.any(url.startsWith)) {
+          lines[i] =
+              '• ${meta.name}：❌ 返回的是占位音频（几秒的固定片段，不是这首歌），${sw.elapsedMilliseconds}ms';
+        } else if (url != null && url.isNotEmpty) {
           final head = url.length > 72 ? '${url.substring(0, 72)}…' : url;
           lines[i] = '• ${meta.name}：✅ ${sw.elapsedMilliseconds}ms\n  $head';
         } else {
