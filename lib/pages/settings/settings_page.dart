@@ -170,7 +170,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 children: [
                   AppSettingTile(
                     title: '音源配置',
-                    subtitle: '音源开关 · 密钥配置 · LX 脚本',
+                    subtitle: '音源开关 · 密钥配置 · 音源脚本',
                     leading: _iconChip(
                       context,
                       Icons.library_music_outlined,

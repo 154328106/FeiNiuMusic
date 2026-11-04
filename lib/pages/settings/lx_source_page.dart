@@ -23,7 +23,9 @@ class _LxSourcePageState extends State<LxSourcePage> {
   final _mgr = LxSourceManager.instance;
   bool _busy = false;
   bool _testing = false;
-  String? _testReport;
+
+  /// 最近一次测试：歌名 · 歌手、平台中文名、每个脚本一行。
+  ({String song, String platform, List<LxTestRow> rows})? _testResult;
 
   @override
   void initState() {
@@ -72,7 +74,7 @@ class _LxSourcePageState extends State<LxSourcePage> {
         platform = 'mg';
         id = SongSource.decodeMigu(song.id);
       case SongSource.feiniu:
-        AppToast.show(context, '当前播的是飞牛本地歌，LX 脚本用不上；换一首在线歌再测');
+        AppToast.show(context, '当前播的是飞牛本地歌，音源脚本用不上；换一首在线歌再测');
         return;
     }
     if (id == null || id.isEmpty) {
@@ -81,12 +83,24 @@ class _LxSourcePageState extends State<LxSourcePage> {
     }
     setState(() {
       _testing = true;
-      _testReport = null;
+      _testResult = null;
     });
     try {
-      final report = await _mgr.testReport(platform: platform, songId: id);
+      final singer = song.artistDisplayName;
+      final rows = await _mgr.testRows(
+        platform: platform,
+        songId: id,
+        name: song.title,
+        singer: singer,
+      );
       if (mounted) {
-        setState(() => _testReport = '歌曲：${song.title}\n$report');
+        setState(
+          () => _testResult = (
+            song: singer.isEmpty ? song.title : '${song.title} - $singer',
+            platform: LxSourceManager.platformNames[platform] ?? platform ?? '',
+            rows: rows,
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _testing = false);
@@ -108,8 +122,10 @@ class _LxSourcePageState extends State<LxSourcePage> {
       if (paths.isEmpty) return;
       await _doImportAll([
         for (final p in paths)
-          (label: p.split(RegExp(r'[\/]')).last,
-           loader: () async => _mgr.import(await File(p).readAsString())),
+          (
+            label: p.split(RegExp(r'[\/]')).last,
+            loader: () async => _mgr.import(await File(p).readAsString()),
+          ),
       ]);
     } catch (e) {
       if (mounted) AppToast.show(context, '读取文件失败：$e', type: ToastType.error);
@@ -165,7 +181,8 @@ class _LxSourcePageState extends State<LxSourcePage> {
           autocorrect: false,
           keyboardType: TextInputType.multiline,
           decoration: const InputDecoration(
-            hintText: '粘贴音源订阅链接，多个就一行一个，例如\n'
+            hintText:
+                '粘贴音源订阅链接，多个就一行一个，例如\n'
                 'https://c.wwwweb.top/script/lxmusic?key=...',
             border: OutlineInputBorder(),
           ),
@@ -252,9 +269,7 @@ class _LxSourcePageState extends State<LxSourcePage> {
         content: TextField(
           controller: controller,
           autofocus: true,
-          decoration: const InputDecoration(
-            hintText: '给这个音源起个名字',
-          ),
+          decoration: const InputDecoration(hintText: '给这个音源起个名字'),
           onSubmitted: (v) => Navigator.pop(ctx, v),
         ),
         actions: [
@@ -302,7 +317,7 @@ class _LxSourcePageState extends State<LxSourcePage> {
     final sources = _mgr.list();
     return AppPageScaffold(
       appBar: AppTopBar(
-        title: 'LX 脚本音源',
+        title: '音源脚本',
         actions: [
           IconButton(
             tooltip: '测试（用当前播放的歌）',
@@ -355,7 +370,7 @@ class _LxSourcePageState extends State<LxSourcePage> {
                     ),
                   ),
                 ),
-                if (_testReport != null)
+                if (_testResult != null)
                   Card(
                     margin: const EdgeInsets.only(bottom: 12),
                     color: scheme.surfaceContainerHighest,
@@ -381,14 +396,11 @@ class _LxSourcePageState extends State<LxSourcePage> {
                                 visualDensity: VisualDensity.compact,
                                 icon: const Icon(Icons.close_rounded, size: 18),
                                 onPressed: () =>
-                                    setState(() => _testReport = null),
+                                    setState(() => _testResult = null),
                               ),
                             ],
                           ),
-                          SelectableText(
-                            _testReport!,
-                            style: const TextStyle(fontSize: 12, height: 1.4),
-                          ),
+                          _TestResultView(result: _testResult!),
                         ],
                       ),
                     ),
@@ -452,6 +464,82 @@ class _LxSourcePageState extends State<LxSourcePage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 测试结果：歌曲、平台，然后每个脚本一行「名字 · 格式 · 大小 · 用时 · ✅/❌」。
+class _TestResultView extends StatelessWidget {
+  const _TestResultView({required this.result});
+
+  final ({String song, String platform, List<LxTestRow> rows}) result;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    const base = TextStyle(fontSize: 13, height: 1.5);
+    final dim = base.copyWith(color: scheme.onSurfaceVariant);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('歌曲：${result.song}', style: base),
+        Text('平台：${result.platform}', style: base),
+        const SizedBox(height: 4),
+        const Text('详情：', style: base),
+        if (result.rows.isEmpty)
+          Text('没有启用的脚本', style: dim)
+        else
+          for (final r in result.rows) _row(r, base, dim),
+      ],
+    );
+  }
+
+  Widget _row(LxTestRow r, TextStyle base, TextStyle dim) {
+    final size = r.size > 0 ? '${(r.size / 1048576).toStringAsFixed(1)}MB' : '';
+    final ms = r.ms == null ? '' : '${r.ms}ms';
+    return Padding(
+      padding: const EdgeInsets.only(left: 8, top: 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  r.name,
+                  style: base,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              SizedBox(width: 44, child: Text(r.format ?? '', style: base)),
+              SizedBox(
+                width: 56,
+                child: Text(size, style: base, textAlign: TextAlign.right),
+              ),
+              SizedBox(
+                width: 62,
+                child: Text(ms, style: base, textAlign: TextAlign.right),
+              ),
+              SizedBox(
+                width: 28,
+                child: Text(
+                  r.ok ? '✅' : '❌',
+                  style: base,
+                  textAlign: TextAlign.right,
+                ),
+              ),
+            ],
+          ),
+          if (r.note.isNotEmpty)
+            Text(
+              r.note,
+              style: dim.copyWith(fontSize: 11),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+        ],
       ),
     );
   }

@@ -9,6 +9,33 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'lx_script_runtime.dart';
 
+/// 「测试」按钮里一个脚本的结果。
+class LxTestRow {
+  const LxTestRow(
+    this.name, {
+    this.ok = false,
+    this.ms,
+    this.format,
+    this.size = 0,
+    this.note = '',
+  });
+
+  final String name;
+  final bool ok;
+
+  /// 脚本取地址用了多久；没去问（不支持该平台等）为 null。
+  final int? ms;
+
+  /// FLAC / MP3 / M4A …（按文件头认的）
+  final String? format;
+
+  /// 整首字节数，拿不到为 0。
+  final int size;
+
+  /// 失败原因 / 提示。
+  final String note;
+}
+
 /// 一条已导入的 LX 脚本音源的元数据。
 class LxSource {
   const LxSource({
@@ -122,7 +149,7 @@ class LxSourceManager {
         id: id,
         name: displayName?.trim().isNotEmpty == true
             ? displayName!.trim()
-            : (runtime.name.isNotEmpty ? runtime.name : 'LX 脚本音源'),
+            : (runtime.name.isNotEmpty ? runtime.name : '音源脚本'),
         enabled: true,
         sources: runtime.sources,
       );
@@ -244,8 +271,10 @@ class LxSourceManager {
   }
 
   /// 拉链接开头 64KB（跟随跳转），看是不是音频。给「测试」按钮用。
+  /// [format] 按文件头认（FLAC / MP3 / M4A / OGG），[size] 是整首字节数（拿不到为 0）。
   @visibleForTesting
-  static Future<({bool ok, String detail})> probeAudio(String url) async {
+  static Future<({bool ok, String detail, String? format, int size})>
+  probeAudio(String url) async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 6)
       ..userAgent = 'Mozilla/5.0';
@@ -276,15 +305,25 @@ class LxSourceManager {
         // Content-Range: bytes 0-65535/12345678 → 整首大小
         final range = resp.headers.value(HttpHeaders.contentRangeHeader) ?? '';
         final total = int.tryParse(range.split('/').last) ?? resp.contentLength;
+        final format = startsWith('fLaC')
+            ? 'FLAC'
+            : startsWith('ftyp', 4)
+            ? 'M4A'
+            : startsWith('OggS')
+            ? 'OGG'
+            : (startsWith('ID3') || (head.length >= 2 && head[0] == 0xFF))
+            ? 'MP3'
+            : type.replaceFirst('audio/', '').toUpperCase();
         final size = total > 0
             ? '${(total / 1048576).toStringAsFixed(1)}MB'
             : '大小未知';
         // 整首不到 1MB 多半是几秒的提示音 / 试听片段
+        final tooSmall = total > 0 && total < 1048576;
         return (
-          ok: total <= 0 || total >= 1048576,
-          detail: total > 0 && total < 1048576
-              ? '只有 $size，像是提示音或片段'
-              : '音频 $size',
+          ok: !tooSmall,
+          detail: tooSmall ? '只有 $size，像是提示音或片段' : '音频 $size',
+          format: format,
+          size: total > 0 ? total : 0,
         );
       }
       final text = String.fromCharCodes(
@@ -294,9 +333,16 @@ class LxSourceManager {
       return (
         ok: false,
         detail: 'HTTP ${resp.statusCode}${snippet.isEmpty ? '' : '：$snippet'}',
+        format: null,
+        size: 0,
       );
     } catch (e) {
-      return (ok: false, detail: '请求失败 ${e.runtimeType}');
+      return (
+        ok: false,
+        detail: '请求失败 ${e.runtimeType}',
+        format: null,
+        size: 0,
+      );
     } finally {
       client.close(force: true);
     }
@@ -331,36 +377,43 @@ class LxSourceManager {
     return false;
   }
 
-  /// 诊断：拿一首真实歌曲（通常是当前播放的）逐个问**所有启用**的脚本，
-  /// 返回逐条报告（命中给 URL 前缀、空/异常如实写）。与 [resolve] 的区别是它
-  /// 不止于第一个命中、把每个脚本的结果都列出来，供「测试」按钮展示。
-  Future<String> testReport({
+  /// 平台代号 → 中文名，测试结果里显示用。
+  static const Map<String, String> platformNames = {
+    'wy': '网易云',
+    'tx': 'QQ',
+    'kg': '酷狗',
+    'kw': '酷我',
+    'mg': '咪咕',
+  };
+
+  /// 诊断：拿一首真实歌曲（通常是当前播放的）逐个问**所有启用**的脚本，每个
+  /// 脚本一行结果。与 [resolve] 的区别是它不止于第一个命中、全部列出来，供
+  /// 「测试」按钮展示。歌名歌手也要传 —— 有的脚本（溯音酷我）是按歌名搜的。
+  Future<List<LxTestRow>> testRows({
     required String platform,
     required String songId,
     String quality = 'flac',
+    String? name,
+    String? singer,
   }) async {
     await ensureLoaded();
     final enabled = _metas.where((m) => m.enabled).toList();
-    if (enabled.isEmpty) return '没有启用的脚本。';
-    final info = _musicInfo(platform, songId);
+    final info = _musicInfo(platform, songId, name: name, singer: singer);
 
     // 串行逐个测：flutter_js 原生引擎被并发驱动会互相干扰甚至闪退（和「一个
     // 一个测都能取到、全开一起测只命中一个或全崩」的现象一致），一次只问一个。
     // getMusicUrl 本身也有全局串行闸兜底，这里显式顺序跑让耗时可控、结果稳定。
-    final lines = List<String>.filled(enabled.length, '');
-    var tested = 0;
-    for (var i = 0; i < enabled.length; i++) {
-      final meta = enabled[i];
+    final rows = <LxTestRow>[];
+    for (final meta in enabled) {
       if (!meta.sources.contains(platform)) {
-        lines[i] = '• ${meta.name}：不支持 $platform，跳过';
+        rows.add(LxTestRow(meta.name, note: '不支持这个平台'));
         continue;
       }
       final runtime = _runtimes[meta.id];
       if (runtime == null) {
-        lines[i] = '• ${meta.name}：运行时未就绪';
+        rows.add(LxTestRow(meta.name, note: '脚本没加载起来'));
         continue;
       }
-      tested++;
       final sw = Stopwatch()..start();
       try {
         final url = await runtime.getMusicUrl(
@@ -370,34 +423,32 @@ class LxSourceManager {
           timeout: const Duration(seconds: 8),
         );
         sw.stop();
-        if (url != null && _placeholderPrefixes.any(url.startsWith)) {
-          lines[i] =
-              '• ${meta.name}：❌ 返回的是占位音频（几秒的固定片段，不是这首歌），${sw.elapsedMilliseconds}ms';
-        } else if (url != null && url.isNotEmpty) {
-          final head = url.length > 72 ? '${url.substring(0, 72)}…' : url;
+        final ms = sw.elapsedMilliseconds;
+        if (url == null || url.isEmpty) {
+          rows.add(LxTestRow(meta.name, ms: ms, note: '没取到'));
+        } else if (_placeholderPrefixes.any(url.startsWith)) {
+          rows.add(LxTestRow(meta.name, ms: ms, note: '占位音频，不是这首歌'));
+        } else {
           // 有的脚本（全豆要的长青 / 念心）只是把 id 拼进固定链接就当「拿到了」，
           // 不管有没有这首歌都秒回 —— 只看「返回了链接」会误报 ✅。真去拉开头
           // 一小段，确认是音频才算数。
           final probe = await probeAudio(url);
-          lines[i] = probe.ok
-              ? '• ${meta.name}：✅ ${sw.elapsedMilliseconds}ms · ${probe.detail}\n  $head'
-              : '• ${meta.name}：❌ 返回了链接但不是音频（${probe.detail}），'
-                    '${sw.elapsedMilliseconds}ms\n  $head';
-        } else {
-          lines[i] =
-              '• ${meta.name}：⚠️ 没取到（该源无此曲 / 后端无货，${sw.elapsedMilliseconds}ms）';
+          rows.add(
+            LxTestRow(
+              meta.name,
+              ok: probe.ok,
+              ms: ms,
+              format: probe.format,
+              size: probe.size,
+              note: probe.ok ? '' : probe.detail,
+            ),
+          );
         }
       } catch (e) {
-        lines[i] = '• ${meta.name}：❌ 异常 $e';
+        rows.add(LxTestRow(meta.name, note: '出错：$e'));
       }
     }
-
-    final buf = StringBuffer('平台 $platform · id $songId\n')
-      ..writeln(lines.where((l) => l.isNotEmpty).join('\n'));
-    if (tested == 0) {
-      buf.writeln('\n（没有脚本声明支持 $platform —— 换一首该平台的歌再测）');
-    }
-    return buf.toString().trim();
+    return rows;
   }
 
   /// 构造传给脚本的 musicInfo（洛雪 info.musicInfo）。酷狗(kg)用 hash、其余
