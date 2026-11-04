@@ -7,10 +7,15 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite/sqflite.dart';
 import 'package:webdav_client/webdav_client.dart' as webdav;
 
 import '../db/db_constants.dart';
 import '../db/db_helper.dart';
+import '../played_song_cache.dart';
+import '../source/netease_source.dart';
+import '../../utils/cache_version_store.dart';
+import '../../utils/page_cache_store.dart';
 import '../stats_service.dart';
 import '../feiniu/account_entry.dart';
 import '../feiniu/account_store.dart';
@@ -78,6 +83,9 @@ class BackupService {
   static const String _prefsAutoKeepCount = 'backup_auto_keep_count';
   static const String _prefsAutoLastMs = 'backup_auto_last_ms';
 
+  /// PlayedSongCache 的偏好键：随「听歌统计」导出、合并还原（旧备份里它在「应用设置」中）。
+  static const String _playedSongsKey = 'played.songs.v1';
+
   // Pref keys that must NOT be exported as generic "app settings".
   static const Set<String> _settingsDenyList = {
     'feiniu_accounts_v1',
@@ -92,6 +100,7 @@ class BackupService {
     'fn_access_code',
     'fn_last_fnid',
     'debug_log_entries',
+    _playedSongsKey,
     _prefsSectionsKey,
     _prefsDeviceId,
     _prefsTargetsKey,
@@ -203,6 +212,15 @@ class BackupService {
     }
     var reload = false;
     if (data['settings'] is Map && (restrict?.settings ?? true)) {
+      final legacyPlayed = (data['settings'] as Map)[_playedSongsKey];
+      if (legacyPlayed is Map && legacyPlayed['v'] is String) {
+        try {
+          final list = jsonDecode(legacyPlayed['v'] as String);
+          if (list is List) {
+            await PlayedSongCache.instance.mergeFromBackup(list);
+          }
+        } catch (_) {}
+      }
       await _importSettings((data['settings'] as Map).cast<String, dynamic>());
       applied.add('应用设置');
       reload = true;
@@ -217,6 +235,16 @@ class BackupService {
     // 旧版备份把登录态混在「应用设置」里；不管走哪条路写回了偏好，都让各服务
     // 立刻按存档重载，否则它们下次保存会拿内存里的旧状态把刚还原的覆盖掉。
     if (reload) await _reloadSourceServices();
+    if (applied.isNotEmpty) {
+      // 页面缓存里可能还躺着「未登录 / 空统计」的旧结果，清掉让各页重新拉
+      PageCacheStore.instance.clearAll();
+      CacheVersionStore.instance.bump('song_library');
+      debugPrint(
+        '[Backup] 还原完成：${applied.join('、')}；网易云登录=${NetEaseApiClient.instance.isLoggedIn} '
+        'QQ=${QQAuth.instance.isLoggedIn.value} 酷狗=${KugouAuth.instance.isLoggedIn.value} '
+        '咪咕=${MiguAuth.instance.isLoggedIn.value} 播放留档=${PlayedSongCache.instance.length} 首',
+      );
+    }
 
     return applied.isEmpty ? '没有可导入的数据' : '已导入：${applied.join('、')}';
   }
@@ -271,15 +299,56 @@ class BackupService {
     // 原始报告事件：完整导出一份，保证还原后年度报告可重建。
     final db = await DbHelper.instance.database;
     final events = await db.query(DbConstants.tableReportEvents);
+    // 排行榜要靠歌曲信息才能显示：飞牛曲库的歌在 songs 表，在线歌在播放留档里。
+    // 只带统计里出现过的歌，避免把整个曲库塞进备份。
+    final statIds = (agg['songStats'] as List? ?? const [])
+        .whereType<Map>()
+        .map((r) => r['songId']?.toString() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toList();
+    final songRows = <Map<String, dynamic>>[];
+    for (var i = 0; i < statIds.length; i += 400) {
+      final chunk = statIds.sublist(i, min(i + 400, statIds.length));
+      final rows = await db.query(
+        DbConstants.tableSongs,
+        where: 'id IN (${List.filled(chunk.length, '?').join(',')})',
+        whereArgs: chunk,
+      );
+      songRows.addAll(rows.map((r) => Map<String, dynamic>.from(r)));
+    }
+    List<Map<String, dynamic>> played = const [];
+    try {
+      played = await PlayedSongCache.instance.exportForBackup();
+    } catch (_) {}
     return {
       ...agg,
       'reportEvents': events.map((r) => Map<String, dynamic>.from(r)).toList(),
+      'songs': songRows,
+      'playedSongs': played,
     };
   }
 
   Future<void> _importStats(Map<String, dynamic> data) async {
     // 1) 聚合统计：智能合并（累加计数 / 取 max 时间）。
     await _stats.importMerge(data);
+
+    // 1.5) 排行榜要用的歌曲信息：songs 表（本机已有的不覆盖）+ 播放留档（合并）。
+    final songRows = (data['songs'] as List?) ?? const [];
+    if (songRows.isNotEmpty) {
+      final db = await DbHelper.instance.database;
+      for (final raw in songRows) {
+        if (raw is! Map) continue;
+        try {
+          await db.insert(
+            DbConstants.tableSongs,
+            raw.cast<String, dynamic>(),
+            conflictAlgorithm: ConflictAlgorithm.ignore,
+          );
+        } catch (_) {}
+      }
+    }
+    final played = data['playedSongs'];
+    if (played is List) await PlayedSongCache.instance.mergeFromBackup(played);
 
     // 2) report_events：按 (songId, sessionStartMs) 去重合并，避免还原后重复。
     final events = (data['reportEvents'] as List?) ?? const [];
@@ -332,6 +401,11 @@ class BackupService {
     try {
       scripts = await LxSourceManager.instance.exportScripts();
     } catch (_) {}
+    final neteaseCookie = prefs.getString('netease.cookies') ?? '';
+    debugPrint(
+      '[Backup] 导出音源与平台登录：${out.length} 项偏好、${scripts.length} 个外置脚本；'
+      '网易云登录=${neteaseCookie.contains('MUSIC_U')}',
+    );
     return {'prefs': out, 'lxScripts': scripts};
   }
 
@@ -363,6 +437,8 @@ class BackupService {
       MiguAuth.instance.reloadFromStorage,
       UnblockSourceService.instance.reloadFromStorage,
       LxSourceManager.instance.reloadFromStorage,
+      // 网易源按账号缓存了 uid / 「我喜欢」歌单 id，还原后要按新登录态重新取
+      () async => NetEaseSource.instance.reset(),
     ];
     for (final reload in reloads) {
       try {

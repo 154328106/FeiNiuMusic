@@ -37,6 +37,38 @@ class PlayedSongCache {
 
   Future<void> ensureLoaded() => _loading ??= _load();
 
+  /// 备份：导出整份留档（听歌统计里网易云 / QQ / 酷狗等在线歌的歌名、歌手、封面靠它）。
+  Future<List<Map<String, dynamic>>> exportForBackup() async {
+    await ensureLoaded();
+    return [for (final song in _songs.values) song.toMap()];
+  }
+
+  /// 还原：把备份里的条目**合并**进本机留档（本机已有的不覆盖），返回新增条数。
+  Future<int> mergeFromBackup(List<dynamic> items) async {
+    await ensureLoaded();
+    var added = 0;
+    for (final item in items) {
+      if (item is! Map) continue;
+      try {
+        final song = SongEntity.fromMap(Map<String, dynamic>.from(item));
+        if (_songs.containsKey(song.id)) continue;
+        _songs[song.id] = song;
+        added++;
+      } catch (_) {}
+    }
+    if (added > 0) await _persist();
+    return added;
+  }
+
+  int get length => _songs.length;
+
+  /// 测试用：回到「刚装好、还没读存档」的状态。
+  @visibleForTesting
+  void resetForTest() {
+    _songs.clear();
+    _loading = null;
+  }
+
   Future<void> _load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
