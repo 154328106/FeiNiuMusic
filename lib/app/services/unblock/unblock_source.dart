@@ -8,6 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'free_unblock_sources.dart';
 import 'kugou_public_sources.dart';
 import '../lxscript/lx_source_manager.dart';
+import '../qq/qq_api_client.dart';
+import '../qq/qq_models.dart';
 
 /// 第三方音源（解锁灰色 / 会员歌曲的播放地址）。
 ///
@@ -242,7 +244,13 @@ class UnblockSourceService {
 
     if (noCopyright && platform == 'wy') {
       debugPrint('[Unblock] wy/$songId 网易无版权（下架），直接按歌名搜');
-      return _resolveByKeyword(cfg, keyword, durationMs);
+      return _resolveByKeyword(
+        cfg,
+        keyword,
+        durationMs,
+        platform: platform,
+        background: isBackground,
+      );
     }
 
     // GD / 星海这两家 App 自己会问（只限网易云、且开着免费兜底）。告诉 LX 脚本
@@ -402,23 +410,96 @@ class UnblockSourceService {
     // 这里不按平台拦：那两家都是「搜歌名再比时长」，跟歌来自哪个平台无关。
     // 原来按 `platform != 'wy'` 直接返回，理由是「id 对不上 GD 的入参」——
     // 那只对 GD 成立，拦掉整条等于把 QQ / 酷狗的退路也堵死了。
-    return _resolveByKeyword(cfg, keyword, durationMs);
+    return _resolveByKeyword(
+      cfg,
+      keyword,
+      durationMs,
+      platform: platform,
+      background: background,
+    );
   }
 
+  /// 按「歌名 歌手」去别家找：酷狗 → 酷我 → QQ。
   Future<String?> _resolveByKeyword(
     UnblockSourceConfig cfg,
     String? keyword,
-    int durationMs,
-  ) async {
+    int durationMs, {
+    required String platform,
+    required bool background,
+  }) async {
     if (!freeFallbackEnabled.value) return null;
     final query = keyword ?? '';
     // 没有歌名就真没得查了（GD 那条按 id 的路在上面已经走完）。
     if (query.trim().isEmpty) return null;
-    return FreeUnblockSources.resolve(
+    final url = await FreeUnblockSources.resolve(
       keyword: query,
       durationMs: durationMs,
       quality: cfg.quality,
     );
+    if (url != null) return url;
+    // 本来就是 QQ 的歌，按 id 已经问过了，不再搜一遍自己。
+    if (platform == 'tx') return null;
+    return _qqByKeyword(query, durationMs, background: background);
+  }
+
+  /// 从 QQ 搜索结果里挑「就是这首」的那条，挑不到返回 null（宁可放弃不播错）。
+  ///
+  /// 歌名（去掉「(国语)」「(Live)」这类括号注记）必须出现在关键词里，有时长
+  /// 时时长还要差 5 秒以内。只看时长不够：搜「不负如来不负卿 林峯」，第一条是
+  /// 时长一模一样（267s）的粤语版《也无风雨也无月》。
+  @visibleForTesting
+  static QQSong? pickQQMatch(
+    List<QQSong> songs,
+    String keyword,
+    int durationMs,
+  ) {
+    final kw = _normTitle(keyword);
+    for (final s in songs) {
+      final title = _normTitle(s.name);
+      final nameOk = title.isNotEmpty && kw.contains(title);
+      final timeOk =
+          durationMs <= 0 ||
+          (s.durationMs > 0 && (s.durationMs - durationMs).abs() < 5000);
+      if (nameOk && timeOk) return s;
+    }
+    return null;
+  }
+
+  /// 去掉括号注记、空白和常见标点，转小写，用来比歌名。
+  static String _normTitle(String s) => s
+      .replaceAll(RegExp(r'[（(\[【][^）)\]】]*[）)\]】]'), '')
+      .replaceAll(RegExp(r'[\s·・\-—_,，.。!！?？:：/&、]+'), '')
+      .toLowerCase();
+
+  /// QQ 按歌名兜底：用 QQ 自己的搜索找到这首的 mid，再交给声明支持 QQ 的
+  /// 音源脚本取地址。
+  ///
+  /// 比酷狗 / 酷我那两家挑得严：那边对不上时长会退回第一条，这里**时长差
+  /// 5 秒以内**才算（没有时长就要求歌名对得上），宁可放弃也不播错歌。
+  Future<String?> _qqByKeyword(
+    String keyword,
+    int durationMs, {
+    required bool background,
+  }) async {
+    try {
+      final songs = await QQApiClient.instance.searchSongs(keyword, limit: 5);
+      final match = pickQQMatch(songs, keyword, durationMs);
+      if (match == null) return null;
+      final url = await LxSourceManager.instance.resolve(
+        platform: 'tx',
+        songId: match.mid,
+        name: match.name,
+        singer: match.artists,
+        background: background,
+      );
+      if (url != null) {
+        debugPrint('[Unblock] QQ 按歌名命中 $keyword → tx/${match.mid}');
+      }
+      return url;
+    } catch (e) {
+      debugPrint('[Unblock] QQ 按歌名搜失败：$e');
+      return null;
+    }
   }
 
   Future<String?> _requestOnce({
