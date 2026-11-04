@@ -343,6 +343,33 @@ class UnblockSourceService {
       }
     }
 
+    // LX（洛雪）脚本音源：用户导入的第三方脚本，按平台代号匹配取址。
+    // 前台：放在官方 ID 源（GD / zddyr / 聆澜）之后、关键词兜底之前 —— 它们
+    // 按原始 id 取址更准，脚本作为补充。
+    // 后台预取：提到聆澜**前面**。2026-11-05 日志：打开 95 首的酷狗歌单，整队
+    // 预取 11 秒里把聆澜打了约 70 次、还吃了一次 429；而用户的「聚合音源-A」
+    // 0.1～0.4 秒就能给、不花额度。聆澜是有额度的公益卡，留给脚本救不了的歌。
+    Future<String?> tryLx() async {
+      lxTried = true;
+      final lxUrl = await LxSourceManager.instance.resolve(
+        platform: platform,
+        songId: songId,
+        name: name,
+        singer: singer,
+        background: background,
+        hostCovers: hostCovers,
+      );
+      if (lxUrl != null) {
+        debugPrint('[Unblock] LX 脚本命中 $platform/$songId');
+      }
+      return lxUrl;
+    }
+
+    if (background && !lxTried) {
+      final lxUrl = await tryLx();
+      if (lxUrl != null) return lxUrl;
+    }
+
     if (cfg.isUsable && !rateLimited) {
       final keys = cfg.apiKeys;
       // 从上次命中的那个开始轮，命中率最高的先试。
@@ -365,22 +392,9 @@ class UnblockSourceService {
       debugPrint('[Unblock] ${keys.length} 个密钥全部未命中：$platform/$songId');
     }
 
-    // LX（洛雪）脚本音源：用户导入的第三方脚本，按平台代号匹配取址。放在官方
-    // ID 源（GD / zddyr / 聆澜）之后、关键词兜底之前 —— 它们按原始 id 取址更准，
-    // 脚本作为它们都未命中时的补充；脚本能给到无损/Hi-Res 时也算额外收益。
     if (!lxTried) {
-      final lxUrl = await LxSourceManager.instance.resolve(
-        platform: platform,
-        songId: songId,
-        name: name,
-        singer: singer,
-        background: background,
-        hostCovers: hostCovers,
-      );
-      if (lxUrl != null) {
-        debugPrint('[Unblock] LX 脚本命中 $platform/$songId');
-        return lxUrl;
-      }
+      final lxUrl = await tryLx();
+      if (lxUrl != null) return lxUrl;
     }
 
     // 最后一层：按歌名搜的免费兜底（酷狗 → 酷我）。GD 上面已经试过了。
