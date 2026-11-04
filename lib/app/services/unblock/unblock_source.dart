@@ -224,6 +224,9 @@ class UnblockSourceService {
   /// [skipPublicSources] 给已经自己问过公益源的调用方用（扣扣音乐那边
   /// 把公益源提到了官方地址**前面**，因为官方只给 128k）。不跳过的话每首
   /// 歌会把同一个请求对着公益服务打两遍 —— 作者明说了「切勿短时间批量」。
+  /// [noCopyright]：网易云官方明确回了「无版权」（code 404，下架歌）。这类歌
+  /// 按网易 id 取址的来源（GD / 星海 / 聆澜 / LX 脚本）实测全都拿不到，以前
+  /// 每首要白跑一遍才掉到按歌名搜，约 8～9 秒、刷一大屏日志；现在直接按歌名搜。
   Future<String?> resolve({
     required String platform,
     required String songId,
@@ -232,9 +235,22 @@ class UnblockSourceService {
     bool skipPublicSources = false,
     String? name,
     String? singer,
+    bool noCopyright = false,
   }) async {
     await load();
     final cfg = config.value;
+
+    if (noCopyright && platform == 'wy') {
+      debugPrint('[Unblock] wy/$songId 网易无版权（下架），直接按歌名搜');
+      return _resolveByKeyword(cfg, keyword, durationMs);
+    }
+
+    // GD / 星海这两家 App 自己会问（只限网易云、且开着免费兜底）。告诉 LX 脚本
+    // 一声，脚本里同样的后端就不用再打一遍 —— 之前一首没命中的歌，GD 和星海
+    // 会被 App 和「网易专用」脚本各问一次。脚本认不认这个字段随它，不认也没坏处。
+    final hostCovers = platform == 'wy' && freeFallbackEnabled.value
+        ? const ['gdstudio', 'zddyr']
+        : const <String>[];
 
     // 第〇层（可选）：优先走外置音源。开了「优先走外置音源」就先问用户导入的
     // LX/JS 脚本，命中直接用，官方 ID 源和兜底全让路。没命中则置 lxTried，下面
@@ -247,6 +263,7 @@ class UnblockSourceService {
         songId: songId,
         name: name,
         singer: singer,
+        hostCovers: hostCovers,
       );
       lxTried = true;
       if (url != null) {
@@ -358,6 +375,7 @@ class UnblockSourceService {
         name: name,
         singer: singer,
         background: background,
+        hostCovers: hostCovers,
       );
       if (lxUrl != null) {
         debugPrint('[Unblock] LX 脚本命中 $platform/$songId');
@@ -370,6 +388,14 @@ class UnblockSourceService {
     // 这里不按平台拦：那两家都是「搜歌名再比时长」，跟歌来自哪个平台无关。
     // 原来按 `platform != 'wy'` 直接返回，理由是「id 对不上 GD 的入参」——
     // 那只对 GD 成立，拦掉整条等于把 QQ / 酷狗的退路也堵死了。
+    return _resolveByKeyword(cfg, keyword, durationMs);
+  }
+
+  Future<String?> _resolveByKeyword(
+    UnblockSourceConfig cfg,
+    String? keyword,
+    int durationMs,
+  ) async {
     if (!freeFallbackEnabled.value) return null;
     final query = keyword ?? '';
     // 没有歌名就真没得查了（GD 那条按 id 的路在上面已经走完）。
@@ -410,7 +436,12 @@ class UnblockSourceService {
       return null;
     }
     if (response.statusCode != 200) {
-      debugPrint('[Unblock] HTTP ${response.statusCode}');
+      // 把对方的原话带上：401「API密钥不存在或已被禁用」是密钥坏了，500 多半是
+      // 这首歌它也没有。只打状态码时两者分不清，曾被误判成「聆澜整个挂了」。
+      debugPrint(
+        '[Unblock] 聆澜 HTTP ${response.statusCode} 密钥#${_keyTail(apiKey)}：'
+        '${_errorText(response.data)}',
+      );
       return null;
     }
 
@@ -435,6 +466,24 @@ class UnblockSourceService {
     if (resolved is String && resolved.isNotEmpty) return resolved;
     debugPrint('[Unblock] 响应中没有播放地址');
     return null;
+  }
+
+  /// 日志里只露密钥末 5 位，够认是哪一把，又不把整把钥匙写进日志。
+  static String _keyTail(String key) =>
+      key.length <= 5 ? key : key.substring(key.length - 5);
+
+  /// 错误响应里的人话：优先 JSON 的 message / msg，否则截正文前 80 字。
+  static String _errorText(String? body) {
+    final raw = (body ?? '').trim();
+    if (raw.isEmpty) return '（无正文）';
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        final msg = decoded['message'] ?? decoded['msg'] ?? decoded['error'];
+        if (msg != null && '$msg'.isNotEmpty) return '$msg';
+      }
+    } catch (_) {}
+    return raw.length > 80 ? '${raw.substring(0, 80)}…' : raw;
   }
 
   /// 多个点分路径依次取值，先命中先用。

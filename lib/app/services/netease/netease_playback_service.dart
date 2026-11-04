@@ -87,6 +87,7 @@ class NetEasePlaybackService {
         final unblocked = await UnblockSourceService.instance.resolve(
           platform: 'wy',
           songId: '$neteaseId',
+          noCopyright: info?.noCopyright ?? false,
         );
         if (unblocked != null) {
           debugPrint('[NetEase] $neteaseId 由第三方音源提供地址');
@@ -173,7 +174,11 @@ class NetEasePlaybackService {
       for (final song in songs)
         if (song.neteaseId != null) song.neteaseId!: song,
     };
-    final unblocked = await _resolveUnblocked(needUnblock, byId);
+    final noCopyright = <int>{
+      for (final id in needUnblock)
+        if (result[id]?.noCopyright ?? false) id,
+    };
+    final unblocked = await _resolveUnblocked(needUnblock, byId, noCopyright);
 
     final playable = <SongEntity>[];
     var dropped = 0;
@@ -227,6 +232,7 @@ class NetEasePlaybackService {
   Future<Map<int, String>> _resolveUnblocked(
     List<int> ids,
     Map<int, SongEntity> byId,
+    Set<int> noCopyright,
   ) async {
     final out = <int, String>{};
     for (var start = 0; start < ids.length; start += _unblockBatchSize) {
@@ -243,6 +249,7 @@ class NetEasePlaybackService {
             // 没有就报 `song name missing`。队列这儿手里正好有 SongEntity，带上。
             name: byId[id]?.title,
             singer: byId[id]?.artistDisplayName,
+            noCopyright: noCopyright.contains(id),
           ),
       ]);
       for (var i = 0; i < batch.length; i++) {

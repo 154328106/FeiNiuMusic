@@ -77,12 +77,21 @@ class NetEaseSongUrl {
     required this.freeTrial,
     required this.bitrate,
     required this.type,
+    this.code,
   });
 
   final int id;
 
   /// 播放直链；灰色歌曲 / 无版权时为 null。
   final String? url;
+
+  /// 官方逐首返回的状态码：200 正常、-110 需要会员、404 无版权（下架）。
+  final int? code;
+
+  /// 网易云自己都没有版权（下架）。2026-11-05 实测这类歌 GD / 星海 / 聆澜 /
+  /// 按网易 id 取址的 LX 脚本**全部**拿不到，只有按歌名去别家搜才救得回来；
+  /// 会员歌是 -110，GD 照样给，不能混为一谈。
+  bool get noCopyright => code == 404;
 
   /// 服务端只给了试听片段（VIP 歌曲未登录或非会员）。
   final bool freeTrial;

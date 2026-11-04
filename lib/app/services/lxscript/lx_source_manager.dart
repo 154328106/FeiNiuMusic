@@ -205,10 +205,15 @@ class LxSourceManager {
     String? name,
     String? singer,
     bool background = false,
+    List<String> hostCovers = const [],
   }) async {
     if (!_loaded) await ensureLoaded();
     if (_runtimes.isEmpty) return null;
     final info = _musicInfo(platform, songId, name: name, singer: singer);
+    // 飞牛自定义字段：App 自己会去问的后端（'gdstudio' / 'zddyr'）。认得它的
+    // 脚本（如「网易专用」1.0.2+）就跳过同名后端，免得一首歌被问两遍；
+    // 别的脚本不读这个键，照常工作。「测试」按钮不带它，测的是脚本完整能力。
+    if (hostCovers.isNotEmpty) info['hostCovers'] = hostCovers;
     for (final meta in _metas) {
       if (!meta.enabled) continue;
       if (!meta.sources.contains(platform)) continue;

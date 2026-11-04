@@ -470,6 +470,7 @@ class NetEaseApiClient {
         freeTrial: item['freeTrialInfo'] != null,
         bitrate: item['br'] as int?,
         type: item['type'] as String?,
+        code: item['code'] as int?,
       );
     }
     return result;
