@@ -9,6 +9,8 @@ import '../../app/services/source/music_source_registry.dart';
 import '../../app/services/kugou/kugou_api_client.dart';
 import '../../app/services/kugou/kugou_auth.dart';
 import '../../app/services/kugou/kugou_playback_service.dart';
+import '../../app/services/netease/netease_api_client.dart';
+import '../../app/services/netease/netease_playback_service.dart';
 import '../../app/services/qq/qq_auth.dart';
 import '../../app/services/qq/qq_playback_service.dart';
 import '../../app/services/migu/migu_auth.dart';
@@ -253,7 +255,9 @@ class _MusicSourceSection extends StatelessWidget {
         await KugouApiClient.instance.registerDevice();
         AppToast.showGlobal(
           KugouAuth.instance.hasDfid ? '设备注册成功' : '设备注册失败，看日志',
-          type: KugouAuth.instance.hasDfid ? ToastType.success : ToastType.error,
+          type: KugouAuth.instance.hasDfid
+              ? ToastType.success
+              : ToastType.error,
         );
         KugouPlaybackService.instance.clear();
         registry.notifyContentChanged();
@@ -312,12 +316,55 @@ class _MusicSourceSection extends StatelessWidget {
     registry.notifyContentChanged();
   }
 
-  /// 右侧「登录 / 账号」按钮：扫码登录，回来后刷新这一行和首页。
+  /// 右侧「登录 / 账号」按钮：没登录就扫码；已登录则和 QQ / 酷狗 / 咪咕一样
+  /// 弹「已登录：昵称 / 退出登录」。以前不管登没登录都直接进扫码页，
+  /// 用户会以为网易云没登录上（备份还原后尤其容易误判）。
   Future<void> _onLogin(
     BuildContext context,
     MusicSourceRegistry registry,
   ) async {
+    final api = NetEaseApiClient.instance;
+    await api.load();
+    if (api.isLoggedIn) {
+      var nickname = '';
+      try {
+        nickname = (await api.account().timeout(
+          const Duration(seconds: 4),
+        )).nickname;
+      } catch (_) {
+        // 拿不到昵称不影响：只显示「已登录」。
+      }
+      if (!context.mounted) return;
+      final logout = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('网易云音乐账号'),
+          content: Text(
+            '已登录${nickname.isEmpty ? '' : '：$nickname'}。'
+            '退出后仍可用推荐、榜单和搜索，但收藏、每日推荐和最近播放拿不到。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('退出登录'),
+            ),
+          ],
+        ),
+      );
+      if (logout != true) return;
+      await api.logout();
+      NetEasePlaybackService.instance.clear();
+      NetEaseSource.instance.reset();
+      registry.notifyContentChanged();
+      return;
+    }
+    if (!context.mounted) return;
     await Navigator.pushNamed(context, AppRoutes.neteaseLogin);
+    NetEasePlaybackService.instance.clear();
     NetEaseSource.instance.reset();
     // 登录态变了，首页的收藏 / 最近播放要重拉。源没换，所以只发内容变更。
     registry.notifyContentChanged();
@@ -370,7 +417,10 @@ class _SourceBar extends StatelessWidget {
           end: Alignment.bottomRight,
           colors: selected
               ? [accent.withValues(alpha: 0.30), accent.withValues(alpha: 0.11)]
-              : [accent.withValues(alpha: 0.14), accent.withValues(alpha: 0.05)],
+              : [
+                  accent.withValues(alpha: 0.14),
+                  accent.withValues(alpha: 0.05),
+                ],
         ),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
@@ -540,11 +590,8 @@ class _StatsCard extends StatelessWidget {
                   width: 40,
                   height: 40,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => Icon(
-                    Icons.bar_chart_rounded,
-                    color: accent,
-                    size: 30,
-                  ),
+                  errorBuilder: (_, _, _) =>
+                      Icon(Icons.bar_chart_rounded, color: accent, size: 30),
                 ),
               ),
               const SizedBox(width: 12),
