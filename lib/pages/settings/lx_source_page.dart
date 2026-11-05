@@ -85,8 +85,7 @@ class _LxSourcePageState extends State<LxSourcePage> {
     }
     final singer = song.artistDisplayName;
     final songText = singer.isEmpty ? song.title : '${song.title} - $singer';
-    final platformText =
-        LxSourceManager.platformNames[platform] ?? platform;
+    final platformText = LxSourceManager.platformNames[platform] ?? platform;
     setState(() {
       _testing = true;
       _testResult = (
@@ -428,31 +427,86 @@ class _LxSourcePageState extends State<LxSourcePage> {
                       ),
                     ),
                   ),
-                for (final s in sources)
-                  Card(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    child: SwitchListTile(
-                      value: s.enabled,
-                      onChanged: (v) => _mgr.setEnabled(s.id, v),
-                      title: Text(s.name),
-                      subtitle: Text(
-                        s.sources.isEmpty
-                            ? '未声明支持的源'
-                            : '支持：${s.sources.join(' / ')}',
-                      ),
-                      secondary: PopupMenuButton<String>(
-                        icon: const Icon(Icons.more_vert_rounded),
-                        onSelected: (v) {
-                          if (v == 'rename') _renameSource(s);
-                          if (v == 'delete') _confirmRemove(s);
-                        },
-                        itemBuilder: (_) => const [
-                          PopupMenuItem(value: 'rename', child: Text('重命名')),
-                          PopupMenuItem(value: 'delete', child: Text('删除')),
-                        ],
+                if (sources.length > 1)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+                    child: Text(
+                      '按从上到下的顺序问，前面的拿到就不再往下问。长按卡片可以拖动排序。',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: scheme.onSurfaceVariant,
                       ),
                     ),
                   ),
+                // 长按拖动排序（2026-11-05）。嵌在外层 ListView 里，自己不滚动。
+                // 不用默认拖动把手：桌面端把手会压在开关上；统一改成长按卡片拖。
+                ReorderableListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  buildDefaultDragHandles: false,
+                  itemCount: sources.length,
+                  onReorderItem: (oldIndex, newIndex) =>
+                      _mgr.move(sources[oldIndex].id, newIndex),
+                  itemBuilder: (context, index) {
+                    final s = sources[index];
+                    final last = sources.length - 1;
+                    return ReorderableDelayedDragStartListener(
+                      key: ValueKey(s.id),
+                      index: index,
+                      child: Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: SwitchListTile(
+                          value: s.enabled,
+                          onChanged: (v) => _mgr.setEnabled(s.id, v),
+                          title: Text(s.name),
+                          subtitle: Text(
+                            [
+                              if (sources.length > 1) '第 ${index + 1} 个问',
+                              s.sources.isEmpty
+                                  ? '未声明支持的源'
+                                  : '支持：${s.sources.join(' / ')}',
+                            ].join(' · '),
+                          ),
+                          secondary: PopupMenuButton<String>(
+                            icon: const Icon(Icons.more_vert_rounded),
+                            onSelected: (v) {
+                              if (v == 'top') _mgr.move(s.id, 0);
+                              if (v == 'up') _mgr.move(s.id, index - 1);
+                              if (v == 'down') _mgr.move(s.id, index + 1);
+                              if (v == 'rename') _renameSource(s);
+                              if (v == 'delete') _confirmRemove(s);
+                            },
+                            itemBuilder: (_) => [
+                              if (index > 0)
+                                const PopupMenuItem(
+                                  value: 'top',
+                                  child: Text('移到最前'),
+                                ),
+                              if (index > 0)
+                                const PopupMenuItem(
+                                  value: 'up',
+                                  child: Text('上移'),
+                                ),
+                              if (index < last)
+                                const PopupMenuItem(
+                                  value: 'down',
+                                  child: Text('下移'),
+                                ),
+                              const PopupMenuItem(
+                                value: 'rename',
+                                child: Text('重命名'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'delete',
+                                child: Text('删除'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ],
             ),
           if (_busy)
@@ -528,9 +582,7 @@ class _TestResultView extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    result.testing == '…'
-                        ? '准备中…'
-                        : '正在问 ${result.testing}…',
+                    result.testing == '…' ? '准备中…' : '正在问 ${result.testing}…',
                     style: dim,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,

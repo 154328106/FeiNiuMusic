@@ -206,6 +206,19 @@ class LxSourceManager {
   }
 
   /// 重命名脚本（只改显示名，不动脚本内容 / 取址逻辑）。
+  /// 调整脚本顺序：取址时按列表从上往下问，前面的先问、命中就不再往下。
+  /// [newIndex] 是移动**之后**它所在的位置（0 起）。
+  Future<void> move(String id, int newIndex) async {
+    final i = _metas.indexWhere((m) => m.id == id);
+    if (i < 0) return;
+    final target = newIndex.clamp(0, _metas.length - 1);
+    if (target == i) return;
+    final meta = _metas.removeAt(i);
+    _metas.insert(target, meta);
+    await _persist();
+    _bump();
+  }
+
   Future<void> renameSource(String id, String name) async {
     final trimmed = name.trim();
     if (trimmed.isEmpty) return;
