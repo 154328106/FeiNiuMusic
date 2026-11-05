@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../state/song_source.dart';
 import '../../state/song_state.dart';
+import '../unblock/expiring_set.dart';
 import '../unblock/free_unblock_sources.dart';
 import '../unblock/unblock_source.dart';
 import 'migu_models.dart';
@@ -46,7 +47,9 @@ class MiguPlaybackService {
   static const Duration urlTtl = Duration(minutes: 45);
 
   final Map<String, _Resolved> _cache = {};
-  final Set<String> _unresolvable = {};
+  final ExpiringSet<String> _unresolvable = ExpiringSet(
+    const Duration(minutes: 10),
+  );
   final Map<String, _Meta> _meta = {};
   final Map<String, Future<String?>> _inflight = {};
 

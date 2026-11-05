@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../state/song_source.dart';
 import '../../state/song_state.dart';
+import '../unblock/expiring_set.dart';
 import '../unblock/kugou_public_sources.dart';
 import '../unblock/unblock_source.dart';
 import 'qq_api_client.dart';
@@ -46,7 +47,9 @@ class QQPlaybackService {
   ///
   /// 没有这份记录，每次起播都会为这些歌重跑一整套请求 —— 网易云那边实测
   /// 5 首就能把起播拖到四五秒。
-  final Set<String> _unresolvable = {};
+  final ExpiringSet<String> _unresolvable = ExpiringSet(
+    const Duration(minutes: 10),
+  );
 
   /// 给第三方音源做匹配用的「歌名 歌手」和时长。
   ///

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../state/song_source.dart';
 import '../../state/song_state.dart';
+import '../unblock/expiring_set.dart';
 import '../unblock/unblock_source.dart';
 import 'netease_api_client.dart';
 import 'netease_models.dart';
@@ -42,7 +43,9 @@ class NetEasePlaybackService {
   /// 没有这份记录，每次起播都会把这些歌重新走一遍完整流程：eapi → weapi
   /// 兜底 → 降级 standard → 逐个问音源。实测 5 首这样的歌就要 4.4 秒，
   /// 表现为「点收藏要等五秒才出声，切下一首还是等五秒」。
-  final Set<int> _unresolvable = {};
+  final ExpiringSet<int> _unresolvable = ExpiringSet(
+    const Duration(minutes: 10),
+  );
 
   /// 当前音质档位。免费账号拿不到 lossless 会自动降级。
   String level = 'exhigh';

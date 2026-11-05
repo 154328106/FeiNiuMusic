@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/router/app_page_route.dart';
+import '../../app/services/lxscript/lx_source_manager.dart';
 import '../../app/services/unblock/unblock_source.dart';
 import '../../components/index.dart';
 import 'lx_source_page.dart';
@@ -43,6 +44,8 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
 
   Future<void> _restore() async {
     await _service.load();
+    // 开关下的「还没导入脚本」提示要看脚本索引，先载入，免得误报。
+    await LxSourceManager.instance.ensureLoaded();
     if (!mounted) return;
     final cfg = _service.config.value;
     _templateController.text = cfg.template;
@@ -292,29 +295,48 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                 value: _enabled,
                 onChanged: (v) => setState(() => _enabled = v),
               ),
-              ValueListenableBuilder<bool>(
-                valueListenable:
-                    UnblockSourceService.instance.freeFallbackEnabled,
-                builder: (context, on, _) => AppSettingSwitchTile(
-                  title: '免费兜底音源',
-                  subtitle: on
-                      ? '上面的音源没配或没命中时，再试 GD Studio / 酷狗 / 酷我'
-                      : '关闭后只用上面配置的音源',
-                  value: on,
-                  onChanged:
-                      UnblockSourceService.instance.setFreeFallbackEnabled,
-                ),
+              // 「保证能播」：设置自相矛盾时（关了兜底却什么都没配、开了优先却
+              // 没有脚本）App 会自己绕开，这里如实告诉用户。
+              ListenableBuilder(
+                listenable: Listenable.merge([
+                  UnblockSourceService.instance.freeFallbackEnabled,
+                  UnblockSourceService.instance.config,
+                  LxSourceManager.instance.revision,
+                ]),
+                builder: (context, _) {
+                  final svc = UnblockSourceService.instance;
+                  final on = svc.freeFallbackEnabled.value;
+                  return AppSettingSwitchTile(
+                    title: '免费兜底音源',
+                    subtitle: on
+                        ? '上面的音源没配或没命中时，再试 GD Studio / 酷狗 / 酷我'
+                        : svc.freeFallbackActive
+                        ? '聆澜没配好、也没启用音源脚本，为了能播仍会用免费音源'
+                        : '关闭后只用上面配置的音源',
+                    value: on,
+                    onChanged: svc.setFreeFallbackEnabled,
+                  );
+                },
               ),
-              ValueListenableBuilder<bool>(
-                valueListenable: UnblockSourceService.instance.preferLxEnabled,
-                builder: (context, on, _) => AppSettingSwitchTile(
-                  title: '优先走外置音源',
-                  subtitle: on
-                      ? '先用你导入的 JS 脚本取址，没命中再走内置音源'
-                      : '默认先走内置音源，JS 脚本作为补充（在下方「脚本」里导入）',
-                  value: on,
-                  onChanged: UnblockSourceService.instance.setPreferLxEnabled,
-                ),
+              ListenableBuilder(
+                listenable: Listenable.merge([
+                  UnblockSourceService.instance.preferLxEnabled,
+                  LxSourceManager.instance.revision,
+                ]),
+                builder: (context, _) {
+                  final on =
+                      UnblockSourceService.instance.preferLxEnabled.value;
+                  return AppSettingSwitchTile(
+                    title: '优先走外置音源',
+                    subtitle: on && !LxSourceManager.instance.hasEnabled
+                        ? '还没导入或启用音源脚本，暂不生效，照常走内置音源'
+                        : on
+                        ? '先用你导入的 JS 脚本取址，没命中再走内置音源'
+                        : '默认先走内置音源，JS 脚本作为补充（在下方「脚本」里导入）',
+                    value: on,
+                    onChanged: UnblockSourceService.instance.setPreferLxEnabled,
+                  );
+                },
               ),
             ],
           ),

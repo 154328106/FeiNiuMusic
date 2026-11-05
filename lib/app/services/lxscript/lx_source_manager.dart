@@ -104,6 +104,11 @@ class LxSourceManager {
 
   bool get hasEnabled => _metas.any((m) => m.enabled);
 
+  /// 有没有启用、且声明支持 [platform] 的脚本。脚本索引还没载入时按「有」算
+  /// （真正取址时 [resolve] 会再判断，最多等 2 秒）。
+  bool hasEnabledFor(String platform) =>
+      !_loaded || _metas.any((m) => m.enabled && m.sources.contains(platform));
+
   Future<void> ensureLoaded() {
     if (_loaded) return Future<void>.value();
     return _loadFuture ??= () async {
@@ -234,7 +239,16 @@ class LxSourceManager {
     bool background = false,
     List<String> hostCovers = const [],
   }) async {
-    if (!_loaded) await ensureLoaded();
+    if (!_loaded) {
+      // 第一次取址时脚本可能还在载入（每个最多 8 秒）。最多等 2 秒，等不到这首
+      // 就先不用脚本，交给内置链 —— 别让起播卡在载脚本上。载入在后台接着跑。
+      try {
+        await ensureLoaded().timeout(const Duration(seconds: 2));
+      } on TimeoutException {
+        debugPrint('[LX] 脚本还在载入，$platform/$songId 这首先不等');
+        return null;
+      }
+    }
     if (_runtimes.isEmpty) return null;
     final info = _musicInfo(platform, songId, name: name, singer: singer);
     // 飞牛自定义字段：App 自己会去问的后端（'gdstudio' / 'zddyr'）。认得它的
@@ -269,6 +283,12 @@ class LxSourceManager {
             debugPrint('[LX] ${meta.name} 给的是占位音频（不是这首歌），丢弃：$platform/$songId');
             continue;
           }
+          if (!await linkAlive(url)) {
+            debugPrint(
+              '[LX] ${meta.name} 给的链接打不开（404 / 错误页），丢弃：$platform/$songId',
+            );
+            continue;
+          }
           debugPrint('[LX] ${meta.name} 命中 $platform/$songId');
           return url;
         }
@@ -277,6 +297,34 @@ class LxSourceManager {
       }
     }
     return null;
+  }
+
+  /// 脚本给的链接先敲一下门：有的脚本只是把 id 拼进固定地址就当「拿到了」，
+  /// 歌没有的时候是 404 或一张错误页 —— 交给播放器就是播放失败、跳歌。
+  /// 只在**确定是坏的**时候返回 false（404/410/5xx、或回的是网页 / JSON）；
+  /// 超时、拿不准的一律放行，交给播放器（慢不等于坏）。
+  @visibleForTesting
+  static Future<bool> linkAlive(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null || !uri.hasScheme) return true;
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
+    try {
+      final req = await client.getUrl(uri).timeout(const Duration(seconds: 3));
+      req.headers.set(HttpHeaders.rangeHeader, 'bytes=0-1');
+      final resp = await req.close().timeout(const Duration(seconds: 3));
+      final code = resp.statusCode;
+      final mime = resp.headers.contentType?.mimeType ?? '';
+      if (code == 404 || code == 410 || code >= 500) return false;
+      if (mime == 'text/html' || mime.contains('json')) return false;
+      return true;
+    } on SocketException catch (e) {
+      // 连接超时算「慢」，放行；域名解析不了 / 连接被拒才算坏（播放器一样连不上）
+      return e.message.toLowerCase().contains('timed out');
+    } catch (_) {
+      return true;
+    } finally {
+      client.close(force: true);
+    }
   }
 
   // ---- 熔断：脚本后端挂了别拖住切歌 ----
@@ -474,7 +522,9 @@ class LxSourceManager {
         sw.stop();
         final ms = sw.elapsedMilliseconds;
         final url = r.url;
-        if (url != null && url.isNotEmpty) _trips.remove('${meta.id}/$platform');
+        if (url != null && url.isNotEmpty) {
+          _trips.remove('${meta.id}/$platform');
+        }
         if (url == null || url.isEmpty) {
           rows.add(
             LxTestRow(

@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../state/song_source.dart';
 import '../../state/song_state.dart';
+import '../unblock/expiring_set.dart';
 import '../unblock/unblock_source.dart';
 import 'kuwo_models.dart';
 
@@ -49,7 +50,9 @@ class KuwoPlaybackService {
   );
 
   final Map<String, _Resolved> _cache = {};
-  final Set<String> _unresolvable = {};
+  final ExpiringSet<String> _unresolvable = ExpiringSet(
+    const Duration(minutes: 10),
+  );
   final Map<String, _Meta> _meta = {};
   final Map<String, Future<String?>> _inflight = {};
 

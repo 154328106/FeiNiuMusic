@@ -156,6 +156,15 @@ class UnblockSourceService {
 
   bool get isUsable => config.value.isUsable;
 
+  /// 免费音源（GD / 按歌名搜）这次到底用不用。
+  ///
+  /// 「保证能播」（2026-11-05 用户要求）：用户关了免费兜底，本意是「只用我配的
+  /// 音源」；可要是聆澜没配好、也没启用任何音源脚本，那就等于什么都没有，一首
+  /// 会员歌都放不出来。这种情况下照样用免费音源，设置页上也会提示。
+  bool get freeFallbackActive =>
+      freeFallbackEnabled.value ||
+      (!config.value.isUsable && !LxSourceManager.instance.hasEnabled);
+
   /// 备份还原后调用：丢掉内存里的旧状态，按存档重新读一遍（否则下次保存会把还原的数据覆盖回去）。
   Future<void> reloadFromStorage() async {
     _loaded = false;
@@ -256,7 +265,7 @@ class UnblockSourceService {
     // GD / 星海这两家 App 自己会问（只限网易云、且开着免费兜底）。告诉 LX 脚本
     // 一声，脚本里同样的后端就不用再打一遍 —— 之前一首没命中的歌，GD 和星海
     // 会被 App 和「网易专用」脚本各问一次。脚本认不认这个字段随它，不认也没坏处。
-    final hostCovers = platform == 'wy' && freeFallbackEnabled.value
+    final hostCovers = platform == 'wy' && freeFallbackActive
         ? const ['gdstudio', 'zddyr']
         : const <String>[];
 
@@ -265,7 +274,11 @@ class UnblockSourceService {
     // 那次脚本调用跳过 —— flutter_js 的运行时不经得起同一首歌连驱两遍。
     var lxTried = false;
     final background = isBackground;
-    if (preferLxEnabled.value && !background) {
+    // 开了「优先」但没有能用的脚本（没导入 / 全关了 / 都不支持这个平台）：
+    // 当没开，直接走内置链，不白等。
+    if (preferLxEnabled.value &&
+        !background &&
+        LxSourceManager.instance.hasEnabledFor(platform)) {
       final url = await LxSourceManager.instance.resolve(
         platform: platform,
         songId: songId,
@@ -321,7 +334,7 @@ class UnblockSourceService {
     //
     // 注意它只认网易云 id：QQ / 酷狗的歌 [FreeUnblockSources.gdStudio] 用不上，
     // 那两家仍然走后面的关键词兜底。
-    final gdNeteaseId = platform == 'wy' && freeFallbackEnabled.value
+    final gdNeteaseId = platform == 'wy' && freeFallbackActive
         ? int.tryParse(songId)
         : null;
     if (gdNeteaseId != null) {
@@ -427,7 +440,7 @@ class UnblockSourceService {
     required String platform,
     required bool background,
   }) async {
-    if (!freeFallbackEnabled.value) return null;
+    if (!freeFallbackActive) return null;
     final query = keyword ?? '';
     // 没有歌名就真没得查了（GD 那条按 id 的路在上面已经走完）。
     if (query.trim().isEmpty) return null;

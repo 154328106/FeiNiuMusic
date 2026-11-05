@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../state/song_source.dart';
 import '../../state/song_state.dart';
+import '../unblock/expiring_set.dart';
 import '../unblock/unblock_source.dart';
 import 'kugou_api_client.dart';
 import 'kugou_models.dart';
@@ -59,7 +60,9 @@ class KugouPlaybackService {
   final Map<String, _ResolvedUrl> _cache = {};
 
   /// 确认拿不到地址的歌。没有这份记录，每次起播都会为它们重跑一整套请求。
-  final Set<String> _unresolvable = {};
+  final ExpiringSet<String> _unresolvable = ExpiringSet(
+    const Duration(minutes: 10),
+  );
 
   /// 取址与兜底要用到的信息，从 SongEntity 里带过来。
   ///
