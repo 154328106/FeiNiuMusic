@@ -81,6 +81,8 @@ class MiniPlayerCollapse {
         _downAccum = 0;
         _upAccum = 0;
         _expandTimer?.cancel(); // 按下去就别回条了
+        // 到底时收着的球：这是「第二下」，这一下停了才回条。
+        if (_heldAtBottom) _releaseOnEnd = true;
       }
     } else if (n is ScrollUpdateNotification) {
       // scrollDelta > 0：内容往上走 = 往下浏览；< 0：往回（往上）滑。
@@ -119,24 +121,49 @@ class MiniPlayerCollapse {
     } else if (n is ScrollEndNotification) {
       _downAccum = 0;
       _upAccum = 0;
-      scheduleExpand(); // 松手且惯性停了才倒计时
+      if (_releaseOnEnd) {
+        // 第二下划完：照常停半秒回条。
+        scheduleExpand();
+      } else if (collapsed.value &&
+          n.metrics.pixels >= n.metrics.maxScrollExtent - 2) {
+        // 滑到最底停下：保持球态，不自动回条 —— 底部的按钮（「第三方音源」的
+        // 保存 / 测试等）要露出来给人点。再划一下屏幕才回来。
+        _expandTimer?.cancel();
+        _heldAtBottom = true;
+        debugPrint('[MiniCollapse] 到底了，保持收起，再划一下才回条');
+      } else {
+        scheduleExpand(); // 松手且惯性停了才倒计时
+      }
     }
     return false;
   }
+
+  /// 滑到最底时收成的球：停下后不自动回条，等下一次手指划动。
+  bool _heldAtBottom = false;
+
+  /// 「下一次划动」已经开始，它停下时回条。
+  bool _releaseOnEnd = false;
 
   /// 往下 / 往回累计滑过多少像素才触发收起 / 展开。
   static const double _threshold = 16;
   double _downAccum = 0;
   double _upAccum = 0;
 
-  /// 停下后约半秒展开回条。
+  /// 停下后约半秒展开回条。外部（页面关掉时）调用也走这里，会顺带解除
+  /// 「到底保持收起」—— 离开页面一定回条。
   void scheduleExpand() {
+    _heldAtBottom = false;
+    _releaseOnEnd = false;
     _expandTimer?.cancel();
     if (!collapsed.value) return;
     _expandTimer = Timer(_expandDelay, () => _set(false));
   }
 
   void _set(bool value) {
+    if (!value) {
+      _heldAtBottom = false;
+      _releaseOnEnd = false;
+    }
     if (collapsed.value == value) return;
     collapsed.value = value;
     final c = _controller;
@@ -162,6 +189,8 @@ class MiniPlayerCollapse {
   /// 开播放页 / 换页等场景直接回到条态（不放动画）。
   void reset() {
     _expandTimer?.cancel();
+    _heldAtBottom = false;
+    _releaseOnEnd = false;
     collapsed.value = false;
     _controller?.value = 0;
     progress.value = 0;

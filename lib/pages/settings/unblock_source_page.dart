@@ -271,7 +271,13 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
     return AppPageScaffold(
       appBar: const AppTopBar(title: '第三方音源'),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        // 底部要把迷你播放条的高度让出来，否则全展开时「保存 / 测试」压在条下面。
+        padding: EdgeInsets.fromLTRB(
+          16,
+          12,
+          16,
+          AppPageScaffold.scrollableBottomPadding(context),
+        ),
         children: [
           _collapsible(
             title: '开关',
