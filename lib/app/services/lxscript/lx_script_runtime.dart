@@ -28,6 +28,11 @@ class LxScriptRuntime {
   /// 脚本名（从 @name 注释尽力解析，仅展示用）。
   String name = '';
 
+  /// 交给脚本的 `lx.currentScriptInfo`（头注释里的元信息 + 原文）。
+  @visibleForTesting
+  static Map<String, String> scriptInfo(String script) =>
+      _LxEngine.scriptInfo(script);
+
   /// 脚本 send(inited) 声明的支持平台代号（如 wy/tx/kg/kw/mg）。
   List<String> get sources => _LxEngine.instance.sourcesOf(_scriptId);
 
@@ -142,7 +147,8 @@ class _LxEngine {
       // 宿主对象、各自的 handlers。脚本原文直接内联（和洛雪注入方式一致），末尾补
       // 换行以终结可能的行尾注释。
       final wrapped =
-          'globalThis.__lxDefineScript(${jsonEncode(scriptId)}, function(lx){\n'
+          'globalThis.__lxDefineScript(${jsonEncode(scriptId)}, '
+          '${jsonEncode(scriptInfo(scriptText))}, function(lx){\n'
           '$scriptText\n});';
       _rt.evaluate(wrapped);
       _startPump();
@@ -318,7 +324,9 @@ class _LxEngine {
       final waiter = id is int ? _invokeWaiters[id] : null;
       if (waiter != null && !waiter.isCompleted) {
         final err = map['err'];
-        if (err != null && err.toString().isNotEmpty) _lastError = err.toString();
+        if (err != null && err.toString().isNotEmpty) {
+          _lastError = err.toString();
+        }
         final url = map['url'];
         waiter.complete(url is String && url.isNotEmpty ? url : null);
       }
@@ -358,17 +366,26 @@ class _LxEngine {
       if (rawHeaders is Map) {
         rawHeaders.forEach((k, v) => headers[k.toString()] = v);
       }
-      dynamic body = options['body'] ?? options['form'] ?? options['data'];
+      final form = options['form'];
+      dynamic body = options['body'] ?? form ?? options['data'];
       debugPrint('[LX] http $method $url');
-      // form 对象按表单编码；其余按原样（字符串/JSON）交给 dio。
+      // 洛雪的 `form` 是表单（x-www-form-urlencoded）。以前原样交给 dio，dio 拿到
+      // Map 默认按 JSON 发，服务端读不到参数。其余按原样（字符串 / JSON）交给 dio。
+      final isForm = form is Map && options['body'] == null;
+      final timeoutMs = options['timeout'];
       final resp = await _dio.request<dynamic>(
         url,
         data: body,
         options: Options(
           method: method,
           headers: headers,
+          contentType: isForm ? Headers.formUrlEncodedContentType : null,
           responseType: ResponseType.plain,
           followRedirects: options['follow_max'] != 0,
+          // 脚本自己给的超时（毫秒）：有的脚本靠它快速放弃死站
+          receiveTimeout: timeoutMs is num && timeoutMs > 0
+              ? Duration(milliseconds: timeoutMs.toInt())
+              : null,
         ),
       );
       // lx 约定 resp.body：是 JSON 就给对象，否则给字符串。
@@ -419,6 +436,24 @@ class _LxEngine {
     return const {};
   }
 
+  /// 洛雪的 `lx.currentScriptInfo`：从脚本头注释里取 @name / @description /
+  /// @version / @author / @homepage，再附上脚本原文。
+  static Map<String, String> scriptInfo(String script) {
+    String tag(String name) =>
+        RegExp(
+          '@$name[ \\t]+([^\\r\\n*]+)',
+        ).firstMatch(script)?.group(1)?.trim() ??
+        '';
+    return {
+      'name': tag('name'),
+      'description': tag('description'),
+      'version': tag('version'),
+      'author': tag('author'),
+      'homepage': tag('homepage'),
+      'rawScript': script,
+    };
+  }
+
   static String? parseName(String script) {
     final m = RegExp(r'@name\s+([^\r\n*]+)').firstMatch(script);
     return m?.group(1)?.trim();
@@ -438,12 +473,200 @@ class _LxEngine {
     request: 'request', inited: 'inited', updateAlert: 'updateAlert',
     updateMusicUrl: 'updateMusicUrl'
   };
-  function makeLx(scriptId){
+
+  // ---- 洛雪 lx.utils 兼容层（2026-11-05）----
+  // QuickJS / JavaScriptCore 没有 Node 的 Buffer / crypto，也没有 btoa / atob。
+  // 以前 utils.crypto 是空对象、buffer 是假的，用到 md5 / base64 的脚本一调就崩。
+  // 照洛雪移动版的接口补上（纯 JS）：buffer.from / bufToString（utf8、hex、
+  // base64、binary）、crypto.md5 / randomBytes。aesEncrypt / rsaEncrypt / zlib
+  // 太大没做，调用时给出明确的报错，测试结果里看得到原因。
+  function utf8Encode(str){
+    var out = [];
+    for (var i = 0; i < str.length; i++) {
+      var c = str.charCodeAt(i);
+      if (c >= 0xd800 && c < 0xdc00 && i + 1 < str.length) {
+        var c2 = str.charCodeAt(i + 1);
+        if (c2 >= 0xdc00 && c2 < 0xe000) { c = 0x10000 + ((c - 0xd800) << 10) + (c2 - 0xdc00); i++; }
+      }
+      if (c < 0x80) out.push(c);
+      else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+      else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+      else out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    }
+    return out;
+  }
+  function utf8Decode(b){
+    var s = '', i = 0;
+    while (i < b.length) {
+      var c = b[i++];
+      if (c < 0x80) s += String.fromCharCode(c);
+      else if (c < 0xe0) s += String.fromCharCode(((c & 31) << 6) | (b[i++] & 63));
+      else if (c < 0xf0) { var x1 = b[i++] & 63, x2 = b[i++] & 63; s += String.fromCharCode(((c & 15) << 12) | (x1 << 6) | x2); }
+      else {
+        var y1 = b[i++] & 63, y2 = b[i++] & 63, y3 = b[i++] & 63;
+        var cp = (((c & 7) << 18) | (y1 << 12) | (y2 << 6) | y3) - 0x10000;
+        s += String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 1023));
+      }
+    }
+    return s;
+  }
+  var B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  function b64Encode(b){
+    var s = '', i = 0;
+    for (; i + 2 < b.length; i += 3) {
+      var n = (b[i] << 16) | (b[i + 1] << 8) | b[i + 2];
+      s += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + B64[(n >> 6) & 63] + B64[n & 63];
+    }
+    var r = b.length - i;
+    if (r === 1) { var n1 = b[i] << 16; s += B64[(n1 >> 18) & 63] + B64[(n1 >> 12) & 63] + '=='; }
+    else if (r === 2) { var n2 = (b[i] << 16) | (b[i + 1] << 8); s += B64[(n2 >> 18) & 63] + B64[(n2 >> 12) & 63] + B64[(n2 >> 6) & 63] + '='; }
+    return s;
+  }
+  function b64Decode(str){
+    var t = String(str).replace(/-/g, '+').replace(/_/g, '/').replace(/[^A-Za-z0-9+\/]/g, '');
+    var out = [], buf = 0, bits = 0;
+    for (var i = 0; i < t.length; i++) {
+      buf = ((buf << 6) | B64.indexOf(t.charAt(i))) & 0xffffff;
+      bits += 6;
+      if (bits >= 8) { bits -= 8; out.push((buf >> bits) & 255); }
+    }
+    return out;
+  }
+  function hexEncode(b){
+    var s = '';
+    for (var i = 0; i < b.length; i++) s += (b[i] < 16 ? '0' : '') + b[i].toString(16);
+    return s;
+  }
+  function hexDecode(str){
+    var out = [];
+    for (var i = 0; i + 1 < str.length; i += 2) out.push(parseInt(str.substr(i, 2), 16) & 255);
+    return out;
+  }
+  function normEnc(enc){ return String(enc || 'utf8').toLowerCase().replace('-', ''); }
+  function toBytes(v, enc){
+    if (v == null) return [];
+    if (typeof v === 'string') {
+      var e = normEnc(enc);
+      if (e === 'hex') return hexDecode(v);
+      if (e === 'base64') return b64Decode(v);
+      if (e === 'binary' || e === 'latin1' || e === 'ascii') {
+        var a = [];
+        for (var i = 0; i < v.length; i++) a.push(v.charCodeAt(i) & 255);
+        return a;
+      }
+      return utf8Encode(v);
+    }
+    if (typeof v.length === 'number') {
+      var o = [];
+      for (var j = 0; j < v.length; j++) o.push(v[j] & 255);
+      return o;
+    }
+    return utf8Encode(String(v));
+  }
+  function bufToString(b, enc){
+    var bytes = toBytes(b), e = normEnc(enc);
+    if (e === 'hex') return hexEncode(bytes);
+    if (e === 'base64') return b64Encode(bytes);
+    if (e === 'binary' || e === 'latin1' || e === 'ascii') {
+      var s = '';
+      for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+      return s;
+    }
+    return utf8Decode(bytes);
+  }
+  // 洛雪给的是 Node Buffer，脚本常写 buffer.from(x).toString('base64')
+  function makeBuf(bytes){
+    var u = new Uint8Array(bytes);
+    u.toString = function(enc){ return bufToString(u, enc); };
+    return u;
+  }
+  var MD5_K = [
+    0xd76aa478,0xe8c7b756,0x242070db,0xc1bdceee,0xf57c0faf,0x4787c62a,0xa8304613,0xfd469501,
+    0x698098d8,0x8b44f7af,0xffff5bb1,0x895cd7be,0x6b901122,0xfd987193,0xa679438e,0x49b40821,
+    0xf61e2562,0xc040b340,0x265e5a51,0xe9b6c7aa,0xd62f105d,0x02441453,0xd8a1e681,0xe7d3fbc8,
+    0x21e1cde6,0xc33707d6,0xf4d50d87,0x455a14ed,0xa9e3e905,0xfcefa3f8,0x676f02d9,0x8d2a4c8a,
+    0xfffa3942,0x8771f681,0x6d9d6122,0xfde5380c,0xa4beea44,0x4bdecfa9,0xf6bb4b60,0xbebfbc70,
+    0x289b7ec6,0xeaa127fa,0xd4ef3085,0x04881d05,0xd9d4d039,0xe6db99e5,0x1fa27cf8,0xc4ac5665,
+    0xf4292244,0x432aff97,0xab9423a7,0xfc93a039,0x655b59c3,0x8f0ccc92,0xffeff47d,0x85845dd1,
+    0x6fa87e4f,0xfe2ce6e0,0xa3014314,0x4e0811a1,0xf7537e82,0xbd3af235,0x2ad7d2bb,0xeb86d391
+  ];
+  var MD5_S = [7,12,17,22,7,12,17,22,7,12,17,22,7,12,17,22,5,9,14,20,5,9,14,20,5,9,14,20,5,9,14,20,
+    4,11,16,23,4,11,16,23,4,11,16,23,4,11,16,23,6,10,15,21,6,10,15,21,6,10,15,21,6,10,15,21];
+  function md5Hex(input){
+    var msg = toBytes(input);
+    var len = msg.length;
+    msg.push(0x80);
+    while (msg.length % 64 !== 56) msg.push(0);
+    var lo = (len * 8) >>> 0, hi = Math.floor(len / 0x20000000) >>> 0;
+    for (var k = 0; k < 4; k++) msg.push((lo >>> (8 * k)) & 255);
+    for (var k2 = 0; k2 < 4; k2++) msg.push((hi >>> (8 * k2)) & 255);
+    var a0 = 0x67452301, b0 = 0xefcdab89 | 0, c0 = 0x98badcfe | 0, d0 = 0x10325476;
+    for (var off = 0; off < msg.length; off += 64) {
+      var M = [];
+      for (var w = 0; w < 16; w++) {
+        var p = off + w * 4;
+        M[w] = msg[p] | (msg[p + 1] << 8) | (msg[p + 2] << 16) | (msg[p + 3] << 24);
+      }
+      var A = a0, B = b0, C = c0, D = d0;
+      for (var j = 0; j < 64; j++) {
+        var F, g;
+        if (j < 16) { F = (B & C) | (~B & D); g = j; }
+        else if (j < 32) { F = (D & B) | (~D & C); g = (5 * j + 1) % 16; }
+        else if (j < 48) { F = B ^ C ^ D; g = (3 * j + 5) % 16; }
+        else { F = C ^ (B | ~D); g = (7 * j) % 16; }
+        F = (F + A + MD5_K[j] + M[g]) | 0;
+        A = D; D = C; C = B;
+        B = (B + ((F << MD5_S[j]) | (F >>> (32 - MD5_S[j])))) | 0;
+      }
+      a0 = (a0 + A) | 0; b0 = (b0 + B) | 0; c0 = (c0 + C) | 0; d0 = (d0 + D) | 0;
+    }
+    var out = '', words = [a0, b0, c0, d0];
+    for (var q = 0; q < 4; q++) {
+      for (var z = 0; z < 4; z++) {
+        var x = (words[q] >>> (8 * z)) & 255;
+        out += (x < 16 ? '0' : '') + x.toString(16);
+      }
+    }
+    return out;
+  }
+  function unsupported(name){
+    return function(){ throw new Error('App 暂不支持 lx.utils.' + name); };
+  }
+  var LX_UTILS = {
+    buffer: {
+      from: function(v, enc){ return makeBuf(toBytes(v, enc)); },
+      bufToString: function(b, enc){ return bufToString(b, enc); }
+    },
+    crypto: {
+      md5: function(v){ return md5Hex(v); },
+      randomBytes: function(n){
+        var a = [];
+        for (var i = 0; i < n; i++) a.push(Math.floor(Math.random() * 256));
+        return makeBuf(a);
+      },
+      aesEncrypt: unsupported('crypto.aesEncrypt'),
+      rsaEncrypt: unsupported('crypto.rsaEncrypt')
+    },
+    zlib: {
+      inflate: unsupported('zlib.inflate'),
+      deflate: unsupported('zlib.deflate')
+    }
+  };
+  globalThis.__lxUtils = LX_UTILS;
+  if (typeof globalThis.btoa !== 'function') {
+    globalThis.btoa = function(s){ return b64Encode(toBytes(String(s), 'binary')); };
+  }
+  if (typeof globalThis.atob !== 'function') {
+    globalThis.atob = function(s){ return bufToString(b64Decode(s), 'binary'); };
+  }
+  function makeLx(scriptId, info){
     var handlers = {};
     var obj = {
       EVENT_NAMES: EVENT_NAMES,
       env: 'mobile',
       version: '2.0.0',
+      // 洛雪会给脚本自己的元信息；有的脚本读 .version 做校验，没有就加载即崩
+      currentScriptInfo: info || { name: '', description: '', version: '', author: '', homepage: '', rawScript: '' },
       on: function(name, fn){ handlers[name] = fn; },
       send: function(name, data){
         if (name === EVENT_NAMES.inited) {
@@ -457,19 +680,14 @@ class _LxEngine {
         try { sendMessage('lx_http', JSON.stringify({ id: id, url: url, options: options || {} })); }
         catch(e){ var cb = globalThis.__lxHttpCbs[id]; delete globalThis.__lxHttpCbs[id]; cb(e, null); }
       },
-      utils: {
-        buffer: {
-          from: function(v, enc){ return { __raw: v, enc: enc || 'utf8' }; },
-          bufToString: function(b, enc){ return (b && b.__raw != null) ? String(b.__raw) : String(b); }
-        },
-        crypto: {}
-      }
+      utils: LX_UTILS
     };
     globalThis.__lxScripts[scriptId] = { handlers: handlers, lx: obj };
     return obj;
   }
-  globalThis.__lxDefineScript = function(scriptId, body){
-    var lx = makeLx(scriptId);
+  globalThis.__lxDefineScript = function(scriptId, info, body){
+    if (typeof info === 'function') { body = info; info = null; }
+    var lx = makeLx(scriptId, info);
     // 既以参数传入，又设为全局：很多脚本从 globalThis.lx 解构取 request/on/
     // EVENT_NAMES 等。加载顺序执行、取址有串行闸，任一刻全局 lx 只属于当前脚本，
     // 隔离仍靠各自的 handlers，不会退回「只最后一个能用」。
@@ -482,7 +700,8 @@ class _LxEngine {
     var cb = globalThis.__lxHttpCbs[id];
     if (!cb) return;
     delete globalThis.__lxHttpCbs[id];
-    try { cb(err, resp); } catch(e){}
+    // 洛雪的回调是 (err, resp, body)，有的脚本只读第三个参数
+    try { cb(err, resp, resp ? resp.body : null); } catch(e){}
   };
   globalThis.__lxInvoke = function(scriptId, reqId, req){
     var s = globalThis.__lxScripts[scriptId];
