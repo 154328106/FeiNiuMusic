@@ -73,6 +73,18 @@ jobs:
           codesign -dv "$APP_PATH" 2>&1 || echo "（未签名，符合预期）"
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
+          # 主程序先 ad-hoc 签一下，只为把签名 identifier 钉成 bundle id。
+          # 全裸的二进制交给巨魔 / 签名工具时，identifier 会默认取文件名 "Runner"，
+          # 而系统「正在播放」（灵动岛 / 锁屏）按签名 identifier 找 app，
+          # 对不上 com.melodic.music → 点灵动岛回不到 app（爱思签用 bundle id，所以正常）。
+          # 已有签名时巨魔沿用原 identifier；不带 entitlements，行为跟原来一样。
+          # 拷出来单独签，免得 codesign 把整个 .app 当 bundle 签而去校验未签的 Frameworks。
+          BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw "$APP_PATH/Info.plist")
+          EXE=$(plutil -extract CFBundleExecutable raw "$APP_PATH/Info.plist")
+          cp "Payload/Runner.app/$EXE" "/tmp/$EXE"
+          codesign -f -s - -i "$BUNDLE_ID" --timestamp=none "/tmp/$EXE"
+          cp "/tmp/$EXE" "Payload/Runner.app/$EXE"
+          codesign -dv "Payload/Runner.app/$EXE" 2>&1 | grep -E "Identifier|Signature" || true
           ditto -c -k --sequesterRsrc --keepParent Payload "Melodic-v${VERSION}-unsigned.ipa"
           ls -lh "Melodic-v${VERSION}-unsigned.ipa"
 
