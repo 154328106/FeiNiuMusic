@@ -75,7 +75,7 @@ void main() {
     }
   }
 
-  testWidgets('滑到最底停下：不自动回条；再划一下、停下才回来', (tester) async {
+  testWidgets('滑到最底停下：不自动回条；再划一下才回来', (tester) async {
     await pump(tester);
     final m = MiniPlayerCollapse.instance..reset();
     collapse(m);
@@ -90,12 +90,31 @@ void main() {
     expect(m.collapsed.value, isFalse);
   });
 
-  testWidgets('页面中间停下：照旧半秒回条', (tester) async {
+  testWidgets('页面中间停下：也一直收着，第二下划完才回来', (tester) async {
     await pump(tester);
     final m = MiniPlayerCollapse.instance..reset();
     collapse(m);
     m.handle(end(120), pageHasMini: true);
-    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump(const Duration(seconds: 2));
+    expect(m.collapsed.value, isTrue, reason: '停在中间也不自己回来');
+
+    // 第二下：接着往下浏览的一划，划完就回条
+    m.handle(start(120), pageHasMini: true);
+    m.handle(update(10, -10), pageHasMini: true);
+    expect(m.collapsed.value, isTrue, reason: '第二下划的途中还收着');
+    m.handle(end(140), pageHasMini: true);
+    expect(m.collapsed.value, isFalse);
+  });
+
+  testWidgets('往回滑：不用等第二下，立刻回条', (tester) async {
+    await pump(tester);
+    final m = MiniPlayerCollapse.instance..reset();
+    collapse(m);
+    m.handle(end(120), pageHasMini: true);
+    m.handle(start(120), pageHasMini: true);
+    for (var i = 0; i < 3; i++) {
+      m.handle(update(-10, 10), pageHasMini: true);
+    }
     expect(m.collapsed.value, isFalse);
   });
 

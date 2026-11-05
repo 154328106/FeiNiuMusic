@@ -5,10 +5,12 @@ import 'package:flutter/material.dart';
 import '../services/player_service.dart';
 import 'settings_state.dart';
 
-/// 迷你播放器「滚动时收成球、停下回条」的全局状态。
+/// 迷你播放器「往下浏览收成球、第二下划动才回条」的全局状态。
 ///
-/// 页面一滚，迷你播放条从左往右下连续收窄成一个圆，落到底部导航条同一行的右侧，
-/// 导航条同时把右边让出来；停下约半秒再展开回条。
+/// 页面一往下浏览，迷你播放条从左往右下连续收窄成一个圆，落到底部导航条同一行
+/// 的右侧，导航条同时把右边让出来。停下后**一直收着**（2026-11-05 起；以前是停
+/// 半秒自动回条，会挡住底部按钮和列表里正要点的歌），直到下一次手指划动划完，
+/// 或者往回滑，才展开回条；离开页面也会回条。
 ///
 /// 迷你条（在各页脚手架里）和导航条（在外壳里）不在同一棵子树，所以用一个全局
 /// [progress] 驱动：两边都读它，同一帧取同一个值，伸缩完全同步。进度由
@@ -81,8 +83,8 @@ class MiniPlayerCollapse {
         _downAccum = 0;
         _upAccum = 0;
         _expandTimer?.cancel(); // 按下去就别回条了
-        // 到底时收着的球：这是「第二下」，这一下停了才回条。
-        if (_heldAtBottom) _releaseOnEnd = true;
+        // 收着的球：这是「第二下」，这一下划完就回条。
+        if (_held) _releaseOnEnd = true;
       }
     } else if (n is ScrollUpdateNotification) {
       // scrollDelta > 0：内容往上走 = 往下浏览；< 0：往回（往上）滑。
@@ -122,24 +124,22 @@ class MiniPlayerCollapse {
       _downAccum = 0;
       _upAccum = 0;
       if (_releaseOnEnd) {
-        // 第二下划完：照常停半秒回条。
-        scheduleExpand();
-      } else if (collapsed.value &&
-          n.metrics.pixels >= n.metrics.maxScrollExtent - 2) {
-        // 滑到最底停下：保持球态，不自动回条 —— 底部的按钮（「第三方音源」的
-        // 保存 / 测试等）要露出来给人点。再划一下屏幕才回来。
+        // 第二下划完：回条。
+        _set(false);
+      } else if (collapsed.value) {
+        // 2026-11-05 用户要的「二次」：第一下往下浏览收成球，停在哪都一直收着，
+        // 不再停半秒自动回条（会挡住底部的按钮 / 列表里正要点的歌）；等第二下
+        // 划动划完才回来。往回滑（上面 delta < 0 那支）照旧立刻回条。
         _expandTimer?.cancel();
-        _heldAtBottom = true;
-        debugPrint('[MiniCollapse] 到底了，保持收起，再划一下才回条');
-      } else {
-        scheduleExpand(); // 松手且惯性停了才倒计时
+        _held = true;
+        debugPrint('[MiniCollapse] 保持收起，再划一下才回条');
       }
     }
     return false;
   }
 
-  /// 滑到最底时收成的球：停下后不自动回条，等下一次手指划动。
-  bool _heldAtBottom = false;
+  /// 第一下收成的球：停下后不自动回条，等下一次手指划动。
+  bool _held = false;
 
   /// 「下一次划动」已经开始，它停下时回条。
   bool _releaseOnEnd = false;
@@ -152,7 +152,7 @@ class MiniPlayerCollapse {
   /// 停下后约半秒展开回条。外部（页面关掉时）调用也走这里，会顺带解除
   /// 「到底保持收起」—— 离开页面一定回条。
   void scheduleExpand() {
-    _heldAtBottom = false;
+    _held = false;
     _releaseOnEnd = false;
     _expandTimer?.cancel();
     if (!collapsed.value) return;
@@ -161,7 +161,7 @@ class MiniPlayerCollapse {
 
   void _set(bool value) {
     if (!value) {
-      _heldAtBottom = false;
+      _held = false;
       _releaseOnEnd = false;
     }
     if (collapsed.value == value) return;
@@ -189,7 +189,7 @@ class MiniPlayerCollapse {
   /// 开播放页 / 换页等场景直接回到条态（不放动画）。
   void reset() {
     _expandTimer?.cancel();
-    _heldAtBottom = false;
+    _held = false;
     _releaseOnEnd = false;
     collapsed.value = false;
     _controller?.value = 0;
