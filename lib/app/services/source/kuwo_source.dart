@@ -6,6 +6,7 @@ import '../kuwo/kuwo_api_client.dart';
 import '../kuwo/kuwo_models.dart';
 import '../kuwo/kuwo_playback_service.dart';
 import '../played_song_cache.dart';
+import 'artist_cover_cache.dart';
 import 'music_source.dart';
 
 /// 酷我音乐源（MVP：搜索 + 榜单 + 播放）。
@@ -191,8 +192,13 @@ class KuwoSource implements MusicSource {
     '刘德华',
   ];
 
-  // 歌手名 → 已拿到的封面。只存非空：找到的不会再丢，没找到的下次重进再补。
-  static final Map<String, String> _artistCoverCache = {};
+  // 歌手名 → 头像，存本地；第一次最多等 1.2 秒，剩下的后台补（见 ArtistCoverCache）。
+  // 并发 6：一次并发 20 个会把 kuwo r.s 打到丢请求，表现为封面时有时无。
+  late final ArtistCoverCache _artistCovers = ArtistCoverCache(
+    'kuwo.artistCovers.v1',
+    _firstCover,
+    concurrency: 6,
+  );
 
   Future<String?> _firstCover(String name) async {
     try {
@@ -207,23 +213,10 @@ class KuwoSource implements MusicSource {
   }
 
   Future<List<SourcePlaylist>> artists({int limit = 30}) async {
-    final missing = [
-      for (final a in _hotArtists)
-        if (!_artistCoverCache.containsKey(a)) a,
-    ];
-    // 限并发：每批 4 个。一次并发 20 个会把 kuwo r.s 打到丢请求，表现为封面
-    // 时有时无、重进就变。配合上面的缓存，封面只会越补越全。
-    for (var i = 0; i < missing.length; i += 4) {
-      final batch = missing.skip(i).take(4).toList();
-      final covers = await Future.wait([for (final a in batch) _firstCover(a)]);
-      for (var j = 0; j < batch.length; j++) {
-        final c = covers[j];
-        if (c != null && c.isNotEmpty) _artistCoverCache[batch[j]] = c;
-      }
-    }
+    final covers = await _artistCovers.covers(_hotArtists);
     return [
       for (final a in _hotArtists)
-        SourcePlaylist(id: 'kwa:$a', name: a, coverId: _artistCoverCache[a]),
+        SourcePlaylist(id: 'kwa:$a', name: a, coverId: covers[a]),
     ];
   }
 

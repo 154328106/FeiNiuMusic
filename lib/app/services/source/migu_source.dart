@@ -6,6 +6,7 @@ import '../migu/migu_api_client.dart';
 import '../migu/migu_models.dart';
 import '../migu/migu_playback_service.dart';
 import '../played_song_cache.dart';
+import 'artist_cover_cache.dart';
 import 'music_source.dart';
 
 /// 咪咕音乐源（搜索 + 首页热门 + 歌手 + 播放 + 扫码登录）。
@@ -212,8 +213,11 @@ class MiguSource implements MusicSource {
     '刘德华',
   ];
 
-  // 歌手名 → 已拿到的封面。只存非空：找到的不会再丢。
-  static final Map<String, String> _artistCoverCache = {};
+  // 歌手名 → 头像，存本地；第一次最多等 1.2 秒，剩下的后台补（见 ArtistCoverCache）。
+  late final ArtistCoverCache _artistCovers = ArtistCoverCache(
+    'migu.artistCovers.v1',
+    _firstCover,
+  );
 
   Future<String?> _firstCover(String name) async {
     try {
@@ -228,22 +232,10 @@ class MiguSource implements MusicSource {
   }
 
   Future<List<SourcePlaylist>> artists({int limit = 30}) async {
-    final missing = [
-      for (final a in _hotArtists)
-        if (!_artistCoverCache.containsKey(a)) a,
-    ];
-    // 限并发：每批 4 个，避免并发过多被限流。配合缓存，封面只会越补越全。
-    for (var i = 0; i < missing.length; i += 4) {
-      final batch = missing.skip(i).take(4).toList();
-      final covers = await Future.wait([for (final a in batch) _firstCover(a)]);
-      for (var j = 0; j < batch.length; j++) {
-        final c = covers[j];
-        if (c != null && c.isNotEmpty) _artistCoverCache[batch[j]] = c;
-      }
-    }
+    final covers = await _artistCovers.covers(_hotArtists);
     return [
       for (final a in _hotArtists)
-        SourcePlaylist(id: 'mga:$a', name: a, coverId: _artistCoverCache[a]),
+        SourcePlaylist(id: 'mga:$a', name: a, coverId: covers[a]),
     ];
   }
 
