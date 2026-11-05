@@ -54,7 +54,9 @@ class KuwoSource implements MusicSource {
         // （r.s，带封面）。为避免首页全是一个人，一次搜多位歌手混合打乱。
         var songs = await _api.rank(bangId: 93, limit: 30);
         if (songs.isEmpty) songs = await _hotMix();
-        final mapped = [for (final s in songs) KuwoPlaybackService.toSongEntity(s)];
+        final mapped = [
+          for (final s in songs) KuwoPlaybackService.toSongEntity(s),
+        ];
         if (mapped.isNotEmpty) _rankCache = mapped;
         return mapped;
       } catch (e) {
@@ -69,8 +71,18 @@ class KuwoSource implements MusicSource {
   /// 热门混合：一次搜多位热门歌手（每天轮换窗口），合并去重打乱，充当首页流。
   Future<List<KuwoSong>> _hotMix() async {
     const pool = [
-      '周杰伦', '林俊杰', '邓紫棋', '薛之谦', '陈奕迅', '毛不易',
-      '李荣浩', '张学友', '王菲', '李健', '赵雷', '陈粒',
+      '周杰伦',
+      '林俊杰',
+      '邓紫棋',
+      '薛之谦',
+      '陈奕迅',
+      '毛不易',
+      '李荣浩',
+      '张学友',
+      '王菲',
+      '李健',
+      '赵雷',
+      '陈粒',
     ];
     final day = DateTime.now().day;
     final picks = [for (var i = 0; i < 5; i++) pool[(day + i) % pool.length]];
@@ -122,16 +134,61 @@ class KuwoSource implements MusicSource {
     }
   }
 
+  /// 推荐歌单（首页「歌单」入口）。id 形如 kwp:<歌单 id>。
   @override
-  Future<List<SourcePlaylist>> playlists({int limit = 10}) async => const [];
+  Future<List<SourcePlaylist>> playlists({int limit = 10}) async {
+    final list = await _api.hotPlaylists(limit: limit < 30 ? 30 : limit);
+    return [
+      for (final p in list.take(limit))
+        SourcePlaylist(id: 'kwp:${p.id}', name: p.name, coverId: p.pic),
+    ];
+  }
+
+  /// 不往排行榜里放的：学习机榜、儿童故事（是有声书，不是歌）。
+  static const Set<String> _skipCharts = {'340', '344'};
+
+  /// 排行榜（首页「排行榜」入口）。id 形如 kwt:<榜单 id>。目录拿不到时至少
+  /// 给几个常用榜。
+  Future<List<SourcePlaylist>> toplists() async {
+    var charts = await _api.rankCatalog();
+    if (charts.isEmpty) {
+      charts = const [
+        (id: '93', name: '酷我飙升榜', pic: null),
+        (id: '17', name: '酷我新歌榜', pic: null),
+        (id: '16', name: '酷我热歌榜', pic: null),
+        (id: '158', name: '抖音热歌榜', pic: null),
+      ];
+    }
+    return [
+      for (final c in charts)
+        if (!_skipCharts.contains(c.id))
+          SourcePlaylist(id: 'kwt:${c.id}', name: c.name, coverId: c.pic),
+    ];
+  }
 
   /// 热门歌手（首页「歌手」入口用）。酷我没有免签名的热门歌手榜，用一组常见
   /// 歌手充当；点进去是该歌手的歌（r.s 搜索，带封面）。
   static const List<String> _hotArtists = [
-    '周杰伦', '林俊杰', '邓紫棋', '薛之谦', '陈奕迅', '毛不易',
-    '李荣浩', '张学友', '王菲', '李健', '赵雷', '陈粒',
-    '周深', '张杰', '汪苏泷', '许嵩', '李宇春', '华晨宇',
-    '邓丽君', '刘德华',
+    '周杰伦',
+    '林俊杰',
+    '邓紫棋',
+    '薛之谦',
+    '陈奕迅',
+    '毛不易',
+    '李荣浩',
+    '张学友',
+    '王菲',
+    '李健',
+    '赵雷',
+    '陈粒',
+    '周深',
+    '张杰',
+    '汪苏泷',
+    '许嵩',
+    '李宇春',
+    '华晨宇',
+    '邓丽君',
+    '刘德华',
   ];
 
   // 歌手名 → 已拿到的封面。只存非空：找到的不会再丢，没找到的下次重进再补。
@@ -182,6 +239,14 @@ class KuwoSource implements MusicSource {
         debugPrint('[KuwoSource] artist songs error: $e');
         return const [];
       }
+    }
+    // 榜单：kwt:<榜单 id>；歌单：kwp:<歌单 id>。
+    if (playlistId.startsWith('kwt:') || playlistId.startsWith('kwp:')) {
+      final id = playlistId.substring(4);
+      final songs = playlistId.startsWith('kwt:')
+          ? await _api.bangSongs(id, limit: 100)
+          : await _api.playlistSongs(id, limit: 100);
+      return [for (final s in songs) KuwoPlaybackService.toSongEntity(s)];
     }
     return const [];
   }

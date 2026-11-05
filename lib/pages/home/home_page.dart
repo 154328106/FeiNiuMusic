@@ -532,6 +532,8 @@ class _HomePageState extends State<HomePage>
         charts = await src.toplists();
       } else if (src is MiguSource) {
         charts = await src.toplists();
+      } else if (src is KuwoSource) {
+        charts = await src.toplists();
       } else {
         charts = await src.playlists(limit: 1);
       }
@@ -967,12 +969,29 @@ class _HomePageState extends State<HomePage>
     if (_source.id == 'kuwo') {
       final source = KuwoSource.instance;
       return [
+        // 2026-11-05 补上排行榜（32 个榜）和推荐歌单：酷我 www 接口被挡后改走
+        // qukudata / kbangserver / wapi classify / nplserver，都不用登录。
+        HomeShortcutItem(
+          icon: Icons.leaderboard_rounded,
+          label: '排行榜',
+          accent: const Color(0xFFEC4899),
+          onTap: () => _openSourcePlaylists('排行榜', source.toplists),
+        ),
         // 「搜索」格换成「歌手」：点进去是热门歌手列表，再点就是该歌手的歌。
         HomeShortcutItem(
           icon: Icons.people_rounded,
           label: '歌手',
           accent: const Color(0xFF14B8A6),
           onTap: () => _openSourcePlaylists('热门歌手', source.artists),
+        ),
+        HomeShortcutItem(
+          icon: Icons.queue_music_rounded,
+          label: '歌单',
+          accent: const Color(0xFF3B82F6),
+          onTap: () => _openSourcePlaylists(
+            '${source.label}歌单',
+            () => source.playlists(limit: 30),
+          ),
         ),
         _localShortcut(),
       ];
@@ -991,6 +1010,15 @@ class _HomePageState extends State<HomePage>
           label: '歌手',
           accent: const Color(0xFF14B8A6),
           onTap: () => _openSourcePlaylists('热门歌手', source.artists),
+        ),
+        HomeShortcutItem(
+          icon: Icons.queue_music_rounded,
+          label: '歌单',
+          accent: const Color(0xFF3B82F6),
+          onTap: () => _openSourcePlaylists(
+            '${source.label}歌单',
+            () => source.playlists(limit: 30),
+          ),
         ),
         _localShortcut(),
       ];

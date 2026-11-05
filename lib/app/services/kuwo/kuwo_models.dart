@@ -23,12 +23,21 @@ class KuwoSong {
   final String? coverUrl;
   final bool isVip;
 
+  KuwoSong withCover(String url) => KuwoSong(
+    rid: rid,
+    name: name,
+    artists: artists,
+    album: album,
+    durationMs: durationMs,
+    coverUrl: url,
+    isVip: isVip,
+  );
+
   /// 从酷我 www 接口的一条记录解析（搜索 data.list / 榜单 data.musicList 同构）。
   static KuwoSong? fromJson(Map<String, dynamic> j) {
-    final rid =
-        (j['rid'] ?? j['musicrid'] ?? j['MUSICRID'] ?? j['id'] ?? '')
-            .toString()
-            .replaceAll(RegExp(r'^MUSIC_'), '');
+    final rid = (j['rid'] ?? j['musicrid'] ?? j['MUSICRID'] ?? j['id'] ?? '')
+        .toString()
+        .replaceAll(RegExp(r'^MUSIC_'), '');
     if (rid.isEmpty || rid == 'null') return null;
     final durSec = j['duration'] is int
         ? j['duration'] as int

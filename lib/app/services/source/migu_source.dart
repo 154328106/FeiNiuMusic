@@ -67,7 +67,9 @@ class MiguSource implements MusicSource {
   /// 热门混合：一次搜多位热门歌手（每天轮换窗口），合并去重打乱，充当首页流。
   Future<List<MiguSong>> _hotMix() async {
     final day = DateTime.now().day;
-    final picks = [for (var i = 0; i < 5; i++) _hotArtists[(day + i) % _hotArtists.length]];
+    final picks = [
+      for (var i = 0; i < 5; i++) _hotArtists[(day + i) % _hotArtists.length],
+    ];
     final results = await Future.wait([
       for (final a in picks) _api.search(a, limit: 10),
     ]);
@@ -115,37 +117,99 @@ class MiguSource implements MusicSource {
     }
   }
 
+  /// 歌单广场（首页「歌单」入口）。id 形如 mgp:<歌单 id>。
   @override
-  Future<List<SourcePlaylist>> playlists({int limit = 10}) async => const [];
+  Future<List<SourcePlaylist>> playlists({int limit = 10}) async {
+    final list = await _api.plazaPlaylists();
+    return [
+      for (final p in list.take(limit))
+        SourcePlaylist(id: 'mgp:${p.id}', name: p.name, coverId: p.pic),
+    ];
+  }
 
-  /// 咪咕排行榜（首页「排行榜」入口）。columnId 实测可用的三个尖叫榜。
-  static const List<({String id, String name})> _charts = [
-    (id: '27186466', name: '尖叫热歌榜'),
+  /// 官方目录之外、实测也能拿歌的榜（2026-11-05 逐个试 columnId 试出来的）。
+  static const List<({String id, String name})> _extraCharts = [
+    (id: '23189399', name: '内地榜'),
+    (id: '23189800', name: '港台榜'),
+    (id: '76557036', name: '彩铃分贝榜'),
+  ];
+
+  /// 官方目录拿不到时的兜底（目录里的 9 个 + 上面 3 个）。
+  static const List<({String id, String name})> _fallbackCharts = [
+    (id: '83048887', name: '全网热歌榜'),
+    (id: '83049014', name: '抖音热歌榜'),
+    (id: '83048867', name: '免费热歌榜'),
+    (id: '83049056', name: '收藏人气榜'),
+    (id: '76557745', name: '会员臻爱榜'),
+    (id: '83176390', name: '国风热歌榜'),
     (id: '27553319', name: '尖叫新歌榜'),
+    (id: '27186466', name: '尖叫热歌榜'),
     (id: '27553408', name: '尖叫原创榜'),
   ];
 
-  /// 榜单封面取各榜第一首歌的封面。
+  /// 咪咕排行榜（首页「排行榜」入口）：官方榜单目录（带封面）+ 3 个目录外的榜，
+  /// 原来只有尖叫三榜。目录外的榜没封面，取榜里第一首歌的封面。
   Future<List<SourcePlaylist>> toplists({int limit = 10}) async {
-    final covers = await Future.wait([
-      for (final c in _charts) _api.chart(c.id, limit: 1),
+    final catalog = await _api.rankCatalog();
+    final base = catalog.isNotEmpty
+        ? catalog
+        : [
+            for (final c in _fallbackCharts)
+              (id: c.id, name: c.name, pic: null),
+          ];
+    final ids = {for (final c in base) c.id};
+    final extras = [
+      for (final c in _extraCharts)
+        if (!ids.contains(c.id)) c,
+    ];
+    final needCover = [
+      for (final c in [
+        ...base,
+        ...extras.map((e) => (id: e.id, name: e.name, pic: null)),
+      ])
+        if (c.pic == null) c.id,
+    ];
+    final firsts = await Future.wait([
+      for (final id in needCover) _api.chart(id, limit: 1),
     ]);
+    final coverOf = <String, String?>{
+      for (var i = 0; i < needCover.length; i++)
+        needCover[i]: firsts[i].isNotEmpty ? firsts[i].first.coverUrl : null,
+    };
     return [
-      for (var i = 0; i < _charts.length; i++)
+      for (final c in base)
         SourcePlaylist(
-          id: 'mgt:${_charts[i].id}',
-          name: _charts[i].name,
-          coverId: covers[i].isNotEmpty ? covers[i].first.coverUrl : null,
+          id: 'mgt:${c.id}',
+          name: c.name,
+          coverId: c.pic ?? coverOf[c.id],
         ),
+      for (final c in extras)
+        SourcePlaylist(id: 'mgt:${c.id}', name: c.name, coverId: coverOf[c.id]),
     ];
   }
 
   /// 热门歌手（首页「歌手」入口）。点进去是该歌手的歌（搜索，带封面）。
   static const List<String> _hotArtists = [
-    '周杰伦', '林俊杰', '邓紫棋', '薛之谦', '陈奕迅', '毛不易',
-    '李荣浩', '张学友', '王菲', '李健', '赵雷', '陈粒',
-    '周深', '张杰', '汪苏泷', '许嵩', '李宇春', '华晨宇',
-    '邓丽君', '刘德华',
+    '周杰伦',
+    '林俊杰',
+    '邓紫棋',
+    '薛之谦',
+    '陈奕迅',
+    '毛不易',
+    '李荣浩',
+    '张学友',
+    '王菲',
+    '李健',
+    '赵雷',
+    '陈粒',
+    '周深',
+    '张杰',
+    '汪苏泷',
+    '许嵩',
+    '李宇春',
+    '华晨宇',
+    '邓丽君',
+    '刘德华',
   ];
 
   // 歌手名 → 已拿到的封面。只存非空：找到的不会再丢。
@@ -206,6 +270,11 @@ class MiguSource implements MusicSource {
         debugPrint('[MiguSource] chart songs error: $e');
         return const [];
       }
+    }
+    // 歌单条目：id 形如 mgp:<歌单 id>。
+    if (playlistId.startsWith('mgp:')) {
+      final songs = await _api.playlistSongs(playlistId.substring(4));
+      return [for (final s in songs) MiguPlaybackService.toSongEntity(s)];
     }
     return const [];
   }

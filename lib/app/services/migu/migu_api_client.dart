@@ -38,10 +38,7 @@ class MiguApiClient {
     ),
   );
 
-  Map<String, String> get _headers => {
-    'channel': _channel,
-    'User-Agent': _ua,
-  };
+  Map<String, String> get _headers => {'channel': _channel, 'User-Agent': _ua};
 
   dynamic _decode(dynamic data) {
     if (data is Map || data is List) return data;
@@ -115,6 +112,117 @@ class MiguApiClient {
       return out;
     } catch (e) {
       debugPrint('[Migu] 榜单异常：$e');
+      return const [];
+    }
+  }
+
+  /// 官方排行榜目录（咪咕 App 排行榜首页）：全网热歌 / 抖音热歌 / 免费热歌 /
+  /// 收藏人气 / 会员臻爱 / 国风热歌 / 尖叫三榜，带封面。rankId 直接能给 [chart] 用。
+  Future<List<({String id, String name, String? pic})>> rankCatalog() async {
+    try {
+      final res = await _dio.get<dynamic>(
+        'https://app.c.nf.migu.cn/bmw/rank/rank-index/v1.0',
+        options: Options(headers: _headers),
+      );
+      final json = _decode(res.data);
+      final out = <({String id, String name, String? pic})>[];
+      final seen = <String>{};
+      void walk(dynamic o) {
+        if (o is List) {
+          for (final e in o) {
+            walk(e);
+          }
+        } else if (o is Map) {
+          final id = '${o['rankId'] ?? ''}';
+          final name = '${o['rankName'] ?? ''}'.trim();
+          if (id.isNotEmpty && name.isNotEmpty && seen.add(id)) {
+            final img = '${o['imageUrl'] ?? ''}';
+            out.add((
+              id: id,
+              name: name,
+              pic: img.startsWith('http') ? img : null,
+            ));
+          }
+          for (final v in o.values) {
+            if (v is Map || v is List) walk(v);
+          }
+        }
+      }
+
+      if (json is Map) walk(json['data']);
+      return out;
+    } catch (e) {
+      debugPrint('[Migu] 榜单目录异常：$e');
+      return const [];
+    }
+  }
+
+  /// 歌单广场（推荐标签下的歌单，带封面）。歌单 id 藏在 actionUrl
+  /// `mgmusic://song-list-info?id=<id>` 里。
+  Future<List<({String id, String name, String? pic})>> plazaPlaylists() async {
+    try {
+      final res = await _dio.get<dynamic>(
+        'https://app.c.nf.migu.cn/MIGUM3.0/v1.0/template/musiclistplaza-listbytag',
+        queryParameters: {
+          'tagId': '1000587673',
+          'pageNumber': 1,
+          'templateVersion': 2,
+        },
+        options: Options(headers: _headers),
+      );
+      final json = _decode(res.data);
+      final out = <({String id, String name, String? pic})>[];
+      final seen = <String>{};
+      void walk(dynamic o) {
+        if (o is List) {
+          for (final e in o) {
+            walk(e);
+          }
+        } else if (o is Map) {
+          final m = RegExp(
+            r'song-list-info\?id=(\d+)',
+          ).firstMatch('${o['actionUrl'] ?? ''}');
+          final name = '${o['title'] ?? o['txt'] ?? ''}'.trim();
+          if (m != null && name.isNotEmpty && seen.add(m.group(1)!)) {
+            final img = '${o['imageUrl'] ?? ''}';
+            out.add((
+              id: m.group(1)!,
+              name: name,
+              pic: img.startsWith('http') ? img : null,
+            ));
+          }
+          for (final v in o.values) {
+            if (v is Map || v is List) walk(v);
+          }
+        }
+      }
+
+      if (json is Map) walk(json['data']);
+      return out;
+    } catch (e) {
+      debugPrint('[Migu] 歌单广场异常：$e');
+      return const [];
+    }
+  }
+
+  /// 歌单里的歌。条目字段和榜单同构（songName / singer / albumImgs），
+  /// 用 [MiguSong.fromChartJson] 解析。
+  Future<List<MiguSong>> playlistSongs(String id, {int limit = 100}) async {
+    try {
+      final res = await _dio.get<dynamic>(
+        'https://app.c.nf.migu.cn/MIGUM2.0/v1.0/user/queryMusicListSongs.do',
+        queryParameters: {'musicListId': id, 'pageNo': 1, 'pageSize': limit},
+        options: Options(headers: _headers),
+      );
+      final json = _decode(res.data);
+      final list = json is Map ? json['list'] : null;
+      if (list is! List) return const [];
+      return [
+        for (final e in list)
+          if (e is Map) ?MiguSong.fromChartJson(e.cast<String, dynamic>()),
+      ];
+    } catch (e) {
+      debugPrint('[Migu] 歌单歌异常：$e');
       return const [];
     }
   }

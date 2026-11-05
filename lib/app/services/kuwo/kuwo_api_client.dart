@@ -120,9 +120,13 @@ class KuwoApiClient {
     if (json is Map && json['code'] == 200 && json['data'] is Map) {
       return (json['data'] as Map).cast<String, dynamic>();
     }
-    final head = res.data is String ? (res.data as String) : jsonEncode(res.data);
-    debugPrint('[Kuwo] www $path status=${res.statusCode} '
-        'body=${head.length > 200 ? head.substring(0, 200) : head}');
+    final head = res.data is String
+        ? (res.data as String)
+        : jsonEncode(res.data);
+    debugPrint(
+      '[Kuwo] www $path status=${res.statusCode} '
+      'body=${head.length > 200 ? head.substring(0, 200) : head}',
+    );
     return null;
   }
 
@@ -152,8 +156,8 @@ class KuwoApiClient {
 
   /// 榜单（首页用）。bangId 93=飙升榜、16=热歌榜、158=新歌榜。
   ///
-  /// 走 www（带完整封面）；www 不通返回空，上层回落带封面的搜索。
-  /// 不用 kbangserver —— 它虽免 csrf，但返回里**没有封面字段**，首页会一片灰。
+  /// 先试 www（带完整封面）；www 现在基本被挡（见下方说明），不通就走
+  /// kbangserver + 逐首补封面（[bangSongs]），不再退到「搜热门歌手拼一锅」。
   Future<List<KuwoSong>> rank({int bangId = 93, int limit = 30}) async {
     try {
       final data = await _www('/api/www/bang/bang/musicList', {
@@ -161,11 +165,183 @@ class KuwoApiClient {
         'pn': 1,
         'rn': limit,
       });
-      return _parseList(data?['musicList']);
+      final list = _parseList(data?['musicList']);
+      if (list.isNotEmpty) return list;
     } catch (e) {
-      debugPrint('[Kuwo] 榜单异常：$e');
+      debugPrint('[Kuwo] www 榜单异常：$e');
+    }
+    return bangSongs('$bangId', limit: limit);
+  }
+
+  // ---------------------------------------------------------------------
+  // 2026-11-05：www.kuwo.cn/api/www/* 多了一层校验（要 Secret 头），榜单 / 歌手 /
+  // 推荐歌单一律回「The request is illegal!」，首页榜单其实一直在走兜底。
+  // 下面这些是洛雪 / 车机那一套不用 csrf 的接口，实测都通。
+  // ---------------------------------------------------------------------
+
+  /// 榜单目录（32 个：飙升 / 新歌 / 热歌 / 抖音 / DJ / 古风 / 粤语 / 欧美 / 日韩 /
+  /// Billboard / YouTube / 日本公信榜…）。sourceid 就是榜单 id。
+  Future<List<({String id, String name, String? pic})>> rankCatalog() async {
+    try {
+      final res = await _dio.get<dynamic>(
+        'http://qukudata.kuwo.cn/q.k',
+        queryParameters: {
+          'op': 'query',
+          'cont': 'tree',
+          'node': 2,
+          'pn': 0,
+          'rn': 1000,
+          'fmt': 'json',
+          'level': 2,
+        },
+      );
+      final json = _decode(res.data);
+      final child = json is Map ? json['child'] : null;
+      if (child is! List) return const [];
+      return [
+        for (final b in child)
+          if (b is Map && RegExp(r'^\d+$').hasMatch('${b['sourceid']}'))
+            (
+              id: '${b['sourceid']}',
+              name: '${b['disname'] ?? b['name'] ?? ''}'.trim(),
+              pic: '${b['pic'] ?? ''}'.startsWith('http')
+                  ? '${b['pic']}'
+                  : null,
+            ),
+      ];
+    } catch (e) {
+      debugPrint('[Kuwo] 榜单目录异常：$e');
       return const [];
     }
+  }
+
+  /// 榜单里的歌（kbangserver，每榜 300 首）。它不带封面，按歌再补（见 [_fillCovers]）。
+  Future<List<KuwoSong>> bangSongs(String bangId, {int limit = 100}) async {
+    try {
+      final res = await _dio.get<dynamic>(
+        'http://kbangserver.kuwo.cn/ksong.s',
+        queryParameters: {
+          'from': 'pc',
+          'fmt': 'json',
+          'pn': 0,
+          'rn': limit,
+          'type': 'bang',
+          'data': 'content',
+          'id': bangId,
+          'show_copyright_off': 0,
+          'pcmp4': 1,
+          'isbang': 1,
+        },
+      );
+      final json = _decode(res.data);
+      final songs = _parseList(json is Map ? json['musiclist'] : null);
+      return await _fillCovers(songs);
+    } catch (e) {
+      debugPrint('[Kuwo] 榜单歌异常：$e');
+      return const [];
+    }
+  }
+
+  /// 推荐歌单（按热度，带封面）。
+  Future<List<({String id, String name, String? pic})>> hotPlaylists({
+    int limit = 30,
+  }) async {
+    try {
+      final res = await _dio.get<dynamic>(
+        'http://wapi.kuwo.cn/api/pc/classify/playlist/getRcmPlayList',
+        queryParameters: {'pn': 1, 'rn': limit, 'order': 'hot'},
+      );
+      final json = _decode(res.data);
+      final data = (json is Map && json['data'] is Map)
+          ? (json['data'] as Map)['data']
+          : null;
+      if (data is! List) return const [];
+      return [
+        for (final p in data)
+          if (p is Map && '${p['id'] ?? ''}'.isNotEmpty)
+            (
+              id: '${p['id']}',
+              name: '${p['name'] ?? ''}'.trim(),
+              pic: '${p['img'] ?? ''}'.startsWith('http')
+                  ? '${p['img']}'
+                  : null,
+            ),
+      ];
+    } catch (e) {
+      debugPrint('[Kuwo] 推荐歌单异常：$e');
+      return const [];
+    }
+  }
+
+  /// 歌单里的歌（nplserver，带封面）。
+  Future<List<KuwoSong>> playlistSongs(String pid, {int limit = 100}) async {
+    try {
+      final res = await _dio.get<dynamic>(
+        'http://nplserver.kuwo.cn/pl.svc',
+        queryParameters: {
+          'op': 'getlistinfo',
+          'pid': pid,
+          'pn': 0,
+          'rn': limit,
+          'encode': 'utf8',
+          'keyset': 'pl2012',
+          'identity': 'kuwo',
+          'pcmp4': 1,
+          'vipver': 'MUSIC_9.0.5.0_W1',
+          'newver': 1,
+        },
+      );
+      final json = _decode(res.data);
+      final songs = _parseList(json is Map ? json['musiclist'] : null);
+      return await _fillCovers(songs);
+    } catch (e) {
+      debugPrint('[Kuwo] 歌单歌异常：$e');
+      return const [];
+    }
+  }
+
+  // 歌曲 rid → 封面。kbangserver 不给封面，逐首用 artistpicserver 补，存起来下次直接用。
+  static final Map<String, String> _coverCache = {};
+
+  /// 给没封面的歌补封面：每批 8 个并发，单个 4 秒超时，补不到的留空。
+  Future<List<KuwoSong>> _fillCovers(List<KuwoSong> songs) async {
+    final missing = [
+      for (final s in songs)
+        if ((s.coverUrl == null || s.coverUrl!.isEmpty) &&
+            !_coverCache.containsKey(s.rid))
+          s.rid,
+    ];
+    for (var i = 0; i < missing.length; i += 8) {
+      final batch = missing.skip(i).take(8).toList();
+      await Future.wait([
+        for (final rid in batch)
+          () async {
+            try {
+              final res = await _dio
+                  .get<dynamic>(
+                    'http://artistpicserver.kuwo.cn/pic.web',
+                    queryParameters: {
+                      'corp': 'kuwo',
+                      'type': 'rid_pic',
+                      'pictype': 500,
+                      'size': 500,
+                      'rid': rid,
+                    },
+                  )
+                  .timeout(const Duration(seconds: 4));
+              final text = '${res.data ?? ''}'.trim();
+              if (text.startsWith('http')) _coverCache[rid] = text;
+            } catch (_) {}
+          }(),
+      ]);
+    }
+    return [
+      for (final s in songs)
+        (s.coverUrl == null || s.coverUrl!.isEmpty) &&
+                _coverCache[s.rid] != null
+            ? s.withCover(_coverCache[s.rid]!)
+            : s,
+    ];
   }
 
   /// 歌词（LRC）。m.kuwo.cn 的 songinfoandlrc 偶发返回 data:null / status 301
