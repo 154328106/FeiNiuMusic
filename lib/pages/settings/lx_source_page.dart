@@ -24,8 +24,10 @@ class _LxSourcePageState extends State<LxSourcePage> {
   bool _busy = false;
   bool _testing = false;
 
-  /// 最近一次测试：歌名 · 歌手、平台中文名、每个脚本一行。
-  ({String song, String platform, List<LxTestRow> rows})? _testResult;
+  /// 最近一次测试：歌名 · 歌手、平台中文名、每个脚本一行；[testing] 是正在
+  /// 问的那个脚本（边测边出，测完为 null）。
+  ({String song, String platform, List<LxTestRow> rows, String? testing})?
+  _testResult;
 
   @override
   void initState() {
@@ -81,24 +83,45 @@ class _LxSourcePageState extends State<LxSourcePage> {
       AppToast.show(context, '取不到当前歌的来源 id', type: ToastType.error);
       return;
     }
+    final singer = song.artistDisplayName;
+    final songText = singer.isEmpty ? song.title : '${song.title} - $singer';
+    final platformText =
+        LxSourceManager.platformNames[platform] ?? platform;
     setState(() {
       _testing = true;
-      _testResult = null;
+      _testResult = (
+        song: songText,
+        platform: platformText,
+        rows: const <LxTestRow>[],
+        testing: '…',
+      );
     });
     try {
-      final singer = song.artistDisplayName;
+      // 每测完一个脚本就先显示出来，不用干等全部测完。
       final rows = await _mgr.testRows(
         platform: platform,
         songId: id,
         name: song.title,
         singer: singer,
+        onProgress: (rows, testing) {
+          if (!mounted) return;
+          setState(
+            () => _testResult = (
+              song: songText,
+              platform: platformText,
+              rows: rows,
+              testing: testing,
+            ),
+          );
+        },
       );
       if (mounted) {
         setState(
           () => _testResult = (
-            song: singer.isEmpty ? song.title : '${song.title} - $singer',
-            platform: LxSourceManager.platformNames[platform] ?? platform ?? '',
+            song: songText,
+            platform: platformText,
             rows: rows,
+            testing: null,
           ),
         );
       }
@@ -473,7 +496,8 @@ class _LxSourcePageState extends State<LxSourcePage> {
 class _TestResultView extends StatelessWidget {
   const _TestResultView({required this.result});
 
-  final ({String song, String platform, List<LxTestRow> rows}) result;
+  final ({String song, String platform, List<LxTestRow> rows, String? testing})
+  result;
 
   @override
   Widget build(BuildContext context) {
@@ -487,10 +511,34 @@ class _TestResultView extends StatelessWidget {
         Text('平台：${result.platform}', style: base),
         const SizedBox(height: 4),
         const Text('详情：', style: base),
-        if (result.rows.isEmpty)
+        if (result.rows.isEmpty && result.testing == null)
           Text('没有启用的脚本', style: dim)
         else
           for (final r in result.rows) _row(r, base, dim),
+        if (result.testing != null)
+          Padding(
+            padding: const EdgeInsets.only(left: 8, top: 2),
+            child: Row(
+              children: [
+                const SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(strokeWidth: 1.5),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    result.testing == '…'
+                        ? '准备中…'
+                        : '正在问 ${result.testing}…',
+                    style: dim,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
       ],
     );
   }

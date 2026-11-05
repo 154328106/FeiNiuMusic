@@ -433,12 +433,15 @@ class LxSourceManager {
   /// 诊断：拿一首真实歌曲（通常是当前播放的）逐个问**所有启用**的脚本，每个
   /// 脚本一行结果。与 [resolve] 的区别是它不止于第一个命中、全部列出来，供
   /// 「测试」按钮展示。歌名歌手也要传 —— 有的脚本（溯音酷我）是按歌名搜的。
+  /// [onProgress]：每测完一个脚本回调一次（已有的行 + 下一个要测的脚本名，
+  /// 测完为 null），页面边测边出结果，不用干等全部测完。
   Future<List<LxTestRow>> testRows({
     required String platform,
     required String songId,
     String quality = 'flac',
     String? name,
     String? singer,
+    void Function(List<LxTestRow> rows, String? testing)? onProgress,
   }) async {
     await ensureLoaded();
     final enabled = _metas.where((m) => m.enabled).toList();
@@ -449,6 +452,7 @@ class LxSourceManager {
     // getMusicUrl 本身也有全局串行闸兜底，这里显式顺序跑让耗时可控、结果稳定。
     final rows = <LxTestRow>[];
     for (final meta in enabled) {
+      onProgress?.call(List.of(rows), meta.name);
       if (!meta.sources.contains(platform)) {
         rows.add(LxTestRow(meta.name, note: '不支持这个平台'));
         continue;
@@ -460,17 +464,25 @@ class LxSourceManager {
       }
       final sw = Stopwatch()..start();
       try {
-        final url = await runtime.getMusicUrl(
+        // 超时跟播放时一样按 6 秒：播放时超过 6 秒的脚本本来就用不上，测试多等也没意义。
+        final r = await runtime.getMusicUrlTimed(
           source: platform,
           info: info,
           quality: quality,
-          timeout: const Duration(seconds: 8),
+          timeout: const Duration(seconds: 6),
         );
         sw.stop();
         final ms = sw.elapsedMilliseconds;
+        final url = r.url;
         if (url != null && url.isNotEmpty) _trips.remove('${meta.id}/$platform');
         if (url == null || url.isEmpty) {
-          rows.add(LxTestRow(meta.name, ms: ms, note: '没取到'));
+          rows.add(
+            LxTestRow(
+              meta.name,
+              ms: ms,
+              note: r.timedOut ? '超时（6 秒没回）' : _shortError(r.error),
+            ),
+          );
         } else if (_placeholderPrefixes.any(url.startsWith)) {
           rows.add(LxTestRow(meta.name, ms: ms, note: '占位音频，不是这首歌'));
         } else {
@@ -493,7 +505,16 @@ class LxSourceManager {
         rows.add(LxTestRow(meta.name, note: '出错：$e'));
       }
     }
+    onProgress?.call(List.of(rows), null);
     return rows;
+  }
+
+  /// 脚本 reject 的理由压短一点给测试结果用；没理由就是「没取到」。
+  static String _shortError(String? e) {
+    var t = (e ?? '').trim().replaceFirst(RegExp(r'^(Error|错误)[:：]\s*'), '');
+    if (t.isEmpty) return '没取到';
+    if (t.length > 80) t = '${t.substring(0, 80)}…';
+    return '没取到：$t';
   }
 
   /// 构造传给脚本的 musicInfo（洛雪 info.musicInfo）。酷狗(kg)用 hash、其余

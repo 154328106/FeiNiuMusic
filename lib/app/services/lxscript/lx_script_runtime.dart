@@ -58,8 +58,9 @@ class LxScriptRuntime {
   );
 
   /// 同 [getMusicUrl]，另外告诉调用方这次是不是**跑满超时**才放弃的
-  /// （排队等待不算）。解灰链靠它判断脚本后端是不是挂了。
-  Future<({String? url, bool timedOut})> getMusicUrlTimed({
+  /// （排队等待不算），以及脚本自己报的错（「没货」的理由）。
+  /// 解灰链靠 timedOut 判断脚本后端是不是挂了；测试按钮把 error 显示出来。
+  Future<({String? url, bool timedOut, String? error})> getMusicUrlTimed({
     required String source,
     required Map<String, dynamic> info,
     required String quality,
@@ -111,6 +112,9 @@ class _LxEngine {
 
   /// 刚跑完的那个取址是不是等满了超时（队列串行，跑完立刻读，不会串）。
   bool _lastTimedOut = false;
+
+  /// 刚跑完的那个取址，脚本自己 reject 的理由（同样靠串行保证不串）。
+  String? _lastError;
 
   final Map<int, Completer<String?>> _invokeWaiters = {};
   final Map<String, Completer<void>> _initedWaiters = {};
@@ -176,7 +180,7 @@ class _LxEngine {
     priority: priority,
   ).then((r) => r.url);
 
-  Future<({String? url, bool timedOut})> getUrlTimed(
+  Future<({String? url, bool timedOut, String? error})> getUrlTimed(
     String scriptId, {
     required String source,
     required Map<String, dynamic> info,
@@ -195,7 +199,9 @@ class _LxEngine {
     );
     (priority ? _foreground : _backgroundTasks).add(task);
     unawaited(_runQueue());
-    return task.result.future.then((u) => (url: u, timedOut: task.timedOut));
+    return task.result.future.then(
+      (u) => (url: u, timedOut: task.timedOut, error: task.error),
+    );
   }
 
   Future<void> _runQueue() async {
@@ -212,12 +218,15 @@ class _LxEngine {
             ? _foreground.removeFirst()
             : _backgroundTasks.removeFirst();
         _lastTimedOut = false;
+        _lastError = null;
         try {
           final url = await task.run();
           task.timedOut = _lastTimedOut;
+          task.error = _lastError;
           task.result.complete(url);
         } catch (_) {
           task.timedOut = _lastTimedOut;
+          task.error = _lastError;
           if (!task.result.isCompleted) task.result.complete(null);
         }
       }
@@ -308,6 +317,8 @@ class _LxEngine {
       );
       final waiter = id is int ? _invokeWaiters[id] : null;
       if (waiter != null && !waiter.isCompleted) {
+        final err = map['err'];
+        if (err != null && err.toString().isNotEmpty) _lastError = err.toString();
         final url = map['url'];
         waiter.complete(url is String && url.isNotEmpty ? url : null);
       }
@@ -501,4 +512,7 @@ class _LxTask {
 
   /// 跑满超时才放弃（不含排队时间）。
   bool timedOut = false;
+
+  /// 脚本自己 reject 的理由。
+  String? error;
 }
