@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../app/services/db/dao/download_dao.dart';
 import '../../app/services/download/download_service.dart';
 import '../../app/services/player_service.dart';
+import '../../app/services/stream_spec.dart';
 import '../../app/state/song_source.dart';
 import '../../components/index.dart';
 
@@ -49,7 +50,24 @@ class _DownloadsPageState extends State<DownloadsPage> {
       _records = records;
       _loading = false;
     });
+    // 格式（FLAC / MP3 / M4A）按文件头认，每个文件只读 16 字节，读完再刷一次。
+    final formats = <String, String>{};
+    for (final r in records) {
+      final file = DownloadService.instance.localFileFor(r.song.id);
+      if (file == null) continue;
+      try {
+        final raf = await file.open();
+        final head = await raf.read(16);
+        await raf.close();
+        final f = StreamSpec.formatOf(head);
+        if (f != null) formats[r.song.id] = f;
+      } catch (_) {}
+    }
+    if (mounted) setState(() => _formats = formats);
   }
+
+  /// 歌曲 id → 文件格式。
+  Map<String, String> _formats = const {};
 
   Future<void> _playAll() async {
     if (_records.isEmpty) return;
@@ -224,6 +242,7 @@ class _DownloadsPageState extends State<DownloadsPage> {
             ),
             subtitle: Text(
               '${song.artistDisplayName} · ${_sourceLabel(record.source)} · '
+              '${_formats[song.id] == null ? '' : '${_formats[song.id]} · '}'
               '${_formatSize(record.fileSize)}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,

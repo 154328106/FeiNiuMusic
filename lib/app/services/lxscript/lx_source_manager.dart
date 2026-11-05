@@ -272,7 +272,6 @@ class LxSourceManager {
 
   /// 拉链接开头 64KB（跟随跳转），看是不是音频。给「测试」按钮用。
   /// [format] 按文件头认（FLAC / MP3 / M4A / OGG），[size] 是整首字节数（拿不到为 0）。
-  @visibleForTesting
   static Future<({bool ok, String detail, String? format, int size})>
   probeAudio(String url) async {
     final client = HttpClient()

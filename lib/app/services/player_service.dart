@@ -474,10 +474,9 @@ class PlayerService with WidgetsBindingObserver {
       //（normalizeCroppedPosition），这里按曲目自身 duration 覆盖时长，与
       // just_audio 的 ClippingAudioSource（上报裁剪后时长）行为一致；也避免
       // 把整轨时长误持久化进曲目。
-      final effective =
-          song != null && song.isCue && (song.durationMs ?? 0) > 0
-              ? Duration(milliseconds: song.durationMs!)
-              : value;
+      final effective = song != null && song.isCue && (song.durationMs ?? 0) > 0
+          ? Duration(milliseconds: song.durationMs!)
+          : value;
       duration.value = effective;
       final ms = effective?.inMilliseconds ?? 0;
       if (song != null && ms > 0) {
@@ -780,7 +779,11 @@ class PlayerService with WidgetsBindingObserver {
     final song = logicalIndex < list.length ? list[logicalIndex] : null;
     final remoteResolve =
         song != null &&
-        (song.isNetease || song.isQQ || song.isKugou || song.isKuwo || song.isMigu);
+        (song.isNetease ||
+            song.isQQ ||
+            song.isKugou ||
+            song.isKuwo ||
+            song.isMigu);
     // 往前留两首（够「上一首」无缝），整个 run 最多 6 首。
     final maxBefore = remoteResolve ? 2 : k.length;
     final maxRun = remoteResolve ? 6 : k.length;
@@ -1019,6 +1022,45 @@ class PlayerService with WidgetsBindingObserver {
   /// 说明：**不使用服务器转码 HLS**。mpv 附带的 FFmpeg 音频库（
   /// `media_kit_libs_audio`）没有编入 HLS demuxer，转码的 fMP4 HLS
   /// （`init.mp4` + `.m4s`）播不了（`Failed to recognize file format`）。
+  /// 在线歌（网易 / QQ / 酷狗 / 酷我 / 咪咕）当前的播放地址，给「音频规格」探测用。
+  /// 各家都有地址缓存，正在播的歌再问一次不会发请求。不是在线歌返回 null。
+  Future<String?> onlineStreamUrlFor(SongEntity song) async {
+    if (song.isNetease) {
+      final id = song.neteaseId;
+      return id == null
+          ? null
+          : NetEasePlaybackService.instance.resolveStreamUrl(id);
+    }
+    if (song.isQQ) {
+      final mid = song.qqMid;
+      return mid == null
+          ? null
+          : QQPlaybackService.instance.resolveStreamUrl(
+              mid,
+              mediaMid: song.audioSpec,
+            );
+    }
+    if (song.isKugou) {
+      final hash = song.kugouHash;
+      return hash == null
+          ? null
+          : KugouPlaybackService.instance.resolveStreamUrl(hash);
+    }
+    if (song.isKuwo) {
+      final rid = song.kuwoRid;
+      return rid == null
+          ? null
+          : KuwoPlaybackService.instance.resolveStreamUrl(rid);
+    }
+    if (song.isMigu) {
+      final cid = song.miguCopyrightId;
+      return cid == null
+          ? null
+          : MiguPlaybackService.instance.resolveStreamUrl(cid, song: song);
+    }
+    return null;
+  }
+
   Future<mk.Media> _mediaForSong(
     SongEntity song, {
     bool waitForLocal = false,
@@ -1089,7 +1131,10 @@ class PlayerService with WidgetsBindingObserver {
       final cid = song.miguCopyrightId;
       final url = cid == null
           ? null
-          : await MiguPlaybackService.instance.resolveStreamUrl(cid, song: song);
+          : await MiguPlaybackService.instance.resolveStreamUrl(
+              cid,
+              song: song,
+            );
       if (url == null) {
         throw StateError('咪咕音乐无可用播放地址：${song.title}');
       }
@@ -2782,7 +2827,9 @@ class PlayerService with WidgetsBindingObserver {
     final idx = currentIndex.value;
     if (song == null || idx < 0) return;
     final svc = FeiNiuTranscodeService.instance;
-    _debugLog('setTranscodeOverride ${song.title} -> ${format?.name ?? 'global'}');
+    _debugLog(
+      'setTranscodeOverride ${song.title} -> ${format?.name ?? 'global'}',
+    );
     svc.setForcedTranscodeCodec(song.id, format?.name);
     // 强制转码与强制直连互斥：选了转码格式就取消该歌的直连覆盖。
     _forceDirectSongIds.remove(song.id);

@@ -9,6 +9,7 @@ import '../../app/services/download/download_service.dart';
 import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/feiniu/transcode_service.dart';
 import '../../app/services/song_actions_service.dart';
+import '../../app/services/stream_spec.dart';
 import '../../app/state/song_source.dart';
 import '../../app/services/player/player_engine.dart';
 import '../../app/services/player_service.dart';
@@ -59,6 +60,23 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
   bool _isFavorite = false;
   bool _loadingFavorite = true;
 
+  /// 在线歌的真实音频规格（「FLAC · 32.4MB · 约 960kbps」）。只在播放页「更多」
+  /// 或这首已经下载到本地时才去探 —— 列表里随手点开别的歌不发请求。
+  /// null 表示不显示这一行；'' 表示正在检测。
+  String? _onlineSpec;
+
+  bool get _wantsOnlineSpec =>
+      StreamSpec.isOnline(widget.song) &&
+      (widget.showPlayerControls ||
+          DownloadService.instance.localFileFor(widget.song.id) != null);
+
+  /// 只在 initState 里调：先直接标成「检测中」（initState 里不能 setState）。
+  Future<void> _loadOnlineSpec() async {
+    _onlineSpec = '';
+    final spec = await StreamSpec.describe(widget.song);
+    if (mounted) setState(() => _onlineSpec = spec ?? '取不到');
+  }
+
   @override
   void initState() {
     super.initState();
@@ -73,6 +91,7 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
     AppPlaybackVolumeSettings.ensureLoaded();
     AppPlaybackSpeedSettings.ensureLoaded();
     _loadFavoriteState();
+    if (_wantsOnlineSpec) _loadOnlineSpec();
   }
 
   @override
@@ -247,7 +266,10 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
 
   /// 点击解码 tag：弹出二选一解码器选择。选定后切换当前歌曲的解码引擎并关掉
   /// 面板（重载期间避免拖其他控件）。
-  Future<void> _showDecoderPicker(BuildContext context, EngineKind current) async {
+  Future<void> _showDecoderPicker(
+    BuildContext context,
+    EngineKind current,
+  ) async {
     final selected = await showModalBottomSheet<EngineKind>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -268,9 +290,7 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => _TranscodeFormatPickerSheet(
-        song: widget.song,
-      ),
+      builder: (_) => _TranscodeFormatPickerSheet(song: widget.song),
     );
     // null = 关闭面板（未选择）
     if (selected == null || !mounted) return;
@@ -428,9 +448,7 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                   final nav = Navigator.of(context);
                   nav.pop(); // 关闭详情 sheet
                   final updated = await nav.push<SongEntity>(
-                    buildAppPageRoute(
-                      (_) => SongEditPage(song: widget.song),
-                    ),
+                    buildAppPageRoute((_) => SongEditPage(song: widget.song)),
                   );
                   if (updated != null) {
                     // 激活回调刷新列表 + 更新当前播放/队列
@@ -439,8 +457,7 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                   }
                 },
               ),
-            if (widget.extraActions != null)
-              ...widget.extraActions!,
+            if (widget.extraActions != null) ...widget.extraActions!,
             if (widget.onOpenPlayerAppearanceSettings != null)
               AppListTile(
                 leading: const Icon(Icons.tune_rounded),
@@ -527,11 +544,17 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                   }
                 },
               ),
-            if (song.audioSpec != null && song.audioSpec!.isNotEmpty)
+            // 在线歌：audioSpec 里放的是各家的 id（QQ mediaMid 等），不是规格，
+            // 只显示探出来的真实规格；飞牛歌照旧显示服务端给的规格。
+            if (StreamSpec.isOnline(song)
+                ? _onlineSpec != null
+                : (song.audioSpec != null && song.audioSpec!.isNotEmpty))
               AppListTile(
                 leading: const Icon(Icons.info_outline),
                 title: '音频规格',
-                subtitle: song.audioSpec,
+                subtitle: StreamSpec.isOnline(song)
+                    ? (_onlineSpec!.isEmpty ? '检测中…' : _onlineSpec)
+                    : song.audioSpec,
                 // 转码格式 tag + 解码器 tag 属于播放控制：仅播放器界面打开时显示，
                 // 点击可切换。转码 tag 显示当前转码格式（FLAC/MP3/OPUS）或「直连」。
                 trailing: widget.showPlayerControls
@@ -549,7 +572,8 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                               engine: engine,
                               // 桌面端只有 media_kit（FFmpeg）引擎，
                               // 禁止手动切到 just_audio（无实现）。
-                              onTap: Platform.isWindows ||
+                              onTap:
+                                  Platform.isWindows ||
                                       Platform.isMacOS ||
                                       Platform.isLinux
                                   ? null
@@ -570,7 +594,6 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
       ),
     );
   }
-
 }
 
 class _AppVolumeControl extends StatelessWidget {
@@ -581,9 +604,10 @@ class _AppVolumeControl extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     // 与下方 AppListTile 的标题对齐：同用 ListTileTheme 的 contentPadding，
     // leading（图标宽 24）与标题之间留 16（ListTile 默认 horizontalTitleGap）。
-    final tilePadding = ListTileTheme.of(context).contentPadding?.resolve(
-          Directionality.of(context),
-        ) ??
+    final tilePadding =
+        ListTileTheme.of(
+          context,
+        ).contentPadding?.resolve(Directionality.of(context)) ??
         const EdgeInsets.symmetric(horizontal: 16);
     return Padding(
       padding: EdgeInsets.only(
@@ -672,9 +696,10 @@ class _PlaybackSpeedControl extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     // 与下方 AppListTile 的标题对齐：同用 ListTileTheme 的 contentPadding。
-    final tilePadding = ListTileTheme.of(context).contentPadding?.resolve(
-          Directionality.of(context),
-        ) ??
+    final tilePadding =
+        ListTileTheme.of(
+          context,
+        ).contentPadding?.resolve(Directionality.of(context)) ??
         const EdgeInsets.symmetric(horizontal: 16);
     return Padding(
       padding: EdgeInsets.only(
