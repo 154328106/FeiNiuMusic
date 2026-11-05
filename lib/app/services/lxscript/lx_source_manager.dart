@@ -246,15 +246,24 @@ class LxSourceManager {
       if (!meta.sources.contains(platform)) continue;
       final runtime = _runtimes[meta.id];
       if (runtime == null) continue;
+      final tripKey = '${meta.id}/$platform';
+      if (_isTripped(tripKey)) continue;
       try {
         // 播放解灰链是逐个等的，给个更短超时：卡住的脚本别拖慢起播。
-        final url = await runtime.getMusicUrl(
+        final r = await runtime.getMusicUrlTimed(
           source: platform,
           info: info,
           quality: quality,
           timeout: const Duration(seconds: 6),
           priority: !background,
         );
+        if (r.timedOut) {
+          _noteTimeout(tripKey, meta.name, platform);
+          continue;
+        }
+        // 没超时就说明脚本后端是活的（有货没货另说），清掉计数。
+        _trips.remove(tripKey);
+        final url = r.url;
         if (url != null && url.isNotEmpty) {
           if (isPlaceholder(url, '$platform/$songId')) {
             debugPrint('[LX] ${meta.name} 给的是占位音频（不是这首歌），丢弃：$platform/$songId');
@@ -268,6 +277,42 @@ class LxSourceManager {
       }
     }
     return null;
+  }
+
+  // ---- 熔断：脚本后端挂了别拖住切歌 ----
+  //
+  // 2026-11-05：聚合脚本的酷狗两家后端同时挂了（星海「该源已熔断」、animemusic
+  // 连不上），脚本每首都要跑满 6 秒超时。取址引擎是串行的，后台预取一首占 6 秒、
+  // 切歌一首又问两遍（按 id + QQ 歌名兜底），切歌就卡十几二十秒；关掉脚本立刻好。
+  // 现在同一脚本在同一平台连续 [_tripAfter] 次跑满超时，就先跳过 [_tripCooldown]；
+  // 冷却完放一次试探，再超时接着跳。脚本秒回「没货」不算 —— 那是后端活着。
+  // 「测试」按钮不吃熔断（要看真实情况），测到能用就顺手解除。
+
+  static const int _tripAfter = 2;
+  static const Duration _tripCooldown = Duration(minutes: 3);
+  final Map<String, ({int fails, DateTime? until})> _trips = {};
+
+  bool _isTripped(String key) {
+    final t = _trips[key];
+    final until = t?.until;
+    if (t == null || until == null) return false;
+    if (DateTime.now().isBefore(until)) return true;
+    // 冷却到点：放一次试探，再超时一次就重新跳过。
+    _trips[key] = (fails: _tripAfter - 1, until: null);
+    return false;
+  }
+
+  void _noteTimeout(String key, String name, String platform) {
+    final fails = (_trips[key]?.fails ?? 0) + 1;
+    if (fails >= _tripAfter) {
+      _trips[key] = (fails: fails, until: DateTime.now().add(_tripCooldown));
+      debugPrint(
+        '[LX] $name 在 $platform 连续 $fails 次超时，先跳过 ${_tripCooldown.inMinutes} 分钟',
+      );
+    } else {
+      _trips[key] = (fails: fails, until: null);
+      debugPrint('[LX] $name 在 $platform 超时（第 $fails 次）');
+    }
   }
 
   /// 拉链接开头 64KB（跟随跳转），看是不是音频。给「测试」按钮用。
@@ -423,6 +468,7 @@ class LxSourceManager {
         );
         sw.stop();
         final ms = sw.elapsedMilliseconds;
+        if (url != null && url.isNotEmpty) _trips.remove('${meta.id}/$platform');
         if (url == null || url.isEmpty) {
           rows.add(LxTestRow(meta.name, ms: ms, note: '没取到'));
         } else if (_placeholderPrefixes.any(url.startsWith)) {

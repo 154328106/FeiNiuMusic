@@ -57,6 +57,23 @@ class LxScriptRuntime {
     priority: priority,
   );
 
+  /// 同 [getMusicUrl]，另外告诉调用方这次是不是**跑满超时**才放弃的
+  /// （排队等待不算）。解灰链靠它判断脚本后端是不是挂了。
+  Future<({String? url, bool timedOut})> getMusicUrlTimed({
+    required String source,
+    required Map<String, dynamic> info,
+    required String quality,
+    Duration? timeout,
+    bool priority = true,
+  }) => _LxEngine.instance.getUrlTimed(
+    _scriptId,
+    source: source,
+    info: info,
+    quality: quality,
+    timeout: timeout,
+    priority: priority,
+  );
+
   void dispose() => _LxEngine.instance.unloadScript(_scriptId);
 }
 
@@ -91,6 +108,9 @@ class _LxEngine {
   final Queue<_LxTask> _foreground = Queue<_LxTask>();
   final Queue<_LxTask> _backgroundTasks = Queue<_LxTask>();
   bool _draining = false;
+
+  /// 刚跑完的那个取址是不是等满了超时（队列串行，跑完立刻读，不会串）。
+  bool _lastTimedOut = false;
 
   final Map<int, Completer<String?>> _invokeWaiters = {};
   final Map<String, Completer<void>> _initedWaiters = {};
@@ -147,6 +167,22 @@ class _LxEngine {
     required String quality,
     Duration? timeout,
     bool priority = true,
+  }) => getUrlTimed(
+    scriptId,
+    source: source,
+    info: info,
+    quality: quality,
+    timeout: timeout,
+    priority: priority,
+  ).then((r) => r.url);
+
+  Future<({String? url, bool timedOut})> getUrlTimed(
+    String scriptId, {
+    required String source,
+    required Map<String, dynamic> info,
+    required String quality,
+    Duration? timeout,
+    bool priority = true,
   }) {
     final task = _LxTask(
       () => _getUrlLocked(
@@ -159,7 +195,7 @@ class _LxEngine {
     );
     (priority ? _foreground : _backgroundTasks).add(task);
     unawaited(_runQueue());
-    return task.result.future;
+    return task.result.future.then((u) => (url: u, timedOut: task.timedOut));
   }
 
   Future<void> _runQueue() async {
@@ -175,9 +211,13 @@ class _LxEngine {
         final task = _foreground.isNotEmpty
             ? _foreground.removeFirst()
             : _backgroundTasks.removeFirst();
+        _lastTimedOut = false;
         try {
-          task.result.complete(await task.run());
+          final url = await task.run();
+          task.timedOut = _lastTimedOut;
+          task.result.complete(url);
         } catch (_) {
+          task.timedOut = _lastTimedOut;
           if (!task.result.isCompleted) task.result.complete(null);
         }
       }
@@ -215,6 +255,7 @@ class _LxEngine {
         timeout ?? const Duration(seconds: 10),
       );
     } catch (e) {
+      if (e is TimeoutException) _lastTimedOut = true;
       debugPrint('[LX] getMusicUrl 失败：$e');
       return null;
     } finally {
@@ -457,4 +498,7 @@ class _LxTask {
   _LxTask(this.run);
   final Future<String?> Function() run;
   final Completer<String?> result = Completer<String?>();
+
+  /// 跑满超时才放弃（不含排队时间）。
+  bool timedOut = false;
 }
