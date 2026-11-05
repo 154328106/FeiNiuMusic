@@ -73,18 +73,32 @@ jobs:
           codesign -dv "$APP_PATH" 2>&1 || echo "（未签名，符合预期）"
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
-          # 主程序先 ad-hoc 签一下，只为把签名 identifier 钉成 bundle id。
-          # 全裸的二进制交给巨魔 / 签名工具时，identifier 会默认取文件名 "Runner"，
-          # 而系统「正在播放」（灵动岛 / 锁屏）按签名 identifier 找 app，
-          # 对不上 com.melodic.music → 点灵动岛回不到 app（爱思签用 bundle id，所以正常）。
-          # 已有签名时巨魔沿用原 identifier；不带 entitlements，行为跟原来一样。
+          # 主程序先 ad-hoc 签一下，带上写死 bundle id 的 application-identifier。
+          # 巨魔（TrollStore main.m）见主程序**一个权限都没有**时，会填默认的
+          #   application-identifier = "TROLLTROLL.*"（通配符）
+          # 系统「正在播放」（灵动岛 / 锁屏卡片）靠它认 app，认成 "*" 就找不到 app：
+          # 点灵动岛只展开大卡片、锁屏点卡片也回不去（爱思签的是 队伍ID.com.melodic.music，正常；
+          # 其他巨魔装的 App Store 砸壳包自带真实标识，也正常）。2026-11-05 实测。
+          # 团队号沿用巨魔默认的 TROLLTROLL、钥匙串组照抄它的默认，跟以前装的保持一致；
+          # 不加 get-task-allow（免得要求开发者模式）。签名 identifier 也钉成 bundle id。
           # 拷出来单独签，免得 codesign 把整个 .app 当 bundle 签而去校验未签的 Frameworks。
           BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw "$APP_PATH/Info.plist")
           EXE=$(plutil -extract CFBundleExecutable raw "$APP_PATH/Info.plist")
+          cat > /tmp/ents.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>application-identifier</key><string>TROLLTROLL.${BUNDLE_ID}</string>
+            <key>com.apple.developer.team-identifier</key><string>TROLLTROLL</string>
+            <key>keychain-access-groups</key><array><string>TROLLTROLL.*</string><string>com.apple.token</string></array>
+          </dict></plist>
+          EOF
+          plutil -lint /tmp/ents.plist
           cp "Payload/Runner.app/$EXE" "/tmp/$EXE"
-          codesign -f -s - -i "$BUNDLE_ID" --timestamp=none "/tmp/$EXE"
+          codesign -f -s - -i "$BUNDLE_ID" --entitlements /tmp/ents.plist --timestamp=none "/tmp/$EXE"
           cp "/tmp/$EXE" "Payload/Runner.app/$EXE"
           codesign -dv "Payload/Runner.app/$EXE" 2>&1 | grep -E "Identifier|Signature" || true
+          codesign -d --entitlements - "Payload/Runner.app/$EXE" 2>&1 || true
           ditto -c -k --sequesterRsrc --keepParent Payload "Melodic-v${VERSION}-unsigned.ipa"
           ls -lh "Melodic-v${VERSION}-unsigned.ipa"
 
