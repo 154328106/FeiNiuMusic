@@ -33,6 +33,7 @@ class MiniPlayerCollapse {
 
   /// 停下（松手且惯性停了）后等多久再展开回条。
   static const Duration _expandDelay = Duration(milliseconds: 450);
+
   /// 走完一整程的时长（中途反向按剩余距离等比缩短）。原版观感偏慢、带梯形
   /// 伸缩，420ms 显得赶，放到 600ms。
   static const int _fullMs = 600;
@@ -84,7 +85,11 @@ class MiniPlayerCollapse {
     } else if (n is ScrollUpdateNotification) {
       // scrollDelta > 0：内容往上走 = 往下浏览；< 0：往回（往上）滑。
       final delta = n.scrollDelta ?? 0;
-      if (delta > 0 && n.dragDetails != null) {
+      // 手指这一帧的移动方向：< 0 = 往上推（往下浏览）。只看 scrollDelta 不够 ——
+      // 2026-11-05 安卓「我的」页往下拉也会收成球（iOS 不会），那一帧
+      // scrollDelta > 0 但手指其实在往下。收起只认「手指确实往上推」。
+      final fingerDy = n.dragDetails?.delta.dy;
+      if (delta > 0 && fingerDy != null && fingerDy < 0) {
         // 往下浏览（只认手指拖的帧）：累计过阈值收成球。轻点 / 抖动不算。
         _upAccum = 0;
         _downAccum += delta;
@@ -92,6 +97,11 @@ class MiniPlayerCollapse {
           if (!_miniVisible) {
             debugPrint('[MiniCollapse] 不收：仅播放时显示且已暂停');
           } else {
+            debugPrint(
+              '[MiniCollapse] 往下浏览 pixels=${n.metrics.pixels.toStringAsFixed(0)}'
+              '/${n.metrics.maxScrollExtent.toStringAsFixed(0)} '
+              'delta=${delta.toStringAsFixed(1)} 手指dy=${fingerDy.toStringAsFixed(1)}',
+            );
             _set(true);
           }
         }
@@ -130,8 +140,10 @@ class MiniPlayerCollapse {
     if (collapsed.value == value) return;
     collapsed.value = value;
     final c = _controller;
-    debugPrint('[MiniCollapse] ${value ? "收成球" : "展开回条"} '
-        'controller=${c != null} from=${progress.value.toStringAsFixed(2)}');
+    debugPrint(
+      '[MiniCollapse] ${value ? "收成球" : "展开回条"} '
+      'controller=${c != null} from=${progress.value.toStringAsFixed(2)}',
+    );
     if (c == null) {
       progress.value = value ? 1 : 0; // 兜底：没有宿主就直接跳到终态。
       return;
@@ -140,7 +152,9 @@ class MiniPlayerCollapse {
     final dist = (target - c.value).abs();
     c.animateTo(
       target,
-      duration: Duration(milliseconds: (_fullMs * dist).round().clamp(1, _fullMs)),
+      duration: Duration(
+        milliseconds: (_fullMs * dist).round().clamp(1, _fullMs),
+      ),
       curve: Curves.easeOutCubic,
     );
   }
