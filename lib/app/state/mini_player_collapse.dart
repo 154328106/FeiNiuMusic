@@ -5,12 +5,12 @@ import 'package:flutter/material.dart';
 import '../services/player_service.dart';
 import 'settings_state.dart';
 
-/// 迷你播放器「往下浏览收成球、第二下划动才回条」的全局状态。
+/// 迷你播放器「往下浏览收成球、往回滑才回条」的全局状态。
 ///
 /// 页面一往下浏览，迷你播放条从左往右下连续收窄成一个圆，落到底部导航条同一行
-/// 的右侧，导航条同时把右边让出来。停下后**一直收着**（2026-11-05 起；以前是停
-/// 半秒自动回条，会挡住底部按钮和列表里正要点的歌），直到下一次手指划动划完，
-/// 或者往回滑，才展开回条；离开页面也会回条。
+/// 的右侧，导航条同时把右边让出来。之后**一直收着**：继续往下浏览不管划几次都
+/// 不回条（2026-11-07 起；之前是「第二下划完回条」），只有往回滑、底栏切 tab、
+/// 离开页面才展开回条。
 ///
 /// 迷你条（在各页脚手架里）和导航条（在外壳里）不在同一棵子树，所以用一个全局
 /// [progress] 驱动：两边都读它，同一帧取同一个值，伸缩完全同步。进度由
@@ -83,8 +83,6 @@ class MiniPlayerCollapse {
         _downAccum = 0;
         _upAccum = 0;
         _expandTimer?.cancel(); // 按下去就别回条了
-        // 收着的球：这是「第二下」，这一下划完就回条。
-        if (_held) _releaseOnEnd = true;
       }
     } else if (n is ScrollUpdateNotification) {
       // scrollDelta > 0：内容往上走 = 往下浏览；< 0：往回（往上）滑。
@@ -109,8 +107,10 @@ class MiniPlayerCollapse {
             _set(true);
           }
         }
-      } else if (delta < 0) {
+      } else if (delta < 0 &&
+          n.metrics.pixels < n.metrics.maxScrollExtent - 0.5) {
         // 往回滑（拖或惯性都算）：累计过阈值立刻展开，不用等停下。
+        // 到底时 iOS 回弹（越界弹回来）也是 delta < 0，那不是用户往回滑，不算。
         _downAccum = 0;
         _upAccum += -delta;
         if (collapsed.value && _upAccum >= _threshold) {
@@ -121,49 +121,38 @@ class MiniPlayerCollapse {
       // 已经是球：往下拖 / 惯性途中都别回条（含手指按住没松）。
       if (collapsed.value && delta != 0) _expandTimer?.cancel();
     } else if (n is ScrollEndNotification) {
+      // 2026-11-07：停下后一直收着。往下浏览不管再划几次都不回条（以前「第二
+      // 下划完回条」，长页面看着看着条就冒出来），只有往回滑（上面 delta < 0
+      // 那支）或者切 tab / 离开页面才回条。
       _downAccum = 0;
       _upAccum = 0;
-      if (_releaseOnEnd) {
-        // 第二下划完：回条。
-        _set(false);
-      } else if (collapsed.value) {
-        // 2026-11-05 用户要的「二次」：第一下往下浏览收成球，停在哪都一直收着，
-        // 不再停半秒自动回条（会挡住底部的按钮 / 列表里正要点的歌）；等第二下
-        // 划动划完才回来。往回滑（上面 delta < 0 那支）照旧立刻回条。
-        _expandTimer?.cancel();
-        _held = true;
-        debugPrint('[MiniCollapse] 保持收起，再划一下才回条');
-      }
+      if (collapsed.value) _expandTimer?.cancel();
     }
     return false;
   }
-
-  /// 第一下收成的球：停下后不自动回条，等下一次手指划动。
-  bool _held = false;
-
-  /// 「下一次划动」已经开始，它停下时回条。
-  bool _releaseOnEnd = false;
 
   /// 往下 / 往回累计滑过多少像素才触发收起 / 展开。
   static const double _threshold = 16;
   double _downAccum = 0;
   double _upAccum = 0;
 
-  /// 停下后约半秒展开回条。外部（页面关掉时）调用也走这里，会顺带解除
-  /// 「到底保持收起」—— 离开页面一定回条。
+  /// 停下后约半秒展开回条。页面关掉时调用 —— 离开页面一定回条。
   void scheduleExpand() {
-    _held = false;
-    _releaseOnEnd = false;
     _expandTimer?.cancel();
     if (!collapsed.value) return;
     _expandTimer = Timer(_expandDelay, () => _set(false));
   }
 
+  /// 立刻（带动画）展开回条。底栏切 tab 时调用：IndexedStack 切页不会销毁
+  /// 原页面，收不到 dispose，球会挂着让导航条右边空一块。
+  void expand() {
+    _expandTimer?.cancel();
+    _downAccum = 0;
+    _upAccum = 0;
+    _set(false);
+  }
+
   void _set(bool value) {
-    if (!value) {
-      _held = false;
-      _releaseOnEnd = false;
-    }
     if (collapsed.value == value) return;
     collapsed.value = value;
     final c = _controller;
@@ -189,8 +178,6 @@ class MiniPlayerCollapse {
   /// 开播放页 / 换页等场景直接回到条态（不放动画）。
   void reset() {
     _expandTimer?.cancel();
-    _held = false;
-    _releaseOnEnd = false;
     collapsed.value = false;
     _controller?.value = 0;
     progress.value = 0;

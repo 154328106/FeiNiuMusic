@@ -45,6 +45,7 @@ import '../../pages/migu/migu_login_page.dart';
 import '../../pages/qq/qq_login_page.dart';
 import '../../pages/netease/netease_search_page.dart';
 import '../../pages/songs/batch_match_page.dart';
+import '../../app/state/mini_player_collapse.dart';
 import '../../app/state/settings_state.dart';
 import '../../app/state/song_state.dart';
 import '../../app/utils/primary_shell_scope.dart';
@@ -206,6 +207,9 @@ class _PrimaryNavigationShellState extends State<_PrimaryNavigationShell> {
     if (_currentIndex == index || index < 0 || index >= _pages.length) {
       return;
     }
+    // 在歌曲页收成球后点别的 tab：IndexedStack 不销毁原页，球会挂着让导航条
+    // 右边空一块（首页不显示迷你条，更是白空着）。切 tab 一律回条。
+    MiniPlayerCollapse.instance.expand();
     setState(() {
       _pages[index] ??= _buildPage(index);
       _currentIndex = index;

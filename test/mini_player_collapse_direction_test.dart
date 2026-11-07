@@ -17,17 +17,22 @@ void main() {
     devicePixelRatio: 1,
   );
 
-  ScrollUpdateNotification update(double scrollDelta, double fingerDy) =>
-      ScrollUpdateNotification(
-        metrics: metrics(100),
-        context: ctx,
-        scrollDelta: scrollDelta,
-        dragDetails: DragUpdateDetails(
-          globalPosition: Offset.zero,
-          delta: Offset(0, fingerDy),
-          primaryDelta: fingerDy,
-        ),
-      );
+  ScrollUpdateNotification update(
+    double scrollDelta,
+    double? fingerDy, {
+    double pixels = 100,
+  }) => ScrollUpdateNotification(
+    metrics: metrics(pixels),
+    context: ctx,
+    scrollDelta: scrollDelta,
+    dragDetails: fingerDy == null
+        ? null
+        : DragUpdateDetails(
+            globalPosition: Offset.zero,
+            delta: Offset(0, fingerDy),
+            primaryDelta: fingerDy,
+          ),
+  );
 
   Future<void> pump(WidgetTester tester) => tester.pumpWidget(
     Builder(
@@ -57,7 +62,7 @@ void main() {
     m.reset();
   });
 
-  // ---- 到底保持收起：再划一下才回来 ----
+  // ---- 2026-11-07：收起后一直收着，只有往回滑 / 切 tab / 离开页面才回条 ----
 
   ScrollStartNotification start(double pixels) => ScrollStartNotification(
     metrics: metrics(pixels),
@@ -75,7 +80,7 @@ void main() {
     }
   }
 
-  testWidgets('滑到最底停下：不自动回条；再划一下才回来', (tester) async {
+  testWidgets('滑到最底停下、在底部再划几下：一直收着', (tester) async {
     await pump(tester);
     final m = MiniPlayerCollapse.instance..reset();
     collapse(m);
@@ -83,30 +88,54 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
     expect(m.collapsed.value, isTrue, reason: '到底了不该自己回来');
 
-    // 第二下：在底部再划一下（安卓到底了划不动，也照样有 start / end）
-    m.handle(start(300), pageHasMini: true);
-    m.handle(end(300), pageHasMini: true);
-    await tester.pump(const Duration(milliseconds: 600));
-    expect(m.collapsed.value, isFalse);
+    // 在底部再划几下（安卓到底了划不动，也照样有 start / end）
+    for (var i = 0; i < 3; i++) {
+      m.handle(start(300), pageHasMini: true);
+      m.handle(end(300), pageHasMini: true);
+    }
+    await tester.pump(const Duration(seconds: 1));
+    expect(m.collapsed.value, isTrue);
   });
 
-  testWidgets('页面中间停下：也一直收着，第二下划完才回来', (tester) async {
+  testWidgets('长页面往下浏览划了好几下：一直收着', (tester) async {
     await pump(tester);
     final m = MiniPlayerCollapse.instance..reset();
     collapse(m);
     m.handle(end(120), pageHasMini: true);
-    await tester.pump(const Duration(seconds: 2));
-    expect(m.collapsed.value, isTrue, reason: '停在中间也不自己回来');
+    for (var i = 0; i < 4; i++) {
+      final at = 120.0 + i * 30;
+      m.handle(start(at), pageHasMini: true);
+      for (var j = 0; j < 3; j++) {
+        m.handle(update(10, -10, pixels: at + j * 10), pageHasMini: true);
+      }
+      m.handle(end(at + 30), pageHasMini: true);
+      await tester.pump(const Duration(seconds: 1));
+      expect(m.collapsed.value, isTrue, reason: '第 ${i + 2} 下往下浏览也不回条');
+    }
+  });
 
-    // 第二下：接着往下浏览的一划，划完就回条
-    m.handle(start(120), pageHasMini: true);
-    m.handle(update(10, -10), pageHasMini: true);
-    expect(m.collapsed.value, isTrue, reason: '第二下划的途中还收着');
-    m.handle(end(140), pageHasMini: true);
+  testWidgets('到底 iOS 回弹（越界弹回、没有手指）：不算往回滑', (tester) async {
+    await pump(tester);
+    final m = MiniPlayerCollapse.instance..reset();
+    collapse(m);
+    // 越界到 330 后弹回 300：scrollDelta 都是负的，但不是用户往回滑
+    for (final p in [320.0, 310.0, 300.0]) {
+      m.handle(update(-10, null, pixels: p), pageHasMini: true);
+    }
+    m.handle(end(300), pageHasMini: true);
+    expect(m.collapsed.value, isTrue);
+  });
+
+  testWidgets('收着时切 tab：立刻回条', (tester) async {
+    await pump(tester);
+    final m = MiniPlayerCollapse.instance..reset();
+    collapse(m);
+    m.handle(end(120), pageHasMini: true);
+    m.expand(); // 底栏 _select 里调的就是它
     expect(m.collapsed.value, isFalse);
   });
 
-  testWidgets('往回滑：不用等第二下，立刻回条', (tester) async {
+  testWidgets('往回滑（下拉页面）：立刻回条', (tester) async {
     await pump(tester);
     final m = MiniPlayerCollapse.instance..reset();
     collapse(m);
