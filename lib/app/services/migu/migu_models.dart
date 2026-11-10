@@ -89,6 +89,44 @@ class MiguSong {
     );
   }
 
+  /// 从登录后那批 H5 接口的一条记录解析：「我喜欢」
+  /// （`resource/h5/my/playlist/song`）、今日推荐、最近在听三处同构。
+  /// 字段：`songName` / `singerList[{name}]` / `album`(字符串) / `duration`(秒) /
+  /// `img1..img3`（**相对路径**，拼 `https://d.musicapp.migu.cn`）/ `lrcUrl` /
+  /// 歌曲级 `showTags` 含 `vip` 即会员曲。
+  static MiguSong? fromResourceJson(Map<String, dynamic> j) {
+    final copyrightId = (j['copyrightId'] ?? '').toString().trim();
+    final contentId = (j['contentId'] ?? '').toString().trim();
+    if (copyrightId.isEmpty || copyrightId == 'null') return null;
+    final name = (j['songName'] ?? j['name'] ?? '').toString().trim();
+    if (name.isEmpty) return null;
+    final seconds = int.tryParse('${j['duration'] ?? ''}') ?? 0;
+    String? cover;
+    for (final key in const ['img3', 'img2', 'img1']) {
+      final raw = (j[key] ?? '').toString().trim();
+      if (raw.isEmpty) continue;
+      cover = raw.startsWith('http')
+          ? raw
+          : 'https://d.musicapp.migu.cn${raw.startsWith('/') ? '' : '/'}$raw';
+      break;
+    }
+    final tags = j['showTags'];
+    return MiguSong(
+      copyrightId: copyrightId,
+      contentId: contentId,
+      name: name,
+      artists: _names(j['singerList']),
+      album: (j['album'] ?? '').toString().trim(),
+      durationMs: seconds * 1000,
+      coverUrl: cover,
+      isVip: tags is List && tags.any((t) => '$t'.toLowerCase() == 'vip'),
+      lyricUrl: () {
+        final u = (j['lrcUrl'] ?? '').toString().trim();
+        return u.startsWith('http') ? u : null;
+      }(),
+    );
+  }
+
   /// singers 可能是单对象 `{id,name}`，也可能是数组；都归一成 `/` 分隔。
   static String _names(dynamic singers) {
     if (singers is List) {

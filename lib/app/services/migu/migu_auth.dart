@@ -35,7 +35,10 @@ class MiguAuth {
 
   static const String _prefsKey = 'migu.auth.cookies';
   static const String _prefsNick = 'migu.auth.nickname';
-  static const String _sourceId = '220001';
+
+  /// 咪咕音乐网页端的 sourceid。2026-11-11 前用的 220001 也能扫码，但换 pacmtoken
+  /// 的 token-validate 要和登录时的 sourceid 对上，统一用音乐这套（实测通）。
+  static const String _sourceId = '220029';
 
   static const String _ua =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -83,7 +86,9 @@ class MiguAuth {
         }
       }
       nickname = prefs.getString(_prefsNick) ?? '';
-      isLoggedIn.value = _cookies.isNotEmpty;
+      // 只有 pacmtoken 才是能取用户数据的登录态。2026-11-11 前的登录只收了
+      // passport 的 cookie、没换 pacmtoken，等于没登录，要重新扫一次。
+      isLoggedIn.value = pacmToken.isNotEmpty;
     } catch (_) {
       // 存档坏了就当没登录过。
     }
@@ -95,6 +100,22 @@ class MiguAuth {
       await prefs.setString(_prefsKey, jsonEncode(_cookies));
       await prefs.setString(_prefsNick, nickname);
     } catch (_) {}
+  }
+
+  /// 登录凭证：取「我喜欢」、今日推荐等用户数据都靠它，服务端每次响应可能换发新的。
+  String get pacmToken => _cookies['pacmtoken'] ?? '';
+
+  /// 收下响应里换发的新 pacmtoken（不收就会用着用着过期）。
+  Future<void> absorbRenewal(List<String>? setCookies) async {
+    if (setCookies == null) return;
+    for (final line in setCookies) {
+      final pair = line.split(';').first.trim();
+      if (!pair.startsWith('pacmtoken=')) continue;
+      final value = pair.substring('pacmtoken='.length).trim();
+      if (value.isEmpty || value == _cookies['pacmtoken']) continue;
+      _cookies['pacmtoken'] = value;
+      await _persist();
+    }
   }
 
   /// 请求要带的 Cookie 头。未登录为空。
@@ -188,27 +209,24 @@ class MiguAuth {
   /// 咪咕 passport 成功后把登录态放在 Set-Cookie 和/或 result 里；具体字段要
   /// 真机扫一次确认，这里尽量全收 + 打日志。
   Future<MiguScanResult> _onSuccess(Map<dynamic, dynamic> json) async {
-    debugPrint('[MiguAuth] 登录成功原始返回：${jsonEncode(json)}');
     final result = json['result'];
+    // 只记字段名：原始返回里有 token，日志会被贴出去。
+    debugPrint(
+      '[MiguAuth] 登录成功，返回字段：${result is Map ? result.keys.toList() : '无'}',
+    );
     if (result is Map) {
-      // 常见 token 字段名，收进 cookie 池备用。
-      for (final k in const ['token', 'ssoToken', 'tokenId', 'sidTk']) {
-        final v = (result[k] ?? '').toString();
-        if (v.isNotEmpty) _cookies[k] = v;
-      }
       final nick = (result['nickName'] ?? result['nickname'] ?? '').toString();
       if (nick.isNotEmpty) nickname = nick;
-      // 若带跳转，手动跟一跳收 Cookie（music.migu.cn 的会话 cookie 可能在这里）。
-      final redirect = (result['returnURL'] ?? result['redirectURL'] ?? '')
-          .toString();
-      if (redirect.startsWith('http')) {
-        await _followOnce(redirect);
-      }
     }
-    if (_cookies.isEmpty) {
+    // 不要先跟 redirectURL 跳一下：ST token 很可能是一次性的，跳过去就被用掉了，
+    // 2026-11-11 实测直接拿去换 pacmtoken 是通的。
+    // passport 给的是一次性的 ST token，要拿去换咪咕音乐的 pacmtoken 才能取用户数据。
+    final st = result is Map ? (result['token'] ?? '').toString() : '';
+    if (st.isNotEmpty) await _exchangePacm(st);
+    if (pacmToken.isEmpty) {
       return const MiguScanResult(
         MiguScanState.error,
-        message: '登录成功但没拿到凭证（看日志里的原始返回）',
+        message: '扫码成功，但换取咪咕凭证失败（看日志），请重扫',
       );
     }
     isLoggedIn.value = true;
@@ -216,17 +234,33 @@ class MiguAuth {
     return MiguScanResult(MiguScanState.success, nickname: nickname);
   }
 
-  Future<void> _followOnce(String url) async {
+  /// ST token → pacmtoken（在 Set-Cookie 里）。
+  Future<void> _exchangePacm(String st) async {
     try {
       final res = await _dio.get<String>(
-        url,
+        'https://c.musicapp.migu.cn/user/h5/token-validate/v3.0',
+        queryParameters: {
+          'token': st,
+          'type': '2',
+          'sourceId': _sourceId,
+          'activityId': 'MUSIC-WWW',
+        },
         options: Options(
           responseType: ResponseType.plain,
-          headers: {'Cookie': cookieHeader},
+          headers: {
+            'Cookie': 'idmpauth=true@passport.migu.cn',
+            'Origin': 'https://music.migu.cn',
+            'Referer': 'https://music.migu.cn/',
+          },
         ),
       );
       _absorbCookies(res);
-    } catch (_) {}
+      if (pacmToken.isEmpty) {
+        debugPrint('[MiguAuth] 换 pacmtoken 失败：${res.data}');
+      }
+    } on DioException catch (e) {
+      debugPrint('[MiguAuth] 换 pacmtoken 失败：${e.message}');
+    }
   }
 
   void _absorbCookies(Response<Object?> response) {

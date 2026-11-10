@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
+import 'migu_auth.dart';
 import 'migu_models.dart';
 
 class MiguApiException implements Exception {
@@ -245,6 +246,119 @@ class MiguApiClient {
       debugPrint('[Migu] 歌词异常：$e');
       return null;
     }
+  }
+
+  // ---------------------------------------------------------------------
+  // 登录后的用户数据（凭 pacmtoken，见 [MiguAuth.pacmToken]）
+  //
+  // 2026-11-11 真号实测（照 Domdkw/miguMusic-api-enhanced）：都在 app.c.nf.migu.cn，
+  // Cookie 带 pacmtoken 就行，响应会 Set-Cookie 换发新的 pacmtoken，必须收下。
+  // 成功 code 是 "000000"；"290001 请先登录" = 凭证失效。
+  // ---------------------------------------------------------------------
+
+  static const String _webUa =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+      '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+  Future<Map<String, dynamic>> _pacmGet(
+    String url, {
+    Map<String, dynamic>? query,
+  }) async {
+    final auth = MiguAuth.instance;
+    await auth.ensureLoaded();
+    final token = auth.pacmToken;
+    if (token.isEmpty) throw MiguApiException('咪咕未登录');
+    final Response<dynamic> res;
+    try {
+      res = await _dio.get<dynamic>(
+        url,
+        queryParameters: query,
+        options: Options(
+          headers: {'User-Agent': _webUa, 'Cookie': 'pacmtoken=$token'},
+        ),
+      );
+    } on DioException catch (e) {
+      throw MiguApiException('网络请求失败：${e.message ?? e.type.name}');
+    }
+    await auth.absorbRenewal(res.headers.map['set-cookie']);
+    final json = _decode(res.data);
+    if (json is! Map) throw MiguApiException('响应格式异常');
+    final code = '${json['code'] ?? ''}';
+    if (code == '290001') throw MiguApiException('咪咕登录已失效，请重新扫码');
+    if (code.isNotEmpty && code != '000000') {
+      throw MiguApiException('${json['info'] ?? code}');
+    }
+    return json.cast<String, dynamic>();
+  }
+
+  List<MiguSong> _parseResourceList(dynamic list) => [
+    if (list is List)
+      for (final e in list)
+        if (e is Map) ?MiguSong.fromResourceJson(e.cast<String, dynamic>()),
+  ];
+
+  /// 「喜欢的音乐」的歌单 id：用户主页 `userPrivateItems` 里那一项的
+  /// `actionUrl` 形如 `mgmusic://music/mine/favorite?type=0&musicListId=236988107`。
+  Future<String?> _likedPlaylistId() async {
+    final json = await _pacmGet(
+      'https://app.c.nf.migu.cn/pc/user/home-page/v2.0',
+    );
+    final data = json['data'];
+    final items = data is Map ? data['userPrivateItems'] : null;
+    if (items is List) {
+      for (final item in items) {
+        if (item is! Map) continue;
+        final action = (item['actionUrl'] ?? '').toString();
+        if (!action.contains('mine/favorite')) continue;
+        final id = Uri.tryParse(action)?.queryParameters['musicListId'] ?? '';
+        if (id.isNotEmpty) return id;
+      }
+    }
+    return null;
+  }
+
+  /// 「我喜欢」的歌（分页取全，最多 [limit] 首）。
+  Future<List<MiguSong>> likedSongs({int limit = 500}) async {
+    final id = await _likedPlaylistId();
+    if (id == null) throw MiguApiException('没找到「喜欢的音乐」歌单');
+    final out = <MiguSong>[];
+    const size = 50;
+    for (var page = 1; out.length < limit && page <= 40; page++) {
+      final json = await _pacmGet(
+        'https://app.c.nf.migu.cn/resource/h5/my/playlist/song/v1.0',
+        query: {'pageNo': page, 'pageSize': size, 'playlistId': id},
+      );
+      final data = json['data'];
+      final batch = _parseResourceList(data is Map ? data['songList'] : null);
+      out.addAll(batch);
+      final total = int.tryParse('${data is Map ? data['totalCount'] : ''}');
+      final rawCount = data is Map && data['songList'] is List
+          ? (data['songList'] as List).length
+          : 0;
+      if (rawCount < size || (total != null && page * size >= total)) break;
+    }
+    return out.length <= limit ? out : out.sublist(0, limit);
+  }
+
+  /// 今日推荐（按账号个性化，约 60 首）。
+  Future<List<MiguSong>> todayRecommend() async {
+    final json = await _pacmGet(
+      'https://app.c.nf.migu.cn/pc/v1.0/template/todayRecommendList/release',
+      query: {'actionId': 1, 'index': 1, 'templateVersion': 5},
+    );
+    final data = json['data'];
+    final rec = data is Map ? data['recommendData'] : null;
+    return _parseResourceList(rec is Map ? rec['data'] : null);
+  }
+
+  /// 最近在听（咪咕云端记录，App 和网页播放过的都算）。
+  Future<List<MiguSong>> recentPlayed() async {
+    final json = await _pacmGet(
+      'https://app.c.nf.migu.cn/user/api/my-page-music/v1.0',
+    );
+    final data = json['data'];
+    final info = data is Map ? data['recentPlayInfo'] : null;
+    return _parseResourceList(info is Map ? info['recentPlayList'] : null);
   }
 
   List<MiguSong> _parseList(dynamic list) {

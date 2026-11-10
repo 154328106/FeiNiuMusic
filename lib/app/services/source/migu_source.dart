@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../state/song_source.dart';
 import '../../state/song_state.dart';
 import '../migu/migu_api_client.dart';
+import '../migu/migu_auth.dart';
 import '../migu/migu_models.dart';
 import '../migu/migu_playback_service.dart';
 import '../played_song_cache.dart';
@@ -104,17 +105,47 @@ class MiguSource implements MusicSource {
 
   @override
   Future<List<SongEntity>> fullFeed(HomeFeed kind, {required int limit}) async {
+    await MiguAuth.instance.ensureLoaded();
+    final loggedIn = MiguAuth.instance.isLoggedIn.value;
     switch (kind) {
       case HomeFeed.favorites:
-        return const [];
+        // 登录后读咪咕的「喜欢的音乐」（2026-11-11 前这里直接返回空，登录了也没有）。
+        if (!loggedIn) return const [];
+        return _userSongs('我喜欢', () => _api.likedSongs(limit: limit));
       case HomeFeed.recentPlayed:
+        // 登录了先用咪咕云端「最近在听」（含在咪咕 App 里听的），没有再用本机记录。
+        if (loggedIn) {
+          final cloud = await _userSongs('最近在听', _api.recentPlayed);
+          if (cloud.isNotEmpty) return cloud.take(limit).toList();
+        }
         await PlayedSongCache.instance.ensureLoaded();
         return PlayedSongCache.instance.recent(
           limit: limit,
           idPrefix: SongSource.miguPrefix,
         );
       case HomeFeed.latestSongs:
+        // 登录了用按账号推荐的「今日推荐」，取不到再用热门歌手混合。
+        if (loggedIn) {
+          final today = await _userSongs('今日推荐', _api.todayRecommend);
+          if (today.isNotEmpty) return today;
+        }
         return _hot();
+    }
+  }
+
+  /// 登录后的用户数据：失败时记下原因（凭证失效会提示重新扫码），返回空。
+  Future<List<SongEntity>> _userSongs(
+    String label,
+    Future<List<MiguSong>> Function() load,
+  ) async {
+    try {
+      final songs = await load();
+      lastError = null;
+      return [for (final s in songs) MiguPlaybackService.toSongEntity(s)];
+    } on MiguApiException catch (e) {
+      lastError = '$label读取失败：${e.message}';
+      debugPrint('[MiguSource] $label error: ${e.message}');
+      return const [];
     }
   }
 

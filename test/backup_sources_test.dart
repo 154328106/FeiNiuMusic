@@ -31,7 +31,8 @@ void main() {
       'netease.cookies': jsonEncode({'MUSIC_U': 'nu', '__csrf': 'c'}),
       'qq.auth.cookies': jsonEncode({'qqmusic_key': 'qk', 'uin': '1'}),
       'qq.auth.nickname': 'QQ昵称',
-      'migu.auth.cookies': jsonEncode({'SESSION': 'ms'}),
+      // 咪咕只有 pacmtoken 才算登录（2026-11-11 起）
+      'migu.auth.cookies': jsonEncode({'pacmtoken': 'mp'}),
       'migu.auth.nickname': '咪咕昵称',
       'kugou.auth.v1': jsonEncode({'userid': '9', 'token': 'kt'}),
       'unblock.source.preferLx': true,
