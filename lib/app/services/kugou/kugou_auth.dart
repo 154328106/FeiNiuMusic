@@ -117,23 +117,27 @@ class KugouAuth {
 
   Future<void> saveDfid(String value) async {
     if (value.isEmpty) {
-      // 记一笔失败时间：注册被服务端拒（error_code 20006）时，没必要每次
-      // 开 App 都再撞一遍，留给用户在账号弹窗里手动重试。
-      _data['dfidFailedAt'] = '${DateTime.now().millisecondsSinceEpoch}';
+      // 记一笔失败时间，冷却期内开 App 不再自动重试（账号弹窗里仍可手动重试）。
+      // 2026-11-11 前的协议是错的、稳定 20006，那时记下的 `dfidFailedAt` 不算数，
+      // 换成新键，修好后第一次启动就会重新注册。
+      _data['dfidFailedAtV3'] = '${DateTime.now().millisecondsSinceEpoch}';
       await _persist();
       return;
     }
-    _data.remove('dfidFailedAt');
+    _data.remove('dfidFailedAtV3');
     _data['dfid'] = value;
     await _persist();
   }
 
-  /// 最近一次注册失败是不是还在冷却里（24 小时）。
+  /// 最近一次注册失败是不是还在冷却里（30 分钟）。
+  ///
+  /// 失败多半是同一 IP 短时间连着注册被限流（回 `data: []`），过一会儿就好，
+  /// 不用像以前那样等一整天。
   bool get dfidRecentlyFailed {
-    final raw = int.tryParse(_data['dfidFailedAt'] ?? '');
+    final raw = int.tryParse(_data['dfidFailedAtV3'] ?? '');
     if (raw == null) return false;
     final at = DateTime.fromMillisecondsSinceEpoch(raw);
-    return DateTime.now().difference(at) < const Duration(hours: 24);
+    return DateTime.now().difference(at) < const Duration(minutes: 30);
   }
 
   Future<void> logout() async {

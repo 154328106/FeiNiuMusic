@@ -649,13 +649,18 @@ class KugouApiClient {
     bool web = false,
     Map<String, String> params = const {},
     Map<String, dynamic>? data,
-    Uint8List? rawBody,
+    String? textBody,
+    Map<String, dynamic> Function(Uint8List bytes)? decodeBytes,
     Map<String, String> headers = const {},
   }) async {
     final auth = KugouAuth.instance;
     final all = _baseParams()..addAll(params);
-    final bodyText = data == null ? '' : jsonEncode(data);
-    final body = rawBody ?? (data == null ? null : utf8.encode(bodyText));
+    // 签名要把请求体原文算进去：JSON 是 jsonEncode 的结果，[textBody] 就是它本身
+    // （设备注册发的是 base64 文本 —— 以前发原始字节、签名里没有 body，服务端一律 20006）。
+    final bodyText = textBody ?? (data == null ? '' : jsonEncode(data));
+    final body = textBody != null || data != null
+        ? utf8.encode(bodyText)
+        : null;
     all['signature'] = _signature(all, bodyText, web: web);
     final query = all.entries
         .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
@@ -674,20 +679,28 @@ class KugouApiClient {
     };
     final url = '${baseUrl ?? _gatewayBase}$path?$query';
     if (method == 'GET') return _getJson(url, headers: merged);
+    // 文本 body 按字节走 Stream：直接把 Uint8List 交给 dio 不保险，非 JSON 的
+    // Content-Type 下它会 `data.toString()`，发出去成了「[123, 34, ...]」字面量。
+    final payload = textBody == null
+        ? body
+        : Stream<List<int>>.fromIterable([body!]);
+    if (textBody != null) merged['Content-Length'] = '${body!.length}';
+    if (decodeBytes != null) {
+      // 设备注册成功时回的是 AES 密文（二进制），按文本收会被 UTF-8 解坏
+      final Response<List<int>> response;
+      try {
+        response = await _dio.post<List<int>>(
+          url,
+          data: payload,
+          options: Options(headers: merged, responseType: ResponseType.bytes),
+        );
+      } on DioException catch (e) {
+        throw KugouApiException('网络请求失败：${e.message ?? e.type.name}');
+      }
+      return decodeBytes(Uint8List.fromList(response.data ?? const []));
+    }
     final Response<String> response;
     try {
-      // 二进制 body 走 Stream。
-      //
-      // 直接把 Uint8List 交给 dio 是不保险的：非 JSON 的 Content-Type 下，
-      // 它的默认 transformer 会走到 `data.toString()`，于是发出去的是
-      // 「[123, 34, 97...]」这么一串字面量 —— 服务端当然解不开，表现就是
-      // 设备注册永远拿不到 dfid。Stream 这条路 dio 是原样透传的。
-      final payload = rawBody == null
-          ? body
-          : Stream<List<int>>.fromIterable([rawBody]);
-      if (rawBody != null) {
-        merged['Content-Length'] = '${rawBody.length}';
-      }
       response = await _dio.post<String>(
         url,
         data: payload,
@@ -775,13 +788,10 @@ class KugouApiClient {
       avatar: avatar,
       vipType: vip,
     );
-    // 注册设备**不能**挡在登录结果前面。
-    //
-    // 它稳定失败（风控返 20006），await 在这里意味着扫完码要先干等它把
-    // 超时耗完，登录页才收得到成功、才会自己返回。而轮询是 2 秒一次的定时
-    // 器，前一发卡着的时候后一发照样进来，于是注册被重复触发好几次。
-    // dfid 拿不到只影响会员曲的官方地址，本来就不该拖着登录。
-    unawaited(registerDevice());
+    // 注册设备**不能**挡在登录结果前面：轮询是 2 秒一次的定时器，await 在这里
+    // 会让扫完码干等，前一发卡着时后一发照样进来，注册被重复触发好几次。
+    // dfid 是设备级的，已经有了（免登录时注册过）就不用再注册。
+    if (!KugouAuth.instance.hasDfid) unawaited(registerDevice());
     return KugouScanResult(
       KugouScanState.success,
       nickname: nick.isEmpty ? '酷狗用户 $userId' : nick,
@@ -790,12 +800,21 @@ class KugouApiClient {
 
   /// 注册设备换 dfid。
   ///
-  /// 不做也能登录，但会员曲的取址接口认这个值 —— 少了它，登录了照样
-  /// status=2。这是整个酷狗接入里唯一需要真加密的地方：设备信息用随机
-  /// 口令做 AES-CBC，口令本身再用酷狗的 RSA 公钥加密后放进 query。
+  /// 会员曲的取址接口认这个值，免登录也能注册（uid 0、token 空）。
+  /// 这是整个酷狗接入里唯一需要真加密的地方：设备画像用随机口令做 AES-CBC，
+  /// 口令本身再用酷狗的 RSA 公钥加密后放进 query。
+  ///
+  /// 照 MakcRe/KuGouMusicApi 的 register_dev 逐项对齐（2026-11-11 用 Node 探针实测）：
+  /// - 接口 `/risk/v3/r_register_dev`；
+  /// - 请求体是 AES 密文的 **base64 文本**，并且**算进签名**（以前发原始字节、
+  ///   签名不含 body，服务端一律 `error_code 20006`）；
+  /// - 设备画像 31 个字段一个不少（各传感器「有没有 + 值」成对出现）；
+  /// - 成功时回的是**用同一口令 AES 加密的二进制**，要解密才看得到 dfid；
+  ///   失败时是明文 JSON。
+  /// - 同一 IP 短时间内连着注册，后面几次会回 `status 1` 但 `data: []`，不是参数错。
   Future<void> registerDevice() async {
     final auth = KugouAuth.instance;
-    if (!auth.isLoggedIn.value) return;
+    await auth.ensureLoaded();
     try {
       final rand = Random.secure();
       const pool = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -803,28 +822,37 @@ class KugouApiClient {
         6,
         (_) => pool[rand.nextInt(pool.length)],
       ).join();
-      // 这份设备画像是官方端的原样，字段少一个都可能被判成异常设备。
       final guid = auth.guid;
-      final payload = utf8.encode(
-        jsonEncode({
-          'availableRamSize': 4983533568,
-          'availableRomSize': 48114719,
-          'availableSDSize': 48114717,
-          'basebandVer': '',
-          'batteryLevel': 100,
-          'batteryStatus': 3,
-          'brand': 'Redmi',
-          'buildSerial': 'unknown',
-          'device': 'marble',
-          'imei': guid,
-          'imsi': '',
-          'manufacturer': 'Xiaomi',
-          'uuid': guid,
-          'accelerometer': false,
-          'gyroscope': false,
-        }),
+      final profile = <String, Object>{
+        'availableRamSize': 4983533568,
+        'availableRomSize': 48114719,
+        'availableSDSize': 48114717,
+        'basebandVer': '',
+        'batteryLevel': 100,
+        'batteryStatus': 3,
+        'brand': 'Redmi',
+        'buildSerial': 'unknown',
+        'device': 'marble',
+        'imei': guid,
+        'imsi': '',
+        'manufacturer': 'Xiaomi',
+        'uuid': guid,
+        for (final sensor in const [
+          'accelerometer',
+          'gravity',
+          'gyroscope',
+          'light',
+          'magnetic',
+          'orientation',
+          'pressure',
+          'step_counter',
+          'temperature',
+        ]) ...{sensor: false, '${sensor}Value': ''},
+      };
+      final encrypted = _aesCbcEncrypt(
+        Uint8List.fromList(utf8.encode(jsonEncode(profile))),
+        aesKey,
       );
-      final encrypted = _aesCbcEncrypt(Uint8List.fromList(payload), aesKey);
       final p = utf8.encode(
         jsonEncode({
           'aes': aesKey,
@@ -834,15 +862,13 @@ class KugouApiClient {
       );
       final rsa = _rsaEncrypt(Uint8List.fromList(p));
       final json = await _gateway(
-        '/risk/v2/r_register_dev',
+        '/risk/v3/r_register_dev',
         baseUrl: _userService,
         method: 'POST',
         params: {'part': '1', 'platid': '1', 'p': _hex(rsa)},
-        rawBody: encrypted,
-        headers: {
-          'x-router': 'userservice.kugou.com',
-          'Content-Type': 'application/octet-stream',
-        },
+        textBody: base64Encode(encrypted),
+        headers: {'Content-Type': 'text/plain;charset=UTF-8'},
+        decodeBytes: (bytes) => _decodeRegisterReply(bytes, aesKey),
       );
       final dfid = _deepString(json, const ['dfid']);
       if (dfid.isEmpty) {
@@ -856,14 +882,33 @@ class KugouApiClient {
     }
   }
 
-  /// 登录着但没有 dfid 时补注册一次。
+  /// 设备注册的回包：失败是明文 JSON，成功是 AES 密文（同一口令）。
+  static Map<String, dynamic> _decodeRegisterReply(
+    Uint8List bytes,
+    String aesKey,
+  ) {
+    String text;
+    final head = bytes.isEmpty ? 0 : bytes.first;
+    if (head == 0x7B) {
+      text = utf8.decode(bytes, allowMalformed: true);
+    } else {
+      text = utf8.decode(_aesCbcDecrypt(bytes, aesKey), allowMalformed: true);
+    }
+    final decoded = jsonDecode(text);
+    if (decoded is! Map<String, dynamic>) {
+      throw KugouApiException('设备注册回包格式异常');
+    }
+    return decoded;
+  }
+
+  /// 没有 dfid 时补注册一次（登不登录都注册，免登录也要用）。
   ///
-  /// dfid 只在扫码成功那一刻注册，那次失败了就一直空着，除非用户想起来
+  /// 以前只在扫码成功那一刻注册，那次失败了就一直空着，除非用户想起来
   /// 退出重登 —— 没道理要用户猜。
   Future<void> ensureDeviceRegistered() async {
     final auth = KugouAuth.instance;
     await auth.ensureLoaded();
-    if (!auth.isLoggedIn.value || auth.hasDfid) return;
+    if (auth.hasDfid) return;
     if (auth.dfidRecentlyFailed) return;
     await registerDevice();
   }
@@ -1077,6 +1122,24 @@ class KugouApiClient {
     );
     cipher.init(
       true,
+      pc.PaddedBlockCipherParameters<pc.CipherParameters, pc.CipherParameters>(
+        pc.ParametersWithIV<pc.KeyParameter>(pc.KeyParameter(key), iv),
+        null,
+      ),
+    );
+    return cipher.process(input);
+  }
+
+  static Uint8List _aesCbcDecrypt(Uint8List input, String password) {
+    final digest = _md5Hex(password);
+    final key = Uint8List.fromList(utf8.encode(digest.substring(0, 16)));
+    final iv = Uint8List.fromList(utf8.encode(digest.substring(16)));
+    final cipher = pc.PaddedBlockCipherImpl(
+      pc.PKCS7Padding(),
+      pc.CBCBlockCipher(pc.AESEngine()),
+    );
+    cipher.init(
+      false,
       pc.PaddedBlockCipherParameters<pc.CipherParameters, pc.CipherParameters>(
         pc.ParametersWithIV<pc.KeyParameter>(pc.KeyParameter(key), iv),
         null,
