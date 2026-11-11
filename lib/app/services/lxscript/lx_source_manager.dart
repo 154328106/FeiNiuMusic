@@ -253,14 +253,14 @@ class LxSourceManager {
     List<String> hostCovers = const [],
   }) async {
     if (!_loaded) {
-      // 第一次取址时脚本可能还在载入（每个最多 8 秒）。最多等 2 秒，等不到这首
-      // 就先不用脚本，交给内置链 —— 别让起播卡在载脚本上。载入在后台接着跑。
-      try {
-        await ensureLoaded().timeout(const Duration(seconds: 2));
-      } on TimeoutException {
-        debugPrint('[LX] 脚本还在载入，$platform/$songId 这首先不等');
-        return null;
-      }
+      // 冷启动：脚本还在后台载入（main.dart 启动时已 unawaited(ensureLoaded())，
+      // 但 200KB+ 的混淆脚本 QuickJS 解析要时间，每个最多 8 秒、还是串行）。
+      // 以前这里等 2 秒再放弃，表现成「当天第一首歌卡一下」。现在一秒都不等，
+      // 直接让给内置链 —— 它是官方 ID 取址，通常比脚本快；载入在后台接着跑，
+      // 下一首就能用上脚本。
+      unawaited(ensureLoaded());
+      debugPrint('[LX] 脚本还在载入，$platform/$songId 这首先走内置链');
+      return null;
     }
     if (_runtimes.isEmpty) return null;
     final info = _musicInfo(platform, songId, name: name, singer: singer);
@@ -268,24 +268,40 @@ class LxSourceManager {
     // 脚本（如「网易专用」1.0.2+）就跳过同名后端，免得一首歌被问两遍；
     // 别的脚本不读这个键，照常工作。「测试」按钮不带它，测的是脚本完整能力。
     if (hostCovers.isNotEmpty) info['hostCovers'] = hostCovers;
-    for (final meta in _metas) {
+
+    // 整轮总预算。脚本只能串行逐个问（flutter_js 并发驱动会互相干扰甚至闪退），
+    // 不封顶的话 3 个脚本最坏 3×6=18 秒，一首歌就卡死在那。超了就把这首让给
+    // 内置链。单个脚本仍有自己的上限，但不得超过剩余预算 —— 这样主力源挂掉
+    // 吃满 6 秒后，后面的备用脚本还剩 4 秒可以接力，不至于被它一个人堵死。
+    final deadline = DateTime.now().add(_budget);
+
+    for (final meta in orderFor(platform)) {
       if (!meta.enabled) continue;
       if (!meta.sources.contains(platform)) continue;
       final runtime = _runtimes[meta.id];
       if (runtime == null) continue;
       final tripKey = '${meta.id}/$platform';
       if (_isTripped(tripKey)) continue;
+
+      final left = deadline.difference(DateTime.now());
+      if (left < _minSlice) {
+        debugPrint('[LX] 这轮预算用完，剩下的脚本先不问，$platform/$songId 让给内置链');
+        break;
+      }
+      final slice = left < _perScript ? left : _perScript;
+
       try {
         // 播放解灰链是逐个等的，给个更短超时：卡住的脚本别拖慢起播。
         final r = await runtime.getMusicUrlTimed(
           source: platform,
           info: info,
           quality: quality,
-          timeout: const Duration(seconds: 6),
+          timeout: slice,
           priority: !background,
         );
         if (r.timedOut) {
           _noteTimeout(tripKey, meta.name, platform);
+          _forgetHit(platform, meta.id);
           continue;
         }
         // 没超时就说明脚本后端是活的（有货没货另说），清掉计数。
@@ -294,22 +310,70 @@ class LxSourceManager {
         if (url != null && url.isNotEmpty) {
           if (isPlaceholder(url, '$platform/$songId')) {
             debugPrint('[LX] ${meta.name} 给的是占位音频（不是这首歌），丢弃：$platform/$songId');
+            _forgetHit(platform, meta.id);
             continue;
           }
           if (!await linkAlive(url)) {
             debugPrint(
               '[LX] ${meta.name} 给的链接打不开（404 / 错误页），丢弃：$platform/$songId',
             );
+            _forgetHit(platform, meta.id);
             continue;
           }
           debugPrint('[LX] ${meta.name} 命中 $platform/$songId');
+          lastHit[platform] = meta.id; // 下次这个平台先问它
           return url;
         }
+        // 秒回「没货」：它不该再占着这个平台的亲和位，让后面的脚本先上。
+        _forgetHit(platform, meta.id);
       } catch (e) {
         debugPrint('[LX] ${meta.name} 取址异常：$e');
+        _forgetHit(platform, meta.id);
       }
     }
     return null;
+  }
+
+  // ---- 取址顺序：平台亲和性 ----
+  //
+  // 常见装法是「一个稳定的主力源 + 几个备用」。问题在于备用脚本 inited 时同样
+  // 声明支持全部五个平台（**声明 ≠ 真有货**），所以上面的循环没法靠 `sources`
+  // 提前跳过它们，只能挨个真问一遍 —— 排在前面那个这平台没货，也得等它跑完
+  // （实测 2.4~6.5 秒）才轮到下一个，表现就是「切到网易要卡一下才出声」。
+  //
+  // 这里记住「上次是哪个脚本给出过这个平台的可用链接」，下次同平台把它提到队首：
+  // 主力源平时都命中，第二首起直接秒出；它哪天挂了或这首没货，[_forgetHit] 立刻
+  // 把亲和位让出来，自然回落到按用户排的列表顺序往下接力。只在内存里，重启重学。
+  //
+  // 注意它**不动** [list] 返回的顺序 —— 用户在设置页排的是基础/回落顺序，照样
+  // 保存和显示，这里只是运行时把「刚刚证明有货的那个」插队到最前。
+  @visibleForTesting
+  final Map<String, String> lastHit = {};
+
+  /// 整轮 LX 的总预算。10 秒 = 主力源吃满 [_perScript] 6 秒后，还剩 4 秒够备用
+  /// 脚本接力一次（实测 320k 下各脚本最慢 3.0 秒）。
+  static const Duration _budget = Duration(seconds: 10);
+
+  /// 单个脚本的上限。
+  static const Duration _perScript = Duration(seconds: 6);
+
+  /// 剩余预算少于这个数就不值得再起一个脚本了，直接让给内置链。
+  static const Duration _minSlice = Duration(milliseconds: 1200);
+
+  /// 按亲和性重排：上次命中过 [platform] 的脚本提到最前，其余保持用户排的顺序。
+  /// 返回副本 —— 取址是 async 的，期间用户可能在设置页增删/排序脚本。
+  @visibleForTesting
+  List<LxSource> orderFor(String platform) {
+    final hitId = lastHit[platform];
+    if (hitId == null) return List<LxSource>.of(_metas);
+    final i = _metas.indexWhere((m) => m.id == hitId);
+    if (i <= 0) return List<LxSource>.of(_metas);
+    return [_metas[i], ..._metas.where((m) => m.id != hitId)];
+  }
+
+  /// 这个脚本这次没给出可用链接：如果它正占着该平台的亲和位，让出来。
+  void _forgetHit(String platform, String id) {
+    if (lastHit[platform] == id) lastHit.remove(platform);
   }
 
   /// 脚本给的链接先敲一下门：有的脚本只是把 id 拼进固定地址就当「拿到了」，

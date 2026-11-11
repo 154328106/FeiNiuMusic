@@ -431,7 +431,9 @@ class _LxSourcePageState extends State<LxSourcePage> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
                     child: Text(
-                      '按从上到下的顺序问，前面的拿到就不再往下问。长按卡片可以拖动排序。',
+                      '按从上到下的顺序问，前面的拿到就不再往下问。长按卡片可以拖动排序。'
+                      '某个平台上次是哪个脚本给出地址的，下次同平台会先问它；它没给出来，'
+                      '就按这个顺序往下接力。',
                       style: TextStyle(
                         fontSize: 12,
                         color: scheme.onSurfaceVariant,
