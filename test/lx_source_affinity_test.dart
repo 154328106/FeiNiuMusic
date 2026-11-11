@@ -71,11 +71,11 @@ void main() {
   test('亲和性不动 list()：用户在设置页排的顺序照样保存和显示', () async {
     await reset(['a', 'b', 'c']);
     mgr.lastHit['kg'] = 'c';
-    expect(
-      mgr.list().map((m) => m.id).toList(),
-      ['a', 'b', 'c'],
-      reason: '它只影响运行时问询顺序，不该改用户看到的列表',
-    );
+    expect(mgr.list().map((m) => m.id).toList(), [
+      'a',
+      'b',
+      'c',
+    ], reason: '它只影响运行时问询顺序，不该改用户看到的列表');
   });
 
   test('主力源让出亲和位后，下一轮回到用户排的顺序', () async {
