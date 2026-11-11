@@ -279,11 +279,16 @@ class UnblockSourceService {
     if (preferLxEnabled.value &&
         !background &&
         LxSourceManager.instance.hasEnabledFor(platform)) {
+      // 音质跟设置走（默认 320k），不要吃 [LxSourceManager.resolve] 的默认值
+      // 'flac'：2026-11-12 实测三个主流五源脚本，flac 下网易云/QQ 经常跑满 6 秒
+      // 超时（拿不到无损就一路试下家），连撞两次就被熔断 3 分钟；换 320k 后同样
+      // 的歌 0.3~2.5 秒就给。下面 GD 那条路本来就用 cfg.quality，这里跟它对齐。
       final url = await LxSourceManager.instance.resolve(
         platform: platform,
         songId: songId,
         name: name,
         singer: singer,
+        quality: cfg.quality,
         hostCovers: hostCovers,
       );
       lxTried = true;
@@ -372,11 +377,13 @@ class UnblockSourceService {
     // 0.1～0.4 秒就能给、不花额度。聆澜是有额度的公益卡，留给脚本救不了的歌。
     Future<String?> tryLx() async {
       lxTried = true;
+      // 音质跟设置走，同上（别吃 'flac' 默认值，会跑满超时触发熔断）。
       final lxUrl = await LxSourceManager.instance.resolve(
         platform: platform,
         songId: songId,
         name: name,
         singer: singer,
+        quality: cfg.quality,
         background: background,
         hostCovers: hostCovers,
       );
@@ -498,11 +505,13 @@ class UnblockSourceService {
       final songs = await QQApiClient.instance.searchSongs(keyword, limit: 5);
       final match = pickQQMatch(songs, keyword, durationMs);
       if (match == null) return null;
+      // 音质跟设置走，同上。这里不在 resolve() 作用域里，直接读 config。
       final url = await LxSourceManager.instance.resolve(
         platform: 'tx',
         songId: match.mid,
         name: match.name,
         singer: match.artists,
+        quality: config.value.quality,
         background: background,
       );
       if (url != null) {
