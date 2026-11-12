@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -144,6 +145,72 @@ class UnblockSourceService {
   /// 没命中时再照常走内置那条链。适合自备优质脚本、想先吃脚本的无损/Hi-Res 的人。
   final ValueNotifier<bool> preferLxEnabled = ValueNotifier(false);
 
+  /// 蜂窝数据下自动把取址音质降到 128k。**默认关** —— 悄悄换音质是会被察觉的，
+  /// 得用户自己同意。开了之后只影响解灰/脚本取址这一路，不动已下载的本地文件，
+  /// 也不动飞牛 NAS 的原始流（那是内网，不走流量）。
+  final ValueNotifier<bool> cellularDowngradeEnabled = ValueNotifier(false);
+
+  static const String _prefsCellularDowngradeKey =
+      'unblock.source.cellularDowngrade';
+
+  /// 蜂窝数据下用这个音质。128k 是取址成功率最高的档（实测各脚本在 flac 下
+  /// 经常跑满超时，320k 好很多，128k 最稳），省流量只是顺带。
+  static const String _cellularQuality = '128k';
+
+  /// 当前是否在蜂窝数据上。由 [_watchConnectivity] 维护；拿不到就当不是
+  /// （宁可按原音质走，也不要在 WiFi 上误降）。
+  bool _onCellular = false;
+
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+
+  /// 这次取址实际该用的音质。
+  ///
+  /// 所有取址点都必须读它而不是 `config.value.quality` —— 否则加了开关也只有
+  /// 一部分链路会降，表现成「开了没用」。
+  String get effectiveQuality {
+    if (cellularDowngradeEnabled.value && _onCellular) return _cellularQuality;
+    return config.value.quality;
+  }
+
+  void _watchConnectivity() {
+    if (_connectivitySub != null) return;
+    void apply(List<ConnectivityResult> results) {
+      final cellular = results.contains(ConnectivityResult.mobile);
+      if (cellular == _onCellular) return;
+      _onCellular = cellular;
+      debugPrint(
+        '[Unblock] 网络类型变化 → ${cellular ? "蜂窝数据" : "非蜂窝"}，'
+        '自动降音质${cellularDowngradeEnabled.value ? "已开启" : "未开启"}，'
+        '当前取址音质=$effectiveQuality',
+      );
+    }
+
+    // 整个订阅必须兜住：拿不到网络类型只是「降音质这个增强用不了」，安静退回
+    // 按原音质走就行，绝不能让它把调用方（load / 备份还原）带崩。
+    // 单元测试里没有平台通道，Connectivity 会抛 MissingPluginException——
+    // 以前漏了 onError，流上的错误成了未捕获异步异常，直接把 backup_service_test
+    // 搞挂了。
+    try {
+      _connectivitySub = Connectivity().onConnectivityChanged.listen(
+        apply,
+        onError: (Object e) {
+          debugPrint('[Unblock] 网络类型监听出错，降音质功能停用：$e');
+        },
+        cancelOnError: false,
+      );
+      // onConnectivityChanged 只在**变化**时才给值，冷启动后如果网络一直没变
+      // 就一直收不到，_onCellular 会停在 false。所以这里先主动查一次当前状态。
+      unawaited(
+        Connectivity()
+            .checkConnectivity()
+            .then(apply)
+            .catchError((Object _) {}),
+      );
+    } catch (e) {
+      debugPrint('[Unblock] 订阅网络类型失败，降音质功能停用：$e');
+    }
+  }
+
   static const Object _backgroundZoneKey = #unblockBackground;
 
   /// 在「后台预取」上下文里跑 [body]：播放队列里除了点的那首，其余歌的取址都算后台。
@@ -180,6 +247,11 @@ class UnblockSourceService {
       _preferredKeyIndex = prefs.getInt(_prefsPreferredKey) ?? 0;
       freeFallbackEnabled.value = prefs.getBool(_prefsFreeKey) ?? true;
       preferLxEnabled.value = prefs.getBool(_prefsPreferLxKey) ?? false;
+      cellularDowngradeEnabled.value =
+          prefs.getBool(_prefsCellularDowngradeKey) ?? false;
+      // 开关关着就不订阅：既省掉一个常驻监听，也避免在没有平台通道的环境
+      // （单元测试、binding 未初始化）里白白去碰 connectivity 插件。
+      if (cellularDowngradeEnabled.value) _watchConnectivity();
       final raw = prefs.getString(_prefsKey);
       if (raw == null || raw.isEmpty) return;
       final decoded = jsonDecode(raw);
@@ -212,6 +284,15 @@ class UnblockSourceService {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_prefsPreferLxKey, value);
+    } catch (_) {}
+  }
+
+  Future<void> setCellularDowngradeEnabled(bool value) async {
+    cellularDowngradeEnabled.value = value;
+    if (value) _watchConnectivity(); // 没开过开关时还没订阅，这里补上
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefsCellularDowngradeKey, value);
     } catch (_) {}
   }
 
@@ -288,7 +369,7 @@ class UnblockSourceService {
         songId: songId,
         name: name,
         singer: singer,
-        quality: cfg.quality,
+        quality: effectiveQuality,
         hostCovers: hostCovers,
       );
       lxTried = true;
@@ -345,7 +426,7 @@ class UnblockSourceService {
     if (gdNeteaseId != null) {
       final url = await FreeUnblockSources.gdStudio(
         gdNeteaseId,
-        quality: cfg.quality,
+        quality: effectiveQuality,
       );
       if (url != null) {
         debugPrint('[Unblock] GD Studio 命中 $platform/$songId');
@@ -361,7 +442,7 @@ class UnblockSourceService {
     if (gdNeteaseId != null) {
       final url = await FreeUnblockSources.zddyrNetease(
         gdNeteaseId,
-        quality: cfg.quality,
+        quality: effectiveQuality,
       );
       if (url != null) {
         debugPrint('[Unblock] zddyr 命中 $platform/$songId');
@@ -383,7 +464,7 @@ class UnblockSourceService {
         songId: songId,
         name: name,
         singer: singer,
-        quality: cfg.quality,
+        quality: effectiveQuality,
         background: background,
         hostCovers: hostCovers,
       );
@@ -454,7 +535,7 @@ class UnblockSourceService {
     final url = await FreeUnblockSources.resolve(
       keyword: query,
       durationMs: durationMs,
-      quality: cfg.quality,
+      quality: effectiveQuality,
     );
     if (url != null) return url;
     // 本来就是 QQ 的歌，按 id 已经问过了，不再搜一遍自己。
@@ -511,7 +592,7 @@ class UnblockSourceService {
         songId: match.mid,
         name: match.name,
         singer: match.artists,
-        quality: config.value.quality,
+        quality: effectiveQuality,
         background: background,
       );
       if (url != null) {
@@ -533,7 +614,7 @@ class UnblockSourceService {
     final url = cfg.template
         .replaceAll('{source}', platform)
         .replaceAll('{id}', songId)
-        .replaceAll('{quality}', cfg.quality);
+        .replaceAll('{quality}', effectiveQuality);
 
     final Response<String> response;
     try {

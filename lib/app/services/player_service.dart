@@ -115,6 +115,14 @@ class PlayerService with WidgetsBindingObserver {
   /// （前进/回卷），避免媒体损坏时无限重试刷屏。
   final Set<String> _mediaKitFailedSongIds = {};
 
+  /// 每首歌因为**网络抖动**原地重连过几次（会话内，播成功后清零）。
+  /// 见 [_handlePlayerError] 里的网络分支。
+  final Map<String, int> _networkRetryCounts = {};
+
+  /// 原地重连的上限。用完还失败就当作「不是抖动，是地址真失效了」，
+  /// 落到通用分支重新解析。
+  static const int _maxNetworkRetries = 2;
+
   /// 无声看门狗：对「codec 未知 + 可疑容器」的 just_audio 歌曲，播放确认后
   /// 若位置照常推进但可能无声（ExoPlayer 设备解码器静默失败），升级 media_kit
   /// 重播。升级后不再重复处理：media_kit（FFmpeg）解码即出声，失败走 mpv
@@ -515,6 +523,14 @@ class PlayerService with WidgetsBindingObserver {
           playbackMode.value != PlaybackMode.single &&
           _roamAppendQueuedCount <= 0) {
         unawaited(_handleEngineCompleted(engine));
+      }
+      // 真正播起来了 → 这首歌的「网络抖动原地重连」计数清零。不清的话，一首歌
+      // 在一次长会话里抖够两次之后，后面每次抖动都会去重跑解析链（而那正是这个
+      // 计数要避免的事）。ready + playing 才算数，buffering 不算。
+      if (state.playing &&
+          state.processingState == EngineProcessingState.ready) {
+        final cur = currentSong.value;
+        if (cur != null) _networkRetryCounts.remove(cur.id);
       }
       // 无损大文件（media_kit 直连原始流）对网络要求高：缓冲超时提示网络缓慢。
       // 仅当前激活的 media_kit 引擎 + 缓冲态持续超过阈值时提示一次（去重）。
@@ -1923,6 +1939,31 @@ class PlayerService with WidgetsBindingObserver {
         return;
       }
 
+      // 网络抖动：原地重连即可，**不要**动已解析的地址。
+      // 重新解析对在线歌意味着把整条解灰链再跑一遍（最坏 10 秒预算），对
+      // NAS 歌意味着丢掉已经下了一半的 `.part`。弱网下这恰恰是最该省的。
+      if (isTransientNetworkError(errorMsg)) {
+        final tried = _networkRetryCounts[failedSong.id] ?? 0;
+        if (tried < _maxNetworkRetries) {
+          _networkRetryCounts[failedSong.id] = tried + 1;
+          _debugLog(
+            '网络抖动 ${failedSong.title}，原地重连 ${tried + 1}/$_maxNetworkRetries'
+            '（不重新解析地址）error=$errorMsg',
+          );
+          await _activateLogicalIndex(
+            failedIndex,
+            initialPosition: seekPos > Duration.zero ? seekPos : null,
+          );
+          if (wasPlaying) {
+            await _startPlayback();
+          }
+          return;
+        }
+        // 重连次数用完：多半不是抖动，而是临时直链过期/被下架了。
+        // 落到下面的通用分支去重新解析地址。
+        _debugLog('${failedSong.title} 原地重连 $_maxNetworkRetries 次仍失败，改为重新解析地址');
+      }
+
       // just_audio 其他错误：通用恢复——失效缓存、重载当前 run。
       _invalidateResolvedSource(failedSong);
       await _resolvePlayableUri(failedSong, forceRefresh: true);
@@ -1964,6 +2005,43 @@ class PlayerService with WidgetsBindingObserver {
   /// 在 [_handlePlayerError] 的恢复块内调用（`_recoveringCurrentSource` 已置位，
   /// 不会再触发重复恢复）。跳过用 [_advanceToLogicalIndex] / [_activateLogicalIndex]，
   /// 由恢复块 finally 释放 `_recoveringCurrentSource`。
+  /// 播放器报的这个错是不是「网络抖了一下」。
+  ///
+  /// 分出来是因为两类错的处理方式相反：网络抖动**原地重连**就行（地址还好用、
+  /// `.part` 还能接着下）；而解码失败/地址失效必须重新解析。以前它们都掉进同一个
+  /// 通用分支，于是弱网下每抖一次就把整条解灰链重跑一遍。
+  ///
+  /// ⚠️ 刻意把 4xx 排除在外：`Response code: 403/404` 通常是临时直链过期或歌被
+  /// 下架，**必须**重新解析，原地重连多少次都没用。5xx 和纯连接类错误才算抖动。
+  /// 消息文本来自 ExoPlayer / mpv / Dart 三种来源，所以是按关键字匹配。
+  @visibleForTesting
+  static bool isTransientNetworkError(String message) {
+    final m = message.toLowerCase();
+    // 先排除：带 4xx 状态码的一律不算抖动
+    if (RegExp(
+      r'(response code|status error|httpstatus)\D{0,4}4\d\d',
+    ).hasMatch(m)) {
+      return false;
+    }
+    const markers = [
+      'timeoutexception', // Dart：我们自己的失速超时
+      'sockettimeout', // ExoPlayer/OkHttp
+      'socketexception', // Dart
+      'unknownhost', // DNS 解析不了（切网/飞行模式）
+      'connectexception',
+      'httpdatasource', // ExoPlayer 的 HttpDataSourceException 家族
+      'unable to connect',
+      'failed to connect',
+      'connection closed',
+      'connection reset',
+      'connection abort', // "software caused connection abort"
+      'network is unreachable',
+      'no route to host',
+      'broken pipe',
+    ];
+    return markers.any(m.contains);
+  }
+
   /// 截断播放器原始报错为适合 toast 展示的短句（多行取首行 + 超长加省略号）。
   static String _briefFailureReason(String? reason) {
     if (reason == null || reason.isEmpty) return '无法播放';

@@ -338,6 +338,26 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                   );
                 },
               ),
+              ListenableBuilder(
+                listenable:
+                    UnblockSourceService.instance.cellularDowngradeEnabled,
+                builder: (context, _) {
+                  final on = UnblockSourceService
+                      .instance
+                      .cellularDowngradeEnabled
+                      .value;
+                  return AppSettingSwitchTile(
+                    title: '蜂窝数据下降低音质',
+                    subtitle: on
+                        ? '用流量时取址固定按 128k，省流量、弱网下也更容易出链'
+                        : '始终按上面设置的音质取址，不因为在用流量而改变',
+                    value: on,
+                    onChanged: UnblockSourceService
+                        .instance
+                        .setCellularDowngradeEnabled,
+                  );
+                },
+              ),
             ],
           ),
           const SizedBox(height: 16),
