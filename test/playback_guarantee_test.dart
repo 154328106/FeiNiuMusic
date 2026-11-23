@@ -49,10 +49,7 @@ void main() {
 
     test('关了兜底 + 聆澜配好了 → 尊重用户，只用聆澜', () {
       svc.freeFallbackEnabled.value = false;
-      svc.config.value = const UnblockSourceConfig(
-        template: UnblockSourceConfig.defaultTemplate,
-        apiKeys: ['k'],
-      );
+      svc.config.value = const UnblockSourceConfig(apiKeys: ['k']);
       expect(svc.freeFallbackActive, isFalse);
     });
 

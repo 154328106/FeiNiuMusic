@@ -7,7 +7,6 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'free_unblock_sources.dart';
-import 'kugou_public_sources.dart';
 import '../lxscript/lx_source_manager.dart';
 import '../qq/qq_api_client.dart';
 import '../qq/qq_models.dart';
@@ -30,57 +29,56 @@ import '../qq/qq_models.dart';
 /// 会随仓库公开泄露出去。
 class UnblockSourceConfig {
   const UnblockSourceConfig({
-    required this.template,
     required this.apiKeys,
+    this.ikunKey = '',
     this.quality = '320k',
     this.enabled = true,
   });
 
-  /// 请求模板，含 `{source}` `{id}` `{quality}` 三个占位符。
-  final String template;
-
-  /// 密钥池。当前 key 没命中就换下一个。
+  /// 聆澜密钥池。当前 key 没命中就换下一个。
   final List<String> apiKeys;
+
+  /// ikun（聚合音源-A / c.wwwweb.top）密钥，可空。
+  final String ikunKey;
 
   final String quality;
   final bool enabled;
 
-  bool get isUsable => enabled && template.isNotEmpty && apiKeys.isNotEmpty;
+  bool get isUsable => enabled && (apiKeys.isNotEmpty || ikunKey.isNotEmpty);
 
-  static const String defaultTemplate =
+  static const String lianlanEndpoint =
       'https://source.shiqianjiang.cn/api/music/url'
       '?source={source}&songId={id}&quality={quality}';
 
-  static const UnblockSourceConfig empty = UnblockSourceConfig(
-    template: defaultTemplate,
-    apiKeys: [],
-  );
+  static const String ikunEndpoint = 'https://c.wwwweb.top/music/url';
+
+  static const UnblockSourceConfig empty = UnblockSourceConfig(apiKeys: []);
 
   UnblockSourceConfig copyWith({
-    String? template,
     List<String>? apiKeys,
+    String? ikunKey,
     String? quality,
     bool? enabled,
   }) => UnblockSourceConfig(
-    template: template ?? this.template,
     apiKeys: apiKeys ?? this.apiKeys,
+    ikunKey: ikunKey ?? this.ikunKey,
     quality: quality ?? this.quality,
     enabled: enabled ?? this.enabled,
   );
 
   Map<String, Object?> toJson() => {
-    'template': template,
     'apiKeys': apiKeys,
+    'ikunKey': ikunKey,
     'quality': quality,
     'enabled': enabled,
   };
 
   static UnblockSourceConfig fromJson(Map<String, Object?> json) =>
       UnblockSourceConfig(
-        template: json['template'] as String? ?? defaultTemplate,
         apiKeys:
             (json['apiKeys'] as List?)?.whereType<String>().toList() ??
             const [],
+        ikunKey: json['ikunKey'] as String? ?? '',
         quality: json['quality'] as String? ?? '320k',
         enabled: json['enabled'] as bool? ?? true,
       );
@@ -313,9 +311,6 @@ class UnblockSourceService {
   /// [keyword]（「歌名 歌手」）和 [durationMs] 只有免费兜底音源用得上 ——
   /// 酷狗、酷我那两家是按关键词搜的，没有时长就没法从搜索结果里挑对版本，
   /// 很容易匹配到现场版或翻唱。
-  /// [skipPublicSources] 给已经自己问过公益源的调用方用（扣扣音乐那边
-  /// 把公益源提到了官方地址**前面**，因为官方只给 128k）。不跳过的话每首
-  /// 歌会把同一个请求对着公益服务打两遍 —— 作者明说了「切勿短时间批量」。
   /// [noCopyright]：网易云官方明确回了「无版权」（code 404，下架歌）。这类歌
   /// 按网易 id 取址的来源（GD / 星海 / 聆澜 / LX 脚本）实测全都拿不到，以前
   /// 每首要白跑一遍才掉到按歌名搜，约 8～9 秒、刷一大屏日志；现在直接按歌名搜。
@@ -324,7 +319,6 @@ class UnblockSourceService {
     required String songId,
     String? keyword,
     int durationMs = 0,
-    bool skipPublicSources = false,
     String? name,
     String? singer,
     bool noCopyright = false,
@@ -343,174 +337,69 @@ class UnblockSourceService {
       );
     }
 
-    // GD / 星海这两家 App 自己会问（只限网易云、且开着免费兜底）。告诉 LX 脚本
-    // 一声，脚本里同样的后端就不用再打一遍 —— 之前一首没命中的歌，GD 和星海
-    // 会被 App 和「网易专用」脚本各问一次。脚本认不认这个字段随它，不认也没坏处。
+    final background = isBackground;
     final hostCovers = platform == 'wy' && freeFallbackActive
         ? const ['gdstudio', 'zddyr']
         : const <String>[];
 
-    // 第〇层（可选）：优先走外置音源。开了「优先走外置音源」就先问用户导入的
-    // LX/JS 脚本，命中直接用，官方 ID 源和兜底全让路。没命中则置 lxTried，下面
-    // 那次脚本调用跳过 —— flutter_js 的运行时不经得起同一首歌连驱两遍。
-    var lxTried = false;
-    final background = isBackground;
-    // 开了「优先」但没有能用的脚本（没导入 / 全关了 / 都不支持这个平台）：
-    // 当没开，直接走内置链，不白等。
-    if (preferLxEnabled.value &&
-        !background &&
-        LxSourceManager.instance.hasEnabledFor(platform)) {
-      // 音质跟设置走（默认 320k），不要吃 [LxSourceManager.resolve] 的默认值
-      // 'flac'：2026-11-12 实测三个主流五源脚本，flac 下网易云/QQ 经常跑满 6 秒
-      // 超时（拿不到无损就一路试下家），连撞两次就被熔断 3 分钟；换 320k 后同样
-      // 的歌 0.3~2.5 秒就给。下面 GD 那条路本来就用 cfg.quality，这里跟它对齐。
-      final url = await LxSourceManager.instance.resolve(
-        platform: platform,
-        songId: songId,
-        name: name,
-        singer: singer,
-        quality: effectiveQuality,
-        hostCovers: hostCovers,
-      );
-      lxTried = true;
-      if (url != null) {
-        debugPrint('[Unblock] LX 脚本（优先）命中 $platform/$songId');
-        return url;
-      }
-    }
-
-    final limitedUntil = _rateLimitedUntil;
-    final rateLimited =
-        limitedUntil != null && DateTime.now().isBefore(limitedUntil);
-    final paidAvailable = cfg.isUsable && !rateLimited;
-
-    // 第一层：酷狗的公益取址后端。
-    //
-    // 它们按 hash 取址，正好是我们手里已有的东西，而且实测覆盖了聆澜
-    // 「密钥全部未命中」的那几首。放在最前面能把大部分酷狗会员曲挡下来，
-    // 聆澜的额度留给它真正救得了的（网易云那边没有替代品）。
-    //
-    // 只有聆澜确实可用时才允许它「排队太久就让路」。否则让出去等于跌进
-    // 按歌名搜的免费链，酷我那家现在多半给一段「请到酷我APP收听」的提示音
-    // —— 播不了还会触发自动跳曲，比多等一会儿糟得多。
-    //
-    // QQ（`tx`）也走这一层：songId 传的就是 songmid，格式和洛雪那套约定
-    // 对得上。以前 QQ 的歌**按 id 取址的只有聆澜一家**（GD 只认网易云、
-    // 这两家写死了酷狗），剩下的只能掉进按歌名搜的兜底 —— 那条会串到同名
-    // 翻唱，酷我还常给「请到酷我APP收听」的提示音。
-    //
-    // 这两家认不认 `tx` 我没能在本地验证（沙箱连不上它们），所以
-    // KugouPublicSources 里带了自熄火：非酷狗的源连撞 3 次没结果就判定
-    // 这家不支持，本次运行不再问它，不会每首 QQ 歌都白等两个请求。
-    if (!skipPublicSources && (platform == 'kg' || platform == 'tx')) {
-      final url = await KugouPublicSources.resolve(
-        songId,
-        source: platform,
-        allowBail: paidAvailable,
-      );
-      if (url != null) return url;
-    }
-
-    // 第二层：GD 音乐台（只有网易云走得到）。
-    //
-    // 放在聆澜**前面**，理由是它几乎没有下行风险：按网易云原始 id 取址，
-    // 不像酷狗/酷我那两家是搜歌名，串不到同名翻唱上；免费；实测连会员曲都
-    // 给，还能按设置里的音质给到无损。命中就省一次聆澜额度，没命中也只是
-    // 多一个请求 —— 它本来就在链里，只是从聆澜后面挪到了前面。
-    //
-    // 注意它只认网易云 id：QQ / 酷狗的歌 [FreeUnblockSources.gdStudio] 用不上，
-    // 那两家仍然走后面的关键词兜底。
+    final rateLimited = _rateLimitedUntil != null &&
+        DateTime.now().isBefore(_rateLimitedUntil!);
+    final paidAvailable = cfg.enabled && !rateLimited;
     final gdNeteaseId = platform == 'wy' && freeFallbackActive
         ? int.tryParse(songId)
         : null;
-    if (gdNeteaseId != null) {
-      final url = await FreeUnblockSources.gdStudio(
-        gdNeteaseId,
-        quality: effectiveQuality,
-      );
+    final lxEnabled =
+        preferLxEnabled.value && LxSourceManager.instance.hasEnabledFor(platform);
+
+    Future<String?> tryLx(bool bg) => LxSourceManager.instance.resolve(
+      platform: platform,
+      songId: songId,
+      name: name,
+      singer: singer,
+      quality: effectiveQuality,
+      background: bg,
+      hostCovers: hostCovers,
+    );
+
+    Future<String?> tryLianlan() => _requestLianlan(cfg, platform, songId);
+
+    Future<String?> tryIkun() =>
+        _ikunOnce(platform, songId, effectiveQuality, cfg.ikunKey);
+
+    Future<String?> tryGd() => gdNeteaseId != null
+        ? FreeUnblockSources.gdStudio(gdNeteaseId, quality: effectiveQuality)
+        : Future.value(null);
+
+    if (!background) {
+      final candidates = <Future<String?>>[];
+      if (lxEnabled) candidates.add(guardNull(() => tryLx(false)));
+      if (gdNeteaseId != null) candidates.add(guardNull(tryGd));
+      if (cfg.apiKeys.isNotEmpty && paidAvailable) {
+        candidates.add(guardNull(tryLianlan));
+      }
+      if (cfg.ikunKey.isNotEmpty && paidAvailable) {
+        candidates.add(guardNull(tryIkun));
+      }
+      final url = await firstNonNull(candidates);
       if (url != null) {
-        debugPrint('[Unblock] GD Studio 命中 $platform/$songId');
+        debugPrint('[Unblock] 竞速命中 $platform/$songId');
         return url;
       }
-    }
-
-    // 第三层：星海（zddyr）的网易云，给 GD 当备份。
-    //
-    // 网易云这条链原本单点挂在 GD 上，它一挂就直接掉进付费的聆澜。zddyr
-    // 同样按原始 id 取址（已验证不串歌），域名也是酷狗兜底那家、可靠性有底。
-    // 放在 GD 后面是因为它明说了有 QPS 限制，GD 命中就不会走到这儿。
-    if (gdNeteaseId != null) {
-      final url = await FreeUnblockSources.zddyrNetease(
-        gdNeteaseId,
-        quality: effectiveQuality,
-      );
-      if (url != null) {
-        debugPrint('[Unblock] zddyr 命中 $platform/$songId');
-        return url;
+    } else {
+      if (lxEnabled) {
+        final lxUrl = await tryLx(true);
+        if (lxUrl != null) return lxUrl;
+      }
+      if (cfg.apiKeys.isNotEmpty && paidAvailable) {
+        final lianlan = await tryLianlan();
+        if (lianlan != null) return lianlan;
+      }
+      if (cfg.ikunKey.isNotEmpty && paidAvailable) {
+        final ikun = await tryIkun();
+        if (ikun != null) return ikun;
       }
     }
 
-    // LX（洛雪）脚本音源：用户导入的第三方脚本，按平台代号匹配取址。
-    // 前台：放在官方 ID 源（GD / zddyr / 聆澜）之后、关键词兜底之前 —— 它们
-    // 按原始 id 取址更准，脚本作为补充。
-    // 后台预取：提到聆澜**前面**。2026-11-05 日志：打开 95 首的酷狗歌单，整队
-    // 预取 11 秒里把聆澜打了约 70 次、还吃了一次 429；而用户的「聚合音源-A」
-    // 0.1～0.4 秒就能给、不花额度。聆澜是有额度的公益卡，留给脚本救不了的歌。
-    Future<String?> tryLx() async {
-      lxTried = true;
-      // 音质跟设置走，同上（别吃 'flac' 默认值，会跑满超时触发熔断）。
-      final lxUrl = await LxSourceManager.instance.resolve(
-        platform: platform,
-        songId: songId,
-        name: name,
-        singer: singer,
-        quality: effectiveQuality,
-        background: background,
-        hostCovers: hostCovers,
-      );
-      if (lxUrl != null) {
-        debugPrint('[Unblock] LX 脚本命中 $platform/$songId');
-      }
-      return lxUrl;
-    }
-
-    if (background && !lxTried) {
-      final lxUrl = await tryLx();
-      if (lxUrl != null) return lxUrl;
-    }
-
-    if (cfg.isUsable && !rateLimited) {
-      final keys = cfg.apiKeys;
-      // 从上次命中的那个开始轮，命中率最高的先试。
-      for (var offset = 0; offset < keys.length; offset++) {
-        final index = (_preferredKeyIndex + offset) % keys.length;
-        final url = await _requestOnce(
-          cfg: cfg,
-          platform: platform,
-          songId: songId,
-          apiKey: keys[index],
-        );
-        if (url != null) {
-          await _rememberKey(index);
-          // 成功也留一行。之前只在失败时打日志，结果「明明救回来了」
-          // 在日志里完全看不出来，排查时误以为音源没生效。
-          debugPrint('[Unblock] 聆澜命中 $platform/$songId');
-          return url;
-        }
-      }
-      debugPrint('[Unblock] ${keys.length} 个密钥全部未命中：$platform/$songId');
-    }
-
-    if (!lxTried) {
-      final lxUrl = await tryLx();
-      if (lxUrl != null) return lxUrl;
-    }
-
-    // 最后一层：按歌名搜的免费兜底（酷狗 → 酷我）。GD 上面已经试过了。
-    //
-    // 这里不按平台拦：那两家都是「搜歌名再比时长」，跟歌来自哪个平台无关。
-    // 原来按 `platform != 'wy'` 直接返回，理由是「id 对不上 GD 的入参」——
-    // 那只对 GD 成立，拦掉整条等于把 QQ / 酷狗的退路也堵死了。
     return _resolveByKeyword(
       cfg,
       keyword,
@@ -518,6 +407,103 @@ class UnblockSourceService {
       platform: platform,
       background: background,
     );
+  }
+
+  /// 跑一个可能抛异常的取址，异常一律折成 null，不拖垮竞速池。
+  static Future<String?> guardNull(Future<String?> Function() body) async {
+    try {
+      return await body();
+    } catch (e) {
+      debugPrint('[Unblock] 竞速成员失败：$e');
+      return null;
+    }
+  }
+
+  /// 并发竞速：返回第一个非空结果；全空返回 null。
+  static Future<String?> firstNonNull(List<Future<String?>> futures) {
+    if (futures.isEmpty) return Future.value(null);
+    final completer = Completer<String?>();
+    var remaining = futures.length;
+    for (final future in futures) {
+      future.then((value) {
+        if (completer.isCompleted) return;
+        if (value != null && value.isNotEmpty) {
+          completer.complete(value);
+          return;
+        }
+        remaining--;
+        if (remaining == 0) completer.complete(null);
+      });
+    }
+    return completer.future;
+  }
+
+  /// 聆澜（X-API-Key 协议）取址：从上次命中的密钥开始轮。
+  Future<String?> _requestLianlan(
+    UnblockSourceConfig cfg,
+    String platform,
+    String songId,
+  ) async {
+    final keys = cfg.apiKeys;
+    for (var offset = 0; offset < keys.length; offset++) {
+      final index = (_preferredKeyIndex + offset) % keys.length;
+      final url = await _requestOnce(
+        platform: platform,
+        songId: songId,
+        apiKey: keys[index],
+      );
+      if (url != null) {
+        await _rememberKey(index);
+        debugPrint('[Unblock] 聆澜命中 $platform/$songId');
+        return url;
+      }
+    }
+    debugPrint('[Unblock] ${keys.length} 个密钥全部未命中：$platform/$songId');
+    return null;
+  }
+
+  /// ikun（聚合音源-A / c.wwwweb.top）取址。
+  Future<String?> _ikunOnce(
+    String platform,
+    String songId,
+    String quality,
+    String apiKey,
+  ) async {
+    if (apiKey.isEmpty) return null;
+    try {
+      final response = await _dio.post<String>(
+        UnblockSourceConfig.ikunEndpoint,
+        data: {'source': platform, 'musicId': songId, 'quality': quality},
+        options: Options(
+          headers: {'Content-Type': 'application/json', 'X-Api-Key': apiKey},
+        ),
+      );
+      if (response.statusCode != 200) {
+        debugPrint(
+          '[Unblock] ikun HTTP ${response.statusCode}：${_errorText(response.data)}',
+        );
+        return null;
+      }
+      final Object? decoded;
+      try {
+        decoded = jsonDecode(response.data ?? '');
+      } catch (_) {
+        return null;
+      }
+      if (decoded is! Map) return null;
+      final code = decoded['code'];
+      if (code is int && code != 200 && code != 0) {
+        final message = decoded['message'] ?? decoded['msg'] ?? 'code=$code';
+        debugPrint('[Unblock] ikun 返回失败：$message');
+        return null;
+      }
+      final resolved = _valueAtAnyPath(decoded, 'url|data.url');
+      if (resolved is String && resolved.isNotEmpty) return resolved;
+      return null;
+    } on DioException catch (e) {
+      debugPrint('[Unblock] ikun 请求失败：${e.message ?? e.type.name}');
+      return null;
+    }
   }
 
   /// 按「歌名 歌手」去别家找：酷狗 → 酷我 → QQ。
@@ -606,12 +592,11 @@ class UnblockSourceService {
   }
 
   Future<String?> _requestOnce({
-    required UnblockSourceConfig cfg,
     required String platform,
     required String songId,
     required String apiKey,
   }) async {
-    final url = cfg.template
+    final url = UnblockSourceConfig.lianlanEndpoint
         .replaceAll('{source}', platform)
         .replaceAll('{id}', songId)
         .replaceAll('{quality}', effectiveQuality);

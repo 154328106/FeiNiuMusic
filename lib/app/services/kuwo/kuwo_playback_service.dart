@@ -110,16 +110,20 @@ class KuwoPlaybackService {
     final quality = UnblockSourceService.instance.config.value.quality;
     String? url;
     try {
-      url = await _viaHaitangw(rid, quality);
-      url ??= await UnblockSourceService.instance.resolve(
-        platform: 'kw',
-        songId: rid,
-        keyword: meta?.keyword,
-        durationMs: meta?.durationMs ?? 0,
-        name: meta?.name,
-        singer: meta?.singer,
-      );
-      url ??= await _viaAntiserver(rid);
+      // 海棠与第三方音源并发竞速，谁先回用谁。
+      url = await UnblockSourceService.firstNonNull([
+        UnblockSourceService.guardNull(() => _viaHaitangw(rid, quality)),
+        UnblockSourceService.guardNull(
+          () => UnblockSourceService.instance.resolve(
+            platform: 'kw',
+            songId: rid,
+            keyword: meta?.keyword,
+            durationMs: meta?.durationMs ?? 0,
+            name: meta?.name,
+            singer: meta?.singer,
+          ),
+        ),
+      ]);
     } catch (e) {
       debugPrint('[Kuwo] 取址异常 $rid：$e');
     }
@@ -167,32 +171,7 @@ class KuwoPlaybackService {
     }
   }
 
-  /// 酷我自家 antiserver：返回纯文本地址，必须用 okhttp UA（浏览器 UA 给空串）。
-  Future<String?> _viaAntiserver(String rid) async {
-    try {
-      final res = await _dio.get<String>(
-        'https://antiserver.kuwo.cn/anti.s',
-        queryParameters: {
-          'type': 'convert_url',
-          'format': 'mp3',
-          'response': 'url',
-          'rid': 'MUSIC_$rid',
-        },
-        options: Options(
-          responseType: ResponseType.plain,
-          headers: {'User-Agent': 'okhttp/3.10.0'},
-        ),
-      );
-      final text = res.data ?? '';
-      final m = RegExp(r'http[^\s"]+').firstMatch(text);
-      return m?.group(0);
-    } on DioException {
-      return null;
-    }
-  }
-
-  /// 只有一首（刚点的那首）按前台处理；多首（队列其余部分）按后台预取，
-  /// 不抢「优先走外置音源」和 LX 串行闸的前台位置。
+  /// 酷我自家 antiserver 已失效（9 秒超时 / 提示音），不再调用。
   Future<List<SongEntity>> prepareQueue(List<SongEntity> songs) =>
       songs.length > 1
       ? UnblockSourceService.runInBackground(() => _prepareQueue(songs))

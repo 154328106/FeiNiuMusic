@@ -134,24 +134,27 @@ class KugouPlaybackService {
   Future<String?> _resolveOnce(String hash) async {
     final meta = _meta[hash];
     try {
-      var url = await KugouApiClient.instance.songUrl(
-        hash,
-        albumId: meta?.albumId,
-        albumAudioId: meta?.albumAudioId,
-      );
-      // 官方给不出（会员曲）就问第三方音源，按歌名+歌手+时长匹配。
-      url ??= await UnblockSourceService.instance.resolve(
-        platform: 'kg',
-        songId: hash,
-        keyword: meta?.keyword,
-        durationMs: meta?.durationMs ?? 0,
-        name: meta?.name,
-        singer: meta?.singer,
-      );
+      // 官方与第三方音源并发竞速，谁先回用谁。
+      final url = await UnblockSourceService.firstNonNull([
+        UnblockSourceService.guardNull(
+          () => KugouApiClient.instance.songUrl(
+            hash,
+            albumId: meta?.albumId,
+            albumAudioId: meta?.albumAudioId,
+          ),
+        ),
+        UnblockSourceService.guardNull(
+          () => UnblockSourceService.instance.resolve(
+            platform: 'kg',
+            songId: hash,
+            keyword: meta?.keyword,
+            durationMs: meta?.durationMs ?? 0,
+            name: meta?.name,
+            singer: meta?.singer,
+          ),
+        ),
+      ]);
       if (url == null) {
-        // 被限流时的失败不算数：那是「问太快了」，不是「这首没有」。
-        // 记进 _unresolvable 的话，一次 429 就能让半个队列在这次启动里
-        // 彻底消失（日志里的「可播 7，跳过 18」就是这么来的）。
         if (!UnblockSourceService.instance.isRateLimited) {
           _unresolvable.add(hash);
         }

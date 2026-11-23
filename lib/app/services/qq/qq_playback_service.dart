@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 import '../../state/song_source.dart';
 import '../../state/song_state.dart';
 import '../unblock/expiring_set.dart';
-import '../unblock/kugou_public_sources.dart';
 import '../unblock/unblock_source.dart';
 import 'qq_api_client.dart';
 import 'qq_models.dart';
@@ -112,33 +111,23 @@ class QQPlaybackService {
 
   Future<String?> _resolveStreamUrl(String mid, {String? mediaMid}) async {
     try {
-      // 顺序是「公益源 → 官方 → 其余音源」，和网易云/酷狗反着来，两个理由：
-      //
-      // 1. 官方只给 128k（320k 要绿钻，硬要会拿到打不开的假地址，见
-      //    QQApiClient.songUrl 那段）。而 haitangw 用**同一个 songmid** 给的
-      //    是 QQ 自己的 flac：真机实测 5 首，文件名是 QQ 的 F000{media_mid}
-      //    格式，按 QQ 报的时长反推码率落在 1647~1879kbps（24bit Hi-Res）与
-      //    960kbps（标准 flac），比值集中说明配的就是那首歌。
-      // 2. 官方那个假地址正是 2026-09-02 把扣扣音乐整个摘掉的原因，先问公益
-      //    源能绕开大部分。
       final hint = _matchHints[mid];
-      var url = await KugouPublicSources.resolve(
-        mid,
-        source: 'tx',
-        // 不让它「排队太久就让路」：让出去下一站是 128k，白白降一档音质。
-        allowBail: false,
-      );
-      url ??= await _verifiedOfficialUrl(mid, mediaMid);
-      // 还没有就走完整音源链。公益源上面已经问过了，别再打一遍。
-      url ??= await UnblockSourceService.instance.resolve(
-        platform: 'tx',
-        songId: mid,
-        keyword: hint?.$1,
-        durationMs: hint?.$2 ?? 0,
-        skipPublicSources: true,
-        name: _nameHints[mid]?.$1,
-        singer: _nameHints[mid]?.$2,
-      );
+      // 官方（128k，需登录才给）与第三方音源并发竞速，谁先回用谁。
+      final url = await UnblockSourceService.firstNonNull([
+        UnblockSourceService.guardNull(
+          () => _verifiedOfficialUrl(mid, mediaMid),
+        ),
+        UnblockSourceService.guardNull(
+          () => UnblockSourceService.instance.resolve(
+            platform: 'tx',
+            songId: mid,
+            keyword: hint?.$1,
+            durationMs: hint?.$2 ?? 0,
+            name: _nameHints[mid]?.$1,
+            singer: _nameHints[mid]?.$2,
+          ),
+        ),
+      ]);
       if (url == null) {
         _unresolvable.add(mid);
         return null;

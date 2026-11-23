@@ -6,10 +6,6 @@ import '../../app/services/unblock/unblock_source.dart';
 import '../../components/index.dart';
 import 'lx_source_page.dart';
 
-/// 第三方音源设置。
-///
-/// 官方给不出播放地址（灰色 / 无版权 / 需要会员）时，转向这里配置的音源要。
-/// **不内置密钥**：没填就完全不生效，一个请求都不会发。
 class UnblockSourcePage extends StatefulWidget {
   const UnblockSourcePage({super.key});
 
@@ -19,19 +15,16 @@ class UnblockSourcePage extends StatefulWidget {
 
 class _UnblockSourcePageState extends State<UnblockSourcePage> {
   final _service = UnblockSourceService.instance;
-  final _templateController = TextEditingController();
   final _keysController = TextEditingController();
+  final _ikunController = TextEditingController();
   final _qualityController = TextEditingController();
 
   bool _enabled = true;
   bool _testing = false;
 
-  // 「开关」「配置」两组做成可折叠，默认收起（点一下展开），和设置页一致。
   bool _switchesOpen = false;
   bool _configOpen = false;
 
-  /// 密钥/接口地址默认遮住。它们平时没有再看一眼的必要，露着只是徒增
-  /// 截图和旁人瞄一眼的风险。
   bool _revealSecrets = false;
   String? _result;
   bool _resultOk = false;
@@ -44,27 +37,23 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
 
   Future<void> _restore() async {
     await _service.load();
-    // 开关下的「还没导入脚本」提示要看脚本索引，先载入，免得误报。
     await LxSourceManager.instance.ensureLoaded();
     if (!mounted) return;
     final cfg = _service.config.value;
-    _templateController.text = cfg.template;
-    // 一行一个密钥：比逗号分隔好读，也不怕密钥里带逗号。
     _keysController.text = cfg.apiKeys.join('\n');
+    _ikunController.text = cfg.ikunKey;
     _qualityController.text = cfg.quality;
     setState(() => _enabled = cfg.enabled);
   }
 
   @override
   void dispose() {
-    _templateController.dispose();
     _keysController.dispose();
+    _ikunController.dispose();
     _qualityController.dispose();
     super.dispose();
   }
 
-  /// 音质预设。值必须是 [FreeUnblockSources.gdBitrate] 认得的写法，同时也会
-  /// 原样替换进自配音源接口模板里的 {quality}。
   static const List<(String, String, String)> _qualityPresets = [
     ('128k', '流畅', '128 kbps，省流量'),
     ('320k', '标准', '320 kbps，默认'),
@@ -72,7 +61,6 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
     ('flac24bit', 'Hi-Res', '24bit 母带，货最少'),
   ];
 
-  /// 密钥遮罩：只留末 4 位，够用来分辨是哪一个，又认不出全貌。
   String _maskKey(String key) {
     if (key.length <= 4) return '•' * key.length;
     return '••••••${key.substring(key.length - 4)}';
@@ -88,24 +76,18 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
     return '${keys.length} 个 · ${keys.map(_maskKey).join('，')}';
   }
 
-  /// 接口地址遮罩：露主机名的头两位和后缀，剩下打点。
-  String _templateSummary() {
-    final text = _templateController.text.trim();
-    if (text.isEmpty) return '未填写';
-    final host = Uri.tryParse(text)?.host ?? '';
-    if (host.isEmpty) return '已配置';
-    final dot = host.lastIndexOf('.');
-    if (dot <= 2) return '已配置';
-    return '已配置 · ${host.substring(0, 2)}••••${host.substring(dot)}';
+  String _ikunSummary() {
+    final key = _ikunController.text.trim();
+    return key.isEmpty ? '未填写' : _maskKey(key);
   }
 
   UnblockSourceConfig _currentConfig() => UnblockSourceConfig(
-    template: _templateController.text.trim(),
     apiKeys: _keysController.text
         .split('\n')
         .map((e) => e.trim())
         .where((e) => e.isNotEmpty)
         .toList(),
+    ikunKey: _ikunController.text.trim(),
     quality: _qualityController.text.trim().isEmpty
         ? '320k'
         : _qualityController.text.trim(),
@@ -133,7 +115,7 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
             const Padding(
               padding: EdgeInsets.all(16),
               child: Text(
-                '音质',
+                '选择音质',
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
               ),
             ),
@@ -146,8 +128,6 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                     : null,
                 onTap: () => Navigator.pop(context, value),
               ),
-            // 自配音源的接口模板里 {quality} 是原样替换的，别的源可能要别的
-            // 写法。写死成列表会把那些源打死，留个口子。
             ListTile(
               title: const Text('自定义'),
               subtitle: Text(
@@ -209,17 +189,12 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
     AppToast.show(context, '已保存');
   }
 
-  /// 用一首确定是 VIP 的歌试连通性。成功与否都把原因写出来。
   Future<void> _test() async {
     await _service.save(_currentConfig());
     setState(() {
       _testing = true;
       _result = null;
     });
-    // 梦然《少年》，网易云 id 347230。
-    // 不要用《晴天》(186016) 之类的热门 VIP 曲做探针：上游源对个别歌曲本来
-    // 就没货，会返回 `code 500 / returned no URL`，看着像密钥无效，实际是
-    // 这一首取不到 —— 我自己就被这个误导过一轮。
     final url = await _service.resolve(platform: 'wy', songId: '347230');
     if (!mounted) return;
     setState(() {
@@ -232,8 +207,6 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
     });
   }
 
-  /// 可折叠分组：照「设置 → 功能 / 主题外观」那套，一行头 + 旋转箭头，
-  /// 底下 AnimatedSize 滑出/收回。
   Widget _collapsible({
     required String title,
     required IconData icon,
@@ -274,7 +247,6 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
     return AppPageScaffold(
       appBar: const AppTopBar(title: '第三方音源'),
       body: ListView(
-        // 底部要把迷你播放条的高度让出来，否则全展开时「保存 / 测试」压在条下面。
         padding: EdgeInsets.fromLTRB(
           16,
           12,
@@ -283,20 +255,18 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
         ),
         children: [
           _collapsible(
-            title: '开关',
+            title: '音源开关',
             icon: Icons.power_settings_new_rounded,
-            collapsedSubtitle: _enabled ? '已启用第三方音源' : '已关闭',
+            collapsedSubtitle: _enabled ? '已开启三方音源' : '已关闭',
             expanded: _switchesOpen,
             onToggle: () => setState(() => _switchesOpen = !_switchesOpen),
             children: [
               AppSettingSwitchTile(
-                title: '启用第三方音源',
+                title: '开启三方音源',
                 subtitle: _enabled ? '官方无法播放时自动尝试音源' : '关闭后灰色/会员歌曲将直接跳过',
                 value: _enabled,
                 onChanged: (v) => setState(() => _enabled = v),
               ),
-              // 「保证能播」：设置自相矛盾时（关了兜底却什么都没配、开了优先却
-              // 没有脚本）App 会自己绕开，这里如实告诉用户。
               ListenableBuilder(
                 listenable: Listenable.merge([
                   UnblockSourceService.instance.freeFallbackEnabled,
@@ -311,7 +281,7 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                     subtitle: on
                         ? '上面的音源没配或没命中时，再试 GD Studio / 酷狗 / 酷我'
                         : svc.freeFallbackActive
-                        ? '聆澜没配好、也没启用音源脚本，为了能播仍会用免费音源'
+                        ? '没配音源、也没启用脚本，为了能播仍会用免费音源'
                         : '关闭后只用上面配置的音源',
                     value: on,
                     onChanged: svc.setFreeFallbackEnabled,
@@ -327,12 +297,12 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                   final on =
                       UnblockSourceService.instance.preferLxEnabled.value;
                   return AppSettingSwitchTile(
-                    title: '优先走外置音源',
+                    title: '开启脚本音源',
                     subtitle: on && !LxSourceManager.instance.hasEnabled
-                        ? '还没导入或启用音源脚本，暂不生效，照常走内置音源'
+                        ? '还没导入或启用音源脚本，暂不生效'
                         : on
-                        ? '先用你导入的 JS 脚本取址，没命中再走内置音源'
-                        : '默认先走内置音源，JS 脚本作为补充（在下方「脚本」里导入）',
+                        ? '脚本音源参与竞速取址，谁快用谁'
+                        : '不启用脚本音源',
                     value: on,
                     onChanged: UnblockSourceService.instance.setPreferLxEnabled,
                   );
@@ -347,10 +317,10 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                       .cellularDowngradeEnabled
                       .value;
                   return AppSettingSwitchTile(
-                    title: '蜂窝数据下降低音质',
+                    title: '开启弱网优化',
                     subtitle: on
-                        ? '用流量时取址固定按 128k，省流量、弱网下也更容易出链'
-                        : '始终按上面设置的音质取址，不因为在用流量而改变',
+                        ? '用流量时固定按 128k 取址，省流量、弱网下也更容易出链'
+                        : '始终按上面选择的音质取址，不因为在用流量而改变',
                     value: on,
                     onChanged: UnblockSourceService
                         .instance
@@ -362,27 +332,27 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
           ),
           const SizedBox(height: 16),
           _collapsible(
-            title: '配置',
+            title: '音质配置',
             icon: Icons.tune_rounded,
-            collapsedSubtitle: '音质 ${_qualityLabel()} · 密钥、接口地址',
+            collapsedSubtitle: '选择音质 ${_qualityLabel()} · 密钥',
             expanded: _configOpen,
             onToggle: () => setState(() => _configOpen = !_configOpen),
             children: [
               AppSettingTile(
-                title: '音质',
+                title: '选择音质',
                 subtitle: _qualityLabel(),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: _pickQuality,
               ),
               AppSettingSwitchTile(
-                title: '显示密钥与接口地址',
+                title: '显示密钥',
                 subtitle: _revealSecrets ? '当前明文显示，注意别截图' : '默认遮住，避免截图或旁人看到',
                 value: _revealSecrets,
                 onChanged: (v) => setState(() => _revealSecrets = v),
               ),
               if (!_revealSecrets) ...[
-                AppSettingTile(title: 'API 密钥', subtitle: _keysSummary()),
-                AppSettingTile(title: '接口地址', subtitle: _templateSummary()),
+                AppSettingTile(title: '密钥配置', subtitle: _keysSummary()),
+                AppSettingTile(title: 'ikun 密钥', subtitle: _ikunSummary()),
               ] else ...[
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
@@ -392,7 +362,7 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                     maxLines: 5,
                     autocorrect: false,
                     decoration: const InputDecoration(
-                      labelText: 'API 密钥',
+                      labelText: '密钥配置',
                       hintText: '一行一个，可填多个',
                       border: OutlineInputBorder(),
                     ),
@@ -401,13 +371,11 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
                   child: TextField(
-                    controller: _templateController,
-                    minLines: 2,
-                    maxLines: 4,
+                    controller: _ikunController,
                     autocorrect: false,
                     decoration: const InputDecoration(
-                      labelText: '接口地址',
-                      helperText: '占位符：{source} 平台代号、{id} 歌曲 id、{quality} 音质',
+                      labelText: 'ikun 密钥',
+                      hintText: '聚合音源-A（c.wwwweb.top）的密钥',
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -424,7 +392,7 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                   size: 22,
                   color: scheme.primary,
                 ),
-                title: '脚本',
+                title: '脚本音源',
                 subtitle: 'Js 脚本文件配置',
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Navigator.of(
@@ -439,7 +407,6 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
               Expanded(
                 child: FilledButton.tonal(
                   onPressed: _testing ? null : _save,
-                  // 圆角和下面的分组卡统一，别用默认的胶囊（太圆）。
                   style: FilledButton.styleFrom(
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),

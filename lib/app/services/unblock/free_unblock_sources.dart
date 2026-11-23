@@ -158,54 +158,6 @@ class FreeUnblockSources {
     return _https(url);
   }
 
-  /// 星海（zddyr）的网易云取址 —— [gdStudio] 的备份。
-  ///
-  /// 同样按**网易云原始 id** 取。实测给正确的 id 配一个完全错误的歌名，
-  /// 返回的还是同一个文件，说明歌名字段不参与匹配，没有串到同名翻唱的风险。
-  ///
-  /// 返回里带「第三方调用将受到总体QPS限制」的提示，所以只当备份用：
-  /// 排在 GD 后面，GD 命中就根本不会走到这儿。
-  static Future<String?> zddyrNetease(int neteaseId, {String? quality}) async {
-    final body = await _get(
-      'https://yy.zddyr.top/lx/api/'
-      '?source=netease&songmid=$neteaseId&quality=${_zddyrLevel(quality)}',
-    );
-    final json = _json(body);
-    if (json == null || json['code'] != 200) return null;
-    final url = json['url'];
-    if (url is! String || url.isEmpty) return null;
-    // 它的响应里没有码率字段，只能拿地址后缀当判据（.flac / .mp3）。
-    debugPrint(
-      '[Unblock] zddyr wy/$neteaseId 要 ${_zddyrLevel(quality)}'
-      '，得 ${_urlExtension(url)}',
-    );
-    return _https(url);
-  }
-
-  /// 取地址里的文件后缀，认不出就返回「未知」。带查询串的先切掉。
-  static String _urlExtension(String url) {
-    final path = url.split('?').first;
-    final dot = path.lastIndexOf('.');
-    if (dot < 0 || dot < path.lastIndexOf('/')) return '未知';
-    final ext = path.substring(dot + 1).toLowerCase();
-    return ext.length <= 5 ? ext : '未知';
-  }
-
-  static String _zddyrLevel(String? quality) {
-    switch ((quality ?? '').trim().toLowerCase()) {
-      case '128k':
-        return '128k';
-      case 'flac':
-      case 'lossless':
-        return 'flac';
-      case 'flac24bit':
-      case 'hires':
-        return 'hires';
-      default:
-        return '320k';
-    }
-  }
-
   // ---- 酷狗 ----
 
   static Future<String?> _kugou(String keyword, int durationMs) async {
@@ -287,28 +239,13 @@ class FreeUnblockSources {
     final match = _selectMatch(songs, durationMs, (s) => s.durationMs);
     if (match == null) return null;
 
-    // 先走海棠：酷我自家的 antiserver 现在大概率只给「请到酷我音乐APP收听」
-    // 的提示音（实测 8 首里 6 首，都被下面那道 _looksLikeRealAudio 丢掉，
-    // 等于这一层在空转）。海棠按同一个 rid 取，level=lossless 时给完整 FLAC。
+    // 海棠按 rid 换地址，level=lossless 时给完整 FLAC。
     final viaHaitangw = await _kuwoViaHaitangw(match.rid, quality);
     if (viaHaitangw != null &&
         await _looksLikeRealAudio(viaHaitangw, durationMs)) {
       return viaHaitangw;
     }
-
-    // 海棠没货再回落酷我自家接口。
-    // 这个接口返回的是**纯文本**地址，不是 JSON；换成浏览器 UA 会拿到空串。
-    final text = await _get(
-      'https://antiserver.kuwo.cn/anti.s'
-      '?type=convert_url&format=mp3&response=url&rid=MUSIC_${match.rid}',
-      userAgent: 'okhttp/3.10.0',
-    );
-    if (text == null) return null;
-    final found = RegExp(r'http[^\s"]+').firstMatch(text);
-    final url = found?.group(0);
-    if (url == null || url.isEmpty) return null;
-    final secure = _https(url);
-    return await _looksLikeRealAudio(secure, durationMs) ? secure : null;
+    return null;
   }
 
   /// 海棠的酷我取址：按 rid 换地址，`level=lossless` 时给完整 FLAC。
