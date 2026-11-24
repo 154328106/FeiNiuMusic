@@ -279,7 +279,6 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
             children: [
               AppSettingSwitchTile(
                 title: '开启三方音源',
-                subtitle: _enabled ? '官方无法播放时自动尝试音源' : '关闭后灰色/会员歌曲将直接跳过',
                 value: _enabled,
                 onChanged: (v) => setState(() => _enabled = v),
               ),
@@ -294,11 +293,6 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                   final on = svc.freeFallbackEnabled.value;
                   return AppSettingSwitchTile(
                     title: '免费兜底音源',
-                    subtitle: on
-                        ? '上面的音源没配或没命中时，再试 GD Studio / 酷狗 / 酷我'
-                        : svc.freeFallbackActive
-                        ? '没配音源、也没启用脚本，为了能播仍会用免费音源'
-                        : '关闭后只用上面配置的音源',
                     value: on,
                     onChanged: svc.setFreeFallbackEnabled,
                   );
@@ -314,11 +308,6 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                       UnblockSourceService.instance.preferLxEnabled.value;
                   return AppSettingSwitchTile(
                     title: '开启脚本音源',
-                    subtitle: on && !LxSourceManager.instance.hasEnabled
-                        ? '还没导入或启用音源脚本，暂不生效'
-                        : on
-                        ? '脚本音源参与竞速取址，谁快用谁'
-                        : '不启用脚本音源',
                     value: on,
                     onChanged: UnblockSourceService.instance.setPreferLxEnabled,
                   );
@@ -334,9 +323,6 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                       .value;
                   return AppSettingSwitchTile(
                     title: '开启弱网优化',
-                    subtitle: on
-                        ? '用流量时固定按 128k 取址，省流量、弱网下也更容易出链'
-                        : '始终按上面选择的音质取址，不因为在用流量而改变',
                     value: on,
                     onChanged: UnblockSourceService
                         .instance
@@ -362,7 +348,6 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
               ),
               AppSettingSwitchTile(
                 title: '显示密钥',
-                subtitle: _revealSecrets ? '当前明文显示，注意别截图' : '默认遮住，避免截图或旁人看到',
                 value: _revealSecrets,
                 onChanged: (v) => setState(() => _revealSecrets = v),
               ),
