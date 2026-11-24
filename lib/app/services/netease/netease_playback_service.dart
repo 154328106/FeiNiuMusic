@@ -227,6 +227,14 @@ class NetEasePlaybackService {
           ? url.replaceFirst('http://', 'https://')
           : url;
       _cache[id] = _ResolvedUrl(secure, DateTime.now());
+      // 播放日志：队列预取这条路（批量）不经过 _fetch，得在这儿补一条。
+      final fromOfficial =
+          result[id]?.freeTrial != true && result[id]?.url != null;
+      PlaybackLogService.instance.log(
+        title: song.title,
+        platform: 'wy',
+        source: fromOfficial ? '官方' : '第三方',
+      );
       playable.add(song);
     }
     // 官方能给出地址的比例是关键诊断：几乎全给不出 → 多半是登录态没生效；
