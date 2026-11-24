@@ -296,10 +296,18 @@ class _LxEngine {
     });
   }
 
+  /// 每次只跑一小撮微任务。
+  ///
+  /// 原来一上来 while 循环最多跑 1000 个 job，全在 UI 线程上同步执行：脚本
+  /// （尤其 200KB+ 的混淆聚合源）一次取址产生几百个微任务，一个 tick 就把
+  /// 主线程占满，表现成「切歌时界面像马赛克、点不动」。现在每个 tick 只跑
+  /// 这么多个，剩下的留给下一个 20ms tick —— 取址慢一点，但界面不卡。
+  static const int _drainBudget = 12;
+
   void _drain() {
     try {
       var n = 0;
-      while (_rt.executePendingJob() > 0 && n++ < 1000) {}
+      while (_rt.executePendingJob() > 0 && n++ < _drainBudget) {}
     } catch (_) {}
   }
 
