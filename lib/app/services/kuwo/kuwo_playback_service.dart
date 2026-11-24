@@ -8,6 +8,7 @@ import '../../state/song_source.dart';
 import '../../state/song_state.dart';
 import '../unblock/expiring_set.dart';
 import '../unblock/unblock_source.dart';
+import '../playback_log_service.dart';
 import 'kuwo_models.dart';
 
 class _Resolved {
@@ -111,19 +112,33 @@ class KuwoPlaybackService {
     String? url;
     try {
       // 海棠与第三方音源并发竞速，谁先回用谁。
-      url = await UnblockSourceService.firstNonNull([
-        UnblockSourceService.guardNull(() => _viaHaitangw(rid, quality)),
-        UnblockSourceService.guardNull(
-          () => UnblockSourceService.instance.resolve(
-            platform: 'kw',
-            songId: rid,
-            keyword: meta?.keyword,
-            durationMs: meta?.durationMs ?? 0,
-            name: meta?.name,
-            singer: meta?.singer,
+      final (resolved, label) = await UnblockSourceService.firstLabeled([
+        ('海棠', UnblockSourceService.guardNull(() => _viaHaitangw(rid, quality))),
+        (
+          '第三方',
+          UnblockSourceService.guardNull(
+            () => UnblockSourceService.instance.resolve(
+              platform: 'kw',
+              songId: rid,
+              keyword: meta?.keyword,
+              durationMs: meta?.durationMs ?? 0,
+              name: meta?.name,
+              singer: meta?.singer,
+            ),
           ),
         ),
       ]);
+      url = resolved;
+      if (url != null && url.isNotEmpty) {
+        final sourceLabel = label == '第三方'
+            ? (UnblockSourceService.instance.lastSourceLabel ?? '第三方')
+            : label;
+        PlaybackLogService.instance.log(
+          title: meta?.name ?? rid,
+          platform: 'kw',
+          source: sourceLabel,
+        );
+      }
     } catch (e) {
       debugPrint('[Kuwo] 取址异常 $rid：$e');
     }

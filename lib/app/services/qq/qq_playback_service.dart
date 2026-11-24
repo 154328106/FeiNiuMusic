@@ -7,6 +7,7 @@ import '../../state/song_source.dart';
 import '../../state/song_state.dart';
 import '../unblock/expiring_set.dart';
 import '../unblock/unblock_source.dart';
+import '../playback_log_service.dart';
 import 'qq_api_client.dart';
 import 'qq_models.dart';
 
@@ -112,19 +113,24 @@ class QQPlaybackService {
   Future<String?> _resolveStreamUrl(String mid, {String? mediaMid}) async {
     try {
       final hint = _matchHints[mid];
-      // 官方（128k，需登录才给）与第三方音源并发竞速，谁先回用谁。
-      final url = await UnblockSourceService.firstNonNull([
-        UnblockSourceService.guardNull(
-          () => _verifiedOfficialUrl(mid, mediaMid),
+      final (url, label) = await UnblockSourceService.firstLabeled([
+        (
+          '官方',
+          UnblockSourceService.guardNull(
+            () => _verifiedOfficialUrl(mid, mediaMid),
+          ),
         ),
-        UnblockSourceService.guardNull(
-          () => UnblockSourceService.instance.resolve(
-            platform: 'tx',
-            songId: mid,
-            keyword: hint?.$1,
-            durationMs: hint?.$2 ?? 0,
-            name: _nameHints[mid]?.$1,
-            singer: _nameHints[mid]?.$2,
+        (
+          '第三方',
+          UnblockSourceService.guardNull(
+            () => UnblockSourceService.instance.resolve(
+              platform: 'tx',
+              songId: mid,
+              keyword: hint?.$1,
+              durationMs: hint?.$2 ?? 0,
+              name: _nameHints[mid]?.$1,
+              singer: _nameHints[mid]?.$2,
+            ),
           ),
         ),
       ]);
@@ -132,6 +138,14 @@ class QQPlaybackService {
         _unresolvable.add(mid);
         return null;
       }
+      final sourceLabel = label == '第三方'
+          ? (UnblockSourceService.instance.lastSourceLabel ?? '第三方')
+          : label;
+      PlaybackLogService.instance.log(
+        title: _nameHints[mid]?.$1 ?? mid,
+        platform: 'tx',
+        source: sourceLabel,
+      );
       final secure = url.startsWith('http://')
           ? url.replaceFirst('http://', 'https://')
           : url;

@@ -7,6 +7,7 @@ import '../../state/song_source.dart';
 import '../../state/song_state.dart';
 import '../unblock/expiring_set.dart';
 import '../unblock/unblock_source.dart';
+import '../playback_log_service.dart';
 import 'migu_models.dart';
 
 class _Resolved {
@@ -121,6 +122,13 @@ class MiguPlaybackService {
         name: meta?.name,
         singer: meta?.singer,
       );
+      if (url != null && url.isNotEmpty) {
+        PlaybackLogService.instance.log(
+          title: meta?.name ?? copyrightId,
+          platform: 'mg',
+          source: UnblockSourceService.instance.lastSourceLabel ?? '第三方',
+        );
+      }
     } catch (e) {
       debugPrint('[Migu] 取址异常 $copyrightId：$e');
     }

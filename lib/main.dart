@@ -13,6 +13,7 @@ import 'app/theme/app_glass_theme.dart';
 import 'app/services/audio/stream_cache_service.dart';
 import 'app/services/backup/backup_service.dart';
 import 'app/services/debug_log_service.dart';
+import 'app/services/playback_log_service.dart';
 import 'app/services/download/download_service.dart';
 import 'app/services/fn_auto_reconnect_service.dart';
 import 'app/services/island_lyric_service.dart';
@@ -61,6 +62,7 @@ Future<void> main() async {
     debugPrint('MediaKit.ensureInitialized failed: $e');
   }
   await DebugLogService.instance.ensureLoaded();
+  await PlaybackLogService.instance.ensureLoaded();
   // TV 检测必须在 runApp 前完成，避免首帧后再切换布局造成闪变。
   // TV 面板固定 60Hz，强制高刷无意义甚至闪烁，因此高刷调用跳过 TV。
   await TvDetection.ensureLoaded();

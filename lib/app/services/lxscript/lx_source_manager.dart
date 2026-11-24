@@ -761,4 +761,10 @@ class LxSourceManager {
     await ensureLoaded();
     _bump();
   }
+
+  /// 密钥/音源配置变更后调用：清掉熔断与平台亲和，让下次取址重新公平竞速。
+  void resetForConfigChange() {
+    _trips.clear();
+    lastHit.clear();
+  }
 }

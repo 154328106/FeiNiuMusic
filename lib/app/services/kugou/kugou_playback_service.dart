@@ -7,6 +7,7 @@ import '../../state/song_source.dart';
 import '../../state/song_state.dart';
 import '../unblock/expiring_set.dart';
 import '../unblock/unblock_source.dart';
+import '../playback_log_service.dart';
 import 'kugou_api_client.dart';
 import 'kugou_models.dart';
 
@@ -135,22 +136,28 @@ class KugouPlaybackService {
     final meta = _meta[hash];
     try {
       // 官方与第三方音源并发竞速，谁先回用谁。
-      final url = await UnblockSourceService.firstNonNull([
-        UnblockSourceService.guardNull(
-          () => KugouApiClient.instance.songUrl(
-            hash,
-            albumId: meta?.albumId,
-            albumAudioId: meta?.albumAudioId,
+      final (url, label) = await UnblockSourceService.firstLabeled([
+        (
+          '官方',
+          UnblockSourceService.guardNull(
+            () => KugouApiClient.instance.songUrl(
+              hash,
+              albumId: meta?.albumId,
+              albumAudioId: meta?.albumAudioId,
+            ),
           ),
         ),
-        UnblockSourceService.guardNull(
-          () => UnblockSourceService.instance.resolve(
-            platform: 'kg',
-            songId: hash,
-            keyword: meta?.keyword,
-            durationMs: meta?.durationMs ?? 0,
-            name: meta?.name,
-            singer: meta?.singer,
+        (
+          '第三方',
+          UnblockSourceService.guardNull(
+            () => UnblockSourceService.instance.resolve(
+              platform: 'kg',
+              songId: hash,
+              keyword: meta?.keyword,
+              durationMs: meta?.durationMs ?? 0,
+              name: meta?.name,
+              singer: meta?.singer,
+            ),
           ),
         ),
       ]);
@@ -160,6 +167,14 @@ class KugouPlaybackService {
         }
         return null;
       }
+      final sourceLabel = label == '第三方'
+          ? (UnblockSourceService.instance.lastSourceLabel ?? '第三方')
+          : label;
+      PlaybackLogService.instance.log(
+        title: meta?.name ?? hash,
+        platform: 'kg',
+        source: sourceLabel,
+      );
       final secure = url.startsWith('http://')
           ? url.replaceFirst('http://', 'https://')
           : url;

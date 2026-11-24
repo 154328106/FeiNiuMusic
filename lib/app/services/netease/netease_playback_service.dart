@@ -6,6 +6,7 @@ import '../../state/song_source.dart';
 import '../../state/song_state.dart';
 import '../unblock/expiring_set.dart';
 import '../unblock/unblock_source.dart';
+import '../playback_log_service.dart';
 import 'netease_api_client.dart';
 import 'netease_models.dart';
 
@@ -50,6 +51,9 @@ class NetEasePlaybackService {
   /// 当前音质档位。免费账号拿不到 lossless 会自动降级。
   String level = 'exhigh';
 
+  /// id → 歌名，给播放日志用（批量预取里有，单首解析时回填）。
+  final Map<int, String> _titleHints = {};
+
   /// 解析某首网易云歌曲的可播放直链。
   ///
   /// 返回 null 表示拿不到地址——灰色歌曲、无版权、或未登录的 VIP 曲目。
@@ -86,6 +90,7 @@ class NetEasePlaybackService {
       // 官方给不出地址（灰色/无版权/需要会员），或只给了试听片段 → 问第三方
       // 音源。没配密钥时 resolve 直接返回 null，一个请求都不会发。
       final needsUnblock = url == null || (info?.freeTrial ?? false);
+      var usedUnblock = false;
       if (needsUnblock) {
         final unblocked = await UnblockSourceService.instance.resolve(
           platform: 'wy',
@@ -95,6 +100,7 @@ class NetEasePlaybackService {
         if (unblocked != null) {
           debugPrint('[NetEase] $neteaseId 由第三方音源提供地址');
           url = unblocked;
+          usedUnblock = true;
         }
       }
 
@@ -103,6 +109,13 @@ class NetEasePlaybackService {
         debugPrint('[NetEase] $neteaseId 无可用播放地址（灰色/无版权/需要会员）');
         return null;
       }
+      PlaybackLogService.instance.log(
+        title: _titleHints[neteaseId] ?? '$neteaseId',
+        platform: 'wy',
+        source: usedUnblock
+            ? (UnblockSourceService.instance.lastSourceLabel ?? '第三方')
+            : '官方',
+      );
       if ((info?.freeTrial ?? false) && identical(url, info?.url)) {
         debugPrint('[NetEase] $neteaseId 只返回了试听片段');
       }
@@ -140,6 +153,7 @@ class NetEasePlaybackService {
     for (final song in songs) {
       final id = song.neteaseId;
       if (id == null) continue;
+      _titleHints[id] = song.title;
       // 已缓存地址的、以及已确认取不到的，都不用再问。
       if (_cache[id]?.isExpired == false) continue;
       if (_unresolvable.contains(id)) continue;

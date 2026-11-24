@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../../app/router/app_page_route.dart';
+import '../../app/services/kugou/kugou_playback_service.dart';
+import '../../app/services/kuwo/kuwo_playback_service.dart';
 import '../../app/services/lxscript/lx_source_manager.dart';
+import '../../app/services/migu/migu_playback_service.dart';
+import '../../app/services/netease/netease_playback_service.dart';
+import '../../app/services/qq/qq_playback_service.dart';
 import '../../app/services/unblock/unblock_source.dart';
 import '../../components/index.dart';
 import 'lx_source_page.dart';
@@ -185,12 +190,23 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
 
   Future<void> _save() async {
     await _service.save(_currentConfig());
+    _clearResolvedCaches();
     if (!mounted) return;
     AppToast.show(context, '已保存');
   }
 
+  void _clearResolvedCaches() {
+    QQPlaybackService.instance.clear();
+    KugouPlaybackService.instance.clear();
+    KuwoPlaybackService.instance.clear();
+    MiguPlaybackService.instance.clear();
+    NetEasePlaybackService.instance.clear();
+    LxSourceManager.instance.resetForConfigChange();
+  }
+
   Future<void> _test() async {
     await _service.save(_currentConfig());
+    _clearResolvedCaches();
     setState(() {
       _testing = true;
       _result = null;
@@ -351,8 +367,8 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                 onChanged: (v) => setState(() => _revealSecrets = v),
               ),
               if (!_revealSecrets) ...[
-                AppSettingTile(title: '密钥配置', subtitle: _keysSummary()),
-                AppSettingTile(title: 'ikun 密钥', subtitle: _ikunSummary()),
+                AppSettingTile(title: '聆澜密钥', subtitle: _keysSummary()),
+                AppSettingTile(title: '爱酷密钥', subtitle: _ikunSummary()),
               ] else ...[
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
@@ -362,7 +378,7 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                     maxLines: 5,
                     autocorrect: false,
                     decoration: const InputDecoration(
-                      labelText: '密钥配置',
+                      labelText: '聆澜密钥',
                       hintText: '一行一个，可填多个',
                       border: OutlineInputBorder(),
                     ),
@@ -374,7 +390,7 @@ class _UnblockSourcePageState extends State<UnblockSourcePage> {
                     controller: _ikunController,
                     autocorrect: false,
                     decoration: const InputDecoration(
-                      labelText: 'ikun 密钥',
+                      labelText: '爱酷密钥',
                       hintText: '聚合音源-A（c.wwwweb.top）的密钥',
                       border: OutlineInputBorder(),
                     ),

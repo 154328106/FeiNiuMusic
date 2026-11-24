@@ -92,7 +92,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 title: '功能设置',
                 icon: Icons.widgets_outlined,
                 asset: 'assets/icon/set_features.png',
-                collapsedSubtitle: '音量 · 通知 · 权限 · 元数据 · 启动 · 缓存 · DLNA',
+                collapsedSubtitle: '音量 · 元数据 · 启动 · 缓存 · DLNA',
                 accent: scheme.secondary,
                 children: [
                   // 仅通过 FNID 连接时才显示：候选链路管理只对 FNID 探测有意义，
@@ -248,7 +248,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 children: [
                   AppSettingTile(
                     title: '数据备份',
-                    subtitle: '备份账号、听歌统计与设置到本地或 WebDAV',
+                    subtitle: '设置，密钥，登录状态备份',
                     leading: _iconChip(
                       context,
                       Icons.backup_outlined,

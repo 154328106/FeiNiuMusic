@@ -117,6 +117,11 @@ class UnblockSourceService {
     return until != null && DateTime.now().isBefore(until);
   }
 
+  /// 最近一次 [resolve] 命中的音源标签（脚本 / GD / 聆澜 / ikun / 免费源…）。
+  /// 供播放日志取「这首歌最终走了谁」。
+  String? _lastSourceLabel;
+  String? get lastSourceLabel => _lastSourceLabel;
+
   bool _loaded = false;
 
   final Dio _dio = Dio(
@@ -371,42 +376,54 @@ class UnblockSourceService {
         : Future.value(null);
 
     if (!background) {
-      final candidates = <Future<String?>>[];
-      if (lxEnabled) candidates.add(guardNull(() => tryLx(false)));
-      if (gdNeteaseId != null) candidates.add(guardNull(tryGd));
+      final candidates = <(String, Future<String?>)>[];
+      if (lxEnabled) candidates.add(('脚本', guardNull(() => tryLx(false))));
+      if (gdNeteaseId != null) candidates.add(('GD', guardNull(tryGd)));
       if (cfg.apiKeys.isNotEmpty && paidAvailable) {
-        candidates.add(guardNull(tryLianlan));
+        candidates.add(('聆澜', guardNull(tryLianlan)));
       }
       if (cfg.ikunKey.isNotEmpty && paidAvailable) {
-        candidates.add(guardNull(tryIkun));
+        candidates.add(('爱酷', guardNull(tryIkun)));
       }
-      final url = await firstNonNull(candidates);
+      final (url, label) = await firstLabeled(candidates);
+      _lastSourceLabel = label.isEmpty ? null : label;
       if (url != null) {
-        debugPrint('[Unblock] 竞速命中 $platform/$songId');
+        debugPrint('[Unblock] 竞速命中 $platform/$songId（$label）');
         return url;
       }
     } else {
       if (lxEnabled) {
         final lxUrl = await tryLx(true);
-        if (lxUrl != null) return lxUrl;
+        if (lxUrl != null) {
+          _lastSourceLabel = '脚本';
+          return lxUrl;
+        }
       }
       if (cfg.apiKeys.isNotEmpty && paidAvailable) {
         final lianlan = await tryLianlan();
-        if (lianlan != null) return lianlan;
+        if (lianlan != null) {
+          _lastSourceLabel = '聆澜';
+          return lianlan;
+        }
       }
       if (cfg.ikunKey.isNotEmpty && paidAvailable) {
         final ikun = await tryIkun();
-        if (ikun != null) return ikun;
+        if (ikun != null) {
+          _lastSourceLabel = '爱酷';
+          return ikun;
+        }
       }
     }
 
-    return _resolveByKeyword(
+    final kwUrl = await _resolveByKeyword(
       cfg,
       keyword,
       durationMs,
       platform: platform,
       background: background,
     );
+    if (kwUrl != null) _lastSourceLabel = '免费源';
+    return kwUrl;
   }
 
   /// 跑一个可能抛异常的取址，异常一律折成 null，不拖垮竞速池。
@@ -433,6 +450,27 @@ class UnblockSourceService {
         }
         remaining--;
         if (remaining == 0) completer.complete(null);
+      });
+    }
+    return completer.future;
+  }
+
+  /// 带标签的并发竞速：返回 (第一个非空地址, 它的标签)；全空返回 (null, '')。
+  static Future<(String?, String)> firstLabeled(
+    List<(String, Future<String?>)> items,
+  ) {
+    if (items.isEmpty) return Future.value((null, ''));
+    final completer = Completer<(String?, String)>();
+    var remaining = items.length;
+    for (final (label, future) in items) {
+      future.then((value) {
+        if (completer.isCompleted) return;
+        if (value != null && value.isNotEmpty) {
+          completer.complete((value, label));
+          return;
+        }
+        remaining--;
+        if (remaining == 0) completer.complete((null, ''));
       });
     }
     return completer.future;

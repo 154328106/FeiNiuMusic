@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/services/app_update_service.dart';
 import '../../app/services/debug_log_service.dart';
+import '../../app/services/playback_log_service.dart';
 import '../../app/state/settings_state.dart';
 import '../../components/dialog/app_update_dialog.dart';
 import '../../components/index.dart';
@@ -29,6 +30,7 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
   static const String _projectUrl = 'https://github.com/kuilei0926/FeiNiuMusic';
 
   final DebugLogService _debugLogs = DebugLogService.instance;
+  final PlaybackLogService _playbackLogs = PlaybackLogService.instance;
 
   bool _checking = false;
   String _version = '...';
@@ -38,6 +40,7 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
   void initState() {
     super.initState();
     _debugLogs.ensureLoaded();
+    _playbackLogs.ensureLoaded();
     AppLaunchUpdateSettings.ensureLoaded();
     _loadVersion();
   }
@@ -86,6 +89,23 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
     AppToast.show(context, '日志已复制');
+  }
+
+  Future<void> _clearPlaybackLogs() async {
+    await _playbackLogs.clear();
+    if (!mounted) return;
+    AppToast.show(context, '播放日志已清空');
+  }
+
+  Future<void> _copyPlaybackLogs() async {
+    final text = _playbackLogs.exportText();
+    if (text.trim().isEmpty) {
+      AppToast.show(context, '暂无播放日志');
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    AppToast.show(context, '播放日志已复制');
   }
 
   Future<void> _openProjectUrl() async {
@@ -198,6 +218,36 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
             const SizedBox(height: 16),
           ],
           AppSettingSection(
+            title: '播放日志',
+            children: [
+              ValueListenableBuilder<bool>(
+                valueListenable: _playbackLogs.enabled,
+                builder: (context, enabled, _) {
+                  return AppSettingSwitchTile(
+                    title: '播放日志',
+                    subtitle: '开启后记录每首歌走了哪个音源，便于排查取不到链',
+                    value: enabled,
+                    onChanged: _playbackLogs.setEnabled,
+                  );
+                },
+              ),
+              AppSettingTile(
+                title: '清空播放日志',
+                subtitle: '删除已记录的播放日志',
+                leading: const Icon(Icons.delete_outline_rounded),
+                onTap: _clearPlaybackLogs,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _buildLogViewer(
+            context,
+            _playbackLogs.entries,
+            _playbackLogs.enabled.value ? '暂无播放日志' : '播放日志未开启',
+            _copyPlaybackLogs,
+          ),
+          const SizedBox(height: 16),
+          AppSettingSection(
             title: '调试',
             children: [
               ValueListenableBuilder<bool>(
@@ -227,16 +277,26 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
             ],
           ),
           const SizedBox(height: 16),
-          _buildLogViewer(context),
+          _buildLogViewer(
+            context,
+            _debugLogs.entries,
+            _debugLogs.enabled.value ? '暂无日志' : '调试模式未开启',
+            _copyLogs,
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildLogViewer(BuildContext context) {
+  Widget _buildLogViewer(
+    BuildContext context,
+    ValueNotifier<List<String>> source,
+    String emptyHint,
+    VoidCallback onCopy,
+  ) {
     final scheme = Theme.of(context).colorScheme;
     return ValueListenableBuilder<List<String>>(
-      valueListenable: _debugLogs.entries,
+      valueListenable: source,
       builder: (context, logs, _) {
         return AppSettingSection(
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
@@ -256,7 +316,7 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
                     visualDensity: VisualDensity.compact,
                     icon: const Icon(Icons.copy_rounded, size: 18),
                     tooltip: '复制全部',
-                    onPressed: _copyLogs,
+                    onPressed: onCopy,
                   ),
               ],
             ),
@@ -266,7 +326,7 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
                 padding: const EdgeInsets.symmetric(vertical: 18),
                 child: Center(
                   child: Text(
-                    _debugLogs.enabled.value ? '暂无日志' : '调试模式未开启',
+                    emptyHint,
                     style: TextStyle(
                       color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
                     ),
