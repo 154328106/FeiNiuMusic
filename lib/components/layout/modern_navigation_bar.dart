@@ -9,6 +9,7 @@ import '../../app/router/app_router.dart';
 import '../../app/state/mini_player_collapse.dart';
 import '../../app/state/settings_state.dart';
 import '../../app/theme/app_glass_theme.dart';
+import '../common/glass_gate.dart';
 
 // 底部导航目的地。「收藏」不在其中：首页已有收藏入口，底部再放一个重复，
 // 收藏页改为从首页压栈进入（自带返回键）。
@@ -54,12 +55,6 @@ const double kSolidNavSlotHeight = kSolidNavHeight + kSolidNavPillTopGap * 2;
 
 /// 两种分支胶囊共用的圆角。
 const double kNavPillRadius = 20;
-
-/// 底栏是否画液态玻璃胶囊。
-///
-/// 手机和平板始终走玻璃，不看「液体玻璃」开关（那个开关只管播放条）。
-/// TV 排除：玻璃自带焦点，会跟遥控器方向键冲突。
-bool get useGlassNavChrome => !AppLayoutSettings.tvMode.value;
 
 final ValueNotifier<int> primaryNavigationIndex = ValueNotifier<int>(0);
 bool primaryNavigationShellActive = false;
@@ -178,16 +173,10 @@ class ModernNavigationBar extends StatelessWidget {
     // 监听它即可始终反映真实激活的 tab（含 push 出的详情页）。
     return ValueListenableBuilder<int>(
       valueListenable: primaryNavigationIndex,
-      builder: (context, index, _) {
-        // 普通模式的底栏也用液态玻璃胶囊，和开关打开时长得一样。
-        // TV 仍走实色栏：玻璃组件的焦点会跟遥控器方向键打架。
-        return ValueListenableBuilder<bool>(
-          valueListenable: AppLayoutSettings.tvMode,
-          builder: (context, _, _) => useGlassNavChrome
-              ? _buildGlass(context, index)
-              : _buildOriginal(context, index),
-        );
-      },
+      builder: (context, index, _) => GlassGate(
+        original: _buildOriginal(context, index),
+        glass: _buildGlass(context, index),
+      ),
     );
   }
 

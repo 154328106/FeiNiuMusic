@@ -28,9 +28,11 @@ class AppPageScaffold extends StatefulWidget {
     final miniPlayerPadding = showMiniPlayer
         ? MiniPlayerBar.estimatedHeight
         : 0.0;
-    // 留白高度跟随底栏：玻璃胶囊槽位，TV 实色栏用 kSolidNavSlotHeight。
+    // 留白高度跟随当前分支：玻璃胶囊槽位 84，非玻璃栏 kSolidNavHeight。
     final bottomNavPadding = hasBottomNav
-        ? (useGlassNavChrome ? modernNavHeight : kSolidNavSlotHeight)
+        ? (AppGlassSettings.effectiveEnabled
+            ? modernNavHeight
+            : kSolidNavSlotHeight)
         : 0.0;
     return bottomInset + miniPlayerPadding + bottomNavPadding + minPadding;
   }
@@ -219,9 +221,11 @@ class AppPageScaffoldState extends State<AppPageScaffold>
     // 大圆角边缘，悬浮更透气。
     const miniPlayerBottomLift = 10.0;
     final lift = hasBottomNav ? miniPlayerLift : miniPlayerBottomLift;
-    // 玻璃胶囊只占槽位中间（上方留 kGlassNavPillTopGap 空隙），迷你播放器对齐
-    // 胶囊顶（减去该空隙），避免把空隙误当成间隙。TV 实色栏占满槽位，对齐栏顶。
-    final navDockHeight = useGlassNavChrome
+    // 玻璃开启时胶囊只占槽位中间（上方留 kGlassNavPillTopGap 空隙），迷你
+    // 播放器对齐胶囊顶（减去该空隙），避免把空隙误当成间隙；非玻璃分支是
+    // 占满槽位的实色栏，直接对齐栏顶（kSolidNavHeight）。该值随开关/TV 变化
+    // 由下方 ListenableBuilder 触发重算。
+    final navDockHeight = AppGlassSettings.effectiveEnabled
         ? (AppPageScaffold.modernNavHeight - kGlassNavPillTopGap)
         : kSolidNavSlotHeight - kSolidNavPillTopGap;
     final miniPlayerBottom = hasBottomNav
@@ -238,7 +242,7 @@ class AppPageScaffoldState extends State<AppPageScaffold>
 
     // 收成球的落点：有底栏 → 球和导航胶囊同高、球心对齐胶囊中线（同一行、在它
     // 右边，导航条会按同一进度把右边让出来）；没底栏 → 贴右下角。
-    final glassNav = useGlassNavChrome;
+    final glassNav = AppGlassSettings.effectiveEnabled;
     final navPillHeight = glassNav
         ? AppPageScaffold.modernNavHeight - kGlassNavPillTopGap * 2
         : kSolidNavHeight;
