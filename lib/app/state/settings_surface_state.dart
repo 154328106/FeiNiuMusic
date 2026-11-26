@@ -16,8 +16,8 @@ class SurfaceStyle {
     this.thickness = 0,
     this.frame = true,
     this.frameColor,
-    this.frameOpacity = 0.6,
-    this.frameThickness = 0.4,
+    this.frameOpacity = 0.3,
+    this.frameThickness = 0.25,
   });
 
   /// 框里面的底色。null = 跟随主题。
@@ -84,8 +84,8 @@ class SurfaceStyle {
       thickness: d('thickness', 0),
       frame: j['frame'] is bool ? j['frame'] as bool : true,
       frameColor: fc is int ? Color(fc) : null,
-      frameOpacity: d('frameOpacity', 0.6),
-      frameThickness: d('frameThickness', 0.4),
+      frameOpacity: d('frameOpacity', 0.3),
+      frameThickness: d('frameThickness', 0.25),
     );
   }
 
@@ -127,9 +127,9 @@ class AppSurfaceSettings {
   static const _prefsBarOpacity = 'surface_bar_opacity';
   // 默认值改过一次。只把「还停在上一版出厂值」的安装迁过来，手调过的不动。
   static const _prefsDefaultsRev = 'surface_style_defaults_rev';
-  static const _defaultsRev = 1;
+  static const _defaultsRev = 2;
 
-  /// 新装出厂：白底、蓝框。深浅见构造默认（框 60%/40%，框内 0%/0%）。
+  /// 新装出厂：白底、蓝框。深浅见构造默认（框 30%/25%，框内 0%/0%）。
   static const SurfaceStyle freshDefault = SurfaceStyle(
     color: Colors.white,
     frame: true,
@@ -201,7 +201,7 @@ class AppSurfaceSettings {
       }
       final rev = prefs.getInt(_prefsDefaultsRev) ?? 0;
       if (rev < _defaultsRev) {
-        if (_isPreviousFactoryDefault(style.value)) {
+        if (rev < 1 && _isPreviousFactoryDefault(style.value)) {
           // 上一版出厂深浅：框 25%/35%、框内 50%/50%（或更早的 85%/50%/50%/28%）。
           style.value = style.value.copyWith(
             opacity: freshDefault.opacity,
@@ -217,6 +217,13 @@ class AppSurfaceSettings {
               _near(savedBar, 0.85)) {
             await prefs.setDouble(_prefsBarOpacity, 0);
           }
+        } else if (_isRev1FrameDefault(style.value)) {
+          // 上一版出厂框：深浅 60%、厚度 40%。手调过的不动。
+          style.value = style.value.copyWith(
+            frameOpacity: freshDefault.frameOpacity,
+            frameThickness: freshDefault.frameThickness,
+          );
+          await prefs.setString(_prefsStyle, jsonEncode(style.value.toJson()));
         }
         await prefs.setInt(_prefsDefaultsRev, _defaultsRev);
       }
@@ -262,6 +269,10 @@ class AppSurfaceSettings {
         _near(s.frameThickness, 0.28);
     return previousFresh || previousCtor;
   }
+
+  /// 还停在「框 60% / 厚度 40%」那一版出厂值上。
+  static bool _isRev1FrameDefault(SurfaceStyle s) =>
+      _near(s.frameOpacity, 0.6) && _near(s.frameThickness, 0.4);
 
   static Future<void> setBarOpacity(double v) async {
     final next = v.clamp(0.0, 1.0);

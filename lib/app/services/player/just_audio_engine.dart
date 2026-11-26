@@ -22,7 +22,9 @@ class JustAudioEngine implements PlayerEngine {
   /// 弱网缓冲策略（2026-11-12 加；在此之前这里什么都没传，全用 just_audio 默认）。
   ///
   /// 弱网的核心是「网络好的那几秒尽量多囤」，而默认值囤得不够：
-  /// - `maxBufferDuration` 50 → 120 秒：默认只提前囤 50 秒，地铁/电梯里一断就见底。
+  /// - `maxBufferDuration` 提到 1 小时：120 秒时进度条缓冲只贴在播放头前面
+  ///   一小段，快唱到才再往前长。整首一次囤满，灰色缓冲会直接铺到曲末
+  ///   （比单曲更长的极少，到上限就停）。
   /// - `prioritizeTimeOverSizeThresholds` false → true：**这条是关键**。为 false 时
   ///   ExoPlayer 会被内部字节上限提前截断，无损/高码率的歌实际远囤不到标称的
   ///   时长（1000kbps 的 FLAC 囤满 120 秒要 15MB）。开了才真按时间囤。
@@ -32,18 +34,17 @@ class JustAudioEngine implements PlayerEngine {
   /// `bufferForPlaybackAfterRebufferDuration` 仍是 5 秒 —— 它们是**起播门槛**，
   /// 调大会让「点下去到出声」变慢，和弱网优化的目标相反。囤得多和起播快不冲突。
   ///
-  /// 代价：跳歌时已囤的最多约 120 秒白下；内存占用上升（受 ExoPlayer 自身的
-  /// targetBufferBytes 兜底，没有显式放开）。
+  /// 代价：切歌时已囤下的整首可能白下；内存随单曲大小上升。
   static const _weakNetworkLoadConfig = AudioLoadConfiguration(
     androidLoadControl: AndroidLoadControl(
-      maxBufferDuration: Duration(seconds: 120),
+      maxBufferDuration: Duration(hours: 1),
       prioritizeTimeOverSizeThresholds: true,
       backBufferDuration: Duration(seconds: 30),
     ),
     darwinLoadControl: DarwinLoadControl(
       // iOS 的 automaticallyWaitsToMinimizeStalling 默认就是 true（AVPlayer 自己
       // 权衡起播与卡顿），保持不动；只把预读时长的建议值提到和 Android 一致。
-      preferredForwardBufferDuration: Duration(seconds: 120),
+      preferredForwardBufferDuration: Duration(hours: 1),
     ),
   );
 

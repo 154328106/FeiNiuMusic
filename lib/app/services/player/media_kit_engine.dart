@@ -126,16 +126,20 @@ class MediaKitEngine implements PlayerEngine {
     } catch (e) {
       debugPrint('[MediaKitEngine] disable disk cache failed: $e');
     }
-    // 弱网预读（2026-11-12 加）：mpv 默认 demuxer 只往前读约 10 秒，网一抖就见底。
-    // 提到 120 秒，和 just_audio 那边的 maxBufferDuration 对齐。
-    // 上面刚关掉磁盘缓存层，所以这些全落在内存里 —— 受既有的 32MB
-    // demuxer-max-bytes 兜底（1000kbps 的 FLAC 囤 120 秒约 15MB，装得下；
-    // 更高码率会先撞到 32MB 上限，那是预期行为，不额外放开以免吃内存）。
+    // 整首预读：cache-secs=120 时 demuxer 只在播放头前面维持一小段，
+    // 进度条的缓冲灰条会贴着唱到的位置才往前长。拉到 1 小时，并放开
+    // demuxer 字节上限，让一首歌（常见几十 MB）一次读到曲末。
+    // 磁盘缓存层上面已关，这些落在内存里；单曲超过 192MB 仍会到顶停下。
     try {
       final dynamic nativePlayer = player.platform;
-      await nativePlayer.setProperty('cache-secs', '120');
+      await nativePlayer.setProperty('cache-secs', '3600');
+      await nativePlayer.setProperty('demuxer-readahead-secs', '3600');
+      await nativePlayer.setProperty(
+        'demuxer-max-bytes',
+        '${192 * 1024 * 1024}',
+      );
     } catch (e) {
-      debugPrint('[MediaKitEngine] set cache-secs failed: $e');
+      debugPrint('[MediaKitEngine] set readahead failed: $e');
     }
     // 订阅 mpv 原生日志：仅保留错误级别（PlayerConfiguration.logLevel=error），
     // 诊断加载/解码失败的具体原因。不依赖 kDebugMode：release 版经 DebugLogService
