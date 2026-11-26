@@ -663,7 +663,6 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                   child: _InlineSlider(
                     title: '透明度',
                     value: 1 - opacity,
-                    max: 0.95,
                     onChanged: (v) => AppSurfaceSettings.setBarOpacity(1 - v),
                   ),
                 ),
@@ -676,10 +675,10 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                 valueListenable: AppGlassSettings.liquidGlassEnabled,
                 builder: (context, glassEnabled, _) {
                   return AppSettingSwitchTile(
-                    title: '液体玻璃（导航栏 + 播放条）',
+                    title: '液体玻璃（播放条）',
                     subtitle: glassEnabled
-                        ? '导航栏和播放条用液体玻璃，下面调模糊、厚度'
-                        : '关闭后导航栏和播放条用上面的高斯模糊或实色',
+                        ? '播放条用液体玻璃，下面调模糊、厚度。导航栏始终是液态玻璃'
+                        : '关闭后播放条用上面的高斯模糊或实色。导航栏仍是液态玻璃',
                     value: glassEnabled,
                     onChanged: (value) {
                       AppGlassSettings.setLiquidGlassEnabled(value);
@@ -687,52 +686,40 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                   );
                 },
               ),
-              // 玻璃参数：仅液体玻璃开启时显示，调节即时生效。
-              ValueListenableBuilder<bool>(
-                valueListenable: AppGlassSettings.liquidGlassEnabled,
-                builder: (context, glassEnabled, _) {
-                  if (!glassEnabled) return const SizedBox.shrink();
-                  return Column(
-                    children: [
-                      const SizedBox(height: 8),
-                      ValueListenableBuilder<double>(
-                        valueListenable: AppGlassSettings.glassBlurStrength,
-                        builder: (context, value, _) {
-                          return AppSettingSlider(
-                            title: '玻璃模糊强度',
-                            description: '0 = 无模糊，16 = 最强模糊',
-                            value: value,
-                            min: 0,
-                            max: 16,
-                            divisions: 16,
-                            valueText: value == 0
-                                ? '关闭'
-                                : value.toStringAsFixed(0),
-                            onChanged: (next) {
-                              AppGlassSettings.setGlassBlur(next);
-                            },
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 4),
-                      ValueListenableBuilder<double>(
-                        valueListenable: AppGlassSettings.glassThickness,
-                        builder: (context, value, _) {
-                          return AppSettingSlider(
-                            title: '玻璃厚度',
-                            description: '影响折射强度与边缘高光',
-                            value: value,
-                            min: 0,
-                            max: 30,
-                            divisions: 30,
-                            valueText: value.toStringAsFixed(0),
-                            onChanged: (next) {
-                              AppGlassSettings.setGlassThickness(next);
-                            },
-                          );
-                        },
-                      ),
-                    ],
+              // 玻璃参数：导航栏始终吃这组值；播放条只在上面的开关打开时吃。
+              const SizedBox(height: 8),
+              ValueListenableBuilder<double>(
+                valueListenable: AppGlassSettings.glassBlurStrength,
+                builder: (context, value, _) {
+                  return AppSettingSlider(
+                    title: '玻璃模糊强度',
+                    description: '0 = 无模糊，16 = 最强模糊',
+                    value: value,
+                    min: 0,
+                    max: 16,
+                    divisions: 16,
+                    valueText: value == 0 ? '关闭' : value.toStringAsFixed(0),
+                    onChanged: (next) {
+                      AppGlassSettings.setGlassBlur(next);
+                    },
+                  );
+                },
+              ),
+              const SizedBox(height: 4),
+              ValueListenableBuilder<double>(
+                valueListenable: AppGlassSettings.glassThickness,
+                builder: (context, value, _) {
+                  return AppSettingSlider(
+                    title: '玻璃厚度',
+                    description: '影响折射强度与边缘高光',
+                    value: value,
+                    min: 0,
+                    max: 30,
+                    divisions: 30,
+                    valueText: value.toStringAsFixed(0),
+                    onChanged: (next) {
+                      AppGlassSettings.setGlassThickness(next);
+                    },
                   );
                 },
               ),
@@ -787,10 +774,7 @@ class _SurfaceStyleEditor extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '框的样式',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
+                Text('框的样式', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 10),
                 SizedBox(
                   width: double.infinity,
@@ -859,7 +843,6 @@ class _SurfaceStyleEditor extends StatelessWidget {
         _InlineSlider(
           title: '框内深浅',
           value: style.opacity,
-          min: 0.05,
           onChanged: (v) => onChanged(style.copyWith(opacity: v)),
         ),
         _InlineSlider(
@@ -880,13 +863,11 @@ class _InlineSlider extends StatelessWidget {
     required this.value,
     required this.onChanged,
     this.min = 0,
-    this.max = 1.0,
   });
 
   final String title;
   final double value;
   final double min;
-  final double max;
   final ValueChanged<double> onChanged;
 
   @override
@@ -898,15 +879,12 @@ class _InlineSlider extends StatelessWidget {
         height: 40,
         child: Row(
           children: [
-            SizedBox(
-              width: 76,
-              child: Text(title, style: textTheme.bodyLarge),
-            ),
+            SizedBox(width: 76, child: Text(title, style: textTheme.bodyLarge)),
             Expanded(
               child: Slider(
-                value: value.clamp(min, max),
+                value: value.clamp(min, 1.0),
                 min: min,
-                max: max,
+                max: 1.0,
                 onChanged: onChanged,
               ),
             ),

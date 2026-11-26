@@ -12,18 +12,18 @@ import 'settings_background_state.dart';
 class SurfaceStyle {
   const SurfaceStyle({
     this.color,
-    this.opacity = 0.85,
-    this.thickness = 0.5,
+    this.opacity = 0,
+    this.thickness = 0,
     this.frame = true,
     this.frameColor,
-    this.frameOpacity = 0.5,
-    this.frameThickness = 0.28,
+    this.frameOpacity = 0.6,
+    this.frameThickness = 0.4,
   });
 
   /// 框里面的底色。null = 跟随主题。
   final Color? color;
 
-  /// 框内深浅（底色不透明度）0.05~1。
+  /// 框内深浅（底色不透明度）0~1。0 = 完全透明。
   final double opacity;
 
   /// 框内厚度 0~1：投影深浅（0.5 = 原来的默认投影）。
@@ -80,12 +80,12 @@ class SurfaceStyle {
     final fc = j['frameColor'];
     return SurfaceStyle(
       color: c is int ? Color(c) : null,
-      opacity: d('opacity', 0.85),
-      thickness: d('thickness', 0.5),
+      opacity: d('opacity', 0),
+      thickness: d('thickness', 0),
       frame: j['frame'] is bool ? j['frame'] as bool : true,
       frameColor: fc is int ? Color(fc) : null,
-      frameOpacity: d('frameOpacity', 0.5),
-      frameThickness: d('frameThickness', 0.28),
+      frameOpacity: d('frameOpacity', 0.6),
+      frameThickness: d('frameThickness', 0.4),
     );
   }
 
@@ -125,15 +125,25 @@ class AppSurfaceSettings {
   static const _prefsOldThickness = 'surface_bottom_thickness';
 
   static const _prefsBarOpacity = 'surface_bar_opacity';
+  // 默认值改过一次。只把「还停在上一版出厂值」的安装迁过来，手调过的不动。
+  static const _prefsDefaultsRev = 'surface_style_defaults_rev';
+  static const _defaultsRev = 1;
+
+  /// 新装出厂：白底、蓝框。深浅见构造默认（框 60%/40%，框内 0%/0%）。
+  static const SurfaceStyle freshDefault = SurfaceStyle(
+    color: Colors.white,
+    frame: true,
+    frameColor: Color(0xFF377BEA),
+  );
 
   static final ValueNotifier<SurfaceStyle> style = ValueNotifier(
     const SurfaceStyle(frame: false),
   );
 
-  /// 导航栏 + 播放条自己的不透明度（「导航设置 → 透明度」）。玻璃模式下就是
-  /// 垫在玻璃下面那块白/黑底板的浓淡。和「框内深浅」分开：列表卡片想实一点、
-  /// 底栏想透一点，是常见搭配。
-  static final ValueNotifier<double> barOpacity = ValueNotifier(0.85);
+  /// 导航栏 + 播放条自己的不透明度（「导航设置 → 透明度」= 1 - 这个值）。
+  /// 玻璃模式下就是垫在玻璃下面那块白/黑底板的浓淡。和「框内深浅」分开：
+  /// 列表卡片想实一点、底栏想透一点，是常见搭配。0 = 透明度 100%。
+  static final ValueNotifier<double> barOpacity = ValueNotifier(0);
 
   static Future<void>? _loading;
   static Future<void> ensureLoaded() => _loading ??= _load();
@@ -161,20 +171,13 @@ class AppSurfaceSettings {
         final j = jsonDecode(raw);
         if (j is Map) style.value = SurfaceStyle.fromJson(j.cast());
       } else if (isFreshInstall) {
-        // 新装默认（用户定的）：逐行卡片、蓝框、白底。
+        // 新装默认：逐行卡片、蓝框、白底。深浅用 [freshDefault]。
         await AppBackgroundSettings.setContentFrameStyle(
           AppContentFrameStyle.cards,
         );
-        style.value = const SurfaceStyle(
-          color: Colors.white,
-          opacity: 0.5,
-          thickness: 0.5,
-          frame: true,
-          frameColor: Color(0xFF377BEA),
-          frameOpacity: 0.25,
-          frameThickness: 0.35,
-        );
+        style.value = freshDefault;
         await prefs.setString(_prefsStyle, jsonEncode(style.value.toJson()));
+        await prefs.setInt(_prefsDefaultsRev, _defaultsRev);
       } else {
         // 第一次：从原来的导航栏设置迁移过来，老用户调过的颜色不丢。
         // 描边颜色导航没设就拿原「内容框」的。
@@ -196,10 +199,33 @@ class AppSurfaceSettings {
       if (style.value.frame != listFramed()) {
         style.value = style.value.copyWith(frame: listFramed());
       }
-      // 第一次没存过：沿用原来的深浅，升级后底栏外观不变。
-      barOpacity.value = (prefs.getDouble(_prefsBarOpacity) ??
-              style.value.opacity)
-          .clamp(0.05, 1.0);
+      final rev = prefs.getInt(_prefsDefaultsRev) ?? 0;
+      if (rev < _defaultsRev) {
+        if (_isPreviousFactoryDefault(style.value)) {
+          // 上一版出厂深浅：框 25%/35%、框内 50%/50%（或更早的 85%/50%/50%/28%）。
+          style.value = style.value.copyWith(
+            opacity: freshDefault.opacity,
+            thickness: freshDefault.thickness,
+            frameOpacity: freshDefault.frameOpacity,
+            frameThickness: freshDefault.frameThickness,
+          );
+          await prefs.setString(_prefsStyle, jsonEncode(style.value.toJson()));
+          final savedBar = prefs.getDouble(_prefsBarOpacity);
+          // 底栏透明度以前跟着框内深浅，或停在旧默认 85%。这两种一并改成 100%。
+          if (savedBar == null ||
+              _near(savedBar, 0.5) ||
+              _near(savedBar, 0.85)) {
+            await prefs.setDouble(_prefsBarOpacity, 0);
+          }
+        }
+        await prefs.setInt(_prefsDefaultsRev, _defaultsRev);
+      }
+      // 第一次没存过：沿用框内深浅，升级后底栏外观不变。
+      barOpacity.value =
+          (prefs.getDouble(_prefsBarOpacity) ?? style.value.opacity).clamp(
+            0.0,
+            1.0,
+          );
     } catch (_) {
       // 读坏了就用默认值，别卡启动。
     }
@@ -218,11 +244,31 @@ class AppSurfaceSettings {
     barOpacity,
   ]);
 
+  static bool _near(double a, double b) => (a - b).abs() < 0.001;
+
+  /// 还停在上一版写死的出厂滑条上（颜色可以是当时的白底蓝框，或更早的未改色）。
+  static bool _isPreviousFactoryDefault(SurfaceStyle s) {
+    final previousFresh =
+        s.color == Colors.white &&
+        s.frameColor == const Color(0xFF377BEA) &&
+        _near(s.opacity, 0.5) &&
+        _near(s.thickness, 0.5) &&
+        _near(s.frameOpacity, 0.25) &&
+        _near(s.frameThickness, 0.35);
+    final previousCtor =
+        _near(s.opacity, 0.85) &&
+        _near(s.thickness, 0.5) &&
+        _near(s.frameOpacity, 0.5) &&
+        _near(s.frameThickness, 0.28);
+    return previousFresh || previousCtor;
+  }
+
   static Future<void> setBarOpacity(double v) async {
-    barOpacity.value = v;
+    final next = v.clamp(0.0, 1.0);
+    barOpacity.value = next;
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setDouble(_prefsBarOpacity, v);
+      await prefs.setDouble(_prefsBarOpacity, next);
     } catch (_) {}
   }
 
